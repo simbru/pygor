@@ -61,6 +61,34 @@ def numpy_fillna(data):
     out[mask] = np.concatenate(data)
     return out
 
+def polarity_neat(pol_arr):
+    """Helper function which makes polarity more digestable to process by giving an 
+    array consisting of -1, 0, 1 or 2 to indicate polarity of STRF. 0 means no polarity, 
+    and 2 means bipolar.
+    """
+    # First check that parameters are in check 
+    if isinstance(pol_arr, np.ma.MaskedArray) is True:
+        pol_arr = pol_arr.data
+    if isinstance(pol_arr, np.ndarray) is False:
+        raise AttributeError(f"Function expected input as np.ndarray or np.ma.MaskedArray, not {type(pol_arr)}")  
+    if pol_arr.ndim != 2:
+        raise AttributeError("Function expected input to have ndim == 2.")
+    if np.all(np.isin(pol_arr, (1,0,-1,2))) == False:
+        raise AttributeError("Input contained values other than -1, 0, 1, or 2, which is not expected input for this function.")
+    # Generate a zero array with correct len
+    arr = np.zeros(len(pol_arr))
+    # Fill the zeros array to create 1D polarity index
+    arr[np.where((pol_arr == ( 0, 0)).all(axis=1))] = 0
+    arr[np.where((pol_arr == (-1, 0)).all(axis=1))] = -1
+    arr[np.where((pol_arr == (0, -1)).all(axis=1))] =  1
+    arr[np.where((pol_arr == (1,  0)).all(axis=1))] = -1
+    arr[np.where((pol_arr == (0,  1)).all(axis=1))] =  1
+    arr[np.where((pol_arr == (-1, 1)).all(axis=1))] =  2
+    arr[np.where((pol_arr == (1, -1)).all(axis=1))] =  2
+    arr[np.where((pol_arr == (1, 1)).all(axis=1))] =  2
+    arr[np.where((pol_arr == (-1, -1)).all(axis=1))] =  2
+    return arr
+
 # def manual_border_mask(array_shape, border_width):
 #     """manual_border_mask Takes a tuple (shape of mask) and an intiger (width of
 #     border mask) and creates a boolean mask which can be passed to np.ma.array(x, mask = _mask)
