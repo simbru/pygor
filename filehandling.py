@@ -17,7 +17,7 @@ from joblib import Parallel, delayed
 import sys
 from alive_progress import alive_bar, alive_it
 # from tqdm.autonotebook import tqdm
-
+import warnings
 from tqdm.auto import tqdm
 from multiprocessing import Process
 from IPython.display import clear_output
@@ -26,6 +26,7 @@ import dacite
 import natsort # a godsend 
 
 import space
+import data_helpers
 import contouring
 import temporal
 import utilities
@@ -38,7 +39,8 @@ from dataclasses import dataclass, field
 import dataclasses
 import pickle
 import data_objects
-from data_objects import Data, Data_strf
+from data_objects import Data_STRF, FullField, Data, Experiment, metadata_dict
+from data_helpers import label_from_str
 """
 The purpose is to use this file to read H5s nearly directly, 
 but providing some quality of life improvements like correctly transposed arrays, obtaining metadata easily,
@@ -70,7 +72,7 @@ def _load_parser(file_path, do_bootstrap = True):
     if file_type == ".pkl":
         loaded = load_pkl(file_path)
     if file_type == ".h5":
-        loaded = load_strf_data(file_path, do_bootstrap = do_bootstrap)            
+        loaded = Data_STRF(file_path, do_bootstrap = do_bootstrap)            
     if isinstance(loaded.strfs, np.ndarray) is False and math.isnan(loaded.strfs) is True:
             print("No STRFs found for", file_path, ", skipping...")
             return None
@@ -101,7 +103,7 @@ def picklestore_objects(file_paths, output_folder, do_bootstrap = True):
         warnings.filterwarnings("ignore", category=RuntimeWarning)
         warnings.filterwarnings("ignore", category=UserWarning)
         out = Output()
-        display(out)
+        display(out)  # noqa: F821
         with out:
             for i in progress_bar:
                 _load_and_save(i, output_folder, do_bootstrap = do_bootstrap)
@@ -145,7 +147,7 @@ def load_data(filename, img_stack = True):
     with h5py.File(filename) as HDF5_file:
         rois = np.array(HDF5_file["ROIs"])
         if img_stack == True:
-            images = load_wDataCh0(HDF5_file)
+            images = data_helpers.load_wDataCh0(HDF5_file)
         else:
             images = np.nan
         meta_data = metadata_dict(HDF5_file)
@@ -153,210 +155,128 @@ def load_data(filename, img_stack = True):
     return Data_obj
 
 # Instantiates Data_strf object
-"""
-NOTE Should really be renaemd to "gen_strf_data" or similar
-"""
-def load_strf_data(filename, img_stack = True, strfs = True, ipl_depths = True, keys = True, fix_oversize = False, do_bootstrap = True):
-    with h5py.File(filename) as HDF5_file:
-        # Get keys for STRF, filter for only STRF + n where n is a number between 0 to 9 
-        keys = [i for i in HDF5_file.keys() if "STRF" in i and any(i[4] == np.arange(0, 10).astype("str"))]
-        keys = natsort.natsorted(keys)
-        # Set bool for multi-colour RFs
-        bool_partofmulticolour_list = [len(n.removeprefix("STRF").split("_")) > 2 for n in keys]
-        if all(bool_partofmulticolour_list) == True:
-            multicolour_bool = True
-        if all(bool_partofmulticolour_list) == False:
-            multicolour_bool = False
-        if True in bool_partofmulticolour_list and False in bool_partofmulticolour_list:
-            raise AttributeError("There are both single-coloured and multi-coloured STRFs loaded. Manual fix required.")
-        rois = np.array(HDF5_file["ROIs"])
-        if img_stack == True:
-            images = load_wDataCh0(HDF5_file)
-        else:
-            images = np.nan
-        if strfs == True:
-            strfs_arr = load_strf(HDF5_file)
-            meta_data = metadata_dict(HDF5_file)
-            # User may load file that doesn't contain any matching key, so give np.nan
-            if strfs_arr is None: 
-                strfs_arr = np.nan
-            else: # Go through scripts for correcting and post-processing STRFs
-                # 1. Check which axis is the "longest", as Igor frequently rotates arrays 
-                ## and correct this accordingly 
-                """
-                TODO
-                Account for multi-spectral RFs:
-                - If attribute .multicolour == True, run through STRF_keys and label R G B UV accordingly
-                """
-                input_shape = strfs_arr.shape
-                if input_shape[2] > input_shape[3]:
-                    warnings.warn(f"Rotation detected and corrected for {filename}", stacklevel=2)
-                    strfs_arr = np.transpose(strfs_arr, axes = (0, 1, 3, 2))
-                # 2. Check date and correct silly STA mistakes from early experiments 
-                # Correction for silly STA mistake in the beginning (crop by given factor):
-                # PS: This over-writes so is semi-sketchy, MAKE DAMN SURE ITS CORRECT!
-                if fix_oversize == True and meta_data["exp_date"] < datetime.date(2023, 4, 4): #came before < cutoff == True
-                    warnings.warn("Old experiment detected, correcting for oversized STA", stacklevel=2)
-                    try:
-                        size = int(label_from_str(pathlib.Path(meta_data["filename"]).name, ('800', '400', '200', '100', '75', '50', '25'), first_return_only=True))
-                        strfs_arr = fix_oversize_sta(strfs_arr, size)
-                    except ValueError:
-                        size = np.nan
-                # 3. Post process by masking borders and z-scoring arrays 
-                strfs_arr = post_process_strf_all(strfs_arr)
-        else:
-            strfs_arr = np.nan
-        if ipl_depths == True:
-            try:
-                ipl_depths = np.array(HDF5_file["Positions"])
-            except KeyError:
-                warnings.warn(f"HDF5 key 'Positions' not found for file {filename}", stacklevel=2)
-                ipl_depths = np.array([np.nan])
-    # Dat_strf_obj = Data_strf(strfs, ipl_depths, images, rois, meta_data)
-    Dat_strf_obj = Data_strf(strfs = strfs_arr, ipl_depths = ipl_depths, 
-        images = images, rois = rois, metadata = meta_data, strf_keys = keys, multicolour = multicolour_bool, do_bootstrap = do_bootstrap)
-    Dat_strf_obj.metadata["curr_path"] = filename
-    # res = Data_strf(strfs, rois, metadata=meta_data)
-    return Dat_strf_obj
+# """
+# NOTE Should really be renaemd to "gen_Data_STRF" or similar
+# """
+# def Data_STRF(filename, img_stack = True, strfs = True, ipl_depths = True, keys = True, fix_oversize = False, do_bootstrap = True):
+#     with h5py.File(filename) as HDF5_file:
+#         # Get keys for STRF, filter for only STRF + n where n is a number between 0 to 9 
+#         keys = [i for i in HDF5_file.keys() if "STRF" in i and any(i[4] == np.arange(0, 10).astype("str"))]
+#         keys = natsort.natsorted(keys)
+#         # Set bool for multi-colour RFs
+#         bool_partofmulticolour_list = [len(n.removeprefix("STRF").split("_")) > 2 for n in keys]
+#         if all(bool_partofmulticolour_list) == True:
+#             multicolour_bool = True
+#         if all(bool_partofmulticolour_list) == False:
+#             multicolour_bool = False
+#         if True in bool_partofmulticolour_list and False in bool_partofmulticolour_list:
+#             raise AttributeError("There are both single-coloured and multi-coloured STRFs loaded. Manual fix required.")
+#         rois = np.array(HDF5_file["ROIs"])
+#         if img_stack == True:
+#             images = load_wDataCh0(HDF5_file)
+#         else:
+#             images = np.nan
+#         if strfs == True:
+#             strfs_arr = load_strf(HDF5_file)
+#             meta_data = metadata_dict(HDF5_file)
+#             # User may load file that doesn't contain any matching key, so give np.nan
+#             if strfs_arr is None: 
+#                 strfs_arr = np.nan
+#             else: # Go through scripts for correcting and post-processing STRFs
+#                 # 1. Check which axis is the "longest", as Igor frequently rotates arrays 
+#                 ## and correct this accordingly 
+#                 """
+#                 TODO
+#                 Account for multi-spectral RFs:
+#                 - If attribute .multicolour == True, run through STRF_keys and label R G B UV accordingly
+#                 """
+#                 input_shape = strfs_arr.shape
+#                 if input_shape[2] > input_shape[3]:
+#                     warnings.warn(f"Rotation detected and corrected for {filename}", stacklevel=2)
+#                     strfs_arr = np.transpose(strfs_arr, axes = (0, 1, 3, 2))
+#                 # 2. Check date and correct silly STA mistakes from early experiments 
+#                 # Correction for silly STA mistake in the beginning (crop by given factor):
+#                 # PS: This over-writes so is semi-sketchy, MAKE DAMN SURE ITS CORRECT!
+#                 if fix_oversize == True and meta_data["exp_date"] < datetime.date(2023, 4, 4): #came before < cutoff == True
+#                     warnings.warn("Old experiment detected, correcting for oversized STA", stacklevel=2)
+#                     try:
+#                         size = int(label_from_str(pathlib.Path(meta_data["filename"]).name, ('800', '400', '200', '100', '75', '50', '25'), first_return_only=True))
+#                         strfs_arr = fix_oversize_sta(strfs_arr, size)
+#                     except ValueError:
+#                         size = np.nan
+#                 # 3. Post process by masking borders and z-scoring arrays 
+#                 strfs_arr = post_process_strf_all(strfs_arr)
+#         else:
+#             strfs_arr = np.nan
+#         if ipl_depths == True:
+#             try:
+#                 ipl_depths = np.array(HDF5_file["Positions"])
+#             except KeyError:
+#                 warnings.warn(f"HDF5 key 'Positions' not found for file {filename}", stacklevel=2)
+#                 ipl_depths = np.array([np.nan])
+#     # Dat_strf_obj = Data_strf(strfs, ipl_depths, images, rois, meta_data)
+#     Dat_strf_obj = Data_strf(strfs = strfs_arr, ipl_depths = ipl_depths, 
+#         images = images, rois = rois, metadata = meta_data, strf_keys = keys, multicolour = multicolour_bool, do_bootstrap = do_bootstrap)
+#     Dat_strf_obj.metadata["curr_path"] = filename
+#     # res = Data_strf(strfs, rois, metadata=meta_data)
+#     return Dat_strf_obj
 
-def load_strf_by_df_index(df, index, do_bootstrap = True):
-    #roi = df["roi"][index]
-    path = df["curr_path"][index]
-    loaded_data = load_strf_data(path, do_bootstrap = do_bootstrap)
-    return loaded_data
+# def load_strf_by_df_index(df, index, do_bootstrap = True):
+#     #roi = df["roi"][index]
+#     path = df["curr_path"][index]
+#     loaded_data = Data_STRF(path, do_bootstrap = do_bootstrap)
+#     return loaded_data
 
 """Helper functions for Data classes:_________________________________________"""
-def metadata_dict(HDF5_file):
-    date, time = get_experiment_datetime(HDF5_file["wParamsStr"])
-    metadata_dict = {
-    "filename"       : HDF5_file.filename,
-    "exp_date"       : date,
-    "exp_time"       : time,
-    "objectiveXYZ"   : get_rel_objective_XYZ(HDF5_file["wParamsNum"]),
-    }
-    return metadata_dict
+# def metadata_dict(HDF5_file):
+#     date, time = get_experiment_datetime(HDF5_file["wParamsStr"])
+#     metadata_dict = {
+#     "filename"       : HDF5_file.filename,
+#     "exp_date"       : date,
+#     "exp_time"       : time,
+#     "objectiveXYZ"   : get_rel_objective_XYZ(HDF5_file["wParamsNum"]),
+#     }
+#     return metadata_dict
 
-def load_strf(HDF5_file):
-    # Get all file objects labled STRF0_n
-    """
-    TODO 
-    This needs to flexibly resolve 'STRFn_m' where 'n' represents colours (standardise to 0123 = RGBUV)
-    Does it...? Think it through...
-    """
-    # Get keys from H5 file 
-    strf_list = [k for k in HDF5_file.keys() if 'STRF0_' in k]
-    if not strf_list: # if its empty
-        warnings.warn(f"HDF5 key 'STRF0_' not found for file {HDF5_file.filename}", stacklevel=2)
-        return None
-    # Correct numerical sorting of strings 
-    strf_list_natsort = natsort.natsorted(strf_list)
-    # Return those as tranposed arrays, in a list
-    strf_arr_list = np.array([np.array(HDF5_file[v]).transpose(2,1,0) for v in strf_list_natsort])
-    return strf_arr_list
+# def load_wDataCh0(HDF5_file):
+#     # Prioritise detrended (because corrections applied in pre-proc)
+#     if "wDataCh0_detrended" in HDF5_file.keys():
+#         img = HDF5_file["wDataCh0_detrended"]
+#     elif "wDataCh0" in HDF5_file.keys():
+#         img = HDF5_file["wDataCh0"]
+#     else:
+#         warnings.warn("wDataCh0 or wDataCh0_detrended could not be identified. Returning None")
+#         img = None
+#     return np.array(img).transpose(2,1,0)
 
-def load_wDataCh0(HDF5_file):
-    # Prioritise detrended (because corrections applied in pre-proc)
-    if "wDataCh0_detrended" in HDF5_file.keys():
-        img = HDF5_file["wDataCh0_detrended"]
-    elif "wDataCh0" in HDF5_file.keys():
-        img = HDF5_file["wDataCh0"]
-    else:
-        warnings.warn("wDataCh0 or wDataCh0_detrended could not be identified. Returning None")
-        img = None
-    return np.array(img).transpose(2,1,0)
-
-def fix_oversize_sta(strf_arr4d, boxsize_um, upscale_multiple = 4):
-    # Determine STA size from filename convension
-    size = boxsize_um
-    # Figure out how many boxes on screen 
-    boxes_tup = np.ceil(unit_conversion.calculate_boxes_on_screen(size)).astype('int') * upscale_multiple
-    # Create the appropriate mask 
-    mask = utilities.manual_border_mask(strf_arr4d[0][0].shape, boxes_tup) # just take shape from first ROI first frame
-    # Expand to apply mask to each frame 
-    mask = np.expand_dims(mask, (0, 1))
-    mask = np.repeat(mask, strf_arr4d.shape[0], 0)
-    mask = np.repeat(mask, strf_arr4d.shape[1], 1)
-    # Apply the mask
-    new_masked_strfs = np.ma.array(strf_arr4d, mask = mask)
-    # Determine widths of mask 
-    borders_widths = utilities.check_border(new_masked_strfs[0][0].mask, expect_symmetry=False)
-    # Make note of original dimensions
-    org_shape = np.array(strf_arr4d.shape) #dims: roi,z,x,y
-    # Calculate new shape (after killing mask , which will be same for all ROIs in file)
-    new_shape = org_shape - (0, 0, borders_widths[0] + borders_widths[1], borders_widths[2] + borders_widths[3])
-    # Compress masked array (kills values in mask)
-    new_masked_strfs = new_masked_strfs.compressed()
-    # Reshape it to new dimesnions 
-    new_masked_strfs = new_masked_strfs.reshape(new_shape)
-    return new_masked_strfs
-
-def post_process_strf(arr_3d, correct_rotation = True,  zscore = True):
-    """Gentle post processing that removes border
-    by masking and z-scores the STRFs"""
-    if arr_3d is np.nan:
-        return np.nan
-    # Remove border
-    border_mask = utilities.auto_border_mask(arr_3d)
-    arr_3d = np.ma.array(arr_3d, mask = border_mask)
-    if zscore == True:
-        ## Old implementation
-        # Z score over time and space
-        # arr_3d = scipy.stats.zscore(arr_3d, axis = None)
-        # centred_arr_3d = arr_3d
-        ## New implementation (normalised/centred to first frame)
-        avg_1stframe = np.ma.average(arr_3d[0])
-        std_1stframe = np.ma.std(arr_3d[0])
-        centred_arr_3d = (arr_3d - avg_1stframe) / std_1stframe
-        # # arr_3d = centred_arr_3d
-        return centred_arr_3d
-
-def post_process_strf_all(arr_4d, correct_rotation = True, zscore = True):
-    centred_arr_4d = np.ma.empty(arr_4d.shape)
-    for n, arr3d in enumerate(arr_4d):
-        arr3d = post_process_strf(arr3d)
-        centred_arr_4d[n] = arr3d
-    return centred_arr_4d
-
-def get_raw_objective_XYZ(wParamsNum_arr):
-    """Helper functino to get xyz from wParamsNum"""
-    wParamsNum_All = np.stack(wParamsNum_arr) 
-    wParamsNum_All_XYZ = wParamsNum_All[:, 26:29 ] # 26, 27, and 28 (X, Y, Z)
-    Xs = wParamsNum_All_XYZ[:, 0]
-    Ys = wParamsNum_All_XYZ[:, 2]
-    Zs = wParamsNum_All_XYZ[:, 1]
-    return Xs, Ys, Zs
-
-def get_rel_objective_XYZ(wParamsNum_arr):
-    """Get xyz from wParamsNum"""
-    wParamsNum_All = list(wParamsNum_arr)
-
-    """
-    Need to do this such that centering is done independently 
-    for each plane in a series of files (maybe filter based on filename or smth).
-    In this way, the objective position will be the offset in position from first 
-    recording in any given seires (but only within, never between experiments)
-
-    Would it make sense to do this based on FishID maybe? Since new fish requires new mount and new location 
-    """
-
-    wParamsNum_All_XYZ = wParamsNum_All[26:29] # 26, 27, and 28 (X, Y, Z)
-    X = wParamsNum_All_XYZ[0]
-    Y = wParamsNum_All_XYZ[2]
-    Z = wParamsNum_All_XYZ[1]
-    return X, Y, Z
-
-def get_experiment_datetime(wParamsStr_arr):
-    date = wParamsStr_arr[4].decode("utf-8") 
-    time = wParamsStr_arr[5].decode("utf-8")
-    date = np.array(date.split('-')).astype(int)
-    time = np.array(time.split('-')).astype(int)
-    date = datetime.date(date[0], date[1], date[2])
-    time = datetime.time(time[0], time[1], time[2])
-    return date, time # ensure date is in string 
+# def fix_oversize_sta(strf_arr4d, boxsize_um, upscale_multiple = 4):
+#     # Determine STA size from filename convension
+#     size = boxsize_um
+#     # Figure out how many boxes on screen 
+#     boxes_tup = np.ceil(unit_conversion.calculate_boxes_on_screen(size)).astype('int') * upscale_multiple
+#     # Create the appropriate mask 
+#     mask = utilities.manual_border_mask(strf_arr4d[0][0].shape, boxes_tup) # just take shape from first ROI first frame
+#     # Expand to apply mask to each frame 
+#     mask = np.expand_dims(mask, (0, 1))
+#     mask = np.repeat(mask, strf_arr4d.shape[0], 0)
+#     mask = np.repeat(mask, strf_arr4d.shape[1], 1)
+#     # Apply the mask
+#     new_masked_strfs = np.ma.array(strf_arr4d, mask = mask)
+#     # Determine widths of mask 
+#     borders_widths = utilities.check_border(new_masked_strfs[0][0].mask, expect_symmetry=False)
+#     # Make note of original dimensions
+#     org_shape = np.array(strf_arr4d.shape) #dims: roi,z,x,y
+#     # Calculate new shape (after killing mask , which will be same for all ROIs in file)
+#     new_shape = org_shape - (0, 0, borders_widths[0] + borders_widths[1], borders_widths[2] + borders_widths[3])
+#     # Compress masked array (kills values in mask)
+#     new_masked_strfs = new_masked_strfs.compressed()
+#     # Reshape it to new dimesnions 
+#     new_masked_strfs = new_masked_strfs.reshape(new_shape)
+#     return new_masked_strfs
 
 """Finding files:_________________________________________"""
 
-def find_files_in(filetype_ext_str, dir_path, recursive = False, **kwargs):
+def find_files_in(filetype_ext_str, dir_path, recursive = False, **kwargs) -> list:
     """
     Searches the specified directory for files with the specified file extension.
     The function takes in three parameters:
@@ -374,16 +294,21 @@ def find_files_in(filetype_ext_str, dir_path, recursive = False, **kwargs):
     if recursive is True:
         paths = [path for path in dir_path.rglob('*' + filetype_ext_str)]
     # If search terms are given
-    if "search_terms" in kwargs:
-        if isinstance(kwargs["search_terms"], list):
-            paths = [file for file in paths if any(map(file.name.__contains__, kwargs["search_terms"]))]
-        else:
-            raise AttributeError("kwargs 'search_terms' expected list of strings. Consider kwargs 'search_term' (singular) if you want to specify a single str as search term.")
-    if "search_term" in kwargs:
-        if isinstance(kwargs["search_term"], str):
-            paths = [file for file in paths if kwargs["search_term"] in file.name]
+    if "match" in kwargs:
+        if isinstance(kwargs["match"], str):
+            paths = [file for file in paths if kwargs["match"] in file.name]
         else:
             raise AttributeError("kwargs 'search_term' expected a single str. Consider kwargs 'search_terms' (plural) if you want to use a list of strings as search terms.")
+    if "match_all" in kwargs:
+        if isinstance(kwargs["match_all"], list):
+            paths = [file for file in paths if all(map(file.name.__contains__, kwargs["match_all"]))]
+        else:
+            raise AttributeError("kwargs 'search_term' expected a single str. Consider kwargs 'search_terms' (plural) if you want to use a list of strings as search terms.")
+    if "match_any" in kwargs:
+        if isinstance(kwargs["match_any"], list):
+            paths = [file for file in paths if any(map(file.name.__contains__, kwargs["match_any"]))]
+        else:
+            raise AttributeError("kwargs 'search_terms' expected list of strings. Consider kwargs 'search_term' (singular) if you want to specify a single str as search term.")
     return paths
 
 
@@ -406,50 +331,7 @@ def find_files_in(filetype_ext_str, dir_path, recursive = False, **kwargs):
 #                 else:
 #                     return np.nan
 
-def label_from_str(input_str, search_terms, label = None, split_by = '_', kick_suffix = True, **kwargs):
-    def _decide_output_if_nomatch(**kwargs):
-        # In some cases we might want to return a specific thing if no matches are found
-        if 'else_return' in kwargs:
-            return kwargs['else_return']
-        # In most cases, just setting nan is fine
-        else:
-            return np.nan 
-    def _final_check(input_str, search_terms, **kwargs):
-        if hasattr(search_terms, '__iter__') is True:
-            terms_found = []
-            for term in search_terms:
-                if term in input_str:
-                    terms_found.append(term)
-            if terms_found:
-                if "first_return_only" in kwargs and kwargs["first_return_only"] == True:
-                    return terms_found[0]
-                else:
-                    return ''.join(terms_found)
-            else:
-                _decide_output_if_nomatch()
-        else:
-            raise AttributeError("search_terms must be iterable of strings")
-    # Stuff like '0_G.h5' causes truble when splitting, since the G is tied to .h5 (G.h5). Kick the suffix
-    if kick_suffix == True:
-        # But allow to keep if absolutely must
-        input_str = input_str[:input_str.find('.')]
-    # List comprehension returning matching 
-    matches = [x for x in input_str.split(split_by) if x in search_terms]
-    if not matches: # if its empty
-        # do final check 
-        matches = _final_check(input_str, search_terms, **kwargs)
-        # If matches now contains something
-        if matches:
-            return matches
-        else:
-            return _decide_output_if_nomatch(**kwargs)
-    if label == None:
-        # This looks weird but its a way of getting around sets being weird
-        # Essentially, set a string and join the contents of set_match into the string
-        return ''.join(matches)
-    # In some cases we might want to give 1 label if any of matches are met (e.g, if paired recordings, labled 'RG' or 'GB', return 'Yes')
-    else:
-        return label
+
 
 def _listToString(s):
     # initialize an empty string
@@ -491,7 +373,7 @@ def build_results_dict(data_strf_obj, remove_keys = ["images", "rois","strfs", "
     #   - Don't bother storing strfs as they can be retrievied via file if needed
 
     # Check that the instance is actually a Data_strf object and that it contains STRFs (instead of being empty, i.e. nan)
-    if isinstance(data_strf_obj, Data_strf) and data_strf_obj.strfs is not np.nan:
+    if isinstance(data_strf_obj, Data_STRF) and data_strf_obj.strfs is not np.nan:
         # Calculate how long each entry should be (should be same as number of STRFs)
         # Note: Reshape/restructure pre-existing content to fit required structure
         expected_lengths = len(data_strf_obj.strfs)
@@ -598,7 +480,7 @@ def build_results_dict(data_strf_obj, remove_keys = ["images", "rois","strfs", "
         # Get rid of residual metadata entry in index, pop it to None (basically delete)
         #dict.pop("metatdata", None)
         # Kill data with incorrect dimensinos 
-        remove = ["_contours_centroids", "_contours", "contours_centroids", "_centres_by_pol", "_timecourses"]
+        remove = ["_contours_centroids", "_contours", "contours_centroids", "_centres_by_pol", "_timecourses", "rois", "images", "data_types"]
         [dict.pop(key, None) for key in remove]
         # Notes if wanted
         # dict["notes"] = [''] * expected_lengths
@@ -612,7 +494,7 @@ def build_results_dict(data_strf_obj, remove_keys = ["images", "rois","strfs", "
                 dict[i] = [dict[i]] * data_strf_obj.num_strfs
             #Otherwise, continue and check that all entries are the correct length
             # If not, fill with nan
-            if len(dict[i]) != expected_lengths:
+            if len(dict[i]) != expected_lengths and isinstance(dict[i], (str)) is False:
                 if len(dict[i]) > expected_lengths:
                     # Just a little test to make sure dictionary entries make sense (e.g, one for each ROI/STRF)
                     raise AttributeError(f"Dict key {i} was longer than number of expected RFs. Manual fix required.")
@@ -755,7 +637,7 @@ def compile_strf_df(files, summary_prints = True, do_bootstrap = True):
         if file_type == ".pkl":
             loaded = load_pkl(i)
         if file_type == ".h5":
-            loaded = load_strf_data(i, do_bootstrap = do_bootstrap)
+            loaded = Data_STRF(i, do_bootstrap = do_bootstrap)
         if isinstance(loaded.strfs, np.ndarray) is False and math.isnan(loaded.strfs) is True:
                 print("No STRFs found for", i, ", skipping...")
                 continue
@@ -766,7 +648,7 @@ def compile_strf_df(files, summary_prints = True, do_bootstrap = True):
         # print(curr_df)
         # rec_df = pd.concat(i)
     roi_df = pd.concat(roi_stat_list, ignore_index=True)
-    # roi_df.to_pickle(r"d:/STRF_data/test")
+    # roi_df.to_pickle(r"d:/Data_STRF/test")
     # roi_df = roi_df[np.roll(roi_df.columns, 1)]
     rec_df = pd.concat(rec_info_list, ignore_index=True)
     if summary_prints == True:
@@ -788,7 +670,7 @@ def compile_chroma_strf_df(files, summary_prints = True,  do_bootstrap = True, s
             if file_type == ".pkl":
                 loaded = load_pkl(i)
             if file_type == ".h5":
-                loaded = load_strf_data(i, do_bootstrap = do_bootstrap)            
+                loaded = Data_STRF(i, do_bootstrap = do_bootstrap)            
             if isinstance(loaded.strfs, np.ndarray) is False and math.isnan(loaded.strfs) is True:
                     print("No STRFs found for", i, ", skipping...")
                     continue
@@ -838,7 +720,7 @@ def compile_hdf5_df(files):
         # print(curr_df)
         # rec_df = pd.concat(i)
     # roi_df = pd.concat(roi_stat_list, ignore_index=True)
-    # roi_df.to_pickle(r"d:/STRF_data/test")
+    # roi_df.to_pickle(r"d:/Data_STRF/test")
     # roi_df = roi_df[np.roll(roi_df.columns, 1)]
     rec_df = pd.concat(rec_info_list, ignore_index=True)
     return rec_df
@@ -855,7 +737,7 @@ def split_df_by(DataFrame, category_str):
             "empty": [0],}
         for i in dfs_by_pol.keys():
             if i == "other":
-                continue
+                warnings.warn("Skipping 'other' label" )
             try:
                 # Error out if something is incorrect with categorial splitting
                 assert (dfs_by_pol[i].drop("cat_pol", axis = 1).filter(like = "pol").apply(lambda x: any(val in x.values for val in template_match_dict[i]), axis=1).any().any())
