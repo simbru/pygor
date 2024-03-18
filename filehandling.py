@@ -364,7 +364,12 @@ def numpy_fillna(data):
     out[mask] = np.concatenate(data)
     return out
 
-def build_results_dict(data_strf_obj, remove_keys = ["images", "rois","strfs", "metadata"]): #
+remove_these_keys = ["images", "rois","strfs", "metadata", "triggertimes", "triggerstimes_frame ",
+    "triggerstimes_frame", "averages", "snippets", "phase_num", "_Data__skip_first_frames", "_Data__skip_last_frames", 
+    "frame_hz", "trigger_mode", "_Data__keyword_lables", "_Data__compare_ops_map", "ms_dur", "data_types", "type",
+    "_contours_centroids", "_contours", "contours_centroids", "_centres_by_pol", "_timecourses", "rois", "images", "data_types"]
+
+def build_results_dict(data_strf_obj, remove_keys = remove_these_keys): #
     ## Logic here has to be: 
     #   - Compute information as needed 
     #   - Make sure copmuted things are of equal length 
@@ -382,6 +387,7 @@ def build_results_dict(data_strf_obj, remove_keys = ["images", "rois","strfs", "
         dict = data_strf_obj.__dict__.copy()
         # Remove surplus info
         [dict.pop(key, None) for key in remove_keys]
+        print("inside results dict build", dict.keys())
         # Make note of how many ROIs for easy indexing later
         dict["roi"] = [int(i.split('_')[1]) for i in data_strf_obj.strf_keys]
             
@@ -480,8 +486,6 @@ def build_results_dict(data_strf_obj, remove_keys = ["images", "rois","strfs", "
         # Get rid of residual metadata entry in index, pop it to None (basically delete)
         #dict.pop("metatdata", None)
         # Kill data with incorrect dimensinos 
-        remove = ["_contours_centroids", "_contours", "contours_centroids", "_centres_by_pol", "_timecourses", "rois", "images", "data_types"]
-        [dict.pop(key, None) for key in remove]
         # Notes if wanted
         # dict["notes"] = [''] * expected_lengths
         # Finally, loop through entire dictionary and check that all entries are of correct length
@@ -504,7 +508,7 @@ def build_results_dict(data_strf_obj, remove_keys = ["images", "rois","strfs", "
                     dict[i]=  np.pad(dict[i], (difference,0), constant_values=np.nan)
         return dict 
     
-def build_recording_dict(data_strf_obj):
+def build_recording_dict(data_strf_obj, remove_keys = remove_these_keys):
     dict = data_strf_obj.__dict__.copy()
     # Deal with metadata
     metadata = data_strf_obj.metadata.copy()
@@ -534,10 +538,10 @@ def build_recording_dict(data_strf_obj):
     dict["strfs_shape"] = [np.array(data_strf_obj.strfs).shape]
     dict["ObjXYZ"] = [metadata.pop("objectiveXYZ")]
     # Remove surplus info
-    remove = ["strf_keys", "metadata", "images", "rois", "strfs", "ipl_depths", "_timecourses", "_contours", 
-        "_contours_area", "_pval_time", "_pval_space", "_contours"]
-    [dict.pop(key, None) for key in remove]
-
+    # remove = ["strf_keys", "metadata", "images", "rois", "strfs", "ipl_depths", "_timecourses", "_contours", 
+    #     "_contours_area", "_pval_time", "_pval_space", "_contours"]
+    [dict.pop(key, None) for key in remove_keys]
+    print("inside rec dict build", dict.keys())
     return dict
 
 def build_chromaticity_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
@@ -681,6 +685,7 @@ def compile_chroma_strf_df(files, summary_prints = True,  do_bootstrap = True, s
             #lengths = [len(build_results_dict(loaded)[i]) for i in build_results_dict(loaded)]
             curr_df = pd.DataFrame(build_results_dict(loaded))
             roi_stat_list.append(curr_df)
+            print("resulting rec dict:", build_recording_dict(loaded).keys())
             curr_rec = pd.DataFrame(build_recording_dict(loaded))
             rec_info_list.append(curr_rec)
             curr_crhoma = pd.DataFrame(build_chromaticity_dict(loaded))
@@ -695,6 +700,7 @@ def compile_chroma_strf_df(files, summary_prints = True,  do_bootstrap = True, s
     roi_df = pd.concat(roi_stat_list, ignore_index=True)
     rec_df = pd.concat(rec_info_list, ignore_index=True)
     chroma_df = pd.concat(chroma_list, ignore_index=True)
+    
     # Correct indeces due to quadrupling
     all_ipl_depths = np.repeat(np.array(roi_df["ipl_depths"][~np.isnan(roi_df["ipl_depths"])]), 4) # repeats IPL positions 
     roi_df["ipl_depths"] = all_ipl_depths

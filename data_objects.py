@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from tqdm.auto import tqdm
+import operator
 import matplotlib.pyplot as plt
 import joblib
 import numpy as np
@@ -129,10 +130,17 @@ class Data:
             self.trigger_mode = int(HDF5_file["OS_Parameters"][28])
         if self.trigger_mode != self.phase_num:
             warnings.warn(f"{self.filename.stem}: Trigger mode {self.trigger_mode} does not match phase number {self.phase_num}", stacklevel=3)
+        # Initialise outside Pathlib context
         self.name = self.filename.stem
-
         self.__keyword_lables = {
             "ipl_depths" : self.ipl_depths,
+        }
+        self.__compare_ops_map = {
+            '==' : operator.eq,
+            '>' : operator.gt,
+            '<' : operator.lt,
+            '>=' : operator.ge,
+            '<=' : operator.le,
         }
 
     def help(self, hints = False) -> None:
@@ -168,7 +176,8 @@ class Data:
             cax = divider.append_axes("right", size="5%", pad=0.05)
             plt.colorbar(scanv, ax=ax, cax = cax)
     
-    def view_stack_rois(self, labels = True, func = np.mean, axis = 0, cbar = False, ax = None, **kwargs) -> None:
+    def view_stack_rois(self, labels = True, func = np.mean, axis = 0, cbar = False,
+        ax = None, figsize = (None, None), figsize_scale = None, **kwargs) -> None:
         """
         Display a projection of the image stack using the specified function.
 
@@ -185,8 +194,20 @@ class Data:
         Returns:
         None
         """
+        if figsize == (None, None):
+            figsize = (5, 5)
+        if figsize_scale is not None:
+            figsize = np.array(figsize) * np.array(figsize_scale)
+        else:
+            figsize_scale = 1
         if ax is None:
-            ax = plt.gca()
+            fig, ax = plt.subplots(figsize = figsize)
+        else:
+            fig = plt.gcf()
+        if "text_scale" in kwargs:
+            txt_scl = kwargs["text_scale"]
+        else:
+            txt_scl = 1
         num_rois = int(np.abs(np.min(self.rois)))
         color = cm.get_cmap('jet_r', num_rois)
         scanv = ax.imshow(func(self.images, axis = axis), cmap ="Greys_r", origin = "lower")
@@ -206,15 +227,13 @@ class Data:
                     raise AttributeError(f"Attribute {kwargs['label_by']} not found in object.")
             else:
                 labels= np.abs(label_map) - 1
-           # print(self.keyword_lables[kwargs["label_by"]])
-            print(label_map)
-            print(labels)
             for label_loc, label in zip(label_map, labels):
                 curr_roi_mask = self.rois.T == label_loc
                 curr_roi_centroid = np.mean(np.argwhere(curr_roi_mask == 1), axis = 0)
                 ax.text(curr_roi_centroid[1],curr_roi_centroid[0], label,
-                    ma='center',va='center',ha = "center", c = "w", size = 10, weight = "normal",
-                    path_effects=[path_effects.Stroke(linewidth=2, foreground='k'), path_effects.Normal()])
+                    ma='center',va='center',ha = "center", c = "w", size = 12 * np.array(figsize_scale) * txt_scl, 
+                    weight = "normal", path_effects=[path_effects.Stroke(linewidth = 2 * np.array(figsize_scale) * txt_scl,
+                    foreground='k'), path_effects.Normal()])
 
     def view_drift(self, frame_num = "auto", butterworth_factor = .5, 
         chan_vese_factor = 0.01, ax = None) -> None:
@@ -258,7 +277,7 @@ class Data:
         d3[:, :, 2] = base2
         ax.imshow(utilities.min_max_norm(d3, 0, 1))  
 
-    def plot_averages(self, rois = None, figsize = (None, None), figsize_scale = None, **kwargs):
+    def plot_averages(self, rois = None, figsize = (None, None), figsize_scale = None, axs = None, **kwargs):
         """
         A function to plot the averages of specified regions of interest (rois) on separate subplots within a figure. 
 
@@ -269,30 +288,55 @@ class Data:
         figsize : tuple, optional
             Size of the figure to plot the subplots. Default is calculated based on the number of rois.
 
+        Keyword arguments
+        ----------
+        filter_by : Tuple, optional
+            Tuple in format (function, "operator", value) where 'function' is a mathematical function that
+            can be applied along axis = 1 for self.vverages, '"operator"' is a mathematical operator (e.g, 
+            "<", ">=", or "==") in string format, and 'value' is the threshold metric.
+        sort_by : String, optional
+            String representing attribute of data object, where the metric is ROI-by-ROI, such as a list
+            or array where each element represents the metric of each ROI 
+        label_by : String, optional
+            As above, but instead of changing the order of plotting, changes the label associated with 
+            each ROI to be the specified metric.
+
         Returns
         -------
         None
         """
+        # Handle arguments, keywords, and exceptions
+        if isinstance(rois, Iterable) is False and not rois: # I dont like this solution, but it gets around user ambigouity error if passing numpy array
+            rois = np.arange(0, self.num_rois)
+            #fig, axs = plt.subplots(self.num_rois, figsize = figsize, sharey=True, sharex=True)
+            # ^ no longer needed, since error handling of 'rois' leads to naturally solving this
+        if isinstance(rois, Iterable) is False:
+            rois = [rois]
+        if isinstance(rois, np.ndarray) is False:
+            rois = np.array(rois)
         if rois is not None and isinstance(rois, Iterable) is False:
             rois = np.array([rois])
-        if figsize == (None, None):
-            figsize = (10, self.num_rois)
-        if figsize_scale is not None:
-            figsize = np.array(figsize) * np.array(figsize_scale)
-        colormap = plt.cm.jet_r(np.linspace(1,0,self.num_rois))
-        if isinstance(rois, Iterable) is False and not rois: # I dont like this solution, but it gets around user ambigouity error if passing numpy array
-            fig, axs = plt.subplots(self.num_rois, figsize = figsize, sharey=True, sharex=True)
-            rois = np.arange(0, self.num_rois)
-        else:
-            if isinstance(rois, np.ndarray) is False:
-                rois = np.array(rois)
-            fig, axs = plt.subplots(len(rois), figsize = figsize, sharey=True, sharex=True)
         if "sort_by" in kwargs:
             rois = rois[np.argsort(self.__keyword_lables[kwargs["sort_by"]][rois].astype(int))]
         if "label_by" in kwargs:
             roi_labels = self.__keyword_lables[kwargs["label_by"]][rois]
         else:  
             roi_labels = rois
+        if "filter_by" in kwargs:
+              filter_result = self.__compare_ops_map[
+                    kwargs["filter_by"][1]](kwargs["filter_by"][0]
+                    (self.averages, axis = 1), kwargs["filter_by"][2] )
+              rois = rois[filter_result]
+        if figsize == (None, None):
+            figsize = (10, len(rois))
+        if figsize_scale is not None:
+            figsize = np.array(figsize) * np.array(figsize_scale)
+        # Generate matplotlib plot 
+        colormap = plt.cm.jet_r(np.linspace(1,0,self.num_rois))
+        if axs is None:
+            fig, axs = plt.subplots(len(rois), figsize = figsize, sharey=True, sharex=True)
+        else:
+            fig = plt.gcf()
         # Loop through and plot wwithin axes
         if len(rois == 1): # This takes care of passing just 1 roi, not breaking axs.flat in the next line
             axs = np.array([axs])
@@ -617,7 +661,7 @@ class Data_STRF(Data):
 
     @property
     def contours_complexities(self):
-        return contouring.complexity_weighted(self.contours, self.contours_areas())
+        return contouring.complexity_weighted(self.contours, self.contours_area())
 
     @property
     def timecourses(self, centre_on_zero = True):
