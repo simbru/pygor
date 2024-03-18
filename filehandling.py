@@ -368,7 +368,9 @@ remove_these_keys = ["images", "rois","strfs", "metadata", "triggertimes", "trig
     "triggerstimes_frame", "averages", "snippets", "phase_num", "_Data__skip_first_frames", "_Data__skip_last_frames", 
     "frame_hz", "trigger_mode", "_Data__keyword_lables", "_Data__compare_ops_map", "ms_dur", "data_types", "type",
     "_contours_centroids", "_contours", "contours_centroids", "_centres_by_pol", "_timecourses", "rois", "images", "data_types"]
-
+"""
+TODO Fix DISGUSTING key removal logic
+"""
 def build_results_dict(data_strf_obj, remove_keys = remove_these_keys): #
     ## Logic here has to be: 
     #   - Compute information as needed 
@@ -387,7 +389,6 @@ def build_results_dict(data_strf_obj, remove_keys = remove_these_keys): #
         dict = data_strf_obj.__dict__.copy()
         # Remove surplus info
         [dict.pop(key, None) for key in remove_keys]
-        print("inside results dict build", dict.keys())
         # Make note of how many ROIs for easy indexing later
         dict["roi"] = [int(i.split('_')[1]) for i in data_strf_obj.strf_keys]
             
@@ -507,7 +508,6 @@ def build_results_dict(data_strf_obj, remove_keys = remove_these_keys): #
                     difference = expected_lengths - len(dict[i])
                     dict[i]=  np.pad(dict[i], (difference,0), constant_values=np.nan)
         return dict 
-    
 def build_recording_dict(data_strf_obj, remove_keys = remove_these_keys):
     dict = data_strf_obj.__dict__.copy()
     # Deal with metadata
@@ -538,10 +538,15 @@ def build_recording_dict(data_strf_obj, remove_keys = remove_these_keys):
     dict["strfs_shape"] = [np.array(data_strf_obj.strfs).shape]
     dict["ObjXYZ"] = [metadata.pop("objectiveXYZ")]
     # Remove surplus info
-    # remove = ["strf_keys", "metadata", "images", "rois", "strfs", "ipl_depths", "_timecourses", "_contours", 
-    #     "_contours_area", "_pval_time", "_pval_space", "_contours"]
-    [dict.pop(key, None) for key in remove_keys]
-    print("inside rec dict build", dict.keys())
+    """
+    TODO Fix DISGUSTING key removal logic fuck me this is grim
+    """
+    remove = ["strf_keys", "metadata", "images", "rois", "strfs", "ipl_depths", "_timecourses", "_contours", 
+        "_contours_area", "_pval_time", "_pval_space", "_contours"]
+    temp_remove = []
+    temp_remove.extend(remove_these_keys)
+    temp_remove.extend(remove)
+    [dict.pop(key, None) for key in temp_remove]
     return dict
 
 def build_chromaticity_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
@@ -685,7 +690,6 @@ def compile_chroma_strf_df(files, summary_prints = True,  do_bootstrap = True, s
             #lengths = [len(build_results_dict(loaded)[i]) for i in build_results_dict(loaded)]
             curr_df = pd.DataFrame(build_results_dict(loaded))
             roi_stat_list.append(curr_df)
-            print("resulting rec dict:", build_recording_dict(loaded).keys())
             curr_rec = pd.DataFrame(build_recording_dict(loaded))
             rec_info_list.append(curr_rec)
             curr_crhoma = pd.DataFrame(build_chromaticity_dict(loaded))
