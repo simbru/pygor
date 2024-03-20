@@ -566,7 +566,8 @@ def build_chromaticity_dict(data_strf_obj, wavelengths =  ["588", "478", "422", 
             dict["filename"] = np.repeat(path.name, expected_lengths)
             strf_keys = natsort.natsorted(np.unique(['_'.join(i.split('_')[:2]) for i in data_strf_obj.strf_keys]))
             dict["strf_keys"] = strf_keys
-            dict["cell_id"] = [metadata["exp_date"].strftime("%m-%d-%Y") + '_' + '_'.join(j.split('_')[:2]) for j in strf_keys]
+            dict["cell_id"] = [path.stem.replace(" ", "") + metadata["exp_date"].strftime("%m-%d-%Y") + '_' + '_'.join(j.split('_')[:2]) for j in strf_keys]
+            dict["roi"] = [int(i.split('_')[1]) for i in data_strf_obj.strf_keys][::data_strf_obj.numcolour]
             # dict["cell_id"] = 
             size = int(label_from_str(path.name, ('800', '400', '200', '100', '75', '50', '25'), first_return_only=True))
             dict["size"] =  [size] * expected_lengths
@@ -584,7 +585,12 @@ def build_chromaticity_dict(data_strf_obj, wavelengths =  ["588", "478", "422", 
             neg_peak_t, pos_peak_t = data_strf_obj.peaktime_tuning_functions()
             neg_peak_t, pos_peak_t =  neg_peak_t.T, pos_peak_t.T
 
+
+
             # Chromatic aspects 
+            temporal_filter = utilities.multicolour_reshape(data_strf_obj.timecourses, num_wavelengths)
+            spatial_filter = utilities.multicolour_reshape(data_strf_obj.collapse_times(spatial_centre=True), num_wavelengths)
+            
             for n, i in enumerate(wavelengths):
                 dict[f"pol_{i}"] = polarities[n]
                 # Tuning functions
@@ -595,6 +601,11 @@ def build_chromaticity_dict(data_strf_obj, wavelengths =  ["588", "478", "422", 
                 dict[f"peakneg_{i}"] = neg_peak_t[n]
                 dict[f"peakpos_{i}"] = pos_peak_t[n]
                 dict[f"comp_{i}"] = complexities[n]
+                dict[f"temporal_{i}"] = temporal_filter[n].tolist()
+                dict[f"spatial_{i}"] = spatial_filter[n].tolist()
+            
+            dict["spatial_X"] = [spatial_filter[0, 0].shape[0]] * expected_lengths
+            dict["spatial_Y"] = [spatial_filter[0, 0].shape[1]] * expected_lengths
             dict["opp_bool"] = np.array(data_strf_obj.opponency_bool())
             # Sort dictionary for friendliness 
             core_info = ['date', 'path', 'filename', "curr_path", 'strf_keys', 'cell_id', 'size', 'ipl_depths', 'opp_bool']

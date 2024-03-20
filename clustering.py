@@ -219,9 +219,14 @@ def display_parallel_coordinates_centroids(df, num_clusters):
 
 
 ## Kills metadata
-def cols_like(list, df):
+def cols_like(input_list, df):
+    """
+    TODO "curr_path" bug likely originates here, but I really dont understand why
+    """
     final_list = []
-    for term in list:
+    #Prevent overwriting
+    df = df.copy()
+    for term in input_list:
         curr_list = [i for i in df.columns if term in i]
         final_list.extend(curr_list)
     return final_list
@@ -270,6 +275,12 @@ def prep_input_df(input_df, select_cols = None, scaler = StandardScaler(), nan_r
     # Can specify columns, otherwise use everything available
     if select_cols == None:
         select_cols = list(input_df.columns)
+        select_cols.remove("curr_path")
+        """
+        TODO Fix the above, its a temporary solution and I do not understand where the problem comes from 
+        Basically it solves a bug where "curr_path" within the input_df seemingly gets duplicated recurisvely,
+        making it impossible to acces becasue the shape of df["curr_path"] goes from being (n, ) to (n, 2)
+        """
     # Prevent overwriting 
     input_df = input_df.copy()
     # Drop irrelevant cols (lazy by searching any match, meaning more
@@ -430,6 +441,7 @@ def plot_df_tuning(post_cluster_df, clusters = 0, group_by = "cluster", plot_col
         # This goes through the DataFrames and identifies which columns are present and extracts them 
         # independent of wavelength (more on parsing that below) 
         unique_cols_sans_wavelength = np.unique([i.split("_")[0] for i in post_cluster_df.columns if i != group_by])
+        unique_cols_sans_wavelength = unique_cols_sans_wavelength[unique_cols_sans_wavelength != group_by]
         check_cols = np.unique([i.split("_")[0] for i in post_cluster_df.columns if i != group_by])
         if "ipl" in unique_cols_sans_wavelength:
             unique_cols_sans_wavelength = unique_cols_sans_wavelength.astype(object)
@@ -443,12 +455,13 @@ def plot_df_tuning(post_cluster_df, clusters = 0, group_by = "cluster", plot_col
         fig.tight_layout()
         if num_stats == 1:
             ax = [ax]
+        
     if type(clusters) == int:
         clusters = [clusters]
-    for n, clust_num in enumerate(clusters):
+    for m, clust_num in enumerate(clusters):
         for n, (i, param) in enumerate(zip(ax, unique_cols_sans_wavelength)):
-            if n == 0:
-                i.set_ylabel("Mean ± STD by paramter")
+            # if n == 0:
+            #      i.set_ylabel("Mean ± STD by paramter")
             results = get_cluster_cols(clust_num, unique_cols_sans_wavelength, post_cluster_df).describe()
             wavelength_params = cols_like([param], results)
             means =  results[wavelength_params].loc["mean"]
@@ -469,7 +482,6 @@ def plot_df_tuning(post_cluster_df, clusters = 0, group_by = "cluster", plot_col
                 # set a lil line at 0 for easier viz
                 i.axhline(0, color = "lightgrey", alpha = 1, ls = '--')
             i.set_title(param)
-
 def sum_normalize_data(data):
     """
     scaling values to sum to 1 while preserving their relative proportions
@@ -496,6 +508,7 @@ def scale_data_points(data_array):
     return scaled_data_array
 
 def run_clustering(clust_df, clustering_params = ["ampl", "area", "peak", "cent"]):
+
     clust_params_regex = '|'.join(clustering_params)
     def clust_pipeline(input_df, cluster_params = clustering_params, *args):
         # Run clustering on PCA result
@@ -559,7 +572,8 @@ def run_clustering(clust_df, clustering_params = ["ampl", "area", "peak", "cent"
     merged_stats_df["cluster_id"] = merged_pca_df["cluster_id"].astype('category')
     merged_stats_df["cluster"] = merged_pca_df.cluster_id.cat.codes
     ### And write that to an unprocessed copy
-    org_stats_df = copy.copy(clust_df)
+
+    org_stats_df = copy.deepcopy(clust_df)
     org_stats_df = prep_input_df(org_stats_df, scaler=None, select_cols=clustering_params).reset_index()
     org_stats_df["cluster_id"] = merged_pca_df["cluster_id"].astype('category')
     org_stats_df["cluster"] = merged_pca_df.cluster_id.cat.codes
@@ -568,6 +582,29 @@ def run_clustering(clust_df, clustering_params = ["ampl", "area", "peak", "cent"
     org_stats_df["path"] = pruned_df["path"]
     org_stats_df["filename"] = pruned_df["filename"]
     org_stats_df["date"] = pruned_df["date"]
+    org_stats_df["curr_path"] = pruned_df["curr_path"]
+    org_stats_df["roi"] = pruned_df["roi"]
+    org_stats_df["cell_id"] = pruned_df["cell_id"]
+    org_stats_df["curr_path"] = pruned_df["curr_path"]
+    
+    org_stats_df["spatial_588"] = pruned_df["spatial_588"]
+    org_stats_df["spatial_478"] = pruned_df["spatial_478"]
+    org_stats_df["spatial_422"] = pruned_df["spatial_422"]
+    org_stats_df["spatial_375"] = pruned_df["spatial_375"]
+    org_stats_df["spatial_X"] = pruned_df["spatial_X"]
+    org_stats_df["spatial_Y"] = pruned_df["spatial_Y"]
+    org_stats_df["temporal_588"] = pruned_df["temporal_588"]
+    org_stats_df["temporal_478"] = pruned_df["temporal_478"]
+    org_stats_df["temporal_422"] = pruned_df["temporal_422"]
+    org_stats_df["temporal_375"] = pruned_df["temporal_375"]
+
+        
+
+# org_stats_df["curr_path"] = pruned_df["curr_path"][:, 0]
+    """
+    TODO Fix "curr_path" bug
+    """
+    test_out = clust_df
     
     ## Finally, define outputs 
     return merged_pca_df, merged_stats_df, org_stats_df, pca_results

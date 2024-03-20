@@ -513,8 +513,12 @@ def ipl_summary_chroma(chroma_df):
                     ax[n, m].set_title("ON", weight = "bold", loc = "left")
             ax[0, m].set_title(nanometers[m] + "nm", size = 12)
             num_cells = len(pd.unique(chroma_df["cell_id"]))
+            """
+            TODO this counts cell number incorrectly, duplicate cell_ids
+            """
             ax[1, 0].set_xlabel(f"Percentage by colour (n = {num_cells})", size = 15)
     plt.show()
+    raise UserWarning("Fix 'cell_ID' implementation in roi_df")
 
 def ipl_summary_polarity(roi_df):
     polarities = [-1, 1, 2]

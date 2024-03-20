@@ -83,6 +83,10 @@ class Experiment:
 
 @dataclass
 class Data:
+    # def __str__(self):
+    #     return "MyClass([])"
+    # def __repr__(self):
+    #     return f"{self.data_types}"
     filename: str or pathlib.Path
     metadata: dict = field(init=False)
     rois    : dict = field(init=False)
@@ -656,9 +660,19 @@ class Data_STRF(Data):
             return self._centres_by_pol
 
     @ property
-    def contours_centres(self):
-        return np.nanmean(self.contours_centres_by_pol, axis = 0)
-
+    def contours_centres(self, center_on = "biggest"):
+        if center_on == "pols":
+            return np.nanmean(self.contours_centres_by_pol, axis = 0)
+        if center_on == "biggest":
+            pos_conts_cents = np.array([i[0] if i.size != 0 else np.array([np.nan, np.nan]) for i in self.contours_centroids[1, :]])
+            neg_conts_cents = np.array([i[0] if i.size != 0 else np.array([np.nan, np.nan]) for i in self.contours_centroids[0, :]])
+            area_cents = self.contours_area()
+            neg_pos_largest = np.array([(i[np.argmax(i)], j[np.argmax(j)]) for i,j in area_cents])
+            xs = np.where(neg_pos_largest[:, 0] > neg_pos_largest[:, 1], neg_conts_cents[:, 0], pos_conts_cents[:, 0])
+            ys = np.where(neg_pos_largest[:, 0] > neg_pos_largest[:, 1], neg_conts_cents[:, 1], pos_conts_cents[:, 1])
+            return np.array([xs, ys]).T #centres by biggest area, irrespective of polarity
+        else:
+            raise ValueError("center_on must be 'pols' or 'biggest'")
     @property
     def contours_complexities(self):
         return contouring.complexity_weighted(self.contours, self.contours_area())
@@ -800,16 +814,22 @@ class Data_STRF(Data):
         for n, strf in enumerate(self.strfs):
             collapsed_strf_arr[n] = space.collapse_3d(self.strfs[n], zscore = zscore, mode = mode)
         if spatial_centre == True:
-            # Estimate centre pixel
-            pixel_centres = self.contours_centres
-            avg_centre = np.round(np.nanmean(pixel_centres, axis = 0))
-            # Find offset between centre coordinate andthe mean coordinate 
-            differences = np.nan_to_num(avg_centre - pixel_centres).astype("int")
-            # Loop through and correct
-            overlap = np.ma.array([np.roll(arr, (x,y), axis = (1,0)) for arr, (y, x) in zip(collapsed_strf_arr, differences)])
-            collapsed_strf_arr = overlap
+            # Calculate shifts required for each image (vectorised)
+            arr3d = collapsed_strf_arr
+            # Ideally (but does not seem to work correctly, skewed by spurrious contours)
+            contours_centers = np.where(self.contours_centres > 0, np.floor(self.contours_centres), np.ceil(self.contours_centres))
+            target_pos = np.array(arr3d.shape[1:]) / 2
+            shift_by = target_pos - contours_centers
+            #print("Shift by", shift_by)
+            shift_by = np.nan_to_num(shift_by).astype(int) 
+            shift_by = shift_by
+            # np.roll does not support rolling 3D along depth, so 
+            shifted = np.ma.array([np.roll(arr, shift_by[i], axis = (0,1)) for i, arr in enumerate(arr3d)])
+            return shifted
+            #collapsed_strf_arr = shifted
         return collapsed_strf_arr
         # space.collapse_3d(recording.strfs[strf_num])
+
 
     def polarities(self, exclude_FirstLast=(1,1)):
         if self.strfs is np.nan:

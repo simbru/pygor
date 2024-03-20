@@ -132,7 +132,7 @@ def contour_unipolar(arr_2d, abs_criteria = abs_criteria_global, qc = True, **kw
         contour = contour_points_QualityControl(contour)
     return contour
 
-def _draw_contour_bipolar(arr_2d, abs_criteria):
+def _draw_contour_bipolar(arr_2d, abs_criteria, silence_warnings = True):
     """Helper function for contour_bipolar()"""
     arr_2d_lower = np.clip(arr_2d, np.min(arr_2d), -0)
     arr_2d_upper = np.clip(arr_2d, 0, np.max(arr_2d))
@@ -148,14 +148,16 @@ def _draw_contour_bipolar(arr_2d, abs_criteria):
             contour_upper = skimage.measure.find_contours(arr_2d_upper, level = level_upper)
         else:
             contour_upper = [] #Empty contour
-            warnings.warn(f"Upper contour did not pass arithmetic threshold criteria (half abs-max = {arithmetic_criteria})", stacklevel = 2)
+            if silence_warnings == False:
+                warnings.warn(f"Upper contour did not pass arithmetic threshold criteria (half abs-max = {arithmetic_criteria})", stacklevel = 2)
         # if np.min(arr_2d) < -abs_criteria:
         if _contour_arithtmatic_threshold_passfail(arr_2d_lower, criteria = arithmetic_criteria, metric = np.max) == True:
             level_lower = -1 * _contour_determine_level(arr_2d) # note uses global determinant
             contour_lower = skimage.measure.find_contours(arr_2d_lower, level = level_lower)
         else:
             contour_lower = [] #Empty contour
-            warnings.warn(f"Lower contour did not pass arithmetic threshold criteria (half abs-max = {arithmetic_criteria})", stacklevel = 2)
+            if silence_warnings == False:
+                warnings.warn(f"Lower contour did not pass arithmetic threshold criteria (half abs-max = {arithmetic_criteria})", stacklevel = 2)
         return contour_lower, contour_upper
     else:
         contour_lower = [] #Empty contour
