@@ -56,6 +56,22 @@ def get_rel_objective_XYZ(wParamsNum_arr):
     Z = wParamsNum_All_XYZ[1]
     return X, Y, Z
 
+def create_bs_dict(do_bootstrap = True, time_sig_thresh = 0.1,
+    space_sig_thresh = 0.1, space_bs_n = 1000, time_bs_n = 2500):
+    now_time = datetime.datetime.now()
+    bs_dict = {
+        "do_bootstrap"      : do_bootstrap,
+        "time_sig_thresh"   : time_sig_thresh, 
+        "space_sig_thresh"  : space_sig_thresh,
+        "space_bs_n"        : space_bs_n, 
+        "time_bs_n"         : time_bs_n, 
+        "bs_already_ran"    : False,
+        "bs_datetime"       : now_time,
+        "bs_datetime_str"   : now_time.strftime("%d/%m/%y %H:%M:%S"),
+        "bs_dur_timedelta"  : "",
+    }
+    return bs_dict
+
 def fix_oversize_sta(strf_arr4d, boxsize_um, upscale_multiple = 4):
     # Determine STA size from filename convension
     size = boxsize_um

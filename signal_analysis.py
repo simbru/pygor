@@ -9,7 +9,7 @@ import matplotlib
 import space
 from joblib import Parallel, delayed
 
-import filehandling 
+import data_helpers 
 import utilities
 sns.set_context("notebook")
 rng = np.random.default_rng(1312)
@@ -809,7 +809,7 @@ def init_timing_vars(file_path):
     times and determines when in the loop the trigger occurs on average. It also accounts for the period of no stimulus.
     """
     # Get the file 
-    file = filehandling.load_from_hdf5(file_path)
+    file = data_helpers.load_from_hdf5(file_path)
     # Import the variables
     triggers_time = file.Triggertimes
     linespeed = file.OS_Parameters[56]
@@ -850,7 +850,7 @@ def stim_phase_df(file_path_list, conditions_label_list, phase_trignum, repeats,
 
     Notes
     -----
-    This function relies on other functions from the `signal_analysis` and `filehandling` modules.
+    This function relies on other functions from the `signal_analysis` and `data_helpers` modules.
     """
     stat_list = [] # DataFrames will be temporarily stored here and concatenated later
     for file in file_path_list:
@@ -858,9 +858,9 @@ def stim_phase_df(file_path_list, conditions_label_list, phase_trignum, repeats,
         # Create an empty dictionary
         dict = {}
         # Get the file contents
-        loaded_file = filehandling.load_from_hdf5(file)
+        loaded_file = data_helpers.load_from_hdf5(file)
         dict["filename"] = pathlib.Path(loaded_file.filename).name
-        dict["colour"] = filehandling.label_from_str(loaded_file.filename, ["R", "G", "B", "UV"])
+        dict["colour"] = data_helpers.label_from_str(loaded_file.filename, ["R", "G", "B", "UV"])
         # Load up data of interest
         traces = loaded_file.Averages0
         if 'std_threshold' in kwargs:
