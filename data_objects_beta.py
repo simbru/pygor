@@ -588,7 +588,8 @@ class STRF(Data):
             None
 
         Returns:
-            None
+            None 
+            
         """
         self.bs_settings =  data_helpers.create_bs_dict(do_bootstrap = self.bs_bool)
 
