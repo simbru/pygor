@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pygor"
+version = "0.0.1"
+authors = [
+  { name="Simen Bruøygard", email="simen.bruoy@gmail.com" },
+]
+description = """A package for interacting with Igor Pro, 
+for internal use, for Baden-lab members
+"""
+readme = "README.md"
+requires-python = ">=3.10.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/simbru/pygor"
+Issues = "https://github.com/simbru/pygor/issues"
+
+[tool.setuptools.packages]
+find = {}  # Scan the project directory with the default parameters
+
+
+[tool.hatch.build.targets.wheel]
+#packages = ["src"]
+autodiscover = true
+
+
+#             "core",
+#             "data_objs",
+#             "filehandling",  # Corrected typo here
+#             "clustering",
+#             "plotting",
+#             "unittests",
+#             "utils"
+#             ]
+
+# [tool.setuptools]
+# package-dir = {"pygor" = "src"}
+    # directory containing all the packages (e.g.  src/mypkg1, src/mypkg2)
