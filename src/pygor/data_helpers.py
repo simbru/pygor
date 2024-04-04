@@ -9,6 +9,24 @@ import pygor.utils.unit_conversion
 """Helper functions for Data classes:_________________________________________"""
 
 def get_methods_list(obj, with_returns = True) -> list:
+    """
+    Get a list of methods of a given object.
+
+    Parameters
+    ----------
+    obj : object
+        The object to retrieve the methods from.
+    with_returns : bool, optional
+        If True, include the return type of each method in the list.
+        Default is True.
+
+    Returns
+    -------
+    list
+        A list of methods from the object. If `with_returns` is True,
+        each method is followed by its return type in parenthesis.
+
+    """
     method_list = [func for func in dir(obj) if callable(getattr(obj, func)) is True and "__" not in func]
     """
     TODO Sort the methods list alphabetically by the 
@@ -19,6 +37,24 @@ def get_methods_list(obj, with_returns = True) -> list:
     return method_list
 
 def get_attribute_list(obj, with_types = True) -> list:
+    """
+    Get a list of attributes of a given object.
+
+    Parameters
+    ----------
+    obj : object
+        The object to retrieve the attributes from.
+    with_types : bool, optional
+        If True, include the types of each attribute in the list.
+        Default is True.
+
+    Returns
+    -------
+    list
+        A list of attributes from the object. If `with_types` is True,
+        each attribute is followed by its type in parenthesis.
+
+    """
     attribute_list = [attr for attr in dir(obj) if callable(getattr(obj, attr)) is False and "__" not in attr and attr[0] != '_']
     if with_types is True:
         attribute_list = [attr_str + f" ({type(getattr(obj, attr_str)).__name__})" for attr_str in attribute_list]

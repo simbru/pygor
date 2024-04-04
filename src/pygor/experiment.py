@@ -13,6 +13,7 @@ import pygor.space
 import pygor.steps.contouring
 import pygor.temporal
 import pygor.plotting.plots
+import pygor.utils
 # Dependencies
 from tqdm.auto import tqdm
 import operator
@@ -275,7 +276,7 @@ class Data:
         d3[:, :, 0] = base
         d3[:, :, 1] = base1
         d3[:, :, 2] = base2
-        ax.imshow(utilities.min_max_norm(d3, 0, 1))  
+        ax.imshow(pygor.utils.utilities.min_max_norm(d3, 0, 1))  
 
     def plot_averages(self, rois = None, figsize = (None, None), figsize_scale = None, axs = None, **kwargs):
         """
@@ -373,6 +374,10 @@ class Data:
         numpy.ndarray
             The average image calculated from the trigger frames.
         """
+        # If no repetitions
+        if self.phase_num == 1:
+            warnings.warn("No repetitions detected, returning original images")
+            return
         # Account for trigger skipping logic
         if ignore_skip is True:   
             # Ignore skipping parameters
@@ -744,8 +749,8 @@ class STRF(Data):
     def pvals_table(self) -> pd.DataFrame:
         dict = {}
         if self.multicolour == True: 
-            space_vals = utilities.multicolour_reshape(np.array(self.pval_space()), self.numcolour).T
-            time_vals = utilities.multicolour_reshape(np.array(self.pval_time()), self.numcolour).T
+            space_vals = pygor.utils.utilities.multicolour_reshape(np.array(self.pval_space()), self.numcolour).T
+            time_vals = pygor.utils.utilities.multicolour_reshape(np.array(self.pval_time()), self.numcolour).T
             space_sig = space_vals < self.bs_settings["space_sig_thresh"]
             time_sig = time_vals < self.bs_settings["time_sig_thresh"]
             both_sig = time_sig * space_sig
@@ -868,7 +873,7 @@ class STRF(Data):
 
     def dominant_timecourses(self):
         dominant_times = []
-        for arr in self.timecourses.data:
+        for arr in self.timecourses().data:
             if np.max(np.abs(arr[0]) > np.max(np.abs(arr[1]))):
                 dominant_times.append(arr[0])
             else:
@@ -940,7 +945,7 @@ class STRF(Data):
         """
         if self.multicolour == True:
             # Get the average centre position for each colour
-            avg_colour_centre = np.array([np.nanmean(yx, axis = 0) for yx in utilities.multicolour_reshape(self.contours_centres(), self.numcolour)])
+            avg_colour_centre = np.array([np.nanmean(yx, axis = 0) for yx in pygor.utils.utilities.multicolour_reshape(self.contours_centres(), self.numcolour)])
             # Get the average position for the reference LEDs and the comparison LEDs
             avg_reference_pos = np.nanmean(np.take(avg_colour_centre, reference_LED_index, axis = 0), axis = 0)
             avg_compare_pos = np.nanmean(np.take(avg_colour_centre, compare_LED_index, axis = 0), axis = 0)
@@ -1015,13 +1020,13 @@ class STRF(Data):
             return np.array([np.nan])
         # Get polarities for time courses (which are 2D arrays containing a 
         # timecourse for negative and positive)
-        polarities = pygor.temporal.polarity(self.timecourses, exclude_FirstLast)
+        polarities = pygor.temporal.polarity(self.timecourses(), exclude_FirstLast)
         # Feed that to helper function to break it down into 1D/category
-        return utilities.polarity_neat(polarities)
+        return pygor.utils.utilities.polarity_neat(polarities)
 
     def opponency_bool(self) -> [bool]:
         if self.multicolour == True:
-            arr = utilities.multicolour_reshape(self.polarities(), self.numcolour).T
+            arr = pygor.utils.utilities.multicolour_reshape(self.polarities(), self.numcolour).T
             # This line looks through rearranged chromatic arr roi by roi 
             # and checks the poliarty by getting the unique values and checking 
             # if the length is more than 0 or 1, excluding NaNs. 
@@ -1033,7 +1038,7 @@ class STRF(Data):
 
     def polarity_category(self) -> [str]:
         result = []
-        arr = utilities.multicolour_reshape(self.polarities(), self.numcolour).T
+        arr = pygor.utils.utilities.multicolour_reshape(self.polarities(), self.numcolour).T
         for i in arr:
             inner_no_nan = np.unique(i)[~np.isnan(np.unique(i))]
             inner_no_nan = inner_no_nan[inner_no_nan != 0]
@@ -1059,9 +1064,9 @@ class STRF(Data):
             maxes = np.max(self.dominant_timecourses().data, axis = (1))
             mins = np.min(self.dominant_timecourses().data, axis = (1))
             largest_mag = np.where(maxes > np.abs(mins), maxes, mins) # search and insert values to retain sign
-            largest_by_colour = utilities.multicolour_reshape(largest_mag, self.numcolour)
+            largest_by_colour = pygor.utils.utilities.multicolour_reshape(largest_mag, self.numcolour)
             # signs = np.sign(largest_by_colour)
-            # min_max_scaled = np.apply_along_axis(utilities.min_max_norm, 1, np.abs(largest_by_colour), 0, 1)
+            # min_max_scaled = np.apply_along_axis(pygor.utils.utilities.min_max_norm, 1, np.abs(largest_by_colour), 0, 1)
             tuning_functions = largest_by_colour
             return tuning_functions.T #transpose for simplicity, invert for UV - R by wavelength (increasing)
         else:
@@ -1083,7 +1088,7 @@ class STRF(Data):
             # Step 4: Sum across polarities 
             total_areas = np.sum((tot_neg_areas, tot_pos_areas), axis = 0)
             # Step 5: Reshape to multichromatic format
-            area_by_colour = utilities.multicolour_reshape(total_areas, self.numcolour).T
+            area_by_colour = pygor.utils.utilities.multicolour_reshape(total_areas, self.numcolour).T
             return area_by_colour #transpose for simplicity, invert for UV - R by wavelength (increasing)
         else:
             raise AttributeError("Operation cannot be done since object contains no property '.multicolour.")
@@ -1095,8 +1100,8 @@ class STRF(Data):
             neg_centroids = self.spectral_centroids()[0]
             pos_centroids = self.spectral_centroids()[1]
             # Step 3: Reshaoe ti multichromatic 
-            speed_by_colour_neg = utilities.multicolour_reshape(neg_centroids, self.numcolour).T
-            speed_by_colour_pos = utilities.multicolour_reshape(pos_centroids, self.numcolour).T 
+            speed_by_colour_neg = pygor.utils.utilities.multicolour_reshape(neg_centroids, self.numcolour).T
+            speed_by_colour_pos = pygor.utils.utilities.multicolour_reshape(pos_centroids, self.numcolour).T 
             # NaNs are 0 
             # roi = 4
             # speed_by_colour_neg = np.nan_to_num(speed_by_colour_neg)
@@ -1112,13 +1117,13 @@ class STRF(Data):
         if self.multicolour == True:
             # First get timecourses
             # Split by polarity 
-            neg_times, pos_times = self.timecourses[:, 0], self.timecourses[:, 1]
+            neg_times, pos_times = self.timecourses()[:, 0], self.timecourses()[:, 1]
             # Find max position in pos times and neg position in neg times 
             argmins = np.ma.argmin(neg_times, axis = 1)
             argmaxs = np.ma.argmax(pos_times, axis = 1)
             # Reshape result to multichroma 
-            argmins  = utilities.multicolour_reshape(argmins, self.numcolour).T
-            argmaxs  = utilities.multicolour_reshape(argmaxs, self.numcolour).T
+            argmins  = pygor.utils.utilities.multicolour_reshape(argmins, self.numcolour).T
+            argmaxs  = pygor.utils.utilities.multicolour_reshape(argmaxs, self.numcolour).T
             if dur_s != None:
                 return  (dur_s / neg_times.shape[1]) * np.array([argmins, argmaxs])
             else:
@@ -1128,13 +1133,13 @@ class STRF(Data):
             raise AttributeError("Operation cannot be done since object contains no property '.multicolour.")
 
     def spectral_centroids(self) -> (np.ndarray, np.ndarray):
-        spectroids_neg = np.apply_along_axis(pygor.temporal.only_centroid, 1, self.timecourses[:, 0])
-        spectroids_pos = np.apply_along_axis(pygor.temporal.only_centroid, 1, self.timecourses[:, 1])
+        spectroids_neg = np.apply_along_axis(pygor.temporal.only_centroid, 1, self.timecourses()[:, 0])
+        spectroids_pos = np.apply_along_axis(pygor.temporal.only_centroid, 1, self.timecourses()[:, 1])
         return spectroids_neg, spectroids_pos
 
-    def spectrums(self) -> (np.ndarray, np.ndarray):
-        spectrum_neg = np.apply_along_axis(pygor.temporal.only_spectrum, 1, self.timecourses[:, 0])
-        spectrum_pos = np.apply_along_axis(pygor.temporal.only_spectrum, 1, self.timecourses[:, 1])
+    def spectrums(self, roibyroi = False) -> (np.ndarray, np.ndarray):
+        spectrum_neg = np.array([pygor.temporal.only_spectrum(i) for i in self.timecourses()[:, 0]])
+        spectrum_pos = np.array([pygor.temporal.only_spectrum(i) for i in self.timecourses()[:, 1]])
         return spectrum_neg, spectrum_pos
 
     # def check_ipl_orientation(self):

@@ -204,16 +204,16 @@ def spectral_centroid(timecourse_1d, sampling_rate = None):
     If `sampling_rate` is not given, a warning is issued and the frequency bins are arbitrary.
     """
     if np.all(timecourse_1d == 0):
-        spectrum =  np.empty(len(timecourse_1d))
+        spectrum =  np.empty(int(len(timecourse_1d)/2 + 1))
         spectrum[:] = np.nan
-        weighted_spectrum = np.empty(len(timecourse_1d))
+        weighted_spectrum = np.empty(int(len(timecourse_1d)/2 + 1))
         weighted_spectrum[:] = np.nan
         centroid = np.nan
         return spectrum, weighted_spectrum, centroid
     if isinstance(timecourse_1d, np.ma.MaskedArray) == True and np.all(timecourse_1d.mask == True):
-        spectrum =  np.empty(len(timecourse_1d))
+        spectrum = np.empty(int(len(timecourse_1d)/2 + 1))
         spectrum[:] = np.nan
-        weighted_spectrum = np.empty(len(timecourse_1d))
+        weighted_spectrum = np.empty(int(len(timecourse_1d)/2 + 1))
         weighted_spectrum[:] = np.nan
         centroid = np.nan
         # Don't bother masking these, the nans will be sufficient (i think, look for bugs as consequence)
@@ -246,7 +246,6 @@ def only_centroid(timecourse_1d, sampling_rate = 15.625):
     return spectral_centroid(timecourse_1d, sampling_rate = sampling_rate)[2]
 
 def only_spectrum(timecourse_1d, sampling_rate = 15.625):
-    """Runs spectral_centroid() but returns only the centroid without spectrum array"""
     return spectral_centroid(timecourse_1d, sampling_rate = sampling_rate)[1]
     # return spectral_centroid(timecourse_1d, sampling_rate = 15.625)[1]
 
