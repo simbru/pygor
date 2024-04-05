@@ -4,11 +4,13 @@ import numpy.testing as nptest
 import numpy as np
 import unittest
 import warnings
-import os, pathlib
+import os
+import pathlib
 
-loc = r"C:\Users\Simen\Downloads\2023-11-14_0_0_SWN_200_Colours.h5"
+repo = pathlib.Path(os.getcwd())
+example_data = repo.joinpath(repo, "Example_data/example_exp.h5")
 bs_bool = False
-strfs = pygor.experiment.STRF(loc)
+strfs = pygor.experiment.STRF(example_data)
 
 
 class TestSTRF(unittest.TestCase):

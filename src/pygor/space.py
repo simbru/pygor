@@ -4,12 +4,12 @@ Tools for determining spatial properties of STRFs
 
 import numpy as np
 import numpy.ma as ma
-import math
+#import math
 import scipy
-import skimage.measure
-import skimage.segmentation
+#import skimage.measure
+#import skimage.segmentation
 import warnings
-import cv2
+
 # Local imports
 import pygor.steps.contouring
 import pygor.utils.utilities
@@ -735,7 +735,7 @@ def rf_mask2d(arr_3d, axis = 0, level = None, mode = collapse_3d, **kwargs):
     # Collapse 3rd dimention 
     arr_3d_collapsed = mode(arr_3d, **kwargs)
     # Create contour and mask
-    _contour = conturing.contour(arr_3d_collapsed, expect_bipolar = True, **kwargs)
+    _contour = pygor.steps.conturing.contour(arr_3d_collapsed, expect_bipolar = True, **kwargs)
     (_contour_mask_neg, _contour_mask_pos) = pygor.steps.contouring.contour_mask(_contour, arr_3d_collapsed.shape, expect_bipolar = True, **kwargs)
     # Mask array with negative and positive mask
     neg_masked = np.ma.array(arr_3d_collapsed, mask = _contour_mask_neg)
