@@ -5,7 +5,6 @@ try:
 except ImportError:
     from collections.abc import Iterable
 import types
-from pygor.data_helpers import get_attribute_list, get_methods_list
 
 pp = pprint.PrettyPrinter(width = 110, indent = 2, compact = True)
 md = pprint.PrettyPrinter(width = 110, indent = 2, compact = True)

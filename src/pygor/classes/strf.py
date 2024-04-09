@@ -5,7 +5,6 @@ except ImportError:
     from collections.abc import Iterable
 # Local imports
 import pygor.utils.unit_conversion as unit_conversion
-from pygor.utils.utilities import multicolour_reshape as reshape
 import pygor.steps.signal_analysis as signal_analysis
 import pygor.data_helpers
 import pygor.utils.helpinfo
@@ -14,7 +13,7 @@ import pygor.steps.contouring
 import pygor.temporal
 import pygor.plotting.plots
 import pygor.utils
-from pygor.data_objs.data_parent import Data
+from pygor.classes.core_data import Core
 # Dependencies
 from tqdm.auto import tqdm
 import joblib
@@ -28,7 +27,7 @@ import pandas as pd
 
 
 @dataclass
-class STRF(Data):
+class STRF(Core):
     type         : str = "STRF"
     # Params 
     multicolour  : bool = False

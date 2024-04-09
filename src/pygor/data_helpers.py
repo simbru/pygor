@@ -5,6 +5,7 @@ import warnings
 import pygor.utils.utilities
 import pathlib
 import pygor.utils.unit_conversion
+import pygor.utils.helpinfo
 
 """Helper functions for Data classes:_________________________________________"""
 
@@ -33,7 +34,7 @@ def get_methods_list(obj, with_returns = True) -> list:
     letter in the second part of the funciton name, after '_'
     """
     if with_returns is True:
-        method_list = [func_str + f" ({get_return_type(getattr(obj, func_str))})" for func_str in method_list]
+        method_list = [func_str + f" ({pygor.helpinfo.get_return_type(getattr(obj, func_str))})" for func_str in method_list]
     return method_list
 
 def get_attribute_list(obj, with_types = True) -> list:

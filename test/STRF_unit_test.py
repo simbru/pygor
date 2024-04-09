@@ -1,4 +1,4 @@
-import pygor.experiment
+import pygor.analyses
 import pygor.data_helpers
 import numpy.testing as nptest
 import numpy as np
@@ -10,8 +10,7 @@ import pathlib
 repo = pathlib.Path(os.getcwd())
 example_data = repo.joinpath(repo, "Example_data/example_exp.h5")
 bs_bool = False
-strfs = pygor.experiment.STRF(example_data)
-
+strfs = pygor.analyses.STRF(example_data)
 
 class TestSTRF(unittest.TestCase):
     def test_contours(self):
@@ -34,8 +33,13 @@ class TestSTRF(unittest.TestCase):
         import os 
         dir_path = os.path.dirname(os.path.realpath(__file__))
         filename = "test.pkl"
-        strfs.save_pkl(dir_path, filename)
-        os.remove(pathlib.Path(dir_path, filename))
+        try:
+            strfs.save_pkl(dir_path, filename)
+        except FileNotFoundError as e:
+            raise FileNotFoundError("Error in storing .pkl file during test_saveload.") from e
+            
+        finally:
+            os.remove(pathlib.Path(dir_path, filename))
     
     def test_bs(self):
         strfs.get_bootstrap_settings()

@@ -26,7 +26,7 @@ import skimage
 
 
 @dataclass
-class Data:
+class Core:
     # def __str__(self):
     #     return "MyClass([])"
     # def __repr__(self):
