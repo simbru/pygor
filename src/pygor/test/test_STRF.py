@@ -7,8 +7,8 @@ import warnings
 import os
 import pathlib
 
-repo = pathlib.Path(os.getcwd())
-example_data = repo.joinpath(repo, "examples/strf_demo_data.h5")
+file_loc = pathlib.Path(__file__).parents[1]
+example_data = file_loc.joinpath("examples/strf_demo_data.h5")
 bs_bool = False
 strfs = pygor.load.STRF(example_data)
 

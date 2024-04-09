@@ -1,4 +1,4 @@
-import pygor.analyses
+import pygor.load
 import pathlib
 import os
 import numpy.testing as nptest
@@ -6,11 +6,11 @@ import numpy as np
 import unittest
 
 
-repo = pathlib.Path(os.getcwd())
-example_data = repo.joinpath(repo, "Example_data/example_exp.h5")
+file_loc = pathlib.Path(__file__).parents[1]
+example_data = file_loc.joinpath("examples/strf_demo_data.h5")
 print(example_data)
 bs_bool = False
-data = pygor.analyses.Core(example_data)
+data = pygor.load.Core(example_data)
 
 class TestCore(unittest.TestCase):
     def test_averages(self):
