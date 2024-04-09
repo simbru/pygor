@@ -33,7 +33,6 @@ def dynamic_import(classes_folder = "classes") -> None:
                 # Check if class with the same name is already imported
                 if hasattr(sys.modules[__name__], obj.__name__):
                     # Print a message and raise a warning if the class is already imported
-                    print(f"Class '{obj.__name__}' is already imported, skipping.")
                     warnings.warn(f"Class '{obj.__name__}' is already imported, skipping.", UserWarning)
                 else:
                     # Add the class to the list of imported classes

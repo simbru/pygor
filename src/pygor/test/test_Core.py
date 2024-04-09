@@ -16,7 +16,5 @@ class TestCore(unittest.TestCase):
     def test_averages(self):
         data.averages
 
-    def test_
-
 if __name__ == "__main__":
     unittest.main()

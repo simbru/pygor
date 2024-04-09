@@ -1,4 +1,4 @@
-import pygor.analyses
+import pygor.load
 import pygor.data_helpers
 import numpy.testing as nptest
 import numpy as np
@@ -8,9 +8,9 @@ import os
 import pathlib
 
 repo = pathlib.Path(os.getcwd())
-example_data = repo.joinpath(repo, "Example_data/example_exp.h5")
+example_data = repo.joinpath(repo, "examples/strf_demo_data.h5")
 bs_bool = False
-strfs = pygor.analyses.STRF(example_data)
+strfs = pygor.load.STRF(example_data)
 
 class TestSTRF(unittest.TestCase):
     def test_contours(self):
