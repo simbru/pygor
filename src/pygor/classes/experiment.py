@@ -25,7 +25,7 @@ class Experiment:
         with a reference set 
         """       
         def _insert(obj_instance):
-            setattr(self, obj_instance.type, obj)
+            setattr(self, "test", obj)
             if obj_instance.type not in self.data_types:
                 self.data_types.append(obj_instance.type)
         # self.__dict__[obj.type] = obj
@@ -42,6 +42,10 @@ class Experiment:
         del(self.__dict__[obj.type])
         self.data_types.remove(obj.type)
         # return None
+
+    def pool_data(self, type = "STRF"):
+        
+        return None
 
     def set_ref(self, obj):
         return None

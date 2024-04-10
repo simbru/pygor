@@ -34,33 +34,22 @@ class Core:
     filename: str or pathlib.Path
     metadata: dict = field(init=False)
     rois    : dict = field(init=False)
-    type    : str = field(init=False)
+    data_types : list = field(default_factory=list)
     frame_hz : float = field(init=False)
     averages : np.array = np.nan
     snippets : np.array = np.nan
     ms_dur   : int = np.nan
     phase_num : int = 1 # Default to 1, for simplicity in pygor.plotting.plots avgs etc...
     num_rois : int = field(init = False)
-
-    """
-    TODO Add docstrings
-    TODO Consider 
-    """
-
     def __post_init__(self):
         # Ensure path is pathlib compatible
         if isinstance(self.filename, pathlib.Path) is False:
             self.filename = pathlib.Path(self.filename)
         with h5py.File(self.filename, 'r') as HDF5_file:
             # Basic information
-            self.type = self.__class__.__name__
             self.metadata = pygor.data_helpers.metadata_dict(HDF5_file)
             self.rois = np.copy(HDF5_file["ROIs"])
             self.num_rois = len(np.unique(self.rois)) - 1
-            """
-            TODO User might skip detrend, need a if statement for no _detrended 
-            and for both wDataCh0 and wDataCh0_detrended
-            """
             self.images = np.array(HDF5_file["wDataCh0_detrended"]).T
             #print(HDF5_file["OS_Parameters"])
             #self.os_params = copy.deepcopy(list()
@@ -104,7 +93,7 @@ class Core:
     def get_help(self, hints = False, types = False) -> None:
         method_list = pygor.utils.helpinfo.get_methods_list(self, with_returns=types)
         attribute_list = pygor.utils.helpinfo.get_attribute_list(self, with_types=types)
-        welcome=pygor.utils.helpinfo.welcome_help(self.type, self.metadata, hints = hints)
+        welcome=pygor.utils.helpinfo.welcome_help(self.data_types, self.metadata, hints = hints)
         attrs = pygor.utils.helpinfo.attrs_help(attribute_list, hints = hints)
         meths = pygor.utils.helpinfo.meths_help(method_list, hints = hints)
         pygor.utils.helpinfo.print_help([welcome, attrs, meths, pygor.utils.helpinfo.text_exit()])

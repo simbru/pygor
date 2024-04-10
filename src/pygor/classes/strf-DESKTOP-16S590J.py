@@ -28,7 +28,7 @@ import pandas as pd
 
 @dataclass
 class STRF(Core):
-    #type         : str = "STRF"
+    type         : str = "STRF"
     # Params 
     multicolour  : bool = False
     bs_bool      : bool = False
@@ -42,7 +42,7 @@ class STRF(Core):
     
     def __post_init__(self):
         # Post initialise the contents of Data class to be inherited
-        #super().__dict__["data_types"].append(self.type)
+        super().__dict__["data_types"].append(self.type)
         super().__post_init__()
         self.bs_settings = pygor.data_helpers.create_bs_dict(do_bootstrap = self.bs_bool)
         with h5py.File(self.filename) as HDF5_file:
