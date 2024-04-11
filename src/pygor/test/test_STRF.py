@@ -1,5 +1,6 @@
 import pygor.load
 import pygor.data_helpers
+import pygor.utils.helpinfo
 import numpy.testing as nptest
 import numpy as np
 import unittest
@@ -17,11 +18,11 @@ class TestSTRF(unittest.TestCase):
         strfs.contours
     
     def test_attributes(self):
-        attr_list = pygor.data_helpers.get_attribute_list(strfs, with_types=False)
+        attr_list = pygor.utils.helpinfo.get_attribute_list(strfs, with_types=False)
         [getattr(strfs, i) for i in attr_list]
 
     def test_simple_methods(self):
-        meth_list = pygor.data_helpers.get_methods_list(strfs, with_returns=False)
+        meth_list = pygor.utils.helpinfo.get_methods_list(strfs, with_returns=False)
         for i in meth_list:
             if i not in ["save_pkl", "load_pkl", "get_bootstrap_settings", "update_bootstrap_settings", "run_bootstrap"]:
                 try:
