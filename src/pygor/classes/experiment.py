@@ -1,55 +1,59 @@
+# Dependencies
 from dataclasses import dataclass
+from dataclasses import field
 try:
     from collections import Iterable
 except ImportError:
     from collections.abc import Iterable
-# Local imports
+from collections import defaultdict
+import pandas as pd
+import pathlib
 
-# Dependencies
+# Local imports
 
 
 @dataclass
 class Experiment:
-    data_types = []
-    def __str__(self):
-        return "MyClass([])"
-    def __repr__(self, string = data_types):
-        return f"Experiment({string})"
-    def __post_init__(self):
-        self.data_types : []    
-    @classmethod
-    def attach_data(self, obj, assumptions = True):        
-        """
-        TODO Here there should be several tests that check 
-        the plane number, rec number, date, and ROI number (more?) 
-        with a reference set 
-        """       
-        def _insert(obj_instance):
-            setattr(self, "test", obj)
-            if obj_instance.type not in self.data_types:
-                self.data_types.append(obj_instance.type)
-        # self.__dict__[obj.type] = obj
-        if isinstance(obj, Iterable):
-            raise AttributeError("'obj' must be single ")
-            # for i in obj:
-                # _insert(i)
+    # Initialise object properties
+    recording: list = field(default_factory=list)
+    id_dict: dict = field(default_factory=lambda: defaultdict(list))
+
+    def __exp_setter__(self, object):
+        # if object.metadata["filename"] in self.id_dict["path"]:
+        #     raise ValueError("Object already in experiment")
+        # else:
+            self.recording.append(object)
+            self.id_dict["id"].append(len(self.id_dict["name"]))
+            self.id_dict["date"].append(object.metadata["exp_date"].strftime('%d-%m-%Y'))        
+            self.id_dict["name"].append(pathlib.Path(object.metadata["filename"]).stem)
+            self.id_dict["num_rois"].append(object.num_rois)
+            self.id_dict["type"].append(object.type)
+            self.id_dict["path"].append(object.metadata["filename"])   
+
+    def __exp_forgetter__(self, indices: int or list[int]):
+        # Deal with recording list
+        self.recording.pop(indices)
+        # Deal with id_dict
+        if isinstance(indices, Iterable) is False:
+            _input = [indices]
+        for k, v in self.id_dict.items():
+            # Use list comprehension to remove elements at specified indices
+            v[:] = [v[i] for i in range(len(v)) if i not in _input and i - len(v) not in _input]
+    
+    def attach_data(self, objects: object or list[object]):
+        if isinstance(objects, Iterable) is False:
+            self.__exp_setter__(objects)
         else:
-            _insert(obj)
-            # self.__repr__ = "ooglie"
-        return None
+            for i in objects:
+                self.__exp_setter__(i)
 
-    def detach_data(self, obj):
-        del(self.__dict__[obj.type])
-        self.data_types.remove(obj.type)
-        # return None
+    def detach_data(self, indices:int or list(int)):
+        if isinstance(indices, Iterable) is False:
+            self.__exp_forgetter__(indices)
+        else:
+            for i in indices:
+                self.__exp_forgetter__(i)
 
-    def pool_data(self, type = "STRF"):
-        
-        return None
-
-    def set_ref(self, obj):
-        return None
-    def change_ref(self, obj):
-        return None 
-    def clear_ref(self, obj):
-        return None
+    @property
+    def recording_id(self):
+        return pd.DataFrame(self.id_dict)

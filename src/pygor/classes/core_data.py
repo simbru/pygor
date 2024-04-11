@@ -27,10 +27,7 @@ import skimage
 
 @dataclass
 class Core:
-    # def __str__(self):
-    #     return "MyClass([])"
-    # def __repr__(self):
-    #     return f"{self.data_types}"
+
     filename: str or pathlib.Path
     metadata: dict = field(init=False)
     rois    : dict = field(init=False)
@@ -42,28 +39,20 @@ class Core:
     phase_num : int = 1 # Default to 1, for simplicity in pygor.plotting.plots avgs etc...
     num_rois : int = field(init = False)
 
-    """
-    TODO Add docstrings
-    TODO Consider 
-    """
-
     def __post_init__(self):
         # Ensure path is pathlib compatible
         if isinstance(self.filename, pathlib.Path) is False:
             self.filename = pathlib.Path(self.filename)
         with h5py.File(self.filename, 'r') as HDF5_file:
+            # Data 
+            self.traces_raw = np.array(HDF5_file["Traces0_raw"])
+            self.traces_znorm = np.array(HDF5_file["Traces0_znorm"])
+            self.images = np.array(HDF5_file["wDataCh0_detrended"]).T
             # Basic information
             self.type = self.__class__.__name__
             self.metadata = pygor.data_helpers.metadata_dict(HDF5_file)
             self.rois = np.copy(HDF5_file["ROIs"])
             self.num_rois = len(np.unique(self.rois)) - 1
-            """
-            TODO User might skip detrend, need a if statement for no _detrended 
-            and for both wDataCh0 and wDataCh0_detrended
-            """
-            self.images = np.array(HDF5_file["wDataCh0_detrended"]).T
-            #print(HDF5_file["OS_Parameters"])
-            #self.os_params = copy.deepcopy(list()
             # Timing parameters
             self.triggertimes = np.array(HDF5_file["Triggertimes"]).T
             self.triggertimes = self.triggertimes[~np.isnan(self.triggertimes)].astype(int)
@@ -71,9 +60,6 @@ class Core:
             self.triggerstimes_frame = self.triggerstimes_frame[~np.isnan(self.triggerstimes_frame)].astype(int)        
             self.__skip_first_frames = int(HDF5_file["OS_Parameters"][22]) # Note name mangling to prevent accidents if 
             self.__skip_last_frames = -int(HDF5_file["OS_Parameters"][23]) # private class attrs share names 
-            # if self.__skip_last_frames == 0:
-            #     self.__skip_last_frames = None
-            # self.triggerstimes_frame = self.triggerstimes_frame[self.__skip_first_frames:self.__skip_last_frames]
             try:
                 self.ipl_depths = np.copy(HDF5_file["Positions"])
             except KeyError:
@@ -100,7 +86,29 @@ class Core:
             '>=' : operator.ge,
             '<=' : operator.le,
         }
+    
+    def __repr__(self):
+        # For pretty printing
+        date = self.metadata['exp_date'].strftime('%d-%m-%Y')
+        return f"{date}:{self.__class__.__name__}:{self.filename.stem}"
 
+    def __str__(self):
+        # For pretty printing
+        return f"{self.__class__}"
+        """
+        Get help information for the object, including methods and attributes.
+
+        Parameters
+        ----------
+        hints : bool, optional
+            Whether to include hints in the help information (default is False)
+        types : bool, optional
+            Whether to include types in the help information (default is False)
+
+        Returns
+        -------
+        None
+        """
     def get_help(self, hints = False, types = False) -> None:
         method_list = pygor.utils.helpinfo.get_methods_list(self, with_returns=types)
         attribute_list = pygor.utils.helpinfo.get_attribute_list(self, with_types=types)

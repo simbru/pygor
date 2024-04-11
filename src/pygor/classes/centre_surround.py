@@ -4,7 +4,7 @@ from pygor.classes.core_data import Core
 import numpy as np
 import matplotlib.pyplot as plt
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, repr=False)
 class CenterSurround(Core):
     phase_num : int
     type : str = "CS"

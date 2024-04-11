@@ -26,7 +26,7 @@ import warnings
 import pandas as pd
 
 
-@dataclass
+@dataclass(repr = False)
 class STRF(Core):
     #type         : str = "STRF"
     # Params 

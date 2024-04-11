@@ -5,7 +5,7 @@ import numpy as np
 
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, repr=False)
 class MovingBars(Core):
     dir_num : int 
     col_num : int

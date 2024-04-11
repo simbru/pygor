@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from pygor.classes.core_data import Core
 import numpy as np
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, repr=False)
 class FullField(Core):
     # key-word only, so phase_num must be specified when initialising Data_FFF
     phase_num : int
