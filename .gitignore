@@ -3,8 +3,7 @@ meetingnotes.ipynb
 analysis.ipynb
 old_data_strfs.h5
 meetingnotes.ipynb
-Example_data/
-
+src/pygor/test/test_out.txt
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -30,6 +30,7 @@ class Import(unittest.TestCase):
         main_module = "pygor.classes"
         submodules_with_classes = get_submodule_class_names(main_module)
         for submodule, user_class in submodules_with_classes:
+            print(submodule)
             submodule_full = main_module + "." + submodule
             submodule_obj = importlib.import_module(submodule_full)
             class_obj = getattr(submodule_obj, user_class)
