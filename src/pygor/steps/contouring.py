@@ -6,7 +6,7 @@ import scipy
 import warnings
 import matplotlib.pyplot as plt
 # Local imports
-import pygor.utils.utilities
+import pygor.utilities
 
 # Global vars
 abs_criteria_global = 1     ## Rectified STRF must pass this threshold to attempt contour draw at all 

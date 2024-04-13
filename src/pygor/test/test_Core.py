@@ -1,7 +1,6 @@
 import pygor.load
 import pathlib
 import os
-import numpy.testing as nptest
 import numpy as np
 import unittest
 import warnings
@@ -10,16 +9,14 @@ from contextlib import redirect_stdout
 
 file_loc = pathlib.Path(__file__).parents[1]
 example_data = file_loc.joinpath("examples/strf_demo_data.h5")
-print(example_data)
-bs_bool = False
 data = pygor.load.Core(example_data)
 
 class TestCore(unittest.TestCase):
     def test_averages_type(self):
-        self.assertTrue(isinstance(data.averages, np.ndarray) or np.isnan(data.averages))
+        self.assertTrue(isinstance(data.averages, np.ndarray) or data.averages is None)
 
     def test_ipl_depths_type(self):
-        self.assertTrue(isinstance(data.ipl_depths, np.ndarray) or np.isnan(data.ipl_depths))
+        self.assertTrue(isinstance(data.ipl_depths, np.ndarray) or data.ipl_depths is None)
 
     def test_metadata_type(self):
         self.assertTrue(isinstance(data.metadata, dict))
@@ -36,10 +33,11 @@ class TestCore(unittest.TestCase):
 
     def test_simple_methods_return(self):
         meth_list = pygor.utils.helpinfo.get_methods_list(data, with_returns=False)
-        with open(r"src/pygor/test/test_out.txt", 'w') as f:
+        write_to = file_loc.parent.joinpath("test_out.txt")
+        with open(write_to, 'w') as f:
             with redirect_stdout(f):
                 for i in meth_list:
-                    if i not in []: # exclusion list
+                    if i not in ['try_fetch']: # exclusion list
                         try:
                             getattr(data, i)() 
                         except AttributeError:

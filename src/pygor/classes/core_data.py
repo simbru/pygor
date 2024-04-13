@@ -23,7 +23,18 @@ import warnings
 import math
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import skimage
-
+def try_fetch(file, key):
+    try:
+        result = file[key]
+        result_shape = result.shape
+        if result_shape != ():
+            result = np.array(result).T
+    except KeyError as error:
+        result = None
+        #raise KeyError(f"'{key}' not found in {file.filename}, setting to np.nan") from error
+        warnings.warn(f"'{key}' not found in {file.filename}, setting to np.nan", stacklevel=2)
+        error
+    return result
 
 @dataclass
 class Core:
@@ -43,39 +54,43 @@ class Core:
         # Ensure path is pathlib compatible
         if isinstance(self.filename, pathlib.Path) is False:
             self.filename = pathlib.Path(self.filename)
+        # Set type attribute
+        self.type = self.__class__.__name__
+        # Fetch all relevant data from the HDF5 file (if not in file, gets set to None)
         with h5py.File(self.filename, 'r') as HDF5_file:
             # Data 
-            self.traces_raw = np.array(HDF5_file["Traces0_raw"])
-            self.traces_znorm = np.array(HDF5_file["Traces0_znorm"])
-            self.images = np.array(HDF5_file["wDataCh0_detrended"]).T
+            self.traces_raw = try_fetch(HDF5_file, "Traces0_raw")
+            self.traces_znorm = try_fetch(HDF5_file, "Traces0_znorm")
+            self.images = try_fetch(HDF5_file, "wDataCh0_detrended")
             # Basic information
-            self.type = self.__class__.__name__
             self.metadata = pygor.data_helpers.metadata_dict(HDF5_file)
-            self.rois = np.copy(HDF5_file["ROIs"])
+            self.rois = try_fetch(HDF5_file, "ROIs")
             self.num_rois = len(np.unique(self.rois)) - 1
             # Timing parameters
-            self.triggertimes = np.array(HDF5_file["Triggertimes"]).T
+            self.triggertimes = try_fetch(HDF5_file, "Triggertimes")
             self.triggertimes = self.triggertimes[~np.isnan(self.triggertimes)].astype(int)
-            self.triggerstimes_frame = np.array(HDF5_file["Triggertimes_Frame"]).T
-            self.triggerstimes_frame = self.triggerstimes_frame[~np.isnan(self.triggerstimes_frame)].astype(int)        
-            self.__skip_first_frames = int(HDF5_file["OS_Parameters"][22]) # Note name mangling to prevent accidents if 
+            self.triggerstimes_frame = try_fetch(HDF5_file, "Triggertimes_Frame")
+            self.__skip_first_frames = int(try_fetch(HDF5_file, "OS_Parameters")[22]) # Note name mangling to prevent accidents if 
             self.__skip_last_frames = -int(HDF5_file["OS_Parameters"][23]) # private class attrs share names 
-            try:
-                self.ipl_depths = np.copy(HDF5_file["Positions"])
-            except KeyError:
-                warnings.warn(f"HDF5 key 'Positions' not found for file {self.filename}", stacklevel=2)
-                self.ipl_depths = np.nan
-            if "Averages0" in HDF5_file.keys():
-                self.averages = np.array(HDF5_file["Averages0"]).T
-                self.ms_dur = self.averages.shape[-1]
-            if "Snippets0" in HDF5_file.keys():
-                self.snippets = np.array(HDF5_file["Snippets0"]).T
-            self.frame_hz = float(HDF5_file["OS_Parameters"][58])
-            self.trigger_mode = int(HDF5_file["OS_Parameters"][28])
+            self.ipl_depths = try_fetch(HDF5_file, "Positions")
+            self.averages = try_fetch(HDF5_file, "Averages0")
+            self.snippets = try_fetch(HDF5_file, "Snippets0")
+            self.frame_hz = float(try_fetch(HDF5_file, "OS_Parameters")[58])
+            self.trigger_mode = int(try_fetch(HDF5_file, "OS_Parameters")[28])
+        # Check that trigger mode matches phase number
         if self.trigger_mode != self.phase_num:
             warnings.warn(f"{self.filename.stem}: Trigger mode {self.trigger_mode} does not match phase number {self.phase_num}", stacklevel=3)
-        # Initialise outside Pathlib context
+        # Imply from averages the ms_duration of one repeat
+        if self.averages is not None:
+            self.ms_dur = self.averages.shape[-1]
+        else:
+            self.ms_dur = None
+        # Ensure triggerstimes_frame does not include uneccessary nans
+        if self.triggerstimes_frame is not None:
+            self.triggerstimes_frame = self.triggerstimes_frame[~np.isnan(self.triggerstimes_frame)].astype(int)
+        # Set name
         self.name = self.filename.stem
+        # Set keyword lables
         self.__keyword_lables = {
             "ipl_depths" : self.ipl_depths,
         }
@@ -95,6 +110,8 @@ class Core:
     def __str__(self):
         # For pretty printing
         return f"{self.__class__}"
+
+    def get_help(self, hints = False, types = False) -> None:
         """
         Get help information for the object, including methods and attributes.
 
@@ -109,7 +126,6 @@ class Core:
         -------
         None
         """
-    def get_help(self, hints = False, types = False) -> None:
         method_list = pygor.utils.helpinfo.get_methods_list(self, with_returns=types)
         attribute_list = pygor.utils.helpinfo.get_attribute_list(self, with_types=types)
         welcome=pygor.utils.helpinfo.welcome_help(self.type, self.metadata, hints = hints)
@@ -242,7 +258,7 @@ class Core:
         d3[:, :, 0] = base
         d3[:, :, 1] = base1
         d3[:, :, 2] = base2
-        ax.imshow(pygor.utils.utilities.min_max_norm(d3, 0, 1))  
+        ax.imshow(pygor.utilities.min_max_norm(d3, 0, 1))  
 
     def plot_averages(self, rois = None, figsize = (None, None), figsize_scale = None, axs = None, **kwargs):
         """
@@ -273,7 +289,7 @@ class Core:
         None
         """
         # Handle arguments, keywords, and exceptions
-        if np.isnan(self.averages) == True:
+        if self.averages is None:
             raise AttributeError("self.averages is nan, meaning it has likely not been generated")
         if isinstance(rois, Iterable) is False and not rois: # I dont like this solution, but it gets around user ambigouity error if passing numpy array
             rois = np.arange(0, self.num_rois)

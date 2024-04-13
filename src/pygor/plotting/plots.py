@@ -1,28 +1,20 @@
-import h5py
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.animation
 from matplotlib import cm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from matplotlib.patches import Circle, Ellipse
-import pathlib
 import pandas as pd
 import numpy as np
 import seaborn as sns
-import math
-import scipy.signal
-import warnings
-from cycler import cycler
 from matplotlib import colors
 try:
     from collections import Iterable
 except ImportError:
     from collections.abc import Iterable
-from ipywidgets import interact, interactive, fixed, interact_manual
+from ipywidgets import interact
 import ipywidgets as widgets
-from ipyfilechooser import FileChooser
 # Local imports
-import pygor.utils.utilities
+import pygor.utilities
 import pygor.space
 import pygor.temporal
 import pygor.steps.contouring
@@ -50,7 +42,7 @@ def play_movie(d3_arr, figaxim_return = False,**kwargs):
     plot_settings["savefig.facecolor"] = "white"
     # Check attributes and kwargs
     if d3_arr.ndim != 3:
-        raise AttributeError(f"Array passed to function is not three dimensional (3D). Shape should be: (time,y,x)")
+        raise AttributeError("Array passed to function is not three dimensional (3D). Shape should be: (time,y,x)")
     if 'cmap' not in kwargs:
         kwargs['cmap'] = 'Greys_r'
     else:
@@ -64,11 +56,11 @@ def play_movie(d3_arr, figaxim_return = False,**kwargs):
         div = make_axes_locatable(ax)
         cax = div.append_axes('right', '2%', '2%')
         # Plotting 
-        im = ax.imshow(d3_arr[0], origin='lower', **kwargs)
-        cb = fig.colorbar(im, cax = cax)
+        im = ax.imshow(d3_arr[0], origin='lower', **kwargs, cmap = cmap)
+        fig.colorbar(im, cax = cax)
         # Scale colormap
-        min_val = np.min(d3_arr)
-        max_val = np.max(d3_arr)
+#        min_val = np.min(d3_arr)
+#        max_val = np.max(d3_arr)
         max_abs_val = np.max(np.abs(d3_arr))
         # im.set_clim(min_val, max_val)
         im.set_clim(-max_abs_val, max_abs_val)
@@ -82,14 +74,14 @@ def play_movie(d3_arr, figaxim_return = False,**kwargs):
         # Close the animation 
         plt.close()
         # Decide what to return based on input
-        if figaxim_return == True:
+        if figaxim_return is True:
             print("Returning vars (animation, fig, ax)")
             return animation, fig, ax, im
         else:
             return animation
 
 def rois_overlay_object(data_strf_object):
-    preprocess = pygor.utils.utilities.min_max_norm(np.std(data_strf_object.images, axis = 0), 0, 255)
+    preprocess = pygor.utilities.min_max_norm(np.std(data_strf_object.images, axis = 0), 0, 255)
     plt.imshow(preprocess, origin = "lower", cmap = "Greys_r",
     vmin = 100, vmax = 255)
     num_rois = int(np.abs(np.min(data_strf_object.rois)))
@@ -98,18 +90,12 @@ def rois_overlay_object(data_strf_object):
     plt.imshow(np.ma.masked_where(data_strf_object.rois.T == 1, data_strf_object.rois.T), cmap = color, alpha = 0.5, origin = "lower")
     plt.axis("off")
 
-def rois_overlay_hdf5():
-    """
-    TODO as above but from hdf5 object directly (for ease)
-    """
-    return 1
-
 def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_crop = (0, 0), x_crop = (0 ,0),
     column_titles = ["588 nm", "478 nm", "422 nm", "375 nm"], colour_maps = [red_map, green_map, blue_map, violet_map],
     ax = None):
     if isinstance(colour_maps, Iterable) is False:
         colour_maps = [colour_maps] * len(column_titles)
-    strfs_chroma = pygor.utils.utilities.multicolour_reshape(data_strf_object.collapse_times(), data_strf_object.numcolour)
+    strfs_chroma = pygor.utilities.multicolour_reshape(data_strf_object.collapse_times(), data_strf_object.numcolour)
     # Create iterators depneding on desired output
     if isinstance(specify_rois, int): # user specifies number of rois from "start", although negative is also allowed
         specify_rois = range(specify_rois, specify_rois+1)
@@ -127,7 +113,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
     else:
         fig = plt.gcf()
     for n, roi in enumerate(specify_rois):
-        spaces = np.copy(pygor.utils.utilities.auto_remove_border(strfs_chroma[:, roi])) # this works
+        spaces = np.copy(pygor.utilities.auto_remove_border(strfs_chroma[:, roi])) # this works
         if y_crop != (0, 0) or x_crop != (0, 0):
             spaces = spaces[:, y_crop[0]:y_crop[1], x_crop[0]:x_crop[1]]
         # plotting depending on specified number of rois (more or less than 1)
@@ -138,7 +124,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
                 if n == 0:
                     for j in range(data_strf_object.numcolour):
                         ax[-n, j].set_title(column_titles[j])
-            desired_aspect = np.abs(np.diff(ax[n, 0].get_ylim())[0] / np.diff(ax[0,0].get_xlim())[0])
+            np.abs(np.diff(ax[n, 0].get_ylim())[0] / np.diff(ax[0,0].get_xlim())[0])
         else:
             for i in range(4):
                 strf = ax[i].imshow(spaces[i], cmap = colour_maps[i], origin = "lower")
@@ -153,7 +139,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
 def rgb_representation(data_strf_object, colours_dims = [0, 1, 2, 3], specify_rois=None, ipl_sort = False, y_crop = (0, 0), x_crop = (0 ,0),
     ax = None):
 
-    strfs_chroma = pygor.utils.utilities.multicolour_reshape(data_strf_object.collapse_times(), data_strf_object.numcolour)
+    strfs_chroma = pygor.utilities.multicolour_reshape(data_strf_object.collapse_times(), data_strf_object.numcolour)
     # Create iterators depneding on desired output
     if isinstance(specify_rois, int): # user specifies number of rois from "start", although negative is also allowed
         specify_rois = range(specify_rois, specify_rois+1)
@@ -180,15 +166,15 @@ def rgb_representation(data_strf_object, colours_dims = [0, 1, 2, 3], specify_ro
     b_vals = np.repeat([2, 3], len(specify_rois))
     # Loop through column by column
     for n, ax in enumerate(ax.flat):
-        spaces = np.copy(pygor.utils.utilities.auto_remove_border(strfs_chroma[:, rois[n]])) # this works
+        spaces = np.copy(pygor.utilities.auto_remove_border(strfs_chroma[:, rois[n]])) # this works
         rgb = np.abs(spaces[[0, 1, b_vals[n]]])
-        processed_rgb = np.rollaxis(pygor.utils.utilities.min_max_norm(rgb, 0, 1), axis = 0, start = 3)
+        processed_rgb = np.rollaxis(pygor.utilities.min_max_norm(rgb, 0, 1), axis = 0, start = 3)
         ax.imshow(processed_rgb, origin = "lower")
         ax.axis(False)
     fig.tight_layout(pad = 0.1, h_pad = .1, w_pad=.1)
 
 def _contours_plotter(data_strf_object, ax, roi, num_colours = 4):
-    contours = pygor.utils.utilities.multicolour_reshape(data_strf_object.contours, 4)[:, roi]
+    contours = pygor.utilities.multicolour_reshape(data_strf_object.contours, 4)[:, roi]
     neg_contours = contours[:, 0]
     pos_contours = contours[:, 1]
     for colour in range(num_colours):
@@ -198,11 +184,11 @@ def _contours_plotter(data_strf_object, ax, roi, num_colours = 4):
                 ax.plot(contour_p[:, 1], contour_p[:, 0], lw = 1, ls = "-", c = fish_palette[colour], alpha = 1)
 
 def visualise_summary(data_strf_object, specify_rois, ipl_sort = False,  y_crop = (0, 0), x_crop = (0 , 0)):
-    strfs_chroma = pygor.utils.utilities.multicolour_reshape(data_strf_object.collapse_times(), 4)
+    strfs_chroma = pygor.utilities.multicolour_reshape(data_strf_object.collapse_times(), 4)
     strfs_rgb = np.abs(np.rollaxis((np.delete(strfs_chroma, 3, 0)), 0, 4))
-    strfs_rgb = np.array([pygor.utils.utilities.min_max_norm(i, 0, 1) for i in strfs_rgb])
+    strfs_rgb = np.array([pygor.utilities.min_max_norm(i, 0, 1) for i in strfs_rgb])
     strfs_rgu = np.abs(np.rollaxis((np.delete(strfs_chroma, 2, 0)), 0, 4))
-    strfs_rgu = np.array([pygor.utils.utilities.min_max_norm(i, 0, 1) for i in strfs_rgu]);
+    strfs_rgu = np.array([pygor.utilities.min_max_norm(i, 0, 1) for i in strfs_rgu]);
 
     # Create iterators depneding on desired output
     if isinstance(specify_rois, int): # user specifies number of rois from "start", although negative is also allowed
@@ -219,7 +205,7 @@ def visualise_summary(data_strf_object, specify_rois, ipl_sort = False,  y_crop 
     fig, ax = plt.subplots(len(specify_rois), 3, figsize = (5 *3 , len(specify_rois) * 3))
     for n, roi in enumerate(specify_rois):
         # Summary of spatial components 
-        #spaces = np.copy(pygor.utils.utilities.auto_remove_border(strfs_chroma[:, roi])) # this works
+        #spaces = np.copy(pygor.utilities.auto_remove_border(strfs_chroma[:, roi])) # this works
         spaces = strfs_chroma[:, roi]
         # Prepare for RGB representation (by intiger)
         spaces[3] = np.roll(spaces[3], np.round(data_strf_object.calc_LED_offset(), 0).astype("int"), axis =(0,1))
@@ -228,8 +214,8 @@ def visualise_summary(data_strf_object, specify_rois, ipl_sort = False,  y_crop 
         r, g, b, uv = spaces[0], spaces[1], spaces[2], spaces[3]
         rgb = np.abs(np.array([r,g,b]))
         rgu = np.abs(np.array([r,g,uv]))
-        processed_rgb = np.rollaxis(pygor.utils.utilities.min_max_norm(rgb, 0, 1), axis = 0, start = 3)
-        processed_rgu = np.rollaxis(pygor.utils.utilities.min_max_norm(rgu, 0, 1), axis = 0, start = 3)
+        processed_rgb = np.rollaxis(pygor.utilities.min_max_norm(rgb, 0, 1), axis = 0, start = 3)
+        processed_rgu = np.rollaxis(pygor.utilities.min_max_norm(rgu, 0, 1), axis = 0, start = 3)
         # Handle axes differently depending on number of rois (trust me, makes lif easier)
         if len(specify_rois) > 1:
             roi_ax = ax[n]
@@ -244,7 +230,7 @@ def visualise_summary(data_strf_object, specify_rois, ipl_sort = False,  y_crop 
             cax.axis(False)
             _contours_plotter(data_strf_object, cax, roi)
         # Reshape times for convenience
-        times = np.ma.copy(pygor.utils.utilities.multicolour_reshape(data_strf_object.timecourses, 4))[:, roi]
+        times = np.ma.copy(pygor.utilities.multicolour_reshape(data_strf_object.timecourses, 4))[:, roi]
         for cax in roi_ax.flat[2::3]:
            for colour in range(4):
                curr_colour = times[colour].T
@@ -270,7 +256,7 @@ def _legacy_play_movie(d3_arr, **kwargs):
     play = widgets.Play(value=0, min=0, max=img_len, step=1, interval=100, description="Press play", disabled=False)
     slider = widgets.IntSlider(min=0, max=img_len, step=1, value=1, continuous_update=True)
     widgets.jslink((play, 'value'), (slider, 'value'))
-    display(slider)
+    display(slider)  # noqa: F821
     interact(update_plots, frame = play)
 
 def contouring_demo(arr_3d, level = None, display_time = True, returns = False, **kwargs):        
@@ -391,7 +377,7 @@ def tiling(Data_strf_object, deletion_threshold = 0, chromatic = False, x_lim = 
             if n == 4:
                 n = 0
     else:
-        for i in cleaned_contours:
+        for i in contours:
             upper, lower = i
             if len(upper) != 0:
                 for contour_up in upper:
@@ -429,7 +415,7 @@ def stack_to_rgb(stack, eight_bit = True):
 
     Notes
     -----
-    This function assumes that `pygor.utils.utilities.min_max_norm` is a valid function
+    This function assumes that `pygor.utilities.min_max_norm` is a valid function
     for normalizing the stack values.
 
     Examples
@@ -445,9 +431,9 @@ def stack_to_rgb(stack, eight_bit = True):
     # stack = np.swapaxis()
     stack = np.repeat(np.expand_dims(stack, -1), 3, -1)
     if eight_bit == True:
-        stack = pygor.utils.utilities.min_max_norm(stack, 0, 255).astype('int')
+        stack = pygor.utilities.min_max_norm(stack, 0, 255).astype('int')
     else:
-        stack = pygor.utils.utilities.min_max_norm(stack, 0, 1).astype('float')
+        stack = pygor.utilities.min_max_norm(stack, 0, 1).astype('float')
     return stack
 
 def basic_stim_overlay(stack, frame_duration = 32, frame_width = 125, repeat_interval = 4, xy_loc = (3, 3), size = 10, colour_list = fish_palette):

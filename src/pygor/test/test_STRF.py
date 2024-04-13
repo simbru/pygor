@@ -24,10 +24,11 @@ class TestSTRF(unittest.TestCase):
 
     def test_simple_methods_return(self):
         meth_list = pygor.utils.helpinfo.get_methods_list(strfs, with_returns=False)
-        with open(r"src/pygor/test/test_out.txt", 'w') as f:
+        write_to = file_loc.parent.joinpath("test_out.txt")
+        with open(write_to, 'w') as f:
             with redirect_stdout(f):
                 for i in meth_list:
-                    if i not in ["save_pkl", "load_pkl", "get_bootstrap_settings", "update_bootstrap_settings", "run_bootstrap"]:
+                    if i not in ["try_fetch","save_pkl", "load_pkl", "get_bootstrap_settings", "update_bootstrap_settings", "run_bootstrap", "set_bs_bool"]:
                         try:
                             getattr(strfs, i)() 
                         except AttributeError:

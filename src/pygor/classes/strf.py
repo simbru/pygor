@@ -38,13 +38,11 @@ class STRF(Core):
     numcolour    : int = field(init=False) # gets interpreted from strf array shape
     strf_keys    : list = field(init=False)
 
-    #bs_settings["do_bootstrap"] = bs_bool
-    
+    ## Attributes
     def __post_init__(self):
         # Post initialise the contents of Data class to be inherited
         #super().__dict__["data_types"].append(self.type)
         super().__post_init__()
-        self.bs_settings = pygor.data_helpers.create_bs_dict(do_bootstrap = self.bs_bool)
         with h5py.File(self.filename) as HDF5_file:
             # Get keys for STRF, filter for only STRF + n where n is a number between 0 to 9 
             keys = [i for i in HDF5_file.keys() if "STRF" in i and any(i[4] == np.arange(0, 10).astype("str"))]
@@ -64,9 +62,10 @@ class STRF(Core):
                 self.numcolour = 1
             self.strfs = pygor.data_helpers.load_strf(HDF5_file)
         self.num_strfs = len(self.strfs)
-
-    ## Attributes
-
+        self.set_default_bootstrap_settings()
+        if self.bs_settings["do_bootstrap"] == True:
+            self.run_bootstrap()
+    
     ## Bootstrapping
     def __calc_pval_time(self) -> np.ndarray:
         """
@@ -121,6 +120,11 @@ class STRF(Core):
         :rtype: dict
         """
         return self.bs_settings
+
+    def set_bs_bool(self, bool : bool) -> bool:
+        self.bs_bool = bool
+        self.bs_settings["do_bootstrap"] = bool
+        return self.bs_bool
 
     def update_bootstrap_settings(self, update_dict, silence_print=False) -> None:
         """
@@ -267,8 +271,8 @@ class STRF(Core):
     def pvals_table(self) -> pd.DataFrame:
         dict = {}
         if self.multicolour == True: 
-            space_vals = pygor.utils.utilities.multicolour_reshape(np.array(self.pval_space()), self.numcolour).T
-            time_vals = pygor.utils.utilities.multicolour_reshape(np.array(self.pval_time()), self.numcolour).T
+            space_vals = pygor.utilities.multicolour_reshape(np.array(self.pval_space()), self.numcolour).T
+            time_vals = pygor.utilities.multicolour_reshape(np.array(self.pval_time()), self.numcolour).T
             space_sig = space_vals < self.bs_settings["space_sig_thresh"]
             time_sig = time_vals < self.bs_settings["time_sig_thresh"]
             both_sig = time_sig * space_sig
@@ -463,7 +467,7 @@ class STRF(Core):
         """
         if self.multicolour == True:
             # Get the average centre position for each colour
-            avg_colour_centre = np.array([np.nanmean(yx, axis = 0) for yx in pygor.utils.utilities.multicolour_reshape(self.contours_centres(), self.numcolour)])
+            avg_colour_centre = np.array([np.nanmean(yx, axis = 0) for yx in pygor.utilities.multicolour_reshape(self.contours_centres(), self.numcolour)])
             # Get the average position for the reference LEDs and the comparison LEDs
             avg_reference_pos = np.nanmean(np.take(avg_colour_centre, reference_LED_index, axis = 0), axis = 0)
             avg_compare_pos = np.nanmean(np.take(avg_colour_centre, compare_LED_index, axis = 0), axis = 0)
@@ -540,11 +544,11 @@ class STRF(Core):
         # timecourse for negative and positive)
         polarities = pygor.temporal.polarity(self.timecourses(), exclude_FirstLast)
         # Feed that to helper function to break it down into 1D/category
-        return pygor.utils.utilities.polarity_neat(polarities)
+        return pygor.utilities.polarity_neat(polarities)
 
     def opponency_bool(self) -> [bool]:
         if self.multicolour == True:
-            arr = pygor.utils.utilities.multicolour_reshape(self.polarities(), self.numcolour).T
+            arr = pygor.utilities.multicolour_reshape(self.polarities(), self.numcolour).T
             # This line looks through rearranged chromatic arr roi by roi 
             # and checks the poliarty by getting the unique values and checking 
             # if the length is more than 0 or 1, excluding NaNs. 
@@ -556,7 +560,7 @@ class STRF(Core):
 
     def polarity_category(self) -> [str]:
         result = []
-        arr = pygor.utils.utilities.multicolour_reshape(self.polarities(), self.numcolour).T
+        arr = pygor.utilities.multicolour_reshape(self.polarities(), self.numcolour).T
         for i in arr:
             inner_no_nan = np.unique(i)[~np.isnan(np.unique(i))]
             inner_no_nan = inner_no_nan[inner_no_nan != 0]
@@ -582,9 +586,9 @@ class STRF(Core):
             maxes = np.max(self.dominant_timecourses().data, axis = (1))
             mins = np.min(self.dominant_timecourses().data, axis = (1))
             largest_mag = np.where(maxes > np.abs(mins), maxes, mins) # search and insert values to retain sign
-            largest_by_colour = pygor.utils.utilities.multicolour_reshape(largest_mag, self.numcolour)
+            largest_by_colour = pygor.utilities.multicolour_reshape(largest_mag, self.numcolour)
             # signs = np.sign(largest_by_colour)
-            # min_max_scaled = np.apply_along_axis(pygor.utils.utilities.min_max_norm, 1, np.abs(largest_by_colour), 0, 1)
+            # min_max_scaled = np.apply_along_axis(pygor.utilities.min_max_norm, 1, np.abs(largest_by_colour), 0, 1)
             tuning_functions = largest_by_colour
             return tuning_functions.T #transpose for simplicity, invert for UV - R by wavelength (increasing)
         else:
@@ -606,7 +610,7 @@ class STRF(Core):
             # Step 4: Sum across polarities 
             total_areas = np.sum((tot_neg_areas, tot_pos_areas), axis = 0)
             # Step 5: Reshape to multichromatic format
-            area_by_colour = pygor.utils.utilities.multicolour_reshape(total_areas, self.numcolour).T
+            area_by_colour = pygor.utilities.multicolour_reshape(total_areas, self.numcolour).T
             return area_by_colour #transpose for simplicity, invert for UV - R by wavelength (increasing)
         else:
             raise AttributeError("Operation cannot be done since object contains no property '.multicolour.")
@@ -618,8 +622,8 @@ class STRF(Core):
             neg_centroids = self.spectral_centroids()[0]
             pos_centroids = self.spectral_centroids()[1]
             # Step 3: Reshaoe ti multichromatic 
-            speed_by_colour_neg = pygor.utils.utilities.multicolour_reshape(neg_centroids, self.numcolour).T
-            speed_by_colour_pos = pygor.utils.utilities.multicolour_reshape(pos_centroids, self.numcolour).T 
+            speed_by_colour_neg = pygor.utilities.multicolour_reshape(neg_centroids, self.numcolour).T
+            speed_by_colour_pos = pygor.utilities.multicolour_reshape(pos_centroids, self.numcolour).T 
             # NaNs are 0 
             # roi = 4
             # speed_by_colour_neg = np.nan_to_num(speed_by_colour_neg)
@@ -640,8 +644,8 @@ class STRF(Core):
             argmins = np.ma.argmin(neg_times, axis = 1)
             argmaxs = np.ma.argmax(pos_times, axis = 1)
             # Reshape result to multichroma 
-            argmins  = pygor.utils.utilities.multicolour_reshape(argmins, self.numcolour).T
-            argmaxs  = pygor.utils.utilities.multicolour_reshape(argmaxs, self.numcolour).T
+            argmins  = pygor.utilities.multicolour_reshape(argmins, self.numcolour).T
+            argmaxs  = pygor.utilities.multicolour_reshape(argmaxs, self.numcolour).T
             if dur_s != None:
                 return  (dur_s / neg_times.shape[1]) * np.array([argmins, argmaxs])
             else:

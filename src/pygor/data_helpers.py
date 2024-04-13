@@ -2,10 +2,11 @@ import numpy as np
 import datetime
 import natsort
 import warnings
-import pygor.utils.utilities
+import pygor.utilities
 import pathlib
 import pygor.utils.unit_conversion
 import pygor.utils.helpinfo
+import pygor.utilities
 
 """Helper functions for Data classes:_________________________________________"""
 
@@ -80,7 +81,7 @@ def fix_oversize_sta(strf_arr4d, boxsize_um, upscale_multiple = 4):
     # Figure out how many boxes on screen 
     boxes_tup = np.ceil(pygor.utils.unit_conversion.calculate_boxes_on_screen(size)).astype('int') * upscale_multiple
     # Create the appropriate mask 
-    mask = pygor.utils.utilities.manual_border_mask(strf_arr4d[0][0].shape, boxes_tup) # just take shape from first ROI first frame
+    mask = pygor.utilities.manual_border_mask(strf_arr4d[0][0].shape, boxes_tup) # just take shape from first ROI first frame
     # Expand to apply mask to each frame 
     mask = np.expand_dims(mask, (0, 1))
     mask = np.repeat(mask, strf_arr4d.shape[0], 0)
@@ -88,7 +89,7 @@ def fix_oversize_sta(strf_arr4d, boxsize_um, upscale_multiple = 4):
     # Apply the mask
     new_masked_strfs = np.ma.array(strf_arr4d, mask = mask)
     # Determine widths of mask 
-    borders_widths = pygor.utils.utilities.check_border(new_masked_strfs[0][0].mask, expect_symmetry=False)
+    borders_widths = pygor.utilities.check_border(new_masked_strfs[0][0].mask, expect_symmetry=False)
     # Make note of original dimensions
     org_shape = np.array(strf_arr4d.shape) #dims: roi,z,x,y
     # Calculate new shape (after killing mask , which will be same for all ROIs in file)
@@ -146,7 +147,7 @@ def post_process_strf(arr_3d, correct_rotation = True,  zscore = True):
     if arr_3d is np.nan:
         return np.nan
     # Remove border
-    border_mask = pygor.utils.utilities.auto_border_mask(arr_3d)
+    border_mask = pygor.utilities.auto_border_mask(arr_3d)
     arr_3d = np.ma.array(arr_3d, mask = border_mask)
     if zscore == True:
         ## Old implementation
@@ -173,7 +174,7 @@ def post_process_strf(arr_3d, correct_rotation = True,  zscore = True):
     if arr_3d is np.nan:
         return np.nan
     # Remove border
-    border_mask = pygor.utils.utilities.auto_border_mask(arr_3d)
+    border_mask = pygor.utilities.auto_border_mask(arr_3d)
     arr_3d = np.ma.array(arr_3d, mask = border_mask)
     if zscore == True:
         ## Old implementation

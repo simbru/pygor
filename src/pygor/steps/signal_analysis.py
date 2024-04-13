@@ -8,7 +8,8 @@ import seaborn as sns
 import matplotlib
 from joblib import Parallel, delayed
 import pygor.data_helpers 
-import pygor.utils.utilities
+import pygor.utilities
+import math
 sns.set_context("notebook")
 rng = np.random.default_rng(1312)
 
@@ -149,7 +150,7 @@ def bootstrap_time(arr_3d, bootstrap_n = 2500, mode_param = 2, mode = "sd",
     if np.ma.is_masked(arr_3d) == True:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            arr_3d = pygor.utils.utilities.auto_remove_border(arr_3d)
+            arr_3d = pygor.utilities.auto_remove_border(arr_3d)
     spatial_domain = np.abs(collapse_space(arr_3d, axis = 0))
     collapse_flat_compressed = spatial_domain.flatten()
     if mode == "pixel" or mode == "pixels":
@@ -263,7 +264,7 @@ def bootstrap_space(arr_3d, bootstrap_n = 1000, collapse_time = np.ma.std, metri
     # Kill border (needed for permuting data, otherwise introduce large artefacts)
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message = "Destructive method. You lose data, with no way of recovering original shape!")
-        org_arr = pygor.utils.utilities.auto_remove_border(org_arr)
+        org_arr = pygor.utilities.auto_remove_border(org_arr)
     # Compute base stat
     org_stat = metric(collapse_time(org_arr, axis = 0))
     # Permute spatial data within each time-step    
@@ -627,7 +628,7 @@ def category_labels(spectral_tuning_functions, thresh = 0, return_arrs = False, 
         spectral_tuning_functions_scaled_thresh = np.where(np.abs(spectral_tuning_functions_scaled) > thresh, spectral_tuning_functions_scaled, 0)
         all_u, all_b, all_g, all_r = spectral_tuning_functions_scaled_thresh.T
         spectral_tuning_functions = spectral_tuning_functions_scaled_thresh
-        # spectral_tuning_functions = np.apply_along_axis(pygor.utils.utilities.min_max_norm, 1, spectral_tuning_functions, -1, 1)
+        # spectral_tuning_functions = np.apply_along_axis(pygor.utilities.min_max_norm, 1, spectral_tuning_functions, -1, 1)
         # all_u, all_b, all_g, all_r = [i for i in np.where(np.abs(spectral_tuning_functions.T) > thresh, spectral_tuning_functions.T, 0)]
     else:
         all_u, all_b, all_g, all_r = [i for i in np.where(np.abs(spectral_tuning_functions.T) > thresh, spectral_tuning_functions.T, 0)]
@@ -838,7 +839,7 @@ def pop_on_off_colour_index(pop_array, stim_mode, on_dur, off_dur, on_crop_first
 
     If cropping factors are provided, the function masks the data to exclude specific time segments before computing the index. The metric for each cell is calculated along the cell axis using the specified metric function, such as np.trapz.
 
-    The ON and OFF metrics are then normalized to the range [0, 1] using pygor.utils.utilities.min_max_norm. Finally, the ON-OFF color index is calculated using the on_off_index function, which combines the ON and OFF metrics for each cell and color.
+    The ON and OFF metrics are then normalized to the range [0, 1] using pygor.utilities.min_max_norm. Finally, the ON-OFF color index is calculated using the on_off_index function, which combines the ON and OFF metrics for each cell and color.
 
     Example:
     pop_array = ...  # 4D data array
@@ -855,15 +856,15 @@ def pop_on_off_colour_index(pop_array, stim_mode, on_dur, off_dur, on_crop_first
         # Mask to deal with cropping factors 
         prepped_arr = np.ma.array(prepped_arr, mask = np.ones(prepped_arr.shape))
         # Determine length
-        length = test_arr.shape[-1]
+        length = pop_array.shape[-1]
         # Apply cropping factor ot mask 
         prepped_arr.mask[0, :, :, on_crop_first_last[0]:length-on_crop_first_last[1]] = 0
         prepped_arr.mask[1, :, :, off_crop_first_last[0]:length-off_crop_first_last[1]] = 0
     # Compute metric along cell axis 
     metric_by_cell = metric(prepped_arr, axis = 3)
     # Split ON and OFF metrics for comparing (residual axis is colour) --> meaning each cell will have an ON-OFF index by colour (seems useful)
-    pop_on_metric = pygor.utils.utilities.min_max_norm(metric_by_cell[0], 0, 1)
-    pop_off_metric = pygor.utils.utilities.min_max_norm(metric_by_cell[1], 0, 1)
+    pop_on_metric = pygor.utilities.min_max_norm(metric_by_cell[0], 0, 1)
+    pop_off_metric = pygor.utilities.min_max_norm(metric_by_cell[1], 0, 1)
     # Apply index via matrix operations (mathematically built into function)
     pop_colour_on_off_index = np.array(on_off_index(pop_on_metric, pop_off_metric))
     return pop_colour_on_off_index
@@ -1024,7 +1025,7 @@ def plot_on_off_index_tuning(pop_array, cell_id = None, give_return = False):
 #     # Kill border (needed for permuting data, otherwise introduce large artefacts)
 #     with warnings.catch_warnings():
 #         warnings.filterwarnings("ignore", message = "Destructive method. You lose data, with no way of recovering original shape!")
-#         org_arr = pygor.utils.utilities.auto_remove_border(org_arr)
+#         org_arr = pygor.utilities.auto_remove_border(org_arr)
 #     # Compute base stat
 #     org_stat = metric(collapse_time(org_arr, axis = 0))
 #     def _single_permute_compute(arr_3d, collapse_time = np.ma.std, metric = np.max):
@@ -1138,7 +1139,7 @@ def plot_on_off_index_tuning(pop_array, cell_id = None, give_return = False):
 #     # Kill border
 #     with warnings.catch_warnings():
 #         warnings.filterwarnings("ignore", message = "Destructive method. You lose data, with no way of recovering original shape!")
-#         org_arr = pygor.utils.utilities.auto_remove_border(org_arr)
+#         org_arr = pygor.utilities.auto_remove_border(org_arr)
 #     # Collapse space
 #     org_time = collapse_space(org_arr, axis = (1, 2)) # average? variance? max? 
 #     org_time = org_time - org_time[0] # centre data
