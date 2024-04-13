@@ -16,7 +16,7 @@ strfs = pygor.load.STRF(example_data)
 
 class TestSTRF(unittest.TestCase):
     def test_contours(self):
-        strfs.contours
+        strfs.fit_contours()
     
     def test_attributes_return(self):
         attr_list = pygor.utils.helpinfo.get_attribute_list(strfs, with_types=False)

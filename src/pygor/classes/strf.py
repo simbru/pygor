@@ -224,6 +224,7 @@ class STRF(Core):
             self.bs_settings["bs_datetime_str"] = before_time.strftime("%d/%m/%y %H:%M:%S")
             self.bs_settings["bs_dur_timedelta"] = after_time - before_time
             
+    @property
     def pval_time(self) -> np.ndarray:
         """
         Returns an array of p-values for time calculation.
@@ -246,6 +247,7 @@ class STRF(Core):
                 self.__calc_pval_time() # Executes calculation and writes to self._pval_time
             return self._pval_time
     
+    @property
     def pval_space(self) -> np.ndarray:
         """
         Returns an array of p-values for space calculation.
@@ -268,11 +270,10 @@ class STRF(Core):
                 self.__calc_pval_space() # Executes calculation and writes to self._pval_space
             return self._pval_space
 
-    def pvals_table(self) -> pd.DataFrame:
-        dict = {}
+    def get_pvals_table(self) -> pd.DataFrame:
         if self.multicolour == True: 
-            space_vals = pygor.utilities.multicolour_reshape(np.array(self.pval_space()), self.numcolour).T
-            time_vals = pygor.utilities.multicolour_reshape(np.array(self.pval_time()), self.numcolour).T
+            space_vals = pygor.utilities.multicolour_reshape(np.array(self.pval_space), self.numcolour).T
+            time_vals = pygor.utilities.multicolour_reshape(np.array(self.pval_time), self.numcolour).T
             space_sig = space_vals < self.bs_settings["space_sig_thresh"]
             time_sig = time_vals < self.bs_settings["time_sig_thresh"]
             both_sig = time_sig * space_sig
@@ -290,7 +291,7 @@ class STRF(Core):
             column_labels = ["space", "time", "sig"]
             return pd.DataFrame(final_arr, columns = column_labels)
      
-    def contours(self) -> '?':
+    def fit_contours(self) -> np.array(list[list[list[float, float]]]):
         """
         Returns the contours of the collapse times.
 
@@ -307,15 +308,15 @@ class STRF(Core):
 
         Example:
             data = DataObject()
-            contours = data.contours()
+            contours = data.fit_contours()
         """        
         try:
             return self.__contours
         except AttributeError:
             #self.__contours = [space.contour(x) for x in self.collapse_times()]
             if self.bs_settings["do_bootstrap"] == True:
-                time_pvals = self.pval_time()
-                space_pvals = self.pval_space()
+                time_pvals = self.pval_time
+                space_pvals = self.pval_space
                 __contours = [pygor.steps.contouring.contour(arr) # ensures no contour is drawn if pval not sig enough
                                 if time_pvals[count] < self.bs_settings["time_sig_thresh"] and space_pvals[count] < self.bs_settings["space_sig_thresh"]
                                 else  ([], [])
@@ -324,8 +325,15 @@ class STRF(Core):
                 __contours = [pygor.steps.contouring.contour(arr) for count, arr in enumerate(self.collapse_times())]
             self.__contours = np.array(__contours, dtype = "object")
             return self.__contours    
+    def get_contours_count(self) -> list:
+        count_list = []
+        for i in self.fit_contours():
+            neg_contours, pos_contours = i
+            count_tup = (len(neg_contours), len(pos_contours))
+            count_list.append(count_tup)
+        return count_list
 
-    def contours_area(self, scaling_factor = 1) -> list:
+    def get_contours_area(self, scaling_factor = 1) -> list:
         """
         Generate the area for each contour in the list of contours using the contours_area_bipolar function with a specified scaling factor.
 
@@ -335,34 +343,34 @@ class STRF(Core):
         Returns:
             list: A list of areas for each contour in the list.
         """
-        return [pygor.steps.contouring.contours_area_bipolar(__contours, scaling_factor = scaling_factor) for __contours in self.contours()]
+        return [pygor.steps.contouring.contours_area_bipolar(__contours, scaling_factor = scaling_factor) for __contours in self.fit_contours()]
 
-    def contours_centroids(self) -> np.ndarray:
+    def calc_contours_centroids(self) -> np.ndarray:
         try: 
             return self.__contours_centroids
         except AttributeError:
-            #contours_arr = np.array(self.contours(), dtype = "object")
-            off_contours = [pygor.steps.contouring.contour_centroid(i) for i in self.contours()[:, 0]]
-            on_contours = [pygor.steps.contouring.contour_centroid(i) for i in self.contours()[:, 1]]
+            #contours_arr = np.array(self.fit_contours(), dtype = "object")
+            off_contours = [pygor.steps.contouring.contour_centroid(i) for i in self.fit_contours()[:, 0]]
+            on_contours = [pygor.steps.contouring.contour_centroid(i) for i in self.fit_contours()[:, 1]]
             self.__contours_centroids = np.array([off_contours, on_contours], dtype = "object")
             return self.__contours_centroids
 
-    def contours_centres_by_pol(self) -> np.ndarray:
+    def get_contours_centres_by_pol(self) -> np.ndarray:
         try:
             return self.__centres_by_pol
         except AttributeError:
             self.__centres_by_pol = np.array([
-                [np.average(i, axis = 0) for i in self.contours_centroids()[0, :]], 
-                [np.average(i, axis = 0) for i in self.contours_centroids()[1, :]]])
+                [np.average(i, axis = 0) for i in self.calc_contours_centroids()[0, :]], 
+                [np.average(i, axis = 0) for i in self.calc_contours_centroids()[1, :]]])
             return self.__centres_by_pol
 
-    def contours_centres(self, center_on = "biggest") -> np.ndarray:
+    def get_contours_centres(self, center_on = "biggest") -> np.ndarray:
         if center_on == "pols":
             return np.nanmean(self.contours_centres_by_pol(), axis = 0)
         if center_on == "biggest":
-            pos_conts_cents = np.array([i[0] if i.size != 0 else np.array([np.nan, np.nan]) for i in self.contours_centroids()[1, :]])
-            neg_conts_cents = np.array([i[0] if i.size != 0 else np.array([np.nan, np.nan]) for i in self.contours_centroids()[0, :]])
-            area_cents = self.contours_area()
+            pos_conts_cents = np.array([i[0] if i.size != 0 else np.array([np.nan, np.nan]) for i in self.calc_contours_centroids()[1, :]])
+            neg_conts_cents = np.array([i[0] if i.size != 0 else np.array([np.nan, np.nan]) for i in self.calc_contours_centroids()[0, :]])
+            area_cents = self.get_contours_area()
             neg_pos_largest = np.array([(i[np.argmax(i)], j[np.argmax(j)]) for i,j in area_cents])
             xs = np.where(neg_pos_largest[:, 0] > neg_pos_largest[:, 1], neg_conts_cents[:, 0], pos_conts_cents[:, 0])
             ys = np.where(neg_pos_largest[:, 0] > neg_pos_largest[:, 1], neg_conts_cents[:, 1], pos_conts_cents[:, 1])
@@ -370,19 +378,32 @@ class STRF(Core):
         else:
             raise ValueError("center_on must be 'pols' or 'biggest'")
      
-    def contours_complexities(self) -> np.ndarray:
-        return pygor.steps.contouring.complexity_weighted(self.contours(), self.contours_area())
+    def calc_contours_complexities(self) -> np.ndarray:
+        return pygor.steps.contouring.complexity_weighted(self.fit_contours(), self.fit_contours())
      
-    def timecourses(self, centre_on_zero = True) -> np.ndarray:
+    def get_timecourses(self, centre_on_zero = True) -> np.ndarray:
         try:
             return self.__timecourses 
         except AttributeError:
-            timecourses = np.average(self.strf_masks(), axis = (3,4))
+            timecourses = np.average(self.get_strf_masks(), axis = (3,4))
             first_indexes = np.expand_dims(timecourses[:, :, 0], -1)
-            timecourses_centred = timecourses - first_indexes
+            if centre_on_zero:
+                timecourses_centred = timecourses - first_indexes
+            else:
+                timecourses_centred = timecourses
             self.__timecourses = timecourses_centred
             return self.__timecourses
-    
+
+    def get_dominant_timecourses(self):
+        dominant_times = []
+        for arr in self.get_timecourses().data:
+            if np.max(np.abs(arr[0]) > np.max(np.abs(arr[1]))):
+                dominant_times.append(arr[0])
+            else:
+                dominant_times.append(arr[1])
+        dominant_times = np.array(dominant_times)
+        return dominant_times
+
     ## Methods__________________________________________________________________________________________________________
 
     def plot_chromatic_overview(self):
@@ -391,27 +412,19 @@ class STRF(Core):
             warnings.simplefilter("always")
             return pygor.plotting.plots.chroma_overview(self)
 
-    #def plo
 
-    def dominant_timecourses(self):
-        dominant_times = []
-        for arr in self.timecourses().data:
-            if np.max(np.abs(arr[0]) > np.max(np.abs(arr[1]))):
-                dominant_times.append(arr[0])
-            else:
-                dominant_times.append(arr[1])
-        dominant_times = np.array(dominant_times)
-        return dominant_times
-
-    def strf_masks(self, level = None):
+    def get_strf_masks(self, level = None):
+        """
+        Return masked array of space.rf_mask3d applied to all arrays, with masks based on pval_time and pval_space.
+        """
         if self.strfs is np.nan:
             return np.nan
         else:
             # Apply space.rf_mask3d to all arrays and return as a new masksed array
             all_strf_masks = np.ma.array([pygor.space.rf_mask3d(x, level = None) for x in self.strfs])
             # # Get masks that fail criteria
-            pval_fail_time = np.argwhere(np.array(self.pval_time()) > self.bs_settings["time_sig_thresh"]) # nan > thresh always yields false, so thats really convenient 
-            pval_fail_space = np.argwhere(np.array(self.pval_space()) > self.bs_settings["space_sig_thresh"]) # because if pval is nan, it returns everything
+            pval_fail_time = np.argwhere(np.array(self.pval_time) > self.bs_settings["time_sig_thresh"]) # nan > thresh always yields false, so thats really convenient 
+            pval_fail_space = np.argwhere(np.array(self.pval_space) > self.bs_settings["space_sig_thresh"]) # because if pval is nan, it returns everything
             pval_fail = np.unique(np.concatenate((pval_fail_time, pval_fail_space)))
             # Set entire mask to True conditionally 
             all_strf_masks.mask[pval_fail] = True
@@ -467,7 +480,7 @@ class STRF(Core):
         """
         if self.multicolour == True:
             # Get the average centre position for each colour
-            avg_colour_centre = np.array([np.nanmean(yx, axis = 0) for yx in pygor.utilities.multicolour_reshape(self.contours_centres(), self.numcolour)])
+            avg_colour_centre = np.array([np.nanmean(yx, axis = 0) for yx in pygor.utilities.multicolour_reshape(self.get_contours_centres(), self.numcolour)])
             # Get the average position for the reference LEDs and the comparison LEDs
             avg_reference_pos = np.nanmean(np.take(avg_colour_centre, reference_LED_index, axis = 0), axis = 0)
             avg_compare_pos = np.nanmean(np.take(avg_colour_centre, compare_LED_index, axis = 0), axis = 0)
@@ -477,33 +490,21 @@ class STRF(Core):
         else:
             raise AttributeError("Not a multicoloured STRF, self.multicolour != True.")
 
-    def timecourses_noncentred(self) -> np.ndarray:
-        # Just return raw timecourses 
-        self.__timecourses = np.average(self.strf_masks(), axis = (3,4))
-    
-    # This one should probably also just be a property to make syntax easier
-    def rf_masks(self) -> (np.ndarray, np.ndarray):
-        neg_mask2d, pos_mask2d = self.strf_masks().mask[:, :, 0][:, 0], self.strf_masks().mask[:, :, 0][:, 1]
+    def get_spatial_masks(self) -> (np.ndarray, np.ndarray):
+        neg_mask2d, pos_mask2d = self.get_strf_masks().mask[:, :, 0][:, 0], self.get_strf_masks().mask[:, :, 0][:, 1]
         #return np.array([neg_mask2d, pos_mask2d])
         return (neg_mask2d, pos_mask2d)
 
+    @property
     def rf_masks_combined(self) -> np.ndarray:
-        mask_2d = self.rf_masks()
+        mask_2d = self.get_spatial_masks()
         neg_mask2d, pos_mask2d = mask_2d[0], mask_2d[1]
         mask2d_combined  = np.invert(neg_mask2d * -1) + np.invert(pos_mask2d)
         return mask2d_combined
 
-    def contours_count(self) -> list:
-        count_list = []
-        for i in self.contours():
-            neg_contours, pos_contours = i
-            count_tup = (len(neg_contours), len(pos_contours))
-            count_list.append(count_tup)
-        return count_list
-
     # def contours_centered
     #     # Estimate centre pixel
-    #     pixel_centres = self.contours_centres()
+    #     pixel_centres = self.get_contours_centres()
     #     avg_centre = np.round(np.nanmean(pixel_centres, axis = 0))
     #     # Find offset between centre coordinate andthe mean coordinate 
     #     differences = np.nan_to_num(avg_centre - pixel_centres).astype("int")
@@ -523,7 +524,7 @@ class STRF(Core):
             # Calculate shifts required for each image (vectorised)
             arr3d = collapsed_strf_arr
             # Ideally (but does not seem to work correctly, skewed by spurrious contours)
-            contours_centers = np.where(self.contours_centres() > 0, np.floor(self.contours_centres()), np.ceil(self.contours_centres()))
+            contours_centers = np.where(self.get_contours_centres() > 0, np.floor(self.get_contours_centres()), np.ceil(self.get_contours_centres()))
             target_pos = np.array(arr3d.shape[1:]) / 2
             shift_by = target_pos - contours_centers
             #print("Shift by", shift_by)
@@ -536,19 +537,19 @@ class STRF(Core):
         return collapsed_strf_arr
         # space.collapse_3d(recording.strfs[strf_num])
 
-
-    def polarities(self, exclude_FirstLast=(1,1)) -> np.ndarray:
+    
+    def get_polarities(self, exclude_FirstLast=(1,1)) -> np.ndarray:
         if self.strfs is np.nan:
             return np.array([np.nan])
         # Get polarities for time courses (which are 2D arrays containing a 
         # timecourse for negative and positive)
-        polarities = pygor.temporal.polarity(self.timecourses(), exclude_FirstLast)
+        polarities = pygor.temporal.polarity(self.get_timecourses(), exclude_FirstLast)
         # Feed that to helper function to break it down into 1D/category
         return pygor.utilities.polarity_neat(polarities)
 
     def opponency_bool(self) -> [bool]:
         if self.multicolour == True:
-            arr = pygor.utilities.multicolour_reshape(self.polarities(), self.numcolour).T
+            arr = pygor.utilities.multicolour_reshape(self.get_polarities(), self.numcolour).T
             # This line looks through rearranged chromatic arr roi by roi 
             # and checks the poliarty by getting the unique values and checking 
             # if the length is more than 0 or 1, excluding NaNs. 
@@ -560,7 +561,7 @@ class STRF(Core):
 
     def polarity_category(self) -> [str]:
         result = []
-        arr = pygor.utilities.multicolour_reshape(self.polarities(), self.numcolour).T
+        arr = pygor.utilities.multicolour_reshape(self.get_polarities(), self.numcolour).T
         for i in arr:
             inner_no_nan = np.unique(i)[~np.isnan(np.unique(i))]
             inner_no_nan = inner_no_nan[inner_no_nan != 0]
@@ -579,12 +580,12 @@ class STRF(Core):
         return result
 
     #def amplitude_tuning_functions(self):
-    def tunings_amplitude(self) -> np.ndarray:
+    def calc_tunings_amplitude(self) -> np.ndarray:
         if self.multicolour == True:
             # maxes = np.max(self.collapse_times().data, axis = (1, 2))
             # mins = np.min(self.collapse_times().data, axis = (1, 2))
-            maxes = np.max(self.dominant_timecourses().data, axis = (1))
-            mins = np.min(self.dominant_timecourses().data, axis = (1))
+            maxes = np.max(self.get_dominant_timecourses().data, axis = (1))
+            mins = np.min(self.get_dominant_timecourses().data, axis = (1))
             largest_mag = np.where(maxes > np.abs(mins), maxes, mins) # search and insert values to retain sign
             largest_by_colour = pygor.utilities.multicolour_reshape(largest_mag, self.numcolour)
             # signs = np.sign(largest_by_colour)
@@ -594,14 +595,14 @@ class STRF(Core):
         else:
             raise AttributeError("Operation cannot be done since object property '.multicolour.' is False")
 
-    def tunings_area(self, size = None, upscale_factor = 4) -> np.ndarray:
+    def calc_tunings_area(self, size = None, upscale_factor = 4) -> np.ndarray:
         if self.multicolour == True:
             # Step 1: Pull contour areas (note, the size is in A.U. for now)
             # Step 2: Split by positive and negative areas
             if size == None:
                 warnings.warn("size stimates in arbitrary cartesian units")
-                neg_contour_areas = [i[0] for i in self.contours_area()]
-                pos_contour_areas = [i[1] for i in self.contours_area()]
+                neg_contour_areas = [i[0] for i in self.get_contours_centres()]
+                pos_contour_areas = [i[1] for i in self.get_contours_centres()]
             else:
                 neg_contour_areas = [i[0] for i in self.contours_area(unit_conversion.au_to_visang(size)/upscale_factor)]
                 pos_contour_areas = [i[1] for i in self.contours_area(unit_conversion.au_to_visang(size)/upscale_factor)]
@@ -615,7 +616,7 @@ class STRF(Core):
         else:
             raise AttributeError("Operation cannot be done since object contains no property '.multicolour.")
     
-    def tunings_centroids(self) -> np.ndarray:
+    def calc_tunings_centroids(self) -> np.ndarray:
         if self.multicolour == True:
             # Step 1: Pull centroids
             # Step 2: Not sure how to treat ons and offs yet, just do ONS for now 
@@ -635,11 +636,11 @@ class STRF(Core):
         else:
             raise AttributeError("Operation cannot be done since object contains no property '.multicolour.")
 
-    def tunings_peaktime(self, dur_s = 1.3) -> np.ndarray:
+    def calc_tunings_peaktime(self, dur_s = 1.3) -> np.ndarray:
         if self.multicolour == True:
             # First get timecourses
             # Split by polarity 
-            neg_times, pos_times = self.timecourses()[:, 0], self.timecourses()[:, 1]
+            neg_times, pos_times = self.get_timecourses()[:, 0], self.get_timecourses()[:, 1]
             # Find max position in pos times and neg position in neg times 
             argmins = np.ma.argmin(neg_times, axis = 1)
             argmaxs = np.ma.argmax(pos_times, axis = 1)
@@ -654,14 +655,14 @@ class STRF(Core):
         else:
             raise AttributeError("Operation cannot be done since object contains no property '.multicolour.")
 
-    def spectral_centroids(self) -> (np.ndarray, np.ndarray):
-        spectroids_neg = np.apply_along_axis(pygor.temporal.only_centroid, 1, self.timecourses()[:, 0])
-        spectroids_pos = np.apply_along_axis(pygor.temporal.only_centroid, 1, self.timecourses()[:, 1])
+    def calc_spectral_centroids(self) -> (np.ndarray, np.ndarray):
+        spectroids_neg = np.apply_along_axis(pygor.temporal.only_centroid, 1, self.get_timecourses()[:, 0])
+        spectroids_pos = np.apply_along_axis(pygor.temporal.only_centroid, 1, self.get_timecourses()[:, 1])
         return spectroids_neg, spectroids_pos
 
-    def spectrums(self, roibyroi = False) -> (np.ndarray, np.ndarray):
-        spectrum_neg = np.array([pygor.temporal.only_spectrum(i) for i in self.timecourses()[:, 0]])
-        spectrum_pos = np.array([pygor.temporal.only_spectrum(i) for i in self.timecourses()[:, 1]])
+    def calc_spectrums(self, roibyroi = False) -> (np.ndarray, np.ndarray):
+        spectrum_neg = np.array([pygor.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 0]])
+        spectrum_pos = np.array([pygor.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 1]])
         return spectrum_neg, spectrum_pos
 
     # def check_ipl_orientation(self):

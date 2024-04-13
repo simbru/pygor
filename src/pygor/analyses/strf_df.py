@@ -239,7 +239,7 @@ def build_chromaticity_dict(data_strf_obj, wavelengths =  ["588", "478", "422", 
             dict["cat_pol"] = data_strf_obj.polarity_category()
             
             polarities = utilities.multicolour_reshape(data_strf_obj.polarities(), num_wavelengths)
-            complexities = utilities.multicolour_reshape(np.nanmean(contouring.complexity_weighted(data_strf_obj.contours, data_strf_obj.contours_area()), axis = 1), num_wavelengths)
+            complexities = utilities.multicolour_reshape(np.nanmean(contouring.complexity_weighted(data_strf_obj.contours(), data_strf_obj.contours_area()), axis = 1), num_wavelengths)
             area_t = data_strf_obj.area_tuning_functions(size).T
             ampl_t = data_strf_obj.amplitude_tuning_functions().T
             neg_cent_t, pos_cent_t = data_strf_obj.centroid_tuning_functions()
