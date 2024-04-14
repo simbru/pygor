@@ -379,7 +379,7 @@ class STRF(Core):
             raise ValueError("center_on must be 'pols' or 'biggest'")
      
     def calc_contours_complexities(self) -> np.ndarray:
-        return pygor.steps.contouring.complexity_weighted(self.fit_contours(), self.fit_contours())
+        return pygor.steps.contouring.complexity_weighted(self.fit_contours(), self.get_contours_area())
      
     def get_timecourses(self, centre_on_zero = True) -> np.ndarray:
         try:
