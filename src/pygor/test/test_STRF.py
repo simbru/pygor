@@ -28,7 +28,7 @@ class TestSTRF(unittest.TestCase):
         with open(write_to, 'w') as f:
             with redirect_stdout(f):
                 for i in meth_list:
-                    if i not in ["try_fetch","save_pkl", "load_pkl", "get_bootstrap_settings", "update_bootstrap_settings", "run_bootstrap", "set_bs_bool"]:
+                    if i not in ["try_fetch","save_pkl", "load_pkl", "get_bootstrap_settings", "update_bootstrap_settings", "run_bootstrap", "set_bootstrap_bool"]:
                         try:
                             getattr(strfs, i)() 
                         except AttributeError:
@@ -47,6 +47,7 @@ class TestSTRF(unittest.TestCase):
     
     def test_bs(self):
         strfs.get_bootstrap_settings()
+        strfs.set_bootstrap_bool(True)
         new_bs_dict = pygor.data_helpers.create_bs_dict(space_bs_n = 10, time_bs_n = 10)
         strfs.update_bootstrap_settings(new_bs_dict)
         strfs.run_bootstrap()

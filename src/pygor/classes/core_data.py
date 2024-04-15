@@ -342,7 +342,7 @@ class Core:
         fig.subplots_adjust(wspace = 0, hspace = 0)
         #plt.tight_layout()
         return fig, axs
-    def calculate_average_images(self, ignore_skip = False):
+    def calculate_image_average(self, ignore_skip = False):
         """
         Calculate the average image from a series of trigger frames.
 

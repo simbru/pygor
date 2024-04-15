@@ -20,15 +20,14 @@ Pass 'hint = True' for more tips and hints on using the data class.
     
     ## Methods
         Here's some actions you have -> pass 'types = True' for type hints, func (return type):
-    [ 'calc_LED_offset', 'calc_contours_centroids', 'calc_contours_complexities', 'calc_spectral_centroids',
-      'calc_spectrums', 'calc_tunings_amplitude', 'calc_tunings_area', 'calc_tunings_centroids',
-      'calc_tunings_peaktime', 'calculate_average_images', 'collapse_times', 'fit_contours',
-      'get_bootstrap_settings', 'get_contours_area', 'get_contours_centres', 'get_contours_centres_by_pol',
-      'get_contours_count', 'get_dominant_timecourses', 'get_help', 'get_polarities', 'get_pvals_table',
-      'get_spatial_masks', 'get_strf_masks', 'get_timecourses', 'opponency_bool', 'plot_averages',
-      'plot_chromatic_overview', 'polarity_category', 'run_bootstrap', 'save_pkl', 'set_bs_bool',
-      'set_default_bootstrap_settings', 'update_bootstrap_settings', 'view_drift', 'view_stack_projection',
-      'view_stack_rois']
+    [ 'get_bootstrap_settings', 'run_bootstrap', 'set_bootstrap_bool', 'set_bootstrap_settings_default',
+      'update_bootstrap_settings', 'calc_contours_centroids', 'calc_contours_complexities', 'fit_contours',
+      'get_contours_area', 'get_contours_centres', 'get_contours_centres_by_pol', 'get_contours_count',
+      'view_drift', 'get_help', 'calculate_image_average', 'calc_LED_offset', 'get_opponency_bool', 'save_pkl',
+      'get_polarities', 'get_polarity_category', 'get_pvals_table', 'plot_averages', 'plot_chromatic_overview',
+      'get_spatial_masks', 'calc_spectral_centroids', 'calc_spectrums', 'view_stack_projection',
+      'view_stack_rois', 'get_strf_masks', 'get_timecourses', 'get_timecourses_dominant', 'collapse_times',
+      'calc_tunings_amplitude', 'calc_tunings_area', 'calc_tunings_centroids', 'calc_tunings_peaktime']
 
     NB: Feel free to write your own attributes (data) and methods (actions)!
     Happy analysin' (:

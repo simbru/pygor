@@ -8,7 +8,6 @@ import dacite
 from dataclasses import dataclass
 import pygor.data_helpers
 
-
 # explicit function to normalize array
 def np_describe(arr):
     stats = {

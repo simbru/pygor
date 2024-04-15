@@ -62,7 +62,7 @@ class STRF(Core):
                 self.numcolour = 1
             self.strfs = pygor.data_helpers.load_strf(HDF5_file)
         self.num_strfs = len(self.strfs)
-        self.set_default_bootstrap_settings()
+        self.set_bootstrap_settings_default()
         if self.bs_settings["do_bootstrap"] == True:
             self.run_bootstrap()
     
@@ -97,7 +97,7 @@ class STRF(Core):
             desc = f"Hang on, bootstrapping spatial components {self.bs_settings['space_bs_n']} times")
         self._pval_space = np.array([signal_analysis.bootstrap_space(x, bootstrap_n=self.bs_settings["space_bs_n"]) for x in bar])
 
-    def set_default_bootstrap_settings(self) -> None:
+    def set_bootstrap_settings_default(self) -> None:
         """
         Sets the default bootstrap settings for the object.
 
@@ -121,7 +121,7 @@ class STRF(Core):
         """
         return self.bs_settings
 
-    def set_bs_bool(self, bool : bool) -> bool:
+    def set_bootstrap_bool(self, bool : bool) -> bool:
         self.bs_bool = bool
         self.bs_settings["do_bootstrap"] = bool
         return self.bs_bool
@@ -394,7 +394,7 @@ class STRF(Core):
             self.__timecourses = timecourses_centred
             return self.__timecourses
 
-    def get_dominant_timecourses(self):
+    def get_timecourses_dominant(self):
         dominant_times = []
         for arr in self.get_timecourses().data:
             if np.max(np.abs(arr[0]) > np.max(np.abs(arr[1]))):
@@ -547,7 +547,7 @@ class STRF(Core):
         # Feed that to helper function to break it down into 1D/category
         return pygor.utilities.polarity_neat(polarities)
 
-    def opponency_bool(self) -> [bool]:
+    def get_opponency_bool(self) -> [bool]:
         if self.multicolour == True:
             arr = pygor.utilities.multicolour_reshape(self.get_polarities(), self.numcolour).T
             # This line looks through rearranged chromatic arr roi by roi 
@@ -559,7 +559,7 @@ class STRF(Core):
         else:
             raise AttributeError("Operation cannot be done since object property '.multicolour' is False")
 
-    def polarity_category(self) -> [str]:
+    def get_polarity_category(self) -> [str]:
         result = []
         arr = pygor.utilities.multicolour_reshape(self.get_polarities(), self.numcolour).T
         for i in arr:
@@ -584,8 +584,8 @@ class STRF(Core):
         if self.multicolour == True:
             # maxes = np.max(self.collapse_times().data, axis = (1, 2))
             # mins = np.min(self.collapse_times().data, axis = (1, 2))
-            maxes = np.max(self.get_dominant_timecourses().data, axis = (1))
-            mins = np.min(self.get_dominant_timecourses().data, axis = (1))
+            maxes = np.max(self.get_timecourses_dominant().data, axis = (1))
+            mins = np.min(self.get_timecourses_dominant().data, axis = (1))
             largest_mag = np.where(maxes > np.abs(mins), maxes, mins) # search and insert values to retain sign
             largest_by_colour = pygor.utilities.multicolour_reshape(largest_mag, self.numcolour)
             # signs = np.sign(largest_by_colour)
@@ -686,3 +686,18 @@ class STRF(Core):
         print("Storing as:", final_path, end = "\r")
         with open(final_path, 'wb') as outp:
             joblib.dump(self, outp, compress='zlib')
+
+# class Clustering:
+#     def __init__(self):
+#         pass
+
+#     def __repr__(self):
+#         return f"{self.__class__.__name__}"
+
+#     def __str__(self):
+#         return f"{self.__class__.__name__}"
+
+#     def __call__(self):
+#         pass
+
+#     https://realpython.com/python-magic-methods/

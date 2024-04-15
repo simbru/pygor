@@ -35,6 +35,10 @@ def get_methods_list(obj, with_returns = True) -> list:
     """
     if with_returns is True:
         method_list = [func_str + f" ({get_return_type(getattr(obj, func_str))})" for func_str in method_list]
+    # Sort method list
+    ignore_list = ['plot']
+    method_list = sorted(method_list, key=lambda x: ('_'.join(x.split('_')[1].lower()) 
+        if len(x.split('_')) > 1 and x.split('_')[0] not in ignore_list else x.lower()))
     return method_list
 
 def get_attribute_list(obj, with_types = True) -> list:

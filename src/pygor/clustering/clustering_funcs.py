@@ -26,7 +26,7 @@ import warnings
 #from collections.abs import Iterable
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline#, make_pipeline
-import filehandling
+import pygor.filehandling as filehandling
 
 palette = sns.color_palette("bright", 10)
 
