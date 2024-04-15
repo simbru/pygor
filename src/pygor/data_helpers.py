@@ -213,7 +213,7 @@ def label_from_str(input_str, search_terms, label = None, split_by = '_', kick_s
                 if "first_return_only" in kwargs and kwargs["first_return_only"] == True:
                     return terms_found[0]
                 else:
-                    return ''.join(terms_found)
+                    return '_'.join(terms_found)
             else:
                 _decide_output_if_nomatch()
         else:

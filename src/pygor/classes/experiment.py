@@ -10,7 +10,7 @@ import pandas as pd
 import pathlib
 
 # Local imports
-
+import pygor.filehandling
 
 @dataclass
 class Experiment:
@@ -40,6 +40,10 @@ class Experiment:
             # Use list comprehension to remove elements at specified indices
             v[:] = [v[i] for i in range(len(v)) if i not in _input and i - len(v) not in _input]
     
+    @property
+    def recording_id(self):
+        return pd.DataFrame(self.id_dict)
+
     def attach_data(self, objects: object or list[object]):
         if isinstance(objects, Iterable) is False:
             self.__exp_setter__(objects)
@@ -54,6 +58,6 @@ class Experiment:
             for i in indices:
                 self.__exp_forgetter__(i)
 
-    @property
-    def recording_id(self):
-        return pd.DataFrame(self.id_dict)
+    def run_strf_clustering():
+        # Create dataframe to store results
+        pygor.filehandling.compile_chroma_strf_df(pkl_files, do_bootstrap = True)

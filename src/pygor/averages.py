@@ -23,7 +23,7 @@ import space
 import plotting
 import temporal
 import utilities
-import filehandling
+import pygor.filehandling
 import utilities
 import signal_analysis
 import unit_conversion

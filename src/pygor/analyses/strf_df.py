@@ -29,7 +29,8 @@ ______ From here is all disgusting DataFrame logic that needs to be dealt with!_
 remove_these_keys = ["images", "rois","strfs", "metadata", "triggertimes", "triggerstimes_frame ",
     "triggerstimes_frame", "averages", "snippets", "phase_num", "_Data__skip_first_frames", "_Data__skip_last_frames", 
     "frame_hz", "trigger_mode", "_Data__keyword_lables", "_Data__compare_ops_map", "ms_dur", "data_types", "type",
-    "_contours_centroids", "_contours", "contours_centroids", "_centres_by_pol", "_timecourses", "rois", "images", "data_types"]
+    "_contours_centroids", "_contours", "contours_centroids", "_centres_by_pol", "_timecourses", "rois", "images", "data_types",
+    "_Core__keyword_lables", "_Core__compare_ops_map", "bs_settings"]
 """
 TODO Fix DISGUSTING key removal logic
 """
@@ -58,6 +59,7 @@ def build_results_dict(data_strf_obj, remove_keys = remove_these_keys): #
 
         # Deal with metadata
         metadata = data_strf_obj.metadata.copy()
+        print(metadata)
         # dict["metadata"] = np.repeat(metadata, expected_lengths)
         path = pathlib.Path(metadata.pop("filename"))
         dict["date"] = np.repeat(metadata["exp_date"], expected_lengths)
@@ -97,7 +99,7 @@ def build_results_dict(data_strf_obj, remove_keys = remove_these_keys): #
         dict["space_pval"] = [i for i in data_strf_obj.pval_space]
 
         # Space
-        contour_count = np.array(data_strf_obj.contours_count())
+        contour_count = np.array(data_strf_obj.get_contours_count())
         neg_contour_count, pos_contour_count = contour_count[:, 0], contour_count[:, 1] 
         #dict["neg_contour_bool"] = [True for i in neg_contour_count if i > 0 else False for i in neg_contour_count]
         dict["neg_contour_bool"] = [i > 0 for i in neg_contour_count]
@@ -106,24 +108,24 @@ def build_results_dict(data_strf_obj, remove_keys = remove_these_keys): #
         dict["neg_contour_count"] = neg_contour_count
         dict["pos_contour_count"] = pos_contour_count
         dict["total_contour_count"] = neg_contour_count + pos_contour_count
-        neg_contour_areas_corrected = [i[0] for i in data_strf_obj.contours_area(unit_conversion.au_to_visang(size)/4)]
-        pos_contour_areas_corrected = [i[1] for i in data_strf_obj.contours_area(unit_conversion.au_to_visang(size)/4)]        
+        neg_contour_areas_corrected = [i[0] for i in data_strf_obj.get_contours_area(unit_conversion.au_to_visang(size)/4)]
+        pos_contour_areas_corrected = [i[1] for i in data_strf_obj.get_contours_area(unit_conversion.au_to_visang(size)/4)]        
         tot_neg_areas_corrected, tot_pos_areas_corrected = [np.sum(i) for i in neg_contour_areas_corrected], [np.sum(i) for i in pos_contour_areas_corrected]
         #dict["neg_contour_areas"] = neg_contour_areas_corrected
         #dict["pos_contour_areas"] = pos_contour_areas_corrected
         dict["neg_contour_area_total"] = tot_neg_areas_corrected
         dict["pos_contour_area_total"] = tot_pos_areas_corrected
         dict["contour_area_total"] = np.sum((tot_neg_areas_corrected, tot_pos_areas_corrected), axis = 0)
-        dict["contour_complexity"] = np.nanmean(contouring.complexity_weighted(data_strf_obj.contours, data_strf_obj.contours_area()), axis = 1)
+        dict["contour_complexity"] = np.nanmean(data_strf_obj.calc_contours_complexities())
 
          # Time
-        timecourses = data_strf_obj.timecourses
+        timecourses = data_strf_obj.get_timecourses()
         timecourses_neg, timecourses_pos = timecourses[:, 0], timecourses[:, 1]
         neg_extrema, pos_extrema = np.min(timecourses_neg, axis = 1), np.max(timecourses_pos, axis = 1)
         dict["neg_extrema"] = neg_extrema
         dict["pos_extrema"] = pos_extrema
         #dict["dom_extrema"] =  np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_extrema, pos_extrema)
-        dict["polarities"] = data_strf_obj.polarities()
+        dict["polarities"] = data_strf_obj.get_polarities()
         neg_biphasic, pos_biphasic = temporal.biphasic_index(timecourses_neg), temporal.biphasic_index(timecourses_pos)
         dict["neg_biphasic_index"] = neg_biphasic
         dict["pos_biphasic_index"] = pos_biphasic
@@ -137,24 +139,20 @@ def build_results_dict(data_strf_obj, remove_keys = remove_these_keys): #
         dict["neg_peaktime"] = neg_peaktime
         dict["pos_peaktime"] = pos_peaktime
         dict["dom_peaktime"] = np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_peaktime, pos_peaktime)
-        neg_centroids, pos_centroids = data_strf_obj.spectral_centroids()
+        neg_centroids, pos_centroids = data_strf_obj.calc_spectral_centroids()
         dict["neg_centroids"] = neg_centroids
         dict["pos_centroids"] = pos_centroids
         dict["dom_centroids"] = np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_centroids, pos_centroids)
         
         # Proof of concept for assigning entire arrays 
-        dict["-timecourse"] = data_strf_obj.timecourses[:, 0].tolist()
-        dict["+timecourse"] = data_strf_obj.timecourses[:, 1].tolist()
+        dict["-timecourse"] = data_strf_obj.get_timecourses()[:, 0].tolist()
+        dict["+timecourse"] = data_strf_obj.get_timecourses()[:, 1].tolist()
 
-        # Get rid of residual metadata entry in index, pop it to None (basically delete)
-        #dict.pop("metatdata", None)
-        # Kill data with incorrect dimensinos 
-        # Notes if wanted
-        # dict["notes"] = [''] * expected_lengths
         # Finally, loop through entire dictionary and check that all entries are of correct length
         # The logic is that in many cases, there might not be data to compute stats on. These will
         # emtpy lists, so we need to make a note that there was no data there (e.g. nan)
         for i in dict:
+            print(i, dict[i])
             # First check if dictionary entry is iterable
             # If its not, assume we want stat per strfs, so duplicate the value n = strfs times  
             if isinstance(dict[i], Iterable) == False:
@@ -224,7 +222,7 @@ def build_chromaticity_dict(data_strf_obj, wavelengths =  ["588", "478", "422", 
             path = pathlib.Path(metadata.pop("filename"))
             dict["date"] = np.repeat(metadata["exp_date"], expected_lengths)
             dict["path"] = np.repeat(path, expected_lengths)
-            dict["curr_path"] = np.repeat(metadata["curr_path"], expected_lengths)
+            dict["curr_path"] = np.repeat(data_strf_obj.filename, expected_lengths)
             dict["filename"] = np.repeat(path.name, expected_lengths)
             strf_keys = natsort.natsorted(np.unique(['_'.join(i.split('_')[:2]) for i in data_strf_obj.strf_keys]))
             dict["strf_keys"] = strf_keys
@@ -236,21 +234,19 @@ def build_chromaticity_dict(data_strf_obj, wavelengths =  ["588", "478", "422", 
             # dict["pol_cat"] = data_strf_obj.polarity_category()
             # Some generic stats
             dict["ipl_depths"] = data_strf_obj.ipl_depths # some things are already aligned by cell_id naturally (from Igor)
-            dict["cat_pol"] = data_strf_obj.polarity_category()
+            dict["cat_pol"] = data_strf_obj.get_polarity_category()
             
-            polarities = utilities.multicolour_reshape(data_strf_obj.polarities(), num_wavelengths)
-            complexities = utilities.multicolour_reshape(np.nanmean(contouring.complexity_weighted(data_strf_obj.contours(), data_strf_obj.contours_area()), axis = 1), num_wavelengths)
-            area_t = data_strf_obj.area_tuning_functions(size).T
-            ampl_t = data_strf_obj.amplitude_tuning_functions().T
-            neg_cent_t, pos_cent_t = data_strf_obj.centroid_tuning_functions()
+            polarities = utilities.multicolour_reshape(data_strf_obj.get_polarities(), num_wavelengths)
+            complexities = utilities.multicolour_reshape(np.nanmean(contouring.complexity_weighted(data_strf_obj.fit_contours(), data_strf_obj.get_contours_area()), axis = 1), num_wavelengths)
+            area_t = data_strf_obj.calc_tunings_area(size).T
+            ampl_t = data_strf_obj.calc_tunings_amplitude().T
+            neg_cent_t, pos_cent_t = data_strf_obj.calc_tunings_centroids()
             neg_cent_t, pos_cent_t = neg_cent_t.T, pos_cent_t.T
-            neg_peak_t, pos_peak_t = data_strf_obj.peaktime_tuning_functions()
+            neg_peak_t, pos_peak_t = data_strf_obj.calc_tunings_peaktime()
             neg_peak_t, pos_peak_t =  neg_peak_t.T, pos_peak_t.T
 
-
-
             # Chromatic aspects 
-            temporal_filter = utilities.multicolour_reshape(data_strf_obj.timecourses, num_wavelengths)
+            temporal_filter = utilities.multicolour_reshape(data_strf_obj.get_timecourses(), num_wavelengths)
             spatial_filter = utilities.multicolour_reshape(data_strf_obj.collapse_times(spatial_centre=True), num_wavelengths)
             
             for n, i in enumerate(wavelengths):
@@ -268,40 +264,12 @@ def build_chromaticity_dict(data_strf_obj, wavelengths =  ["588", "478", "422", 
             
             dict["spatial_X"] = [spatial_filter[0, 0].shape[0]] * expected_lengths
             dict["spatial_Y"] = [spatial_filter[0, 0].shape[1]] * expected_lengths
-            dict["opp_bool"] = np.array(data_strf_obj.opponency_bool())
+            dict["opp_bool"] = np.array(data_strf_obj.get_opponency_bool())
             # Sort dictionary for friendliness 
             core_info = ['date', 'path', 'filename', "curr_path", 'strf_keys', 'cell_id', 'size', 'ipl_depths', 'opp_bool']
             flexible_info = natsort.natsorted(list(set(dict.keys() - set(core_info))))
             final_order = core_info + flexible_info
             dict = {key : dict[key] for key in final_order}
-
-            # Type handling 
-            # # Attempt labelling 
-            # label_list = signal_analysis.category_labels(data_strf_obj.amplitude_tuning_functions())
-            # dict["chroma_label"] = label_list
-            # dict["chroma_label_simplified"] = ["mid" if i == "blue" or i == "green" or i == "broad" else i for i in dict["chroma_label"]]
-            # dict["opponent_bool"] = data_strf_obj.opponency_bool()
-            # dict["non_opp_pol"] = np.where(np.array(data_strf_obj.opponency_bool()) == False, np.nanmean(utilities.multicolour_reshape(data_strf_obj.polarities(), 4), axis = 0), 0)
-
-            # # Calculate areas from contours
-            # neg_contour_areas_corrected = [i[0] for i in data_strf_obj.contours_area(unit_conversion.au_to_visang(size)/4)]
-            # pos_contour_areas_corrected = [i[1] for i in data_strf_obj.contours_area(unit_conversion.au_to_visang(size)/4)]        
-            # tot_neg_areas_corrected, tot_pos_areas_corrected = [np.sum(i) for i in neg_contour_areas_corrected], [np.sum(i) for i in pos_contour_areas_corrected]
-            # ## Add negative and positive polarities together
-            # strf_area_sums = np.sum((tot_neg_areas_corrected, tot_pos_areas_corrected), axis = 0)
-            # area_sums_roi_by_colour = utilities.multicolour_reshape(strf_area_sums, 4)
-            # ## Set area == 0 to nan for nan-mean 
-            # area_sums_roi_by_colour[area_sums_roi_by_colour == 0] = np.nan
-            # ## Average across colours
-            # dict["avg_area"] = np.nanmean(area_sums_roi_by_colour, axis = 0)
-
-            # # dict["contour_complexity"] = np.nanmean(contouring.complexity_weighted(data_strf_obj.contours, data_strf_obj.contours_area()), axis = 1)
-            # neg_centroids, pos_centroids = data_strf_obj.spectral_centroids()
-            # dom_centroids = np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_centroids, pos_centroids)
-            # dict["avg_centroids"] = np.nanmean(utilities.multicolour_reshape(dom_centroids, 4), axis = 0)
-        
-
-            # dict["spectral_tuning_function"] = data_strf_obj.spectral_tuning_functions().tolist()
 
             return dict
         else:
@@ -389,24 +357,6 @@ def compile_chroma_strf_df(files, summary_prints = True,  do_bootstrap = True, s
         print("The following files are missing key 'Positions' resulting in np.nan for 'ipl_depths':\n",
         "\n", pd.unique(roi_df.query("ipl_depths.isnull()")["path"]))
     return roi_df, rec_df, chroma_df
-
-# def compile_hdf5_df(files):
-#     # roi_stat_list = []
-#     rec_info_list = []
-#     for i in files:
-#         loaded = load_from_hdf5(i)
-#         dict = build_results_dict(loaded)
-#         curr_df = pd.DataFrame(dict)
-#         # roi_stat_list.append(curr_df)
-#         curr_rec = pd.DataFrame(build_recording_dict(loaded))
-#         rec_info_list.append(curr_rec)
-#         # print(curr_df)
-#         # rec_df = pd.concat(i)
-#     # roi_df = pd.concat(roi_stat_list, ignore_index=True)
-#     # roi_df.to_pickle(r"d:/pygor.load.STRF/test")
-#     # roi_df = roi_df[np.roll(roi_df.columns, 1)]
-#     rec_df = pd.concat(rec_info_list, ignore_index=True)
-#     return rec_df
 
 def split_df_by(DataFrame, category_str):
     dfs_by_pol = {accepted: sub_df

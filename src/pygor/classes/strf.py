@@ -604,8 +604,8 @@ class STRF(Core):
                 neg_contour_areas = [i[0] for i in self.get_contours_centres()]
                 pos_contour_areas = [i[1] for i in self.get_contours_centres()]
             else:
-                neg_contour_areas = [i[0] for i in self.contours_area(unit_conversion.au_to_visang(size)/upscale_factor)]
-                pos_contour_areas = [i[1] for i in self.contours_area(unit_conversion.au_to_visang(size)/upscale_factor)]
+                neg_contour_areas = [i[0] for i in self.get_contours_area(unit_conversion.au_to_visang(size)/upscale_factor)]
+                pos_contour_areas = [i[1] for i in self.get_contours_area(unit_conversion.au_to_visang(size)/upscale_factor)]
             # Step 3: Sum these by polarity
             tot_neg_areas, tot_pos_areas = [np.sum(i) for i in neg_contour_areas], [np.sum(i) for i in pos_contour_areas]
             # Step 4: Sum across polarities 
@@ -620,8 +620,8 @@ class STRF(Core):
         if self.multicolour == True:
             # Step 1: Pull centroids
             # Step 2: Not sure how to treat ons and offs yet, just do ONS for now 
-            neg_centroids = self.spectral_centroids()[0]
-            pos_centroids = self.spectral_centroids()[1]
+            neg_centroids = self.calc_spectral_centroids()[0]
+            pos_centroids = self.calc_spectral_centroids()[1]
             # Step 3: Reshaoe ti multichromatic 
             speed_by_colour_neg = pygor.utilities.multicolour_reshape(neg_centroids, self.numcolour).T
             speed_by_colour_pos = pygor.utilities.multicolour_reshape(pos_centroids, self.numcolour).T 
