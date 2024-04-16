@@ -9,6 +9,7 @@ from collections import defaultdict
 import pandas as pd
 import pathlib
 import warnings
+import numpy as np
 # Local imports
 import pygor.filehandling
 
@@ -25,7 +26,6 @@ class Experiment:
 
     def __str__(self):
         return f"Experiment with {len(self.recording)} recordings and {len(self.id_dict)} entries in id_dict"
-
 
     def __post_init__(self):
         # Update recording and id_dict if data is passed directly during object creation
@@ -61,7 +61,8 @@ class Experiment:
             self.__exp_list_setter__(object)
 
     def __exp_forgetter__(self, indices: int or list[int]):
-        #raise NotImplementedError("Bug in the code, not implemented yet")
+        if isinstance(indices, Iterable) is False:
+            indices = [indices]
         # Deal with recording list
         for index in sorted(indices, reverse=True): # reverse because we want to remove from the end and back
             del self.recording[index]
@@ -82,11 +83,10 @@ class Experiment:
         print(f"Attached data: {objects}")
 
     def detach_data(self, indices:int or list(int)):
-        """
-        TODO Account for moving indices when detaching
-        """
         to_print = self.recording_id.iloc[indices]["name"]
-        if isinstance(to_print, Iterable):
+        if isinstance(to_print, str):
+             to_print = to_print
+        if isinstance(to_print, pd.Series) or isinstance(to_print, np.ndarray):
              to_print = to_print.to_list()
         print(f"Detaching data: {to_print}")
         self.__exp_forgetter__(indices)
