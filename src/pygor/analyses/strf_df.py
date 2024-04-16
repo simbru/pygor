@@ -30,7 +30,8 @@ remove_these_keys = ["images", "rois","strfs", "metadata", "triggertimes", "trig
     "triggerstimes_frame", "averages", "snippets", "phase_num", "_Data__skip_first_frames", "_Data__skip_last_frames", 
     "frame_hz", "trigger_mode", "_Data__keyword_lables", "_Data__compare_ops_map", "ms_dur", "data_types", "type",
     "_contours_centroids", "_contours", "contours_centroids", "_centres_by_pol", "_timecourses", "rois", "images", "data_types",
-    "_Core__keyword_lables", "_Core__compare_ops_map", "bs_settings"]
+    "_Core__keyword_lables", "_Core__compare_ops_map", "bs_settings", "_STRF__contours_centroids", "_Core__skip_last_frames",
+    "_Core__skip_first_frames", "_STRF__contours", "_STRF__timecourses", "traces_raw", "traces_znorm", "name"]
 """
 TODO Fix DISGUSTING key removal logic
 """
@@ -43,7 +44,7 @@ def build_results_dict(data_strf_obj, remove_keys = remove_these_keys): #
     #   - Don't bother storing strfs as they can be retrievied via file if needed
 
     # Check that the instance is actually a pygor.load.STRF object and that it contains STRFs (instead of being empty, i.e. nan)
-    if isinstance(data_strf_obj, pygor.load.STRF) and data_strf_obj.strfs is not np.nan:
+    if isinstance(data_strf_obj, pygor.classes.strf.STRF) and data_strf_obj.strfs is not np.nan:
         # Calculate how long each entry should be (should be same as number of STRFs)
         # Note: Reshape/restructure pre-existing content to fit required structure
         expected_lengths = len(data_strf_obj.strfs)
@@ -59,7 +60,6 @@ def build_results_dict(data_strf_obj, remove_keys = remove_these_keys): #
 
         # Deal with metadata
         metadata = data_strf_obj.metadata.copy()
-        print(metadata)
         # dict["metadata"] = np.repeat(metadata, expected_lengths)
         path = pathlib.Path(metadata.pop("filename"))
         dict["date"] = np.repeat(metadata["exp_date"], expected_lengths)
@@ -145,14 +145,13 @@ def build_results_dict(data_strf_obj, remove_keys = remove_these_keys): #
         dict["dom_centroids"] = np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_centroids, pos_centroids)
         
         # Proof of concept for assigning entire arrays 
-        dict["-timecourse"] = data_strf_obj.get_timecourses()[:, 0].tolist()
-        dict["+timecourse"] = data_strf_obj.get_timecourses()[:, 1].tolist()
+        #dict["-timecourse"] = data_strf_obj.get_timecourses()[:, 0].tolist()
+        #dict["+timecourse"] = data_strf_obj.get_timecourses()[:, 1].tolist()
 
         # Finally, loop through entire dictionary and check that all entries are of correct length
         # The logic is that in many cases, there might not be data to compute stats on. These will
         # emtpy lists, so we need to make a note that there was no data there (e.g. nan)
         for i in dict:
-            print(i, dict[i])
             # First check if dictionary entry is iterable
             # If its not, assume we want stat per strfs, so duplicate the value n = strfs times  
             if isinstance(dict[i], Iterable) == False:
@@ -242,7 +241,7 @@ def build_chromaticity_dict(data_strf_obj, wavelengths =  ["588", "478", "422", 
             ampl_t = data_strf_obj.calc_tunings_amplitude().T
             neg_cent_t, pos_cent_t = data_strf_obj.calc_tunings_centroids()
             neg_cent_t, pos_cent_t = neg_cent_t.T, pos_cent_t.T
-            neg_peak_t, pos_peak_t = data_strf_obj.calc_tunings_peaktime()
+            neg_peak_build_results_dictt, pos_peak_t = data_strf_obj.calc_tunings_peaktime()
             neg_peak_t, pos_peak_t =  neg_peak_t.T, pos_peak_t.T
 
             # Chromatic aspects 
@@ -259,8 +258,8 @@ def build_chromaticity_dict(data_strf_obj, wavelengths =  ["588", "478", "422", 
                 dict[f"peakneg_{i}"] = neg_peak_t[n]
                 dict[f"peakpos_{i}"] = pos_peak_t[n]
                 dict[f"comp_{i}"] = complexities[n]
-                dict[f"temporal_{i}"] = temporal_filter[n].tolist()
-                dict[f"spatial_{i}"] = spatial_filter[n].tolist()
+                #dict[f"temporal_{i}"] = temporal_filter[n].tolist()
+                #dict[f"spatial_{i}"] = spatial_filter[n].tolist()
             
             dict["spatial_X"] = [spatial_filter[0, 0].shape[0]] * expected_lengths
             dict["spatial_Y"] = [spatial_filter[0, 0].shape[1]] * expected_lengths
