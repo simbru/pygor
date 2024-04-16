@@ -26,16 +26,11 @@ import warnings
 ______ From here is all disgusting DataFrame logic that needs to be dealt with!_________________
 """
 
-remove_these_keys = ["images", "rois","strfs", "metadata", "triggertimes", "triggerstimes_frame ",
-    "triggerstimes_frame", "averages", "snippets", "phase_num", "_Data__skip_first_frames", "_Data__skip_last_frames", 
-    "frame_hz", "trigger_mode", "_Data__keyword_lables", "_Data__compare_ops_map", "ms_dur", "data_types", "type",
-    "_contours_centroids", "_contours", "contours_centroids", "_centres_by_pol", "_timecourses", "rois", "images", "data_types",
-    "_Core__keyword_lables", "_Core__compare_ops_map", "bs_settings", "_STRF__contours_centroids", "_Core__skip_last_frames",
-    "_Core__skip_first_frames", "_STRF__contours", "_STRF__timecourses", "traces_raw", "traces_znorm", "name"]
+
 """
 TODO Fix DISGUSTING key removal logic
 """
-def build_results_dict(data_strf_obj, remove_keys = remove_these_keys): #
+def roi_by_roi_dict(data_strf_obj): #
     ## Logic here has to be: 
     #   - Compute information as needed 
     #   - Make sure copmuted things are of equal length 
@@ -45,27 +40,25 @@ def build_results_dict(data_strf_obj, remove_keys = remove_these_keys): #
 
     # Check that the instance is actually a pygor.load.STRF object and that it contains STRFs (instead of being empty, i.e. nan)
     if isinstance(data_strf_obj, pygor.classes.strf.STRF) and data_strf_obj.strfs is not np.nan:
+        # Create dict to write to
+        dict = {}
         # Calculate how long each entry should be (should be same as number of STRFs)
         # Note: Reshape/restructure pre-existing content to fit required structure
         expected_lengths = len(data_strf_obj.strfs)
-
-        # Get dictionary verison of object
-        dict = data_strf_obj.__dict__.copy()
-        # Remove surplus info
-        [dict.pop(key, None) for key in remove_keys]
-        # Make note of how many ROIs for easy indexing later
-        dict["roi"] = [int(i.split('_')[1]) for i in data_strf_obj.strf_keys]
-            
-        dict["multicolour"] = np.repeat(dict["multicolour"], expected_lengths)
-
+        num_rois = len(np.unique(data_strf_obj.rois)) - 1
         # Deal with metadata
         metadata = data_strf_obj.metadata.copy()
-        # dict["metadata"] = np.repeat(metadata, expected_lengths)
+        # Note identifiers
         path = pathlib.Path(metadata.pop("filename"))
         dict["date"] = np.repeat(metadata["exp_date"], expected_lengths)
         dict["path"] = np.repeat(path, expected_lengths)
         dict["filename"] = np.repeat(path.name, expected_lengths)
-
+        # Make note of how many ROIs for easy indexing later
+        dict["roi"] = [int(i.split('_')[1]) for i in data_strf_obj.strf_keys]
+        # Get IPL info
+        dict["ipl_depths"] = np.repeat(data_strf_obj.ipl_depths, num_rois)
+        print("ipl_depths", dict["ipl_depths"])
+        dict["multicolour"] = np.repeat(data_strf_obj.multicolour, expected_lengths)
         fish_n_plane = label_from_str(path.name, (np.arange(0, 10).astype('str')))[:2]
         colours_set = ('BW', 'BWnoUV', 'R', 'G', 'B', 'UV')
         chromatic_set = colours_set[2:]
@@ -166,9 +159,16 @@ def build_results_dict(data_strf_obj, remove_keys = remove_these_keys): #
                     dict[i] = dict[i].astype(float)
                     difference = expected_lengths - len(dict[i])
                     dict[i]=  np.pad(dict[i], (difference,0), constant_values=np.nan)
-        return dict 
-def build_recording_dict(data_strf_obj, remove_keys = remove_these_keys):
-    dict = data_strf_obj.__dict__.copy()
+        return dict
+
+def recording_dict(data_strf_obj):
+    dict = {}
+    # Identity info 
+    path = pathlib.Path(data_strf_obj.filename)
+    dict["filename"] = path
+    dict["multicolour"] = data_strf_obj.multicolour
+    dict["numcolour"] = data_strf_obj.numcolour
+    dict["numstrfs"] = data_strf_obj.num_strfs
     # Deal with metadata
     metadata = data_strf_obj.metadata.copy()
     path = pathlib.Path(metadata.pop("filename"))
@@ -196,26 +196,15 @@ def build_recording_dict(data_strf_obj, remove_keys = remove_these_keys):
     dict["time"] = np.array([metadata.pop("exp_time")])
     dict["strfs_shape"] = [np.array(data_strf_obj.strfs).shape]
     dict["ObjXYZ"] = [metadata.pop("objectiveXYZ")]
-    # Remove surplus info
-    """
-    TODO Fix DISGUSTING key removal logic fuck me this is grim
-    """
-    remove = ["strf_keys", "metadata", "images", "rois", "strfs", "ipl_depths", "_timecourses", "_contours", 
-        "_contours_area", "_pval_time", "_pval_space", "_contours"]
-    temp_remove = []
-    temp_remove.extend(remove_these_keys)
-    temp_remove.extend(remove)
-    [dict.pop(key, None) for key in temp_remove]
     return dict
 
-def build_chromaticity_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
+def chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
         # Chromaticity
         dict = {}
         num_wavelengths = len(wavelengths)
         if data_strf_obj.multicolour == True:
-            # because we have 4 colours, we expect the final length to be n/4
+            # Because we have 4 colours, we expect the final length to be n/4
             expected_lengths = int(len(data_strf_obj.strfs) / num_wavelengths)
-
             # Keep track of metadata
             metadata = data_strf_obj.metadata.copy()
             path = pathlib.Path(metadata.pop("filename"))
@@ -241,10 +230,10 @@ def build_chromaticity_dict(data_strf_obj, wavelengths =  ["588", "478", "422", 
             ampl_t = data_strf_obj.calc_tunings_amplitude().T
             neg_cent_t, pos_cent_t = data_strf_obj.calc_tunings_centroids()
             neg_cent_t, pos_cent_t = neg_cent_t.T, pos_cent_t.T
-            neg_peak_build_results_dictt, pos_peak_t = data_strf_obj.calc_tunings_peaktime()
+            neg_peak_t, pos_peak_t = data_strf_obj.calc_tunings_peaktime()
             neg_peak_t, pos_peak_t =  neg_peak_t.T, pos_peak_t.T
 
-            # Chromatic aspects 
+            # Chromatic aspects
             temporal_filter = utilities.multicolour_reshape(data_strf_obj.get_timecourses(), num_wavelengths)
             spatial_filter = utilities.multicolour_reshape(data_strf_obj.collapse_times(spatial_centre=True), num_wavelengths)
             
@@ -263,6 +252,7 @@ def build_chromaticity_dict(data_strf_obj, wavelengths =  ["588", "478", "422", 
             
             dict["spatial_X"] = [spatial_filter[0, 0].shape[0]] * expected_lengths
             dict["spatial_Y"] = [spatial_filter[0, 0].shape[1]] * expected_lengths
+            dict["temporal_len"] = [temporal_filter.shape[0]] * expected_lengths
             dict["opp_bool"] = np.array(data_strf_obj.get_opponency_bool())
             # Sort dictionary for friendliness 
             core_info = ['date', 'path', 'filename', "curr_path", 'strf_keys', 'cell_id', 'size', 'ipl_depths', 'opp_bool']
@@ -290,9 +280,9 @@ def compile_strf_df(files, summary_prints = True, do_bootstrap = True):
         if isinstance(loaded.strfs, np.ndarray) is False and math.isnan(loaded.strfs) is True:
                 print("No STRFs found for", i, ", skipping...")
                 continue
-        curr_df = pd.DataFrame(build_results_dict(loaded))
+        curr_df = pd.DataFrame(roi_by_roi_dict(loaded))
         roi_stat_list.append(curr_df)
-        curr_rec = pd.DataFrame(build_recording_dict(loaded))
+        curr_rec = pd.DataFrame(recording_dict(loaded))
         rec_info_list.append(curr_rec)
         # print(curr_df)
         # rec_df = pd.concat(i)
@@ -328,12 +318,12 @@ def compile_chroma_strf_df(files, summary_prints = True,  do_bootstrap = True, s
                     continue
             # Check that lengths check out and so the next few lines dont craash out wiht uninterpetable errors
             #lengths = [len(build_results_dict(loaded)[i]) for i in build_results_dict(loaded)]
-            curr_df = pd.DataFrame(build_results_dict(loaded))
+            curr_df = pd.DataFrame(roi_by_roi_dict(loaded))
             roi_stat_list.append(curr_df)
-            curr_rec = pd.DataFrame(build_recording_dict(loaded))
+            curr_rec = pd.DataFrame(recording_dict(loaded))
             rec_info_list.append(curr_rec)
-            curr_crhoma = pd.DataFrame(build_chromaticity_dict(loaded))
-            chroma_list.append(curr_crhoma)
+            curr_chroma = pd.DataFrame(chromatic_dict(loaded))
+            chroma_list.append(curr_chroma)
             # print(curr_df)
             # rec_df = pd.concat(i)
             if store_objects is not None:

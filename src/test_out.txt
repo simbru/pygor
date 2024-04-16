@@ -8,7 +8,7 @@ Pass 'hint = True' for more tips and hints on using the data class.
         Current metadata: 
        { 'exp_date': datetime.date(2023, 11, 7),
          'exp_time': datetime.time(17, 3, 37),
-         'filename': 'c:\\Users\\Simen\\Git_repos\\pygor\\src\\pygor\\examples\\strf_demo_data.h5',
+         'filename': 'c:\\Users\\SimenLab\\Git_repos\\pygor\\src\\pygor\\examples\\strf_demo_data.h5',
          'objectiveXYZ': (-125190.0, -71909.0, -119340.0)}
 
     ## Attributes

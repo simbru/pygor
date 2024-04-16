@@ -75,12 +75,12 @@ def _load_parser(file_path, as_class = None, **kwargs):
             raise AttributeError("Must specify 'as_class = pygor.load.class' class to load .h5 files")
         if as_class is not None:
             loaded = as_class(file_path,  **kwargs)            
-    if isinstance(loaded.strfs, np.ndarray) is False and math.isnan(loaded.strfs) is True:
-            print("No STRFs found for", file_path, ", skipping...")
-            return None
-    if loaded.multicolour is False:
-            print("Listed file not multichromatic for file", file_path, ", skipping...")
-            return None
+    # # # if isinstance(loaded.strfs, np.ndarray) is False and math.isnan(loaded.strfs) is True:
+    # # #         print("No STRFs found for", file_path, ", skipping...")
+    # #         return None
+    # if loaded.multicolour is False:
+    #         print("Listed file not multichromatic for file", file_path, ", skipping...")
+    #         return None
     return loaded
 
 def load(file_path, as_class = None, **kwargs):

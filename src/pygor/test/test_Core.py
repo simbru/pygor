@@ -43,6 +43,12 @@ class TestCore(unittest.TestCase):
                         except AttributeError:
                             warnings.warn(f"Method {i} gave AttributeError")
 
+    def test_get_help(self):
+        write_to = file_loc.parent.joinpath("test_out.txt")
+        with open(write_to, 'w') as f:
+            with redirect_stdout(f):
+                data.get_help(hints = True, types = True)
+
 if __name__ == "__main__":
     unittest.main()
     print(os.getcwd())

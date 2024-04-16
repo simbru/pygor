@@ -71,9 +71,12 @@ def get_return_type(func):
         return 'None'
     if function_annotation == '?':
         return '?'
-    if isinstance(function_annotation, str) is False and isinstance(function_annotation, Iterable):
+    if isinstance(function_annotation, str) is False and isinstance(function_annotation, Iterable) is True:
         org_type = type(function_annotation)
-        return org_type([i.__name__ for i in function_annotation])
+        try:
+            return org_type([i.__name__ for i in function_annotation])
+        except TypeError:
+            return function_annotation
     elif isinstance(function_annotation, str) is False and isinstance(function_annotation, Iterable) is False:
         return function_annotation.__name__
     else:

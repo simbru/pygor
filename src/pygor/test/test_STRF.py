@@ -52,5 +52,11 @@ class TestSTRF(unittest.TestCase):
         strfs.update_bootstrap_settings(new_bs_dict)
         strfs.run_bootstrap()
 
+    def test_get_help(self):
+        write_to = file_loc.parent.joinpath("test_out.txt")
+        with open(write_to, 'w') as f:
+            with redirect_stdout(f):
+                strfs.get_help(hints = True, types = True)
+
 if __name__ == '__main__':
     unittest.main()
