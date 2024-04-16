@@ -61,23 +61,13 @@ class Experiment:
             self.__exp_list_setter__(object)
 
     def __exp_forgetter__(self, indices: int or list[int]):
-        raise NotImplementedError("Bug in the code, not implemented yet")
+        #raise NotImplementedError("Bug in the code, not implemented yet")
         # Deal with recording list
         for index in sorted(indices, reverse=True): # reverse because we want to remove from the end and back
             del self.recording[index]
             # Deal with id_dict
-            for key, value in self.id_dict.items():
-                print(self.id_dict[key])
+            for key in self.id_dict.keys():
                 del self.id_dict[key][index]
-        
-        # if isinstance(indices, Iterable) is False:
-        #     _input = [indices]
-        # else:
-        #     _input = indices
-        # for k, v in self.id_dict.items():
-        #     # Use list comprehension to remove elements at specified indices
-        #     v[:] = [v[i] for i in range(len(v)) if i not in _input and i - len(v) not in _input]
-            #print(k, v)
 
     @property
     def recording_id(self):
@@ -95,16 +85,11 @@ class Experiment:
         """
         TODO Account for moving indices when detaching
         """
-        # if isinstance(indices, Iterable) is False:
-        #     self.__exp_forgetter__(indices)
-        # else:
-        #     for i in indices:
-        #         self.__exp_forgetter__(i)
-        self.__exp_forgetter__(indices)
         to_print = self.recording_id.iloc[indices]["name"]
         if isinstance(to_print, Iterable):
-            to_print = to_print.to_list()
-        print(f"Detached data: {to_print}")
+             to_print = to_print.to_list()
+        print(f"Detaching data: {to_print}")
+        self.__exp_forgetter__(indices)
     
     def df_strf_chromatic(self):
         roi_list = []
