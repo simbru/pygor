@@ -3,11 +3,11 @@ import pygor.load
 import pygor.utilities as utilities
 import pygor.steps.contouring as contouring
 import pygor.temporal as temporal
+import pygor.classes.experiment
 from pygor.data_helpers import label_from_str
 from pygor.utilities import powerset
 from pygor.utils import unit_conversion
 from pygor.filehandling import load_pkl
-
 
 # External imports
 import numpy as np
@@ -31,6 +31,20 @@ ______ From here is all disgusting DataFrame logic that needs to be dealt with!_
 TODO Fix DISGUSTING key removal logic
 """
 def roi_by_roi_dict(data_strf_obj): #
+    """
+    Process STRF objects and extract relevant information into a dictionary suitable for DataFrame creation.
+
+    Parameters
+    ----------
+    data_strf_obj : STRF object
+        An instance of pygor's STRF class containing spatiotemporal receptive field data.
+
+    Returns
+    -------
+    dict
+        A dictionary with keys corresponding to metadata, spatial, and temporal properties of the STRFs,
+        and values as lists containing the data for these properties, ready for DataFrame conversion.
+    """
     ## Logic here has to be: 
     #   - Compute information as needed 
     #   - Make sure copmuted things are of equal length 
@@ -56,8 +70,7 @@ def roi_by_roi_dict(data_strf_obj): #
         # Make note of how many ROIs for easy indexing later
         dict["roi"] = [int(i.split('_')[1]) for i in data_strf_obj.strf_keys]
         # Get IPL info
-        dict["ipl_depths"] = np.repeat(data_strf_obj.ipl_depths, num_rois)
-        print("ipl_depths", dict["ipl_depths"])
+        dict["ipl_depths"] = data_strf_obj.ipl_depths
         dict["multicolour"] = np.repeat(data_strf_obj.multicolour, expected_lengths)
         fish_n_plane = label_from_str(path.name, (np.arange(0, 10).astype('str')))[:2]
         colours_set = ('BW', 'BWnoUV', 'R', 'G', 'B', 'UV')
@@ -162,6 +175,20 @@ def roi_by_roi_dict(data_strf_obj): #
         return dict
 
 def recording_dict(data_strf_obj):
+    """
+    Generate a dictionary with recording information and metadata.
+
+    Parameters
+    ----------
+    data_strf_obj : object
+        An object containing the filename, multicolour status, number of colours, number of STRFs, and metadata.
+
+    Returns
+    -------
+    dict
+        A dictionary containing the path, filename, multicolour status, number of colours, number of STRFs, colour information,
+        pairing information, colour combinations, size, frequency, noise data, number of ROIs, date, time, STRFs shape, and objective XYZ position.
+    """
     dict = {}
     # Identity info 
     path = pathlib.Path(data_strf_obj.filename)
@@ -199,6 +226,26 @@ def recording_dict(data_strf_obj):
     return dict
 
 def chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
+        """
+        Generate a chromaticity dictionary from a data structure object.
+
+        Parameters
+        ----------
+        data_strf_obj : DataType
+            Data structure object containing STRFs and metadata.
+        wavelengths : list of str, optional
+            List of wavelength strings to be processed. Defaults to ["588", "478", "422", "375"].
+
+        Returns
+        -------
+        dict
+            Dictionary containing chromaticity data and additional metadata.
+
+        Raises
+        ------
+        AttributeError
+            If 'multicolour' attribute of data_strf_obj is not True.
+        """        
         # Chromaticity
         dict = {}
         num_wavelengths = len(wavelengths)
@@ -264,90 +311,69 @@ def chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
         else:
             raise AttributeError("Attribute 'multicolour' is not True. Manual fix required.")
 
- 
-def compile_strf_df(files, summary_prints = True, do_bootstrap = True):
-    roi_stat_list = []
-    rec_info_list = []
-    # progress_bar = alive_it(files, force_tty=True)
-    for i in files:
-        print("Current file:", i)
-        file_type = pathlib.Path(i).suffix
-        print(file_type)
-        if file_type == ".pkl":
-            loaded = load_pkl(i)
-        if file_type == ".h5":
-            loaded = pygor.load.STRF(i, do_bootstrap = do_bootstrap)
-        if isinstance(loaded.strfs, np.ndarray) is False and math.isnan(loaded.strfs) is True:
-                print("No STRFs found for", i, ", skipping...")
-                continue
-        curr_df = pd.DataFrame(roi_by_roi_dict(loaded))
-        roi_stat_list.append(curr_df)
-        curr_rec = pd.DataFrame(recording_dict(loaded))
-        rec_info_list.append(curr_rec)
-        # print(curr_df)
-        # rec_df = pd.concat(i)
-    roi_df = pd.concat(roi_stat_list, ignore_index=True)
-    # roi_df.to_pickle(r"d:/pygor.load.STRF/test")
-    # roi_df = roi_df[np.roll(roi_df.columns, 1)]
-    rec_df = pd.concat(rec_info_list, ignore_index=True)
-    if summary_prints == True:
-        print("The following files are missing key 'Positions' resulting in np.nan for 'ipl_depths':\n",
-        "\n", pd.unique(roi_df.query("ipl_depths.isnull()")["path"]))
-    return roi_df, rec_df
+def chromatic_stats_df(exp_obj : pygor.classes.experiment.Experiment):
+    """
+    Generate a DataFrame containing chromatic statistics from an Experiment object.
 
-def compile_chroma_strf_df(files, summary_prints = True,  do_bootstrap = True, store_objects = None):        
-    roi_stat_list = []
-    rec_info_list = []
-    chroma_list =   []
-    #progress_bar = alive_it(files, spinner = "fishes", bar = 'blocks', calibrate = 50, force_tty=True)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=RuntimeWarning)
-        warnings.filterwarnings("ignore", category=UserWarning)
-        for i in files:
-            print("Current file:", i)
-            file_type = pathlib.Path(i).suffix
-            if file_type == ".pkl":
-                loaded = load_pkl(i)
-            if file_type == ".h5":
-                loaded = pygor.load.STRF(i, do_bootstrap = do_bootstrap)            
-            if isinstance(loaded.strfs, np.ndarray) is False and math.isnan(loaded.strfs) is True:
-                    print("No STRFs found for", i, ", skipping...")
-                    continue
-            if loaded.multicolour is False:
-                    print("Listed file not multichromatic for file", i, ", skipping...")
-                    continue
-            # Check that lengths check out and so the next few lines dont craash out wiht uninterpetable errors
-            #lengths = [len(build_results_dict(loaded)[i]) for i in build_results_dict(loaded)]
-            curr_df = pd.DataFrame(roi_by_roi_dict(loaded))
-            roi_stat_list.append(curr_df)
-            curr_rec = pd.DataFrame(recording_dict(loaded))
-            rec_info_list.append(curr_rec)
-            curr_chroma = pd.DataFrame(chromatic_dict(loaded))
-            chroma_list.append(curr_chroma)
-            # print(curr_df)
-            # rec_df = pd.concat(i)
-            if store_objects is not None:
-                name = pathlib.Path(loaded.metadata["filename"]).stem
-                print(f"Storing {type(loaded)} as {name}")
-                loaded.save_pkl(store_objects, name)
-    # Get dfs like usual 
-    roi_df = pd.concat(roi_stat_list, ignore_index=True)
-    rec_df = pd.concat(rec_info_list, ignore_index=True)
-    chroma_df = pd.concat(chroma_list, ignore_index=True)
-    
-    # Correct indeces due to quadrupling
-    all_ipl_depths = np.repeat(np.array(roi_df["ipl_depths"][~np.isnan(roi_df["ipl_depths"])]), 4) # repeats IPL positions 
-    roi_df["ipl_depths"] = all_ipl_depths
-    roi_df["cell_id"] = [i.strftime("%m-%d-%Y") + '_' + '_'.join(j.split('_')[:2]) for i, j in zip(roi_df["date"], roi_df["strf_keys"])]
-    # Type handling
-    roi_df["size"] = roi_df["size"].astype("category")
-    chroma_df["size"] = chroma_df["size"].astype("category")
-    if summary_prints == True:
-        print("The following files are missing key 'Positions' resulting in np.nan for 'ipl_depths':\n",
-        "\n", pd.unique(roi_df.query("ipl_depths.isnull()")["path"]))
-    return roi_df, rec_df, chroma_df
+    Parameters
+    ----------
+    exp_obj : pygor.classes.experiment.Experiment
+        The Experiment object to extract chromatic statistics from.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A concatenated DataFrame of chromatic statistics from all recordings in the Experiment object.
+    """
+
+    chromatic_dict_list = []
+    for object in exp_obj.recording:
+        curr_dict = chromatic_dict(object)
+        chromatic_dict_list.append(pd.DataFrame(curr_dict))
+    return pd.concat(chromatic_dict_list, ignore_index=True)
+
+def roi_stats_df(exp_obj : pygor.classes.experiment.Experiment):
+    """
+    Generate statistics dataframe for regions of interest in the given experiment.
+
+    Parameters
+    ----------
+    exp_obj : pygor.classes.experiment.Experiment
+        The experiment object containing recordings.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Concatenated dataframe of statistics for each region of interest.
+    """
+    roi_dict = []
+    for object in exp_obj.recording:
+        curr_dict = pygor.analyses.strf_df.roi_by_roi_dict(object)
+        roi_dict.append(pd.DataFrame(curr_dict))
+    return pd.concat(chromatic_dict, ignore_index=True)
+
+def rec_info_df(exp_obj : pygor.classes.experiment.Experiment):
+    """
+    Generate a DataFrame with information from recordings in an Experiment object.
+
+    Parameters
+    ----------
+    exp_obj : pygor.classes.experiment.Experiment
+        The Experiment object to process recordings from.
+
+    Returns
+    -------
+    pd.DataFrame
+        A concatenated DataFrame with information from all recordings in the Experiment object, indexed by recording.
+    """
+    rec_dict = []
+    for object in exp_obj.recording:
+        curr_dict = pygor.analyses.strf_df.recording_dict(object)
+        rec_dict.append(pd.DataFrame(curr_dict))
+    return pd.concat(chromatic_dict, ignore_index=True)
 
 def split_df_by(DataFrame, category_str):
+    raise NotImplementedError("Not implemented yet")
     dfs_by_pol = {accepted: sub_df
     for accepted, sub_df in DataFrame.groupby(category_str)}
     if category_str == "cat_pol":

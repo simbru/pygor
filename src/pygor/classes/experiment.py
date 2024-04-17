@@ -48,7 +48,8 @@ class Experiment:
         self.id_dict["name"].append(pathlib.Path(object.metadata["filename"]).stem)
         self.id_dict["num_rois"].append(object.num_rois)
         self.id_dict["type"].append(object.type)
-        self.id_dict["path"].append(object.metadata["filename"])   
+        self.id_dict["path"].append(object.metadata["filename"])
+
 
     def __exp_list_setter__(self, object):
         self.recording.append(object)
