@@ -1,32 +1,48 @@
 
-import numpy as np 
 import pathlib 
-import h5py
 import warnings
-import pathlib
-import math 
-from collections.abc import Iterable
+
+try:
+    from collections.abc import Iterable
+except ImportError:
+    from collections import Iterable
 import joblib
 # from tqdm.autonotebook import tqdm
 from tqdm.auto import tqdm
 from ipywidgets import Output
-import dacite
-import natsort # a godsend 
 
-import pygor.classes.strf
-
-# ROI frame needs to contain all stuff from each roi 
-# REC frame just keeps tally of recording, and will essentially be only 1 row for each recording
-from dataclasses import dataclass
-def find_files_in(filetype_ext_str, dir_path, recursive = False, **kwargs) -> list:
+def find_files_in(filetype_ext_str, dir_path, recursive=False, **kwargs) -> list:
     """
     Searches the specified directory for files with the specified file extension.
-    The function takes in three parameters:
-    - filetype_ext_str (str): The file extension to search for, including the '.', e.g. '.txt'
-    - dir_path (str or pathlib.PurePath): The directory path to search in. If a string is provided, it will be converted to a pathlib.PurePath object
-    - recursive (bool): If set to True, the function will search recursively through all subdirectories. Default is False.
-    
-    Returns a list of pathlib.Path objects representing the paths of the files found.
+
+    Parameters
+    ----------
+    filetype_ext_str : str
+        The file extension to search for, including the '.', e.g. '.txt'.
+    dir_path : str or pathlib.PurePath
+        The directory path to search in. If a string is provided, it will be converted to a pathlib.PurePath object.
+    recursive : bool, optional
+        If set to True, the function will search recursively through all subdirectories. Default is False.
+    **kwargs
+        - match = str: If provided, the function will filter files based on this single search term.
+        - match_all = [str]: If provided as a list of strings, the function will filter files that contain 
+            all of the specified search terms.
+        - match_any = [str]: If provided as a list of strings, the function will filter files that contain 
+            any of the specified search terms.
+
+    Returns
+    -------
+    list of pathlib.Path
+        A list of pathlib.Path objects representing the paths of the files found.
+
+    Raises
+    ------
+    AttributeError
+        If the 'match' or 'match_all' or 'match_any' kwargs are not used correctly.
+
+    Notes
+    -----
+    The function uses pathlib for handling paths.
     """
     #  Handle paths using pathlib for maximum enjoyment and minimal life hatered
     if isinstance(dir_path, pathlib.PurePath) is False:
@@ -54,18 +70,68 @@ def find_files_in(filetype_ext_str, dir_path, recursive = False, **kwargs) -> li
     return paths
 
 def save_pkl(object, save_path, filename):
+    """
+    Save an object to a pickle file using joblib with zlib compression.
+
+    Parameters
+    ----------
+    object : any type
+        The object to save.
+    save_path : str or pathlib.Path
+        The directory path where the pickle file will be saved.
+    filename : str
+        The name of the file without the extension.
+
+    Returns
+    -------
+    None
+    """
     final_path = pathlib.Path(save_path, filename).with_suffix(".pkl")
     print("Storing as:", final_path, end = "\r")
     with open(final_path, 'wb') as outp:
         joblib.dump(object, outp, compress='zlib')
         
 def load_pkl(full_path):
+    """
+    Load a pickled object from the given full path and update its metadata.
+
+    Parameters
+    ----------
+    full_path : str
+        The full file path to the pickled object file.
+
+    Returns
+    -------
+    object
+        The loaded object with updated metadata.
+    """
     with open(full_path, 'rb') as inp:
         object = joblib.load(inp)
         object.metadata["curr_path"] = full_path
         return object
 
 def _load_parser(file_path, as_class = None, **kwargs):
+    """
+    Parse and load data from a file based on its file type.
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the file to be loaded.
+    as_class : class, optional
+        Class to be used for loading .h5 files.
+        Defaults to None. If not provided when loading .h5 files,
+        an AttributeError will be raised.
+    **kwargs : dict
+        Additional keyword arguments passed to the class initializer
+        when loading .h5 files.
+
+    Returns
+    -------
+    loaded : object
+        The loaded data from the file. Type of the object depends
+        on the file type and `as_class` parameter.
+    """
     #print("Current file:", i)
     file_type = pathlib.Path(file_path).suffix
     if file_type == ".pkl":
@@ -84,15 +150,104 @@ def _load_parser(file_path, as_class = None, **kwargs):
     return loaded
 
 def load(file_path, as_class = None, **kwargs):
+    """
+    Loads data from a file specified by `file_path` using a given class or default parser.
+    
+    Parameters
+    ----------
+    file_path : str
+        The path to the file to be loaded.
+    as_class : class, optional
+        The class to be used for loading the data. If None, an error will be raised
+        when loading .h5 files.
+    **kwargs
+        Arbitrary keyword arguments passed to the loading function.
+    
+    Returns
+    -------
+    object
+        The loaded data from the file. Type of the object depends on the file type and `as_class` parameter.
+    """
     return _load_parser(file_path, as_class = as_class, **kwargs)
 
+def load_list(paths_list, as_class = None, **kwargs) -> [pathlib.WindowsPath]:
+    """
+    Converts a list of paths to a list of objects, optionally using a specified class for instantiation
+    of .h5 files (otherwise will throw an error).
+
+    Parameters
+    ----------
+    paths_list : list
+        A list containing path-like elements.
+    as_class : class, optional
+        A class to be used for creating objects from paths (default is None).
+
+    Returns
+    -------
+    list of pathlib.WindowsPath
+        A list of objects created from the paths, as instances of pathlib.WindowsPath or `as_class` if provided.
+
+    Errors
+    ------
+    AttributeError
+        If `as_class` is not specified when loading .h5 files, an AttributeError is raised 
+        reminding you to specify `as_class` for accurate initialisation.
+    """
+
+    progress_bar = tqdm(paths_list, desc = "Iterating through and loading listed files")
+    objects_list = []
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=UserWarning)
+        out = Output()
+        display(out)  # noqa: F821
+        with out:
+            for i in progress_bar:
+                objects_list.append(_load_parser(i, as_class=as_class, **kwargs))
+                out.clear_output()
+    return objects_list
+
 def _load_and_save(file_path, output_folder, as_class, **kwargs):
+    """
+    Load data from the specified file and save it to the given output folder using the provided class.
+
+    Parameters
+    ----------
+    file_path : str
+        The path to the file to be loaded.
+    output_folder : str
+        The folder where the output file will be saved.
+    as_class : class
+        The class to be used for loading the data.
+    **kwargs
+        Arbitrary keyword arguments passed to the loading function.
+
+    Returns
+    -------
+    None
+    """
     loaded = _load_parser(file_path, as_class=as_class, **kwargs)
     name = pathlib.Path(loaded.metadata["filename"]).stem
     loaded.save_pkl(output_folder, name)
     # out.clear_output()
 
 def picklestore_objects(file_paths, output_folder, **kwargs):
+    """
+    Pickle store objects from given file paths to the specified output folder.
+
+    Parameters
+    ----------
+    file_paths : str or Iterable
+        A single file path or an iterable of file paths to be processed.
+    output_folder : str
+        The folder where the pickled objects will be stored.
+    **kwargs : dict
+        Arbitrary keyword arguments passed on to the loading function.
+
+    Returns
+    -------
+    None
+    """
     if isinstance(file_paths, Iterable) is False:
         file_paths = [file_paths]
     output_folder = pathlib.Path(output_folder)
@@ -108,15 +263,3 @@ def picklestore_objects(file_paths, output_folder, **kwargs):
                 _load_and_save(i, output_folder, **kwargs)
                 out.clear_output()
 
-
-# Instantiates the very basic Data object
-# def load_data(filename, img_stack = True):
-#     with h5py.File(filename) as HDF5_file:
-#         rois = np.array(HDF5_file["ROIs"])
-#         if img_stack == True:
-#             images = data_helpers.load_wDataCh0(HDF5_file)
-#         else:
-#             images = np.nan
-#         meta_data = metadata_dict(HDF5_file)
-#     Data_obj = Data(images = images, rois = rois, metadata = meta_data)
-#     return Data_obj

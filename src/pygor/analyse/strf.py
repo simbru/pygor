@@ -1,13 +1,10 @@
 # Local imports
+import pygor.steps.contouring
+import pygor.temporal
 import pygor.load
-import pygor.utilities as utilities
-import pygor.steps.contouring as contouring
-import pygor.temporal as temporal
+import pygor.utilities
 import pygor.classes.experiment
-from pygor.data_helpers import label_from_str
-from pygor.utilities import powerset
-from pygor.utils import unit_conversion
-from pygor.filehandling import load_pkl
+import pygor.data_helpers
 
 # External imports
 import numpy as np
@@ -19,18 +16,9 @@ except ImportError:
     from collections import Iterable
 import natsort
 import pandas as pd
-import math
 import warnings
 
-"""
-______ From here is all disgusting DataFrame logic that needs to be dealt with!_________________
-"""
-
-
-"""
-TODO Fix DISGUSTING key removal logic
-"""
-def roi_by_roi_dict(data_strf_obj): #
+def _roi_by_roi_dict(data_strf_obj): #
     """
     Process STRF objects and extract relevant information into a dictionary suitable for DataFrame creation.
 
@@ -53,7 +41,7 @@ def roi_by_roi_dict(data_strf_obj): #
     #   - Don't bother storing strfs as they can be retrievied via file if needed
 
     # Check that the instance is actually a pygor.load.STRF object and that it contains STRFs (instead of being empty, i.e. nan)
-    if isinstance(data_strf_obj, pygor.classes.strf.STRF) and data_strf_obj.strfs is not np.nan:
+    if isinstance(data_strf_obj, pygor.classes.strf_data.STRF) and data_strf_obj.strfs is not np.nan:
         # Create dict to write to
         dict = {}
         # Calculate how long each entry should be (should be same as number of STRFs)
@@ -72,20 +60,23 @@ def roi_by_roi_dict(data_strf_obj): #
         # Get IPL info
         dict["ipl_depths"] = data_strf_obj.ipl_depths
         dict["multicolour"] = np.repeat(data_strf_obj.multicolour, expected_lengths)
-        fish_n_plane = label_from_str(path.name, (np.arange(0, 10).astype('str')))[:2]
+        #fish_n_plane = pygor.data_helpers.label_from_str(path.name, (np.arange(0, 10).astype('str')))[:2]
         colours_set = ('BW', 'BWnoUV', 'R', 'G', 'B', 'UV')
         chromatic_set = colours_set[2:]
-        colours_combos = powerset(('R', 'G', 'B', 'UV'), combinations_only=True)
+        colours_combos = pygor.utilities.powerset(('R', 'G', 'B', 'UV'), combinations_only=True)
         if data_strf_obj.multicolour == True:
             # Get last number in strf key 
             strf_key_colour_index = [int(i.split('_')[-1]) for i in data_strf_obj.strf_keys]
             # Assign colour accordingly 
             dict["colour"] = [chromatic_set[i] for i in strf_key_colour_index]
         else:
-            dict["colour"] = [label_from_str(path.name, colours_set)] * expected_lengths
-        dict["simultaneous"] = [label_from_str(path.name, colours_combos, label = 'y', else_return='n')] * expected_lengths
-        dict["combo"] = [label_from_str(path.name, colours_combos)] * expected_lengths
-        size = int(label_from_str(path.name, ('800', '400', '200', '100', '75', '50', '25'), first_return_only=True))
+            dict["colour"] = [pygor.data_helpers.label_from_str(path.name, colours_set)] * expected_lengths
+        dict["simultaneous"] = [pygor.data_helpers.label_from_str(path.name, colours_combos, label = 'y', else_return='n')] * expected_lengths
+        dict["combo"] = [pygor.data_helpers.label_from_str(path.name, colours_combos)] * expected_lengths
+        size = pygor.data_helpers.label_from_str(path.name, ('800', '400', '200', '100', '75', '50', '25'), first_return_only=True)
+        if np.isnan(size):
+            size = 0
+        
         dict["size"] =  [size] * expected_lengths 
         shape = np.stack([i.shape for i in data_strf_obj.strfs])
         dict["shapeZ"] = shape[:, 0]
@@ -93,11 +84,11 @@ def roi_by_roi_dict(data_strf_obj): #
         dict["shapeX"] = shape[:, 2]
         dict["XYratio"] = shape[:, 2]/shape[:, 1]
         # Create a conversion factor between size in au, size in vis ang, and STRF area 
-        visang_size = np.array(unit_conversion.au_to_visang(size))
+        visang_size = np.array(pygor.utils.unit_conversion.au_to_visang(size))
         dict["visang_size"] =  np.repeat(visang_size, expected_lengths) #might as well store it 
         # dict["size_bias"] =  []
-        dict["frequency"] = [label_from_str(path.name, ['10Hz', '5Hz'])] * expected_lengths
-        dict["noise"] = [label_from_str(path.name, ['BWN', 'SWN'])] * expected_lengths
+        dict["frequency"] = [pygor.data_helpers.label_from_str(path.name, ['10Hz', '5Hz'])] * expected_lengths
+        dict["noise"] = [pygor.data_helpers.label_from_str(path.name, ['BWN', 'SWN'])] * expected_lengths
         # Compute results and append to dict 
         ## Compute stats
         # P vals for time and space 
@@ -114,8 +105,8 @@ def roi_by_roi_dict(data_strf_obj): #
         dict["neg_contour_count"] = neg_contour_count
         dict["pos_contour_count"] = pos_contour_count
         dict["total_contour_count"] = neg_contour_count + pos_contour_count
-        neg_contour_areas_corrected = [i[0] for i in data_strf_obj.get_contours_area(unit_conversion.au_to_visang(size)/4)]
-        pos_contour_areas_corrected = [i[1] for i in data_strf_obj.get_contours_area(unit_conversion.au_to_visang(size)/4)]        
+        neg_contour_areas_corrected = [i[0] for i in data_strf_obj.get_contours_area(pygor.utils.unit_conversion.au_to_visang(size)/4)]
+        pos_contour_areas_corrected = [i[1] for i in data_strf_obj.get_contours_area(pygor.utils.unit_conversion.au_to_visang(size)/4)]        
         tot_neg_areas_corrected, tot_pos_areas_corrected = [np.sum(i) for i in neg_contour_areas_corrected], [np.sum(i) for i in pos_contour_areas_corrected]
         #dict["neg_contour_areas"] = neg_contour_areas_corrected
         #dict["pos_contour_areas"] = pos_contour_areas_corrected
@@ -132,7 +123,7 @@ def roi_by_roi_dict(data_strf_obj): #
         dict["pos_extrema"] = pos_extrema
         #dict["dom_extrema"] =  np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_extrema, pos_extrema)
         dict["polarities"] = data_strf_obj.get_polarities()
-        neg_biphasic, pos_biphasic = temporal.biphasic_index(timecourses_neg), temporal.biphasic_index(timecourses_pos)
+        neg_biphasic, pos_biphasic = pygor.temporal.biphasic_index(timecourses_neg), pygor.temporal.biphasic_index(timecourses_pos)
         dict["neg_biphasic_index"] = neg_biphasic
         dict["pos_biphasic_index"] = pos_biphasic
         dict["dom_biphasic_index"] = np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_biphasic, pos_biphasic)
@@ -174,7 +165,7 @@ def roi_by_roi_dict(data_strf_obj): #
                     dict[i]=  np.pad(dict[i], (difference,0), constant_values=np.nan)
         return dict
 
-def recording_dict(data_strf_obj):
+def _recording_dict(data_strf_obj):
     """
     Generate a dictionary with recording information and metadata.
 
@@ -202,18 +193,18 @@ def recording_dict(data_strf_obj):
     dict["path"] = np.array([path])
     dict["filename"] = path.name
     colours_set = ('BW', 'R', 'G', 'B', 'UV')
-    colours_combos = powerset(('R', 'G', 'B', 'UV'), combinations_only=True)
+    colours_combos = pygor.utilities.powerset(('R', 'G', 'B', 'UV'), combinations_only=True)
     if data_strf_obj.multicolour == True:
         dict["colour"] = "RGBUV"
         dict["paired"] = np.nan
-        dict["combo"] = label_from_str(path.name, colours_combos)
+        dict["combo"] = pygor.data_helpers.label_from_str(path.name, colours_combos)
     else:
-        dict["colour"] = label_from_str(path.name, colours_set)
-        dict["paired"] = label_from_str(path.name, colours_combos, label = 'y', else_return='n')        
-        dict["combo"] = label_from_str(path.name, colours_combos)
-    dict["size"] =  label_from_str(path.name, ('800', '400', '200', '100', '75', '50', '25'), first_return_only=True)
-    dict["frequency"] = label_from_str(path.name, ['10Hz', '5Hz'])
-    dict["noise"] = label_from_str(path.name, ['BWN', 'SWN'])
+        dict["colour"] = pygor.data_helpers.label_from_str(path.name, colours_set)
+        dict["paired"] = pygor.data_helpers.label_from_str(path.name, colours_combos, label = 'y', else_return='n')        
+        dict["combo"] = pygor.data_helpers.label_from_str(path.name, colours_combos)
+    dict["size"] =  pygor.data_helpers.label_from_str(path.name, ('800', '400', '200', '100', '75', '50', '25'), first_return_only=True)
+    dict["frequency"] = pygor.data_helpers.label_from_str(path.name, ['10Hz', '5Hz'])
+    dict["noise"] = pygor.data_helpers.label_from_str(path.name, ['BWN', 'SWN'])
     # print(dict["filename"][0], dict[])
     if data_strf_obj.strfs is np.nan:
         dict["rois_num"] = np.array(0)
@@ -225,7 +216,7 @@ def recording_dict(data_strf_obj):
     dict["ObjXYZ"] = [metadata.pop("objectiveXYZ")]
     return dict
 
-def chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
+def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
         """
         Generate a chromaticity dictionary from a data structure object.
 
@@ -264,15 +255,17 @@ def chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
             dict["cell_id"] = [path.stem.replace(" ", "") + metadata["exp_date"].strftime("%m-%d-%Y") + '_' + '_'.join(j.split('_')[:2]) for j in strf_keys]
             dict["roi"] = [int(i.split('_')[1]) for i in data_strf_obj.strf_keys][::data_strf_obj.numcolour]
             # dict["cell_id"] = 
-            size = int(label_from_str(path.name, ('800', '400', '200', '100', '75', '50', '25'), first_return_only=True))
-            dict["size"] =  [size] * expected_lengths
+            size = pygor.data_helpers.label_from_str(path.name, ('800', '400', '200', '100', '75', '50', '25'), first_return_only=True)
+            if np.isnan(size):
+                size = 0
+            dict["size"] =  [int(size)] * expected_lengths
             # dict["pol_cat"] = data_strf_obj.polarity_category()
             # Some generic stats
             dict["ipl_depths"] = data_strf_obj.ipl_depths # some things are already aligned by cell_id naturally (from Igor)
             dict["cat_pol"] = data_strf_obj.get_polarity_category()
             
-            polarities = utilities.multicolour_reshape(data_strf_obj.get_polarities(), num_wavelengths)
-            complexities = utilities.multicolour_reshape(np.nanmean(contouring.complexity_weighted(data_strf_obj.fit_contours(), data_strf_obj.get_contours_area()), axis = 1), num_wavelengths)
+            polarities = pygor.utilities.multicolour_reshape(data_strf_obj.get_polarities(), num_wavelengths)
+            complexities = pygor.utilities.multicolour_reshape(np.nanmean(pygor.steps.contouring.complexity_weighted(data_strf_obj.fit_contours(), data_strf_obj.get_contours_area()), axis = 1), num_wavelengths)
             area_t = data_strf_obj.calc_tunings_area(size).T
             ampl_t = data_strf_obj.calc_tunings_amplitude().T
             neg_cent_t, pos_cent_t = data_strf_obj.calc_tunings_centroids()
@@ -281,8 +274,8 @@ def chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
             neg_peak_t, pos_peak_t =  neg_peak_t.T, pos_peak_t.T
 
             # Chromatic aspects
-            temporal_filter = utilities.multicolour_reshape(data_strf_obj.get_timecourses(), num_wavelengths)
-            spatial_filter = utilities.multicolour_reshape(data_strf_obj.collapse_times(spatial_centre=True), num_wavelengths)
+            temporal_filter = pygor.utilities.multicolour_reshape(data_strf_obj.get_timecourses(), num_wavelengths)
+            spatial_filter = pygor.utilities.multicolour_reshape(data_strf_obj.collapse_times(spatial_centre=True), num_wavelengths)
             
             for n, i in enumerate(wavelengths):
                 dict[f"pol_{i}"] = polarities[n]
@@ -311,7 +304,7 @@ def chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
         else:
             raise AttributeError("Attribute 'multicolour' is not True. Manual fix required.")
 
-def chromatic_stats_df(exp_obj : pygor.classes.experiment.Experiment):
+def chromatic_stats(exp_obj : pygor.classes.experiment.Experiment) -> pd.DataFrame:
     """
     Generate a DataFrame containing chromatic statistics from an Experiment object.
 
@@ -328,11 +321,11 @@ def chromatic_stats_df(exp_obj : pygor.classes.experiment.Experiment):
 
     chromatic_dict_list = []
     for object in exp_obj.recording:
-        curr_dict = chromatic_dict(object)
+        curr_dict = _chromatic_dict(object)
         chromatic_dict_list.append(pd.DataFrame(curr_dict))
     return pd.concat(chromatic_dict_list, ignore_index=True)
 
-def roi_stats_df(exp_obj : pygor.classes.experiment.Experiment):
+def roi_stats(exp_obj : pygor.classes.experiment.Experiment) -> pd.DataFrame:
     """
     Generate statistics dataframe for regions of interest in the given experiment.
 
@@ -348,11 +341,11 @@ def roi_stats_df(exp_obj : pygor.classes.experiment.Experiment):
     """
     roi_dict = []
     for object in exp_obj.recording:
-        curr_dict = pygor.analyses.strf_df.roi_by_roi_dict(object)
+        curr_dict = _roi_by_roi_dict(object)
         roi_dict.append(pd.DataFrame(curr_dict))
-    return pd.concat(chromatic_dict, ignore_index=True)
+    return pd.concat(roi_dict, ignore_index=True)
 
-def rec_info_df(exp_obj : pygor.classes.experiment.Experiment):
+def rec_info(exp_obj : pygor.classes.experiment.Experiment) -> pd.DataFrame:
     """
     Generate a DataFrame with information from recordings in an Experiment object.
 
@@ -368,9 +361,9 @@ def rec_info_df(exp_obj : pygor.classes.experiment.Experiment):
     """
     rec_dict = []
     for object in exp_obj.recording:
-        curr_dict = pygor.analyses.strf_df.recording_dict(object)
+        curr_dict = _recording_dict(object)
         rec_dict.append(pd.DataFrame(curr_dict))
-    return pd.concat(chromatic_dict, ignore_index=True)
+    return pd.concat(rec_dict, ignore_index=True)
 
 def split_df_by(DataFrame, category_str):
     raise NotImplementedError("Not implemented yet")
