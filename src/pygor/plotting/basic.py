@@ -15,21 +15,10 @@ from ipywidgets import interact
 import ipywidgets as widgets
 # Local imports
 import pygor.utilities
-import pygor.space
-import pygor.temporal
-import pygor.steps.contouring
-
-
-
-rgbuv_palette = ["r", "g", "b", "violet"]
-nanometers = ["588", "478", "422", "375"]
-fish_palette = ["#ef8e00", "teal","#5600fe", "fuchsia"]
-polarity_palette = ["grey", "black", "gainsboro"]
-red_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["dimgrey", "grey", "white","#ef8e00","darkred"])
-green_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["dimgrey", "grey","white","mediumaquamarine","teal"])
-blue_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["dimgrey", "grey","white","#5600fe","#4400cb"])
-violet_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["dimgrey", "grey","white","fuchsia","#b22cb2"])
-
+import pygor.strf.space
+import pygor.strf.temporal
+import pygor.strf.contouring
+import pygor.plotting.custom
 
 def play_movie(d3_arr, figaxim_return = False,**kwargs):
     # This is way more efficient than the legacy version and does not rely on ipywidgets
@@ -104,18 +93,18 @@ def _legacy_play_movie(d3_arr, **kwargs):
 
 def contouring_demo(arr_3d, level = None, display_time = True, returns = False, **kwargs):        
     # Collapse time to give us 2d representation
-    arr_3d_collapsed = pygor.space.collapse_3d(arr_3d, zscore=False)
+    arr_3d_collapsed = pygor.strf.space.collapse_3d(arr_3d, zscore=False)
     # Extract content from masks
-    neg_masked, pos_masked = pygor.space.rf_mask3d(arr_3d, level = level)
+    neg_masked, pos_masked = pygor.strf.space.rf_mask3d(arr_3d, level = level)
     neg_mask = neg_masked.mask[0]
     pos_mask = pos_masked.mask[1]
     # Extract time courses
-    neg_time, pos_time = pygor.temporal.extract_timecourse(arr_3d, level = level)
+    neg_time, pos_time = pygor.strf.temporal.extract_timecourse(arr_3d, level = level)
     # Make contours
     if level == None:
-        lower_contour, upper_contour = pygor.steps.contouring.contour(arr_3d_collapsed)
+        lower_contour, upper_contour = pygor.strf.contouring.contour(arr_3d_collapsed)
     else:
-        lower_contour, upper_contour = pygor.steps.contouring.contour(arr_3d_collapsed, level = (-level, level))
+        lower_contour, upper_contour = pygor.strf.contouring.contour(arr_3d_collapsed, level = (-level, level))
     # Init figure 
     if display_time == True:
         fig, ax = plt.subplots(1, 3, subplot_kw={'aspect': 'auto', 'adjustable' : "datalim"}, figsize = (20,5))
@@ -143,101 +132,6 @@ def contouring_demo(arr_3d, level = None, display_time = True, returns = False, 
         return fig, ax, im
     # ax[2].plot(np.average(old_mask, axis = (1, 2)), c = 'yellow', ls = 'dotted', label = "Old mask")
     # plt.close()
-
-def tiling(Data_strf_object, deletion_threshold = 0, chromatic = False, x_lim = None, y_lim = None, **kwargs):
-    def _shrink_contour(coordinates, scale_factor):
-        # Step 1: Find the center of the contour
-        center = np.mean(coordinates, axis=0)
-        # Step 2: Translate coordinates to make the center the origin
-        translated_coordinates = coordinates - center
-        # Step 3: Scale the coordinates to shrink the contour
-        scaled_coordinates = scale_factor * translated_coordinates
-        # Step 4: Translate coordinates back to their original position
-        final_coordinates = scaled_coordinates + center
-        return final_coordinates
-    def _transform_contours(contours, transform_funct, *params):
-        new_contours = []
-        for lower, upper in contours:
-            curr_upper = []
-            curr_lower = []
-            for i in upper:
-                inner_upper = transform_funct(i, *params)
-                curr_upper.append(inner_upper)
-            for j in lower:
-                inner_lower = transform_funct(j, *params)
-                curr_lower.append(inner_lower)
-            new_contours.append([curr_lower, curr_upper])
-        #return np.array(new_lowers, dtype = "object"), np.array(new_uppers, dtype = "object")
-        return np.array(new_contours, dtype = "object")
-    # Make a copy of the array view
-    contours = np.copy(Data_strf_object.contours)
-    if "shrink_factor" in kwargs and kwargs["shrink_factor"] != None:
-        contours = _transform_contours(contours, _shrink_contour, kwargs["shrink_factor"])
-    absolute_version = np.abs(Data_strf_object.collapse_times())
-    indeces_to_delete = np.unique(np.where(np.max(absolute_version, axis = (1,2)) < deletion_threshold)[0]) # filtering criteria based on amplitudes
-
-    # Kick out contours accordingly 
-    cleaned_version = np.delete(Data_strf_object.collapse_times(), indeces_to_delete, axis = 0)
-    #cleaned_contours = list(np.delete(np.array(contours, dtype = "object"), indeces_to_delete, axis = 0))
-    #print(cleaned_contours)
-    contours[:, :][indeces_to_delete] = [[[]]] # I dont understand why this works but it does
-#    cleaned_contours = contours
-    # Make projectsion 
-    min_projection = np.min(cleaned_version, axis = 0) 
-    max_projection = np.max(cleaned_version, axis = 0)
-    min_val = np.min(min_projection)
-    max_val = np.max(max_projection)
-    val_tup = (min_val, max_val)
-    # create plot 
-    fig, ax = plt.subplots(3, 1, figsize = (20, 20))
-    # Plot projections
-    minproj = ax[0].imshow(min_projection, cmap = 'RdBu', origin = "lower")
-    minproj.set_clim(min_val, max_val)
-    plt.colorbar(minproj, ax = ax[0])
-    # Plot the other projection
-    maxproj = ax[1].imshow(max_projection, cmap = 'RdBu', origin = "lower")
-    maxproj.set_clim(min_val, max_val)
-    plt.colorbar(maxproj, ax = ax[1])
-    # Plot their combination
-    combined2 = ax[2].imshow(min_projection, cmap = 'RdBu', alpha = 0.66, origin = "lower")
-    combined = ax[2].imshow(max_projection, cmap = 'RdBu', alpha = 0.33, origin = "lower")
-    combined.set_clim(val_tup)
-    combined2.set_clim(val_tup)
-    # Finally plot contours accordingly
-    if chromatic == True:
-        n = 0 
-        for i in contours:
-            upper, lower = i
-            if len(upper) != 0:
-                for contour_up in upper:
-                    ax[0].plot(contour_up[:, 1], contour_up[:, 0], lw = 2, c = fish_palette[n], alpha = .5)# contour
-                    ax[2].plot(contour_up[:, 1], contour_up[:, 0], lw = 2, c = fish_palette[n], alpha = .5)# contour
-            if len(lower) != 0:
-                for contour_low in lower:
-                    ax[1].plot(contour_low[:, 1], contour_low[:, 0], lw = 2, c = fish_palette[n], alpha = .5)# contour
-                    ax[2].plot(contour_low[:, 1], contour_low[:, 0], lw = 2, c = fish_palette[n], alpha = .5)# contour                
-            n += 1
-            if n == 4:
-                n = 0
-    else:
-        for i in contours:
-            upper, lower = i
-            if len(upper) != 0:
-                for contour_up in upper:
-                    ax[0].plot(contour_up[:, 1] / kwargs["shrink_factor"], contour_up[:, 0] / kwargs["shrink_factor"], lw = 2, c = 'red', alpha = .25)# contour
-                    ax[2].plot(contour_up[:, 1] / kwargs["shrink_factor"], contour_up[:, 0] / kwargs["shrink_factor"], lw = 2, c = 'red', alpha = .4)# contour
-            if len(lower) != 0:
-                for contour_low in lower:
-                    ax[1].plot(contour_low[:, 1] / kwargs["shrink_factor"], contour_low[:, 0] / kwargs["shrink_factor"], lw = 2, c = 'blue', alpha = .25)# contour
-                    ax[2].plot(contour_low[:, 1] / kwargs["shrink_factor"], contour_low[:, 0] / kwargs["shrink_factor"], lw = 2, c = 'blue', alpha = .4)# contour
-    if x_lim != None:
-        for a in ax.flat:
-            a.set_xlim(x_lim[0], x_lim[1])
-    if y_lim != None:
-        for a in ax.flat:
-            a.set_ylim(y_lim[0], y_lim[1])
-    # ax[3].imshow(np.average(load.images, axis = 0), cmap = 'Greys_r', origin = "lower")
-    # plt.savefig(r"C:\Users\SimenLab\OneDrive\Universitet\PhD\Conferences\Life Sciences PhD Careers Symposium 2023\RF_tiling.svg")
 
 def stack_to_rgb(stack, eight_bit = True):
     """
@@ -279,7 +173,8 @@ def stack_to_rgb(stack, eight_bit = True):
         stack = pygor.utilities.min_max_norm(stack, 0, 1).astype('float')
     return stack
 
-def basic_stim_overlay(stack, frame_duration = 32, frame_width = 125, repeat_interval = 4, xy_loc = (3, 3), size = 10, colour_list = fish_palette):
+def basic_stim_overlay(stack, frame_duration = 32, frame_width = 125, 
+    repeat_interval = 4, xy_loc = (3, 3), size = 10, colour_list = pygor.plotting.custom.fish_palette):
     """
     Overlay basic stimuli on an RGB image.
 
@@ -335,7 +230,7 @@ def ipl_summary_chroma(chroma_df):
             # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
             percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
             # percentages = hist_vals_per_condition
-            ax[n, m].barh(np.arange(0, 100, 10), width= percentages, height=10, color = fish_palette[m], edgecolor="black", alpha = 0.75)        
+            ax[n, m].barh(np.arange(0, 100, 10), width= percentages, height=10, color = pygor.plotting.custom.fish_palette[m], edgecolor="black", alpha = 0.75)        
             ax[n, m].grid(False)
             ax[n, m].axhline(55, c = "k", ls = "--")
             # ax[n, m].get_xaxis().set_visible(False)
@@ -348,7 +243,7 @@ def ipl_summary_chroma(chroma_df):
                     ax[n, m].set_title("OFF", weight = "bold", c = "grey", loc = "left")
                 if i == 1:
                     ax[n, m].set_title("ON", weight = "bold", loc = "left")
-            ax[0, m].set_title(nanometers[m] + "nm", size = 12)
+            ax[0, m].set_title(pygor.plotting.custom.nanometers[m] + "nm", size = 12)
             num_cells = len(pd.unique(chroma_df["cell_id"]))
             """
             TODO this counts cell number incorrectly, duplicate cell_ids
@@ -368,7 +263,7 @@ def ipl_summary_polarity(roi_df):
         hist_vals_population = np.histogram(roi_df["ipl_depths"], bins = bins)[0]
         # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
         percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
-        ax.barh(np.arange(0, 100, 10), width= percentages, height=10, color = polarity_palette[n], edgecolor="black", alpha = 0.75)        
+        ax.barh(np.arange(0, 100, 10), width= percentages, height=10, color = pygor.plotting.custom.polarity_palette[n], edgecolor="black", alpha = 0.75)        
         ax.set_title(titles[n], size = 12)
         ax.axhline(55, c = "k", ls = "--")
     axs[0].text(x = 14, y = 53+5, s = "OFF", size = 10)

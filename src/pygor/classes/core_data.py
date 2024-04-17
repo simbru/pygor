@@ -6,10 +6,10 @@ except ImportError:
 # Local imports
 import pygor.data_helpers
 import pygor.utils.helpinfo
-import pygor.space
-import pygor.steps.contouring
-import pygor.temporal
-import pygor.plotting.plots
+import pygor.strf.space
+import pygor.strf.contouring
+import pygor.strf.temporal
+import pygor.plotting.basic
 import pygor.utils
 # Dependencies
 import operator

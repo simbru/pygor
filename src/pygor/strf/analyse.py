@@ -1,6 +1,6 @@
 # Local imports
-import pygor.steps.contouring
-import pygor.temporal
+import pygor.strf.contouring
+import pygor.strf.temporal
 import pygor.load
 import pygor.utilities
 import pygor.classes.experiment
@@ -123,7 +123,7 @@ def _roi_by_roi_dict(data_strf_obj): #
         dict["pos_extrema"] = pos_extrema
         #dict["dom_extrema"] =  np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_extrema, pos_extrema)
         dict["polarities"] = data_strf_obj.get_polarities()
-        neg_biphasic, pos_biphasic = pygor.temporal.biphasic_index(timecourses_neg), pygor.temporal.biphasic_index(timecourses_pos)
+        neg_biphasic, pos_biphasic = pygor.strf.temporal.biphasic_index(timecourses_neg), pygor.strf.temporal.biphasic_index(timecourses_pos)
         dict["neg_biphasic_index"] = neg_biphasic
         dict["pos_biphasic_index"] = pos_biphasic
         dict["dom_biphasic_index"] = np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_biphasic, pos_biphasic)
@@ -265,7 +265,7 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
             dict["cat_pol"] = data_strf_obj.get_polarity_category()
             
             polarities = pygor.utilities.multicolour_reshape(data_strf_obj.get_polarities(), num_wavelengths)
-            complexities = pygor.utilities.multicolour_reshape(np.nanmean(pygor.steps.contouring.complexity_weighted(data_strf_obj.fit_contours(), data_strf_obj.get_contours_area()), axis = 1), num_wavelengths)
+            complexities = pygor.utilities.multicolour_reshape(np.nanmean(pygor.strf.contouring.complexity_weighted(data_strf_obj.fit_contours(), data_strf_obj.get_contours_area()), axis = 1), num_wavelengths)
             area_t = data_strf_obj.calc_tunings_area(size).T
             ampl_t = data_strf_obj.calc_tunings_amplitude().T
             neg_cent_t, pos_cent_t = data_strf_obj.calc_tunings_centroids()

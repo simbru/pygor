@@ -5,13 +5,13 @@ except ImportError:
     from collections.abc import Iterable
 # Local imports
 import pygor.utils.unit_conversion as unit_conversion
-import pygor.steps.signal_analysis as signal_analysis
+import pygor.strf.signal_analysis as signal_analysis
 import pygor.data_helpers
 import pygor.utils.helpinfo
-import pygor.space
-import pygor.steps.contouring
-import pygor.temporal
-import pygor.plotting.plots
+import pygor.strf.space
+import pygor.strf.contouring
+import pygor.strf.temporal
+import pygor.strf.plot
 import pygor.utils
 from pygor.classes.core_data import Core
 # Dependencies
@@ -76,7 +76,7 @@ class STRF(Core):
         """
         # Generate bar for beuty
         bar = tqdm(self.strfs, leave = True, position = 1, disable = None, 
-            desc = f"Hang on, bootstrapping pygor.temporal components {self.bs_settings['time_bs_n']} times")
+            desc = f"Hang on, bootstrapping pygor.strf.temporal components {self.bs_settings['time_bs_n']} times")
         self._pval_time = np.array([signal_analysis.bootstrap_time(x, bootstrap_n=self.bs_settings["time_bs_n"]) for x in bar])
         return self._pval_time
 
@@ -304,7 +304,7 @@ class STRF(Core):
             AttributeError: If the contours have not been calculated yet.
 
         Note:
-            The contours are calculated using the `pygor.steps.contouring.contour` function.
+            The contours are calculated using the `pygor.strf.contouring.contour` function.
 
         Example:
             data = DataObject()
@@ -317,12 +317,12 @@ class STRF(Core):
             if self.bs_settings["do_bootstrap"] == True:
                 time_pvals = self.pval_time
                 space_pvals = self.pval_space
-                __contours = [pygor.steps.contouring.contour(arr) # ensures no contour is drawn if pval not sig enough
+                __contours = [pygor.strf.contouring.contour(arr) # ensures no contour is drawn if pval not sig enough
                                 if time_pvals[count] < self.bs_settings["time_sig_thresh"] and space_pvals[count] < self.bs_settings["space_sig_thresh"]
                                 else  ([], [])
                                 for count, arr in enumerate(self.collapse_times())]
             if self.bs_settings["do_bootstrap"] == False:
-                __contours = [pygor.steps.contouring.contour(arr) for count, arr in enumerate(self.collapse_times())]
+                __contours = [pygor.strf.contouring.contour(arr) for count, arr in enumerate(self.collapse_times())]
             self.__contours = np.array(__contours, dtype = "object")
             return self.__contours    
     def get_contours_count(self) -> list:
@@ -343,15 +343,15 @@ class STRF(Core):
         Returns:
             list: A list of areas for each contour in the list.
         """
-        return [pygor.steps.contouring.contours_area_bipolar(__contours, scaling_factor = scaling_factor) for __contours in self.fit_contours()]
+        return [pygor.strf.contouring.contours_area_bipolar(__contours, scaling_factor = scaling_factor) for __contours in self.fit_contours()]
 
     def calc_contours_centroids(self) -> np.ndarray:
         try: 
             return self.__contours_centroids
         except AttributeError:
             #contours_arr = np.array(self.fit_contours(), dtype = "object")
-            off_contours = [pygor.steps.contouring.contour_centroid(i) for i in self.fit_contours()[:, 0]]
-            on_contours = [pygor.steps.contouring.contour_centroid(i) for i in self.fit_contours()[:, 1]]
+            off_contours = [pygor.strf.contouring.contour_centroid(i) for i in self.fit_contours()[:, 0]]
+            on_contours = [pygor.strf.contouring.contour_centroid(i) for i in self.fit_contours()[:, 1]]
             self.__contours_centroids = np.array([off_contours, on_contours], dtype = "object")
             return self.__contours_centroids
 
@@ -379,7 +379,7 @@ class STRF(Core):
             raise ValueError("center_on must be 'pols' or 'biggest'")
      
     def calc_contours_complexities(self) -> np.ndarray:
-        return pygor.steps.contouring.complexity_weighted(self.fit_contours(), self.get_contours_area())
+        return pygor.strf.contouring.complexity_weighted(self.fit_contours(), self.get_contours_area())
      
     def get_timecourses(self, centre_on_zero = True) -> np.ndarray:
         try:
@@ -410,7 +410,7 @@ class STRF(Core):
         with warnings.catch_warnings(record=True) as w:
             # Cause all warnings to always be triggered.
             warnings.simplefilter("always")
-            return pygor.plotting.plots.chroma_overview(self)
+            return pygor.strf.plots.chroma_overview(self)
 
 
     def get_strf_masks(self, level = None):
@@ -421,7 +421,7 @@ class STRF(Core):
             return np.nan
         else:
             # Apply space.rf_mask3d to all arrays and return as a new masksed array
-            all_strf_masks = np.ma.array([pygor.space.rf_mask3d(x, level = None) for x in self.strfs])
+            all_strf_masks = np.ma.array([pygor.strf.space.rf_mask3d(x, level = None) for x in self.strfs])
             # # Get masks that fail criteria
             pval_fail_time = np.argwhere(np.array(self.pval_time) > self.bs_settings["time_sig_thresh"]) # nan > thresh always yields false, so thats really convenient 
             pval_fail_space = np.argwhere(np.array(self.pval_space) > self.bs_settings["space_sig_thresh"]) # because if pval is nan, it returns everything
@@ -458,7 +458,7 @@ class STRF(Core):
         Raises:
         ------
         AttributeError
-            If the object is not a multicolored spatial-pygor.temporal receptive field (STRF),
+            If the object is not a multicolored spatial-pygor.strf.temporal receptive field (STRF),
             indicated by `self.multicolour` not being True.
 
         Notes:
@@ -519,7 +519,7 @@ class STRF(Core):
                         self.strfs.shape[3])    
         collapsed_strf_arr = np.ma.empty(target_shape)
         for n, strf in enumerate(self.strfs):
-            collapsed_strf_arr[n] = pygor.space.collapse_3d(self.strfs[n], zscore = zscore, mode = mode)
+            collapsed_strf_arr[n] = pygor.strf.space.collapse_3d(self.strfs[n], zscore = zscore, mode = mode)
         if spatial_centre == True:
             # Calculate shifts required for each image (vectorised)
             arr3d = collapsed_strf_arr
@@ -543,7 +543,7 @@ class STRF(Core):
             return np.array([np.nan])
         # Get polarities for time courses (which are 2D arrays containing a 
         # timecourse for negative and positive)
-        polarities = pygor.temporal.polarity(self.get_timecourses(), exclude_FirstLast)
+        polarities = pygor.strf.temporal.polarity(self.get_timecourses(), exclude_FirstLast)
         # Feed that to helper function to break it down into 1D/category
         return pygor.utilities.polarity_neat(polarities)
 
@@ -656,13 +656,13 @@ class STRF(Core):
             raise AttributeError("Operation cannot be done since object contains no property '.multicolour.")
 
     def calc_spectral_centroids(self) -> (np.ndarray, np.ndarray):
-        spectroids_neg = np.apply_along_axis(pygor.temporal.only_centroid, 1, self.get_timecourses()[:, 0])
-        spectroids_pos = np.apply_along_axis(pygor.temporal.only_centroid, 1, self.get_timecourses()[:, 1])
+        spectroids_neg = np.apply_along_axis(pygor.strf.temporal.only_centroid, 1, self.get_timecourses()[:, 0])
+        spectroids_pos = np.apply_along_axis(pygor.strf.temporal.only_centroid, 1, self.get_timecourses()[:, 1])
         return spectroids_neg, spectroids_pos
 
     def calc_spectrums(self, roibyroi = False) -> (np.ndarray, np.ndarray):
-        spectrum_neg = np.array([pygor.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 0]])
-        spectrum_pos = np.array([pygor.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 1]])
+        spectrum_neg = np.array([pygor.strf.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 0]])
+        spectrum_pos = np.array([pygor.strf.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 1]])
         return spectrum_neg, spectrum_pos
 
     # def check_ipl_orientation(self):

@@ -11,7 +11,7 @@ import scipy
 import warnings
 
 # Local imports
-import pygor.steps.contouring
+import pygor.strf.contouring
 import pygor.utilities
 
 def centroid(arr):#
@@ -327,8 +327,8 @@ def rf_mask2d(arr_3d, axis = 0, level = None, mode = collapse_3d, **kwargs):
     # Collapse 3rd dimention 
     arr_3d_collapsed = mode(arr_3d, **kwargs)
     # Create contour and mask
-    _contour = pygor.steps.conturing.contour(arr_3d_collapsed, expect_bipolar = True, **kwargs)
-    (_contour_mask_neg, _contour_mask_pos) = pygor.steps.contouring.contour_mask(_contour, arr_3d_collapsed.shape, expect_bipolar = True, **kwargs)
+    _contour = pygor.strfs.conturing.contour(arr_3d_collapsed, expect_bipolar = True, **kwargs)
+    (_contour_mask_neg, _contour_mask_pos) = pygor.strf.contouring.contour_mask(_contour, arr_3d_collapsed.shape, expect_bipolar = True, **kwargs)
     # Mask array with negative and positive mask
     neg_masked = np.ma.array(arr_3d_collapsed, mask = _contour_mask_neg)
     pos_masked = np.ma.array(arr_3d_collapsed, mask = _contour_mask_pos)
@@ -377,10 +377,10 @@ def rf_mask3d(arr_3d, axis = 0, level = None, mode = collapse_3d, **kwargs):
     # Collapse 3rd dimention 
     arr_3d_collapsed = mode(arr_3d, **kwargs)
     if level == None:
-        _contour = pygor.steps.contouring.contour(arr_3d_collapsed, expect_bipolar = True, **kwargs)
+        _contour = pygor.strf.contouring.contour(arr_3d_collapsed, expect_bipolar = True, **kwargs)
     else:
-        _contour = pygor.steps.contouring.contour(arr_3d_collapsed, expect_bipolar = True, level = (-level, level), **kwargs)
-    (_contour_mask_neg, _contour_mask_pos) = pygor.steps.contouring.contour_mask(_contour, arr_3d_collapsed.shape, expect_bipolar = True, **kwargs)
+        _contour = pygor.strf.contouring.contour(arr_3d_collapsed, expect_bipolar = True, level = (-level, level), **kwargs)
+    (_contour_mask_neg, _contour_mask_pos) = pygor.strf.contouring.contour_mask(_contour, arr_3d_collapsed.shape, expect_bipolar = True, **kwargs)
     # Mask array with negative and positive mask
     neg_masked = np.ma.array(arr_3d, mask = np.repeat(np.expand_dims(_contour_mask_neg, axis = 0), frames, axis = axis))
     pos_masked = np.ma.array(arr_3d, mask = np.repeat(np.expand_dims(_contour_mask_pos, axis = 0), frames, axis = axis))

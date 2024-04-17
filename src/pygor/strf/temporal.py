@@ -3,7 +3,7 @@ import warnings
 import scipy
 
 # Local imports
-import pygor.space
+import pygor.strf.space
 
 def extract_timecourse(arr_3d, level = None, centred = True):
     """
@@ -48,10 +48,10 @@ def extract_timecourse(arr_3d, level = None, centred = True):
     """
     # Apply mask 
     if level == None:
-        masked_strf = pygor.space.rf_mask3d(arr_3d)
+        masked_strf = pygor.strf.space.rf_mask3d(arr_3d)
     else:
-        masked_strf = pygor.space.rf_mask3d(arr_3d, level = level)
-    # Average remaining values along boht axes of pygor.space 
+        masked_strf = pygor.strf.space.rf_mask3d(arr_3d, level = level)
+    # Average remaining values along boht axes of pygor.strf.space 
     time_course_neg = np.ma.average(masked_strf[0], axis = (1,2))
     time_course_pos = np.ma.average(masked_strf[1], axis = (1,2)) 
     if centred == True:
