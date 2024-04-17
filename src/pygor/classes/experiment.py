@@ -91,17 +91,3 @@ class Experiment:
              to_print = to_print.to_list()
         print(f"Detaching data: {to_print}")
         self.__exp_forgetter__(indices)
-    
-    def df_strf_chromatic(self):
-        roi_list = []
-        rec_list = []
-        chroma_list = []
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-            warnings.filterwarnings("ignore", category=UserWarning)
-            for obj in self.recording:
-                print("Current object:", obj.name)
-                
-
-        # Create dataframe to store results
-        # pygor.filehandling.compile_chroma_strf_df(self.)
