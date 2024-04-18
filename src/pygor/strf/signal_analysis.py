@@ -13,6 +13,10 @@ import math
 sns.set_context("notebook")
 rng = np.random.default_rng(1312)
 
+""" 
+TODO Put following few functions in own bootstrap.py file
+"""
+
 def block_shuffle(arr_1d, block_size = None):
     """
     Shuffle the 1D array by a fixed block size in random order, with resampling (meaning the same sample can be drawn multiple times, randomly)
@@ -42,39 +46,6 @@ def stationary_shuffle(arr_1d, max_sample_length = None, output_length = None):
         # randomly pick index to end sample (duration) Note: we don't care if it picks a value far away from the max value
         # as it will only be able to index up to max anyways. 
         end_index = int(rng.integers(start_index+1, max_sample_length))
-        # take that data (sample)
-        taken_sample = arr_1d[start_index:end_index]
-        # insert that into the output array and resetart loop
-        output = np.append(output, taken_sample)
-    # deal with output being longer than input
-    if len(output) > len(arr_1d):
-        output = output[:output_length]
-    # output = output.ravel()
-    return output
-
-def stationary_shuffle(arr_1d, max_sample_length = None, output_length = None):
-    """
-    Shuffle 1D array by a random block size in random order, with resampling,.
-    Inspired by Politis, D.N. and Romano, J.P., 1994. The stationary bootstrap. Journal of the American Statistical association, 89(428), pp.1303-1313.
-    """
-    if output_length == None:
-        output_length = len(arr_1d)
-    if max_sample_length == None:
-        max_sample_length = output_length
-    # Create  array to insert values into. This will be our bootstrapped time series
-    output = np.array([])
-    while len(output) < output_length:
-        # randomly pick an index to start sample
-        start_index = int(rng.choice(output_length-1, 1))
-        # randomly pick index to end sample (duration)
-        max_index = start_index + max_sample_length
-        # Sometimes (or all the time, depending on max_sample_length), the end_index ends up 
-        # being longer than the array. In these cases, we just cap it at the maximum length 
-        # of the input array. This works, because in these cases if max_sample_length = n, 
-        # n will always be equal to or more than the residual max_index that was over the array length
-        if max_index > len(arr_1d):
-            max_index = len(arr_1d)
-        end_index = int(rng.integers(start_index+1, max_index))
         # take that data (sample)
         taken_sample = arr_1d[start_index:end_index]
         # insert that into the output array and resetart loop
