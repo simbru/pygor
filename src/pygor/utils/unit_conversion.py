@@ -17,7 +17,7 @@ def au_to_visang(box_width_pix, screen_width_pix = 1820, screen_width_visang = 8
     # Calculte the visang per pix 
     single_pix_visang = screen_width_visang / screen_width_pix
     # Calculate block vis ang 
-    block_visang = single_pix_visang * box_width_pix
+    block_visang = single_pix_visang * float(box_width_pix)
     return block_visang
 
 def area_conversion_old(area_float, boxsize_um, sta_boxes_tuple = (15, 20)):

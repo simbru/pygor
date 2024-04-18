@@ -256,8 +256,9 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
             dict["roi"] = [int(i.split('_')[1]) for i in data_strf_obj.strf_keys][::data_strf_obj.numcolour]
             # dict["cell_id"] = 
             size = pygor.data_helpers.label_from_str(path.name, ('800', '400', '200', '100', '75', '50', '25'), first_return_only=True)
-            if np.isnan(size):
-                size = 0
+            if isinstance(size, float):           
+                if np.isnan(size):
+                    size = 0
             dict["size"] =  [int(size)] * expected_lengths
             # dict["pol_cat"] = data_strf_obj.polarity_category()
             # Some generic stats
