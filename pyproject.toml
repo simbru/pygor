@@ -44,3 +44,5 @@ autodiscover = true
 # [tool.setuptools]
 # package-dir = {"pygor" = "src"}
     # directory containing all the packages (e.g.  src/mypkg1, src/mypkg2)
+
+# https://stackoverflow.com/questions/73600082/how-to-reference-a-requirements-txt-in-the-pyproject-toml-of-a-setuptools-projec

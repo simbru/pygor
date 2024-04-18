@@ -44,7 +44,7 @@ class TestCore(unittest.TestCase):
                             warnings.warn(f"Method {i} gave AttributeError")
 
     def test_get_help(self):
-        write_to = file_loc.parent.joinpath("test_out.txt")
+        write_to = file_loc.joinpath("test/test_out.txt")
         with open(write_to, 'w') as f:
             with redirect_stdout(f):
                 data.get_help(hints = True, types = True)
