@@ -1,16 +1,57 @@
 # Pygor: Pickup in Python where you left of in IGOR, for Baden-lab members
 
-The intent of this package is to enable Pythonic post-processing, analysis, and plotting of data 2-photon which has been pre-processed using the Baden-lab pipeline written in IGOR Pro 6. 
+Welcome to Pygor!
 
-Many of us (relative) new-comers are already familiar with Python, object-oriented programming, and the expansive number of availible packages for analysis, statistics, data-organisation, and plotting. As such, Pygor is written to extend the IGOR pre-processing pipeline into Python, by tapping into the data-structures (IGOR *waves*) and pre-defined data variables already established within the IGOR. To interface the two, Pygor takes as input .H5 files that are exported from IGOR. These are fairly universal files for storing structured data, with good support on both the IGOR and Python side. Becasue the IGOR pipeline is written with conventions for naming waves, Pygor is designed to pick out certain names (aka *keys*) that correspond to IGOR *waves* from the H5 file. Moreover, customising the export script for H5 files in the current IGOR pipelines is fairly simple, and I plan on writing a guide and how-to on doing this. 
+Your one-stop shop for fetching Baden-lab processed IGOR data via H5 files, and transforming them into a flexible yet structured analysis framework in Python.
 
-This gets at another principle of Pygor. The intention is for it to be democratic, in the sense that its users (thats us!) contribute what we work on, so that others can use it later on. This not only improves consistency across the lab, but also holds each of us accountable for doing our best when it comes to writing our anaylses. If errors are spotted by others, they can simply be raised as an issue and corrected (or corrected directly). This also means that for each new type of analysis/experiment, the user is expected do develop their own sub-module. Again, I plan on creating guides on how to do this. My intention is to set everything up so that this process is as smooth and simple as possible, potentially allowing even novice Python users to start developing their anaylses.
+## Here's the main points:
 
-As an example, my project revolves around anaylsing STRFs. Hence, you will find the following directories/files that correspond to this sub-module:
-- `pygor/classes/strf_data.py`: contains the dataclass for instantiating STRF-objects (data-structure)
-- `pygor/strf/`: sub-module containing all scripts for analyses, plotting, etc related to STRF-objects
-- `pygor/test/test_STRF.py`: a unittesting file that can be ran to check for errors with the internal logic of the STRF-object
+- Pygor consists of data-objects, data-object-specific directories, and an Experiment (name to be decided) class that allows you to collect data-objects and analyse them using the data-directories.
+- Pygor classes are built using [dataclasses](https://docs.python.org/3/library/dataclasses.html), which are simple Python classes which store information and methods with minimal configuration and templating.
+- The special Pygor class `pygor.classes.experiment.Experiment` provides a handy way to collate Pygor objects, in such a way that analyses can be ran on arbitrarily many datasets at a time.
+- Pygor classes can be built by inheriting the `pygor.classes.core_data.Core` object, which comes with handy methods like plotting your scan average, ROI positions, amd gettomg contextual help with parsing the data and methods availible in your new object.
+- Pygor objects can be called simply by passing `from pygor.load import "class name"`, as the import logic dictated by `pygor.load.py` takes care of the potentially confusing (and mostly just annoying) navigation of the directory structure, which can serve as a barrier of entry to novice users.
+- Extending the functionality of Pygor is intended to be *simple*. There are certain design princples the user can follow in order to build out their own analyses pipelines, that can be shared and further improved by other users.
 
-In principle, a user who wishes to expand on the functionality of Pygor only has to create a sub-module (such as `pygor/strf/`) to formalise their analysis. However, in some cases, new object methods or attributes may be required, in which case I encourage the user to write their own dataclass (like `pygor/classes/strf_data.py`). More on this to come.
+## How do I install Pygor
 
-For now, I will keep tinkering away with this library.
+Currently, the package will very likely require you to do your own development. This sounds scary, but its pretty easy
+
+1. Install [hatch](https://hatch.pypa.io/latest/) on your computer
+2. Download Pygor from the Github repo (I prefer using `git clone https://github.com/simbru/pygo` in my target directory. Moving files around manually should also work (uncertain if Git functionality will work).
+3. Open up your favorite command line (CMD for example) and CD to your Pygor directory. You will know  you are in the right spot if you see a file called `pyproject.toml`
+4. Simply run `hatch build` from the command line inside the directroy. You should see some reference to "building wheels". This means you're on the rigth track.
+5. Once that is done, simply stay in the directroy, activate whatever Python envrionment you want to use, and type `pip install -e .` -> This will allow you to use Pygor, while changing the contents of Pygor's files.
+
+That's it! Activate your environment in your favorite IDE and get going with Pygor!
+
+*Alternatively, you should be able to simply download the Git repositroy, set your working directories correctly, and be on your merry way (untested).*
+
+## Pygor design principles
+
+Inside `pygor/src/pygor/` (Python's way of structuring a package with sub-modules), you will find various files and folders.
+
+- `pygor/classes`: This is where the dataclasses live. Each class gets its own .py file, and classes are automatically identified and loaded by `pygor.load.py` when it is imported.
+- `pygor/plotting`: This is where shared plotting-related scripts live
+- `pygor/docs`: Documentation will live here
+- `pygor/shared`: Other shared scripts
+- `pygor/test`: Unittests for Pygor classes
+- `pygor/insert_your_class`: Files containing functions related to your packages!
+
+## Pygor naming conventions for IGOR waves:
+
+| IGOR Wave          | Pygor core attribute |
+| -------------------- | ---------------------- |
+| wDataCh0_detrended | images               |
+| Traces0_raw          | traces_raw             |
+| traces_znorm          | Traces0_znorm             |
+| ROIs          | rois             |
+| Averages0          | averages             |
+| Snippets0          | snippets             |
+| OS_Parameters[58]  | frame_hz             |
+| OS_Parameters[28]  | trigger_mode             |
+| Triggertimes_Frame          | triggerstimes_frame             |
+| Triggertimes          | triggertimes             |
+| Positions          | ipl_depths             |
+
+Eventually, it would make sense to create a framework for customising this, such that the pipeline can be adapted more broadly to other H5 files with other naming conventions. For now, this will wait until it is a requested feature. 
