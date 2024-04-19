@@ -74,9 +74,14 @@ def _roi_by_roi_dict(data_strf_obj): #
         dict["simultaneous"] = [pygor.data_helpers.label_from_str(path.name, colours_combos, label = 'y', else_return='n')] * expected_lengths
         dict["combo"] = [pygor.data_helpers.label_from_str(path.name, colours_combos)] * expected_lengths
         size = pygor.data_helpers.label_from_str(path.name, ('800', '400', '200', '100', '75', '50', '25'), first_return_only=True)
-        if np.isnan(size):
-            size = 0
-        
+        try:
+            try:
+                if np.isnan(size):
+                    size = 0
+            except TypeError:
+                size = int(size)
+        except TypeError as e:
+            raise TypeError(f"nan input error for input size = {size} with type {type(size)}") from e 
         dict["size"] =  [size] * expected_lengths 
         shape = np.stack([i.shape for i in data_strf_obj.strfs])
         dict["shapeZ"] = shape[:, 0]
@@ -113,7 +118,7 @@ def _roi_by_roi_dict(data_strf_obj): #
         dict["neg_contour_area_total"] = tot_neg_areas_corrected
         dict["pos_contour_area_total"] = tot_pos_areas_corrected
         dict["contour_area_total"] = np.sum((tot_neg_areas_corrected, tot_pos_areas_corrected), axis = 0)
-        dict["contour_complexity"] = np.nanmean(data_strf_obj.calc_contours_complexities())
+        dict["contour_complexity"] = np.nanmean(data_strf_obj.calc_contours_complexities(), axis = 1)
 
          # Time
         timecourses = data_strf_obj.get_timecourses()
@@ -122,7 +127,7 @@ def _roi_by_roi_dict(data_strf_obj): #
         dict["neg_extrema"] = neg_extrema
         dict["pos_extrema"] = pos_extrema
         #dict["dom_extrema"] =  np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_extrema, pos_extrema)
-        dict["polarities"] = data_strf_obj.get_polarities()
+        dict["polarity"] = data_strf_obj.get_polarities()
         neg_biphasic, pos_biphasic = pygor.strf.temporal.biphasic_index(timecourses_neg), pygor.strf.temporal.biphasic_index(timecourses_pos)
         dict["neg_biphasic_index"] = neg_biphasic
         dict["pos_biphasic_index"] = pos_biphasic

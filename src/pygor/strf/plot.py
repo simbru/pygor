@@ -13,16 +13,6 @@ import pygor.strf.contouring
 
 from pygor.plotting.custom import red_map, green_map, blue_map, violet_map, fish_palette
 
-def rois_overlay_object(data_strf_object):
-    preprocess = pygor.utilities.min_max_norm(np.std(data_strf_object.images, axis = 0), 0, 255)
-    plt.imshow(preprocess, origin = "lower", cmap = "Greys_r",
-    vmin = 100, vmax = 255)
-    num_rois = int(np.abs(np.min(data_strf_object.rois)))
-    # color = cm.jet(np.linspace(0, 1, int(np.abs(np.min(data_strf_object.rois)))))
-    color = cm.get_cmap('jet_r', num_rois)
-    plt.imshow(np.ma.masked_where(data_strf_object.rois.T == 1, data_strf_object.rois.T), cmap = color, alpha = 0.5, origin = "lower")
-    plt.axis("off")
-
 def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_crop = (0, 0), x_crop = (0 ,0),
     column_titles = ["588 nm", "478 nm", "422 nm", "375 nm"], colour_maps = [red_map, green_map, blue_map, violet_map],
     ax = None):
@@ -107,7 +97,7 @@ def rgb_representation(data_strf_object, colours_dims = [0, 1, 2, 3], specify_ro
     fig.tight_layout(pad = 0.1, h_pad = .1, w_pad=.1)
 
 def _contours_plotter(data_strf_object, ax, roi, num_colours = 4):
-    contours = pygor.utilities.multicolour_reshape(data_strf_object.contours, 4)[:, roi]
+    contours = pygor.utilities.multicolour_reshape(data_strf_object.fit_contours(), 4)[:, roi]
     neg_contours = contours[:, 0]
     pos_contours = contours[:, 1]
     for colour in range(num_colours):
@@ -170,8 +160,41 @@ def visualise_summary(data_strf_object, specify_rois, ipl_sort = False,  y_crop 
                cax.plot(curr_colour, c = fish_palette[colour])
     plt.tight_layout()
 
-
 def tiling(Data_strf_object, deletion_threshold = 0, chromatic = False, x_lim = None, y_lim = None, **kwargs):
+    """
+    Visualizes the tiling of spectro-temporal receptive fields (STRFs).
+
+    This function takes a Data_strf_object, which is assumed to have methods for
+    fitting contours and collapsing times. It optionally shrinks the contours and
+    filters out contours based on a deletion threshold. It then generates a series
+    of plots that show the minimum and maximum projections of the collapsed times,
+    as well as a combined plot with optional chromatic or monochromatic contour
+    overlays.
+
+    Parameters
+    ----------
+    Data_strf_object : object
+        An object with methods for fitting contours and collapsing times, which are
+        used to compute and visualize the STRF tilings.
+    deletion_threshold : float, optional
+        Threshold below which contours are deleted from the visualization based on
+        the maximum amplitude across collapsed times (default is 0).
+    chromatic : bool, optional
+        If True, contours are plotted in color; otherwise, they are plotted in red
+        and blue (default is False).
+    x_lim : tuple of int, optional
+        Limits for the x-axis of the plots (default is None).
+    y_lim : tuple of int, optional
+        Limits for the y-axis of the plots (default is None).
+    **kwargs : dict
+        Additional keyword arguments. Can include 'shrink_factor' to determine the
+        scaling factor by which the contours are shrunk.
+
+    Returns
+    -------
+    None
+        The function does not return any values but generates matplotlib plots.
+    """
     def _shrink_contour(coordinates, scale_factor):
         # Step 1: Find the center of the contour
         center = np.mean(coordinates, axis=0)
@@ -197,12 +220,13 @@ def tiling(Data_strf_object, deletion_threshold = 0, chromatic = False, x_lim = 
         #return np.array(new_lowers, dtype = "object"), np.array(new_uppers, dtype = "object")
         return np.array(new_contours, dtype = "object")
     # Make a copy of the array view
-    contours = np.copy(Data_strf_object.contours)
+    contours = np.copy(Data_strf_object.fit_contours())
     if "shrink_factor" in kwargs and kwargs["shrink_factor"] != None:
         contours = _transform_contours(contours, _shrink_contour, kwargs["shrink_factor"])
+    if "shrink_factor" not in kwargs:
+        kwargs["shrink_factor"] = 1
     absolute_version = np.abs(Data_strf_object.collapse_times())
     indeces_to_delete = np.unique(np.where(np.max(absolute_version, axis = (1,2)) < deletion_threshold)[0]) # filtering criteria based on amplitudes
-
     # Kick out contours accordingly 
     cleaned_version = np.delete(Data_strf_object.collapse_times(), indeces_to_delete, axis = 0)
     #cleaned_contours = list(np.delete(np.array(contours, dtype = "object"), indeces_to_delete, axis = 0))
@@ -214,7 +238,6 @@ def tiling(Data_strf_object, deletion_threshold = 0, chromatic = False, x_lim = 
     max_projection = np.max(cleaned_version, axis = 0)
     min_val = np.min(min_projection)
     max_val = np.max(max_projection)
-    val_tup = (min_val, max_val)
     # create plot 
     fig, ax = plt.subplots(3, 1, figsize = (20, 20))
     # Plot projections
@@ -226,10 +249,9 @@ def tiling(Data_strf_object, deletion_threshold = 0, chromatic = False, x_lim = 
     maxproj.set_clim(min_val, max_val)
     plt.colorbar(maxproj, ax = ax[1])
     # Plot their combination
-    combined2 = ax[2].imshow(min_projection, cmap = 'RdBu', alpha = 0.66, origin = "lower")
-    combined = ax[2].imshow(max_projection, cmap = 'RdBu', alpha = 0.33, origin = "lower")
-    combined.set_clim(val_tup)
-    combined2.set_clim(val_tup)
+    combined2 = ax[2].imshow(np.abs(min_projection) + np.abs(max_projection), cmap = 'Greys', alpha = 1, origin = "lower")
+    combined2.set_clim(0, max_val)
+    plt.colorbar(combined2, ax = ax[2])
     # Finally plot contours accordingly
     if chromatic == True:
         n = 0 

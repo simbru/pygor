@@ -194,7 +194,7 @@ class Core:
         # color = cm.get_cmap('jet_r', num_rois)
         color = matplotlib.colormaps["jet_r"]
         scanv = ax.imshow(func(self.images, axis = axis), cmap ="Greys_r", origin = "lower")
-        rois_masked = np.ma.masked_where(self.rois.T == 1, self.rois.T)
+        rois_masked = np.ma.masked_where(self.rois == 1, self.rois)
         rois = ax.imshow(rois_masked, cmap = color, alpha = 0.5, origin = "lower")
         ax.grid(False)
         ax.axis('off')
@@ -211,7 +211,7 @@ class Core:
             else:
                 labels= np.abs(label_map) - 1
             for label_loc, label in zip(label_map, labels):
-                curr_roi_mask = self.rois.T == label_loc
+                curr_roi_mask = self.rois == label_loc
                 curr_roi_centroid = np.mean(np.argwhere(curr_roi_mask == 1), axis = 0)
                 ax.text(curr_roi_centroid[1],curr_roi_centroid[0], label,
                     ma='center',va='center',ha = "center", c = "w", size = 12 * np.array(figsize_scale) * txt_scl, 

@@ -69,47 +69,6 @@ def find_files_in(filetype_ext_str, dir_path, recursive=False, **kwargs) -> list
             raise AttributeError("kwargs 'match_any' expected list of strings. Consider kwargs 'match' if you want to specify a single str as search term.")
     return paths
 
-def save_pkl(object, save_path, filename):
-    """
-    Save an object to a pickle file using joblib with zlib compression.
-
-    Parameters
-    ----------
-    object : any type
-        The object to save.
-    save_path : str or pathlib.Path
-        The directory path where the pickle file will be saved.
-    filename : str
-        The name of the file without the extension.
-
-    Returns
-    -------
-    None
-    """
-    final_path = pathlib.Path(save_path, filename).with_suffix(".pkl")
-    print("Storing as:", final_path, end = "\r")
-    with open(final_path, 'wb') as outp:
-        joblib.dump(object, outp, compress='zlib')
-        
-def load_pkl(full_path):
-    """
-    Load a pickled object from the given full path and update its metadata.
-
-    Parameters
-    ----------
-    full_path : str
-        The full file path to the pickled object file.
-
-    Returns
-    -------
-    object
-        The loaded object with updated metadata.
-    """
-    with open(full_path, 'rb') as inp:
-        object = joblib.load(inp)
-        object.metadata["curr_path"] = full_path
-        return object
-
 def _load_parser(file_path, as_class = None, **kwargs):
     """
     Parse and load data from a file based on its file type.
@@ -231,6 +190,49 @@ def _load_and_save(file_path, output_folder, as_class, **kwargs):
     loaded.save_pkl(output_folder, name)
     # out.clear_output()
 
+
+def save_pkl(object, save_path, filename):
+    """
+    Save an object to a pickle file using joblib with zlib compression.
+
+    Parameters
+    ----------
+    object : any type
+        The object to save.
+    save_path : str or pathlib.Path
+        The directory path where the pickle file will be saved.
+    filename : str
+        The name of the file without the extension.
+
+    Returns
+    -------
+    None
+    """
+    final_path = pathlib.Path(save_path, filename).with_suffix(".pkl")
+    print("Storing as:", final_path, end = "\r")
+    with open(final_path, 'wb') as outp:
+        joblib.dump(object, outp, compress='zlib')
+        
+def load_pkl(full_path):
+    """
+    Load a pickled object from the given full path and update its metadata.
+
+    Parameters
+    ----------
+    full_path : str
+        The full file path to the pickled object file.
+
+    Returns
+    -------
+    object
+        The loaded object with updated metadata.
+    """
+    with open(full_path, 'rb') as inp:
+        object = joblib.load(inp)
+        object.metadata["curr_path"] = full_path
+        return object
+
+
 def picklestore_objects(file_paths, output_folder, **kwargs):
     """
     Pickle store objects from given file paths to the specified output folder.
@@ -263,3 +265,33 @@ def picklestore_objects(file_paths, output_folder, **kwargs):
                 _load_and_save(i, output_folder, **kwargs)
                 out.clear_output()
 
+def pickleload_objects(file_paths, **kwargs):
+    """
+    Load pickle objects from given file paths to the specified output folder.
+
+    Parameters
+    ----------
+    file_paths : str or Iterable
+        A single file path or an iterable of file paths to be processed.
+    output_folder : str
+        The folder where the pickled objects will be stored.
+    **kwargs : dict
+        Arbitrary keyword arguments passed on to the loading function.
+
+    Returns
+    -------
+    None
+    """
+    if isinstance(file_paths, Iterable) is False:
+        file_paths = [file_paths]
+    output_list = []
+    # progress_bar = alive_it(input_objects, spinner = "fishes", bar = 'blocks', calibrate = 50, force_tty=True)
+    progress_bar = tqdm(file_paths, desc = "Iterating through and loading listed .pkl files as objects")
+    with warnings.catch_warnings():
+        out = Output()
+        display(out)  # noqa: F821
+        with out:
+            for i in progress_bar:
+                output_list.append(load_pkl(i))
+                out.clear_output()
+    return output_list
