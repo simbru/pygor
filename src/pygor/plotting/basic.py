@@ -45,7 +45,7 @@ def play_movie(d3_arr, figaxim_return = False,**kwargs):
         div = make_axes_locatable(ax)
         cax = div.append_axes('right', '2%', '2%')
         # Plotting 
-        im = ax.imshow(d3_arr[0], origin='lower', **kwargs, cmap = cmap)
+        im = ax.imshow(d3_arr[0], origin='lower', **kwargs)
         fig.colorbar(im, cax = cax)
         # Scale colormap
 #        min_val = np.min(d3_arr)

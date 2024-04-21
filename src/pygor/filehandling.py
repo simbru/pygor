@@ -10,6 +10,7 @@ import joblib
 # from tqdm.autonotebook import tqdm
 from tqdm.auto import tqdm
 from ipywidgets import Output
+import shutil
 
 def find_files_in(filetype_ext_str, dir_path, recursive=False, **kwargs) -> list:
     """
@@ -153,13 +154,14 @@ def load_list(paths_list, as_class = None, **kwargs) -> [pathlib.WindowsPath]:
         reminding you to specify `as_class` for accurate initialisation.
     """
 
-    progress_bar = tqdm(paths_list, desc = "Iterating through and loading listed files")
+    progress_bar = tqdm(paths_list, desc = "Iterating through and loading listed files", position = 0,
+    leave = True)
     objects_list = []
+    out = Output()
+    display(out)  # noqa: F821
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=RuntimeWarning)
         warnings.filterwarnings("ignore", category=UserWarning)
-        out = Output()
-        display(out)  # noqa: F821
         with out:
             for i in progress_bar:
                 objects_list.append(_load_parser(i, as_class=as_class, **kwargs))
@@ -295,3 +297,22 @@ def pickleload_objects(file_paths, **kwargs):
                 output_list.append(load_pkl(i))
                 out.clear_output()
     return output_list
+
+def copy_files(sources_list, target_path):
+    """
+    Move a file from one location to another.
+
+    Parameters
+    ----------
+    source_path : str
+        The source path of the file to be moved.
+    target_path : str
+        The target path where the file will be moved.
+
+    Returns
+    -------
+    None
+    """
+    for i in sources_list:
+        source_path = pathlib.Path(i)
+        shutil.copy2(source_path, target_path)

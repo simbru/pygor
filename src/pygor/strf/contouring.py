@@ -9,10 +9,15 @@ import matplotlib.pyplot as plt
 import pygor.utilities
 
 # Global vars
-abs_criteria_global = 1     ## Rectified STRF must pass this threshold to attempt contour draw at all 
-criteria_modifier_global = 3  ## At which multiple of metric (SD) to draw contour lines
+"""
+TODO Move these into strf object
+"""
+abs_criteria_global = 2.5     ## Rectified STRF must pass this threshold to attempt contour draw at all 
+criteria_modifier_global = 2.5  ## At which multiple of metric (SD) to draw contour lines
 # arth_criteria_global = 1     ## Split STRF (lower, upper) must each pass this for contours to be drawn
 
+#def cfar_calc()
+:
 """Contour generation"""
 def _contour_arithtmatic_threshold_passfail(arr_2d, criteria, metric = np.std):
     """

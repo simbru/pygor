@@ -15,7 +15,7 @@ from pygor.plotting.custom import red_map, green_map, blue_map, violet_map, fish
 
 def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_crop = (0, 0), x_crop = (0 ,0),
     column_titles = ["588 nm", "478 nm", "422 nm", "375 nm"], colour_maps = [red_map, green_map, blue_map, violet_map],
-    ax = None):
+    contours = False, ax = None, high_contrast = True):
     if isinstance(colour_maps, Iterable) is False:
         colour_maps = [colour_maps] * len(column_titles)
     strfs_chroma = pygor.utilities.multicolour_reshape(data_strf_object.collapse_times(), data_strf_object.numcolour)
@@ -37,6 +37,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
         fig = plt.gcf()
     for n, roi in enumerate(specify_rois):
         spaces = np.copy(pygor.utilities.auto_remove_border(strfs_chroma[:, roi])) # this works
+        border_tup = pygor.utilities.check_border(strfs_chroma[:, roi])
         if y_crop != (0, 0) or x_crop != (0, 0):
             spaces = spaces[:, y_crop[0]:y_crop[1], x_crop[0]:x_crop[1]]
         # plotting depending on specified number of rois (more or less than 1)
@@ -47,6 +48,10 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
                 if n == 0:
                     for j in range(data_strf_object.numcolour):
                         ax[-n, j].set_title(column_titles[j])
+                # Handle contours optionally 
+                if contours == True:
+                    _contours_plotter(data_strf_object, roi = roi, index = i, ax = ax[-n-1, i], xy_offset = (-border_tup[0], -border_tup[2]), high_contrast = high_contrast)
+
             np.abs(np.diff(ax[n, 0].get_ylim())[0] / np.diff(ax[0,0].get_xlim())[0])
         else:
             for i in range(4):
@@ -55,9 +60,36 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
                 if roi == 0:
                     for j in range(4):
                         ax[j].set_title(column_titles[j])
+                # Handle contours optionally
+                if contours == True:
+                    _contours_plotter(data_strf_object, roi = roi, index = i, ax = ax[i], xy_offset = (-border_tup[0], -border_tup[2]), high_contrast = high_contrast)
     for axis in ax.flat:
         axis.axis(False)
     fig.tight_layout(pad = 0.3, h_pad = .2, w_pad=.4)
+
+def _contours_plotter(data_strf_object, roi, index =  None, xy_offset = (0, 0), high_contrast = True, ax = None):
+    if ax is None:
+        fig, ax = plt.subplots()
+    contours = pygor.utilities.multicolour_reshape(data_strf_object.fit_contours(), 4)[:, roi]
+    neg_contours = contours[:, 0]
+    pos_contours = contours[:, 1]
+    if index is None:
+        index = range(len(contours))
+    if isinstance(index, Iterable) is False:
+        index = [index]
+    for colour in index:
+        for contour_n in neg_contours[colour]:
+                if high_contrast == True:
+                    ax.plot(contour_n[:, 1] + xy_offset[1], contour_n[:, 0] + xy_offset[0], lw = 2, ls = '-', c = 'white', alpha = 1)# contour
+                    ax.plot(contour_n[:, 1] + xy_offset[1], contour_n[:, 0] + xy_offset[0], lw = 2, ls = 'dashed', c = fish_palette[colour], alpha = 1)# contour
+                else:
+                    ax.plot(contour_n[:, 1] + xy_offset[1], contour_n[:, 0] + xy_offset[0], lw = 1, ls = '-', c = fish_palette[colour], alpha = 1)# contour
+        for contour_p in pos_contours[colour]:
+                if high_contrast == True:
+                    ax.plot(contour_p[:, 1] + xy_offset[1], contour_p[:, 0] + xy_offset[0], lw = 2, ls = "-", c = 'white', alpha = 1)                    
+                    ax.plot(contour_p[:, 1] + xy_offset[1], contour_p[:, 0] + xy_offset[0], lw = 2, ls = "dashed", c = fish_palette[colour], alpha = 1)
+                else:
+                    ax.plot(contour_p[:, 1] + xy_offset[1], contour_p[:, 0] + xy_offset[0], lw = 1, ls = "-", c = fish_palette[colour], alpha = 1)
 
 def rgb_representation(data_strf_object, colours_dims = [0, 1, 2, 3], specify_rois=None, ipl_sort = False, y_crop = (0, 0), x_crop = (0 ,0),
     ax = None):
@@ -95,16 +127,6 @@ def rgb_representation(data_strf_object, colours_dims = [0, 1, 2, 3], specify_ro
         ax.imshow(processed_rgb, origin = "lower")
         ax.axis(False)
     fig.tight_layout(pad = 0.1, h_pad = .1, w_pad=.1)
-
-def _contours_plotter(data_strf_object, ax, roi, num_colours = 4):
-    contours = pygor.utilities.multicolour_reshape(data_strf_object.fit_contours(), 4)[:, roi]
-    neg_contours = contours[:, 0]
-    pos_contours = contours[:, 1]
-    for colour in range(num_colours):
-        for contour_n in neg_contours[colour]:
-                ax.plot(contour_n[:, 1], contour_n[:, 0], lw = 1, ls = '-', c = fish_palette[colour], alpha = 1)# contour
-        for contour_p in pos_contours[colour]:
-                ax.plot(contour_p[:, 1], contour_p[:, 0], lw = 1, ls = "-", c = fish_palette[colour], alpha = 1)
 
 def visualise_summary(data_strf_object, specify_rois, ipl_sort = False,  y_crop = (0, 0), x_crop = (0 , 0)):
     strfs_chroma = pygor.utilities.multicolour_reshape(data_strf_object.collapse_times(), 4)
@@ -147,17 +169,18 @@ def visualise_summary(data_strf_object, specify_rois, ipl_sort = False,  y_crop 
         for cax in roi_ax.flat[::3]:
             rgb_plot = cax.imshow(processed_rgb, origin = "lower", interpolation = "none")
             cax.axis(False)
-            _contours_plotter(data_strf_object, cax, roi)
+            _contours_plotter(data_strf_object, roi = roi, ax = cax)
         for cax in roi_ax.flat[1::3]:
             rgb_plot = cax.imshow(processed_rgu, origin = "lower", interpolation = "none")
             cax.axis(False)
-            _contours_plotter(data_strf_object, cax, roi)
+            _contours_plotter(data_strf_object, roi = roi, ax = cax)
         # Reshape times for convenience
-        times = np.ma.copy(pygor.utilities.multicolour_reshape(data_strf_object.timecourses, 4))[:, roi]
+        times = np.ma.copy(pygor.utilities.multicolour_reshape(data_strf_object.get_timecourses(), 4))[:, roi]
         for cax in roi_ax.flat[2::3]:
            for colour in range(4):
                curr_colour = times[colour].T
                cax.plot(curr_colour, c = fish_palette[colour])
+        
     plt.tight_layout()
 
 def tiling(Data_strf_object, deletion_threshold = 0, chromatic = False, x_lim = None, y_lim = None, **kwargs):

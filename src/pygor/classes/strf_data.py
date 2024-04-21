@@ -75,7 +75,7 @@ class STRF(Core):
             np.ndarray: An array of p-values for each time point.
         """
         # Generate bar for beuty
-        bar = tqdm(self.strfs, leave = True, position = 1, disable = None, 
+        bar = tqdm(self.strfs, leave = False, position = 1, disable = None, 
             desc = f"Hang on, bootstrapping pygor.strf.temporal components {self.bs_settings['time_bs_n']} times")
         self._pval_time = np.array([pygor.strf.bootstrap.bootstrap_time(x, bootstrap_n=self.bs_settings["time_bs_n"]) for x in bar])
         return self._pval_time
@@ -93,7 +93,7 @@ class STRF(Core):
 
         """
         # Again, bar for niceness
-        bar = tqdm(self.strfs, leave = True, position = 1, disable = None,
+        bar = tqdm(self.strfs, leave = False, position = 1, disable = None,
             desc = f"Hang on, bootstrapping spatial components {self.bs_settings['space_bs_n']} times")
         self._pval_space = np.array([pygor.strf.bootstrap.bootstrap_space(x, bootstrap_n=self.bs_settings["space_bs_n"]) for x in bar])
 
@@ -310,21 +310,23 @@ class STRF(Core):
             data = DataObject()
             contours = data.fit_contours()
         """        
-        try:
-            return self.__contours
-        except AttributeError:
+        # try:
+        #     return self.__contours
+        # except AttributeError:
             #self.__contours = [space.contour(x) for x in self.collapse_times()]
-            if self.bs_settings["do_bootstrap"] == True:
-                time_pvals = self.pval_time
-                space_pvals = self.pval_space
-                __contours = [pygor.strf.contouring.contour(arr) # ensures no contour is drawn if pval not sig enough
-                                if time_pvals[count] < self.bs_settings["time_sig_thresh"] and space_pvals[count] < self.bs_settings["space_sig_thresh"]
-                                else  ([], [])
-                                for count, arr in enumerate(self.collapse_times())]
-            if self.bs_settings["do_bootstrap"] == False:
-                __contours = [pygor.strf.contouring.contour(arr) for count, arr in enumerate(self.collapse_times())]
-            self.__contours = np.array(__contours, dtype = "object")
-            return self.__contours    
+        if self.bs_settings["do_bootstrap"] == True:
+            time_pvals = self.pval_time
+            space_pvals = self.pval_space
+            __contours = [pygor.strf.contouring.contour(arr) # ensures no contour is drawn if pval not sig enough
+                            if time_pvals[count] < self.bs_settings["time_sig_thresh"] and space_pvals[count] < self.bs_settings["space_sig_thresh"]
+                            else  ([], [])
+                            for count, arr in enumerate(self.collapse_times())]
+        if self.bs_settings["do_bootstrap"] == False:
+            __contours = [pygor.strf.contouring.contour(arr) for count, arr in enumerate(self.collapse_times())]
+        __contours = np.array(__contours, dtype = "object")
+        return __contours
+            # self.__contours = np.array(__contours, dtype = "object")
+            # return self.__contours    
     def get_contours_count(self) -> list:
         count_list = []
         for i in self.fit_contours():
@@ -381,18 +383,24 @@ class STRF(Core):
     def calc_contours_complexities(self) -> np.ndarray:
         return pygor.strf.contouring.complexity_weighted(self.fit_contours(), self.get_contours_area())
      
+    """
+    TODO Add lazy processing back into contouring (maybe skip timecourses, should be fast enough)
+    """
+    
     def get_timecourses(self, centre_on_zero = True) -> np.ndarray:
-        try:
-            return self.__timecourses 
-        except AttributeError:
-            timecourses = np.average(self.get_strf_masks(), axis = (3,4))
-            first_indexes = np.expand_dims(timecourses[:, :, 0], -1)
-            if centre_on_zero:
-                timecourses_centred = timecourses - first_indexes
-            else:
-                timecourses_centred = timecourses
-            self.__timecourses = timecourses_centred
-            return self.__timecourses
+        # try:
+        #     return self.__timecourses 
+        # except AttributeError:
+        timecourses = np.average(self.get_strf_masks(), axis = (3,4))
+        first_indexes = np.expand_dims(timecourses[:, :, 0], -1)
+        if centre_on_zero:
+            timecourses_centred = timecourses - first_indexes
+        else:
+            timecourses_centred = timecourses
+        __timecourses = timecourses_centred
+        return __timecourses
+            # self.__timecourses = timecourses_centred
+            # return self.__timecourses
 
     def get_timecourses_dominant(self):
         dominant_times = []

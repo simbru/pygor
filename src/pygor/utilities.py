@@ -195,7 +195,7 @@ def auto_remove_border(array):
     if was_2d == False:
         return np.copy(array[:, upper_border_width:-lower_border_wdith, right_border_width:-left_border_width])
 
-def check_border(array_mask, expect_symmetry = True):
+def check_border(array, expect_symmetry = False):
     """
     Calculate the widths of the four borders (upper, lower, left, right) of a given 
     2D array_mask. If expect_symmetry is True, the function checks that the four 
@@ -219,11 +219,22 @@ def check_border(array_mask, expect_symmetry = True):
     ValueError: 
         If expect_symmetry is True and the four borders have different widths.
     """
-    centre_coordinate = (round(array_mask.shape[0] / 2), round(array_mask.shape[1] / 2))
-    upper_border_width = np.count_nonzero(array_mask[:centre_coordinate[0], centre_coordinate[1]:centre_coordinate[1]+1]) 
-    lower_border_wdith = np.count_nonzero(array_mask[centre_coordinate[0]:, centre_coordinate[1]:centre_coordinate[1]+1]) 
-    left_border_width  = np.count_nonzero(array_mask[centre_coordinate[0]:centre_coordinate[0]+1, centre_coordinate[1]:]) 
-    right_border_width = np.count_nonzero(array_mask[centre_coordinate[0]:centre_coordinate[0]+1, :centre_coordinate[1]])
+    ## The logic is: find geometrical centre, find extreme points in 4 directions, and count 0s between extreme and center
+    if array.ndim == 3: # sometimes we want to include time
+        array_shape = array[0].shape # shape should be stable with time (no ragged arrays allowed)
+        was_2d = False
+    if array.ndim == 2: # sometimes we don't
+        array_shape = array.shape
+        was_2d = True
+        array = np.expand_dims(array, axis = 0) # super lazy way of getting around dimensionality
+    if np.ma.is_masked(array) is True:
+        # Drop mask in this instance
+        array = array.data
+    centre_coordinate = (round(array_shape[0] / 2), round(array_shape[1] / 2))
+    upper_border_width = np.count_nonzero(array[0][:centre_coordinate[0], centre_coordinate[1]:centre_coordinate[1]+1] == 0) 
+    lower_border_wdith = np.count_nonzero(array[0][centre_coordinate[0]:, centre_coordinate[1]:centre_coordinate[1]+1] == 0) 
+    left_border_width  = np.count_nonzero(array[0][centre_coordinate[0]:centre_coordinate[0]+1, centre_coordinate[1]:] == 0) 
+    right_border_width = np.count_nonzero(array[0][centre_coordinate[0]:centre_coordinate[0]+1, :centre_coordinate[1]] == 0) 
     if expect_symmetry == True:
         if right_border_width == left_border_width == lower_border_wdith == upper_border_width:
             border_width = right_border_width

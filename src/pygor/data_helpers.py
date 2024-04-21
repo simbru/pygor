@@ -89,7 +89,7 @@ def fix_oversize_sta(strf_arr4d, boxsize_um, upscale_multiple = 4):
     # Apply the mask
     new_masked_strfs = np.ma.array(strf_arr4d, mask = mask)
     # Determine widths of mask 
-    borders_widths = pygor.utilities.check_border(new_masked_strfs[0][0].mask, expect_symmetry=False)
+    borders_widths = pygor.utilities.check_border(new_masked_strfs, expect_symmetry=False)
     # Make note of original dimensions
     org_shape = np.array(strf_arr4d.shape) #dims: roi,z,x,y
     # Calculate new shape (after killing mask , which will be same for all ROIs in file)
