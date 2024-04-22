@@ -16,8 +16,8 @@ abs_criteria_global = 2.5     ## Rectified STRF must pass this threshold to atte
 criteria_modifier_global = 2.5  ## At which multiple of metric (SD) to draw contour lines
 # arth_criteria_global = 1     ## Split STRF (lower, upper) must each pass this for contours to be drawn
 
-#def cfar_calc()
-:
+#def cfar_calc():
+
 """Contour generation"""
 def _contour_arithtmatic_threshold_passfail(arr_2d, criteria, metric = np.std):
     """
