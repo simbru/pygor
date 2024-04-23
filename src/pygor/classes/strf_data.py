@@ -412,6 +412,10 @@ class STRF(Core):
         dominant_times = np.array(dominant_times)
         return dominant_times
 
+
+    def get_pix_times(self):
+        return np.array([np.reshape(i, (i.shape[0], -1)) for i in self.strfs])
+
     ## Methods__________________________________________________________________________________________________________
 
     def plot_chromatic_overview(self):
@@ -694,6 +698,7 @@ class STRF(Core):
         print("Storing as:", final_path, end = "\r")
         with open(final_path, 'wb') as outp:
             joblib.dump(self, outp, compress='zlib')
+
 
 # class Clustering:
 #     def __init__(self):
