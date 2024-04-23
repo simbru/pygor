@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pygor"
-version = "0.0.1"
+version = "0.0.2"
 authors = [
   { name="Simen Bruøygard", email="simen.bruoy@gmail.com" },
 ]
@@ -18,6 +18,28 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
+dependencies = [
+  "numpy",
+  "pandas",
+  "matplotlib",
+  "h5py",
+  "pandas",
+  "seaborn",
+  "seaborn-image",
+  "scikit-learn",
+  "scikit-image",
+  "scipy",
+  "napari[all]",
+  "dacite",
+  "ipywidgets",
+  "tifffile",
+  "ipykernel ",
+  "natsort",
+  "ipyfilechooser",
+  "ipykernel",
+  "ipympl",
+  "notebook",
+]
 
 [project.urls]
 Homepage = "https://github.com/simbru/pygor"
@@ -26,20 +48,9 @@ Issues = "https://github.com/simbru/pygor/issues"
 [tool.setuptools.packages]
 find = {}  # Scan the project directory with the default parameters
 
-
 [tool.hatch.build.targets.wheel]
 #packages = ["src"]
 autodiscover = true
-
-
-#             "core",
-#             "data_objs",
-#             "filehandling",  # Corrected typo here
-#             "clustering",
-#             "plotting",
-#             "unittests",
-#             "utils"
-#             ]
 
 # [tool.setuptools]
 # package-dir = {"pygor" = "src"}
