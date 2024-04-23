@@ -17,15 +17,15 @@ Your one-stop shop for fetching Baden-lab processed IGOR data via H5 files, and 
 
 Currently, the package will very likely require you to do your own development. This sounds scary, but its pretty easy
 
-1. Install [hatch](https://hatch.pypa.io/latest/) on your computer
+1. Install [hatch](https://hatch.pypa.io/latest/) on your computer, either via executable or via pip in your environment.
 2. Download Pygor from the Github repo (I prefer using `git clone https://github.com/simbru/pygo` in my target directory. Moving files around manually should also work (uncertain if Git functionality will work).
 3. Open up your favorite command line (CMD for example) and CD to your Pygor directory. You will know  you are in the right spot if you see a file called `pyproject.toml`
 4. Simply run `hatch build` from the command line inside the directroy. You should see some reference to "building wheels". This means you're on the rigth track.
 5. Once that is done, simply stay in the directroy, activate whatever Python envrionment you want to use, and type `pip install -e .` -> This will allow you to use Pygor, while changing the contents of Pygor's files.
 
-That's it! Activate your environment in your favorite IDE and get going with Pygor!
+That's it! Activate your environment in your favorite IDE and get going with Pygor! Please flag it if you run across any issues. 
 
-*Alternatively, you should be able to simply download the Git repositroy, set your working directories correctly, and be on your merry way (untested).*
+*Alternatively, you should be able to simply download the Git repositroy, set your working directories correctly, and be on your merry way (but this is completely untested, and you might have to move your Jupyter notebooks around for imports to work properly).*
 
 ## Pygor design principles
 
