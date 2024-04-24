@@ -18,7 +18,7 @@ import pygor.utilities
 import pygor.strf.space
 import pygor.strf.temporal
 import pygor.strf.contouring
-import pygor.plotting.custom
+from . import custom
 
 def play_movie(d3_arr, figaxim_return = False,**kwargs):
     # This is way more efficient than the legacy version and does not rely on ipywidgets
@@ -174,7 +174,7 @@ def stack_to_rgb(stack, eight_bit = True):
     return stack
 
 def basic_stim_overlay(stack, frame_duration = 32, frame_width = 125, 
-    repeat_interval = 4, xy_loc = (3, 3), size = 10, colour_list = pygor.plotting.custom.fish_palette):
+    repeat_interval = 4, xy_loc = (3, 3), size = 10, colour_list = custom.fish_palette):
     """
     Overlay basic stimuli on an RGB image.
 
@@ -230,7 +230,7 @@ def ipl_summary_chroma(chroma_df):
             # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
             percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
             # percentages = hist_vals_per_condition
-            ax[n, m].barh(np.arange(0, 100, 10), width= percentages, height=10, color = pygor.plotting.custom.fish_palette[m], edgecolor="black", alpha = 0.75)        
+            ax[n, m].barh(np.arange(0, 100, 10), width= percentages, height=10, color = custom.fish_palette[m], edgecolor="black", alpha = 0.75)        
             ax[n, m].grid(False)
             ax[n, m].axhline(55, c = "k", ls = "--")
             # ax[n, m].get_xaxis().set_visible(False)
@@ -243,7 +243,7 @@ def ipl_summary_chroma(chroma_df):
                     ax[n, m].set_title("OFF", weight = "bold", c = "grey", loc = "left")
                 if i == 1:
                     ax[n, m].set_title("ON", weight = "bold", loc = "left")
-            ax[0, m].set_title(pygor.plotting.custom.nanometers[m] + "nm", size = 12)
+            ax[0, m].set_title(custom.nanometers[m] + "nm", size = 12)
             num_cells = len(pd.unique(chroma_df["cell_id"]))
             """
             TODO this counts cell number incorrectly, duplicate cell_ids
@@ -263,7 +263,7 @@ def ipl_summary_polarity(roi_df):
         hist_vals_population = np.histogram(roi_df["ipl_depths"], bins = bins)[0]
         # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
         percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
-        ax.barh(np.arange(0, 100, 10), width= percentages, height=10, color = pygor.plotting.custom.polarity_palette[n], edgecolor="black", alpha = 0.75)        
+        ax.barh(np.arange(0, 100, 10), width= percentages, height=10, color = custom.polarity_palette[n], edgecolor="black", alpha = 0.75)        
         ax.set_title(titles[n], size = 12)
         ax.axhline(55, c = "k", ls = "--")
     axs[0].text(x = 14, y = 53+5, s = "OFF", size = 10)
