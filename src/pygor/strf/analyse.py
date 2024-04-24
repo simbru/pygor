@@ -1,7 +1,7 @@
 # Local imports
 import pygor.strf.contouring
 import pygor.strf.temporal
-import pygor.load
+#import pygor.load
 import pygor.utilities
 import pygor.classes.experiment
 import pygor.data_helpers
