@@ -77,7 +77,7 @@ def _legacy_pixel_polarity(array_3d):
                     polarity_array[x, y] = 1
     return polarity_array
 
-def pixel_polarity(arr_3d, exclude_PrePost = (2, 2)):
+def pixel_polarity(arr_3d, exclude_PrePost = (4, 4)):
     """
     Return a map of whether minimum or maximum value comes first, expressed 
     as 1 or -1 and represents the polarity of a given pixel. 
