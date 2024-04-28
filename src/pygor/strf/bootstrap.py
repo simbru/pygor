@@ -127,7 +127,8 @@ def bootstrap_time(arr_3d, bootstrap_n = 2500, mode_param = 2, mode = "sd",
         # this saves doing that work! :) 
         flat_indeces = np.argpartition(np.abs(collapse_flat_compressed), -n_top_pix)[-n_top_pix:]
     indices_2d = np.unravel_index(flat_indeces, spatial_domain.shape)
-    combined_timecourses = arr_3d[:, indices_2d[0], indices_2d[1]].ravel(order = "f")
+    # Take abs of 3d array for fft, so that bipolar strfs are treated "fairly"
+    combined_timecourses = np.abs(arr_3d)[:, indices_2d[0], indices_2d[1]].ravel(order = "f")
     org_time = combined_timecourses - combined_timecourses[0] # centre data
     # Compute base stat
     fft_org = np.abs(np.fft.rfft(org_time))[1:]
