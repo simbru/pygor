@@ -650,23 +650,32 @@ class STRF(Core):
         else:
             raise AttributeError("Operation cannot be done since object property '.multicolour.' is False")
 
-    def calc_tunings_area(self, size = None, upscale_factor = 4) -> np.ndarray:
+    def calc_tunings_area(self, size = None, upscale_factor = 4, largest_only = True) -> np.ndarray:
         if self.multicolour == True:
             # Step 1: Pull contour areas (note, the size is in A.U. for now)
             # Step 2: Split by positive and negative areas
             if size == None:
                 warnings.warn("size stimates in arbitrary cartesian units")
-                neg_contour_areas = [i[0] for i in self.get_contours_centres()]
-                pos_contour_areas = [i[1] for i in self.get_contours_centres()]
+                neg_contour_areas = [i[0] for i in self.get_contours_area()]
+                pos_contour_areas = [i[1] for i in self.get_contours_area()]
             else:
                 neg_contour_areas = [i[0] for i in self.get_contours_area(unit_conversion.au_to_visang(size)/upscale_factor)]
                 pos_contour_areas = [i[1] for i in self.get_contours_area(unit_conversion.au_to_visang(size)/upscale_factor)]
-            # Step 3: Sum these by polarity
-            tot_neg_areas, tot_pos_areas = [np.sum(i) for i in neg_contour_areas], [np.sum(i) for i in pos_contour_areas]
-            # Step 4: Sum across polarities 
-            total_areas = np.sum((tot_neg_areas, tot_pos_areas), axis = 0)
-            # Step 5: Reshape to multichromatic format
-            area_by_colour = pygor.utilities.multicolour_reshape(total_areas, self.numcolour).T
+            if largest_only == False:
+                # Step 3: Sum these by polarity
+                tot_neg_areas, tot_pos_areas = [np.sum(i) for i in neg_contour_areas], [np.sum(i) for i in pos_contour_areas]
+                # Step 4: Sum across polarities 
+                total_areas = np.sum((tot_neg_areas, tot_pos_areas), axis = 0)
+                # Step 5: Reshape to multichromatic format
+                area_by_colour = pygor.utilities.multicolour_reshape(total_areas, self.numcolour).T
+            if largest_only == True:
+                # Step 3: Get the largest contour by polarity
+                max_negs = np.max(pygor.utilities.numpy_fillna(neg_contour_areas).astype(float), axis = 1)
+                max_pos = np.max(pygor.utilities.numpy_fillna(pos_contour_areas).astype(float), axis = 1)
+                # Step 4: Get the largest of these
+                abs_max = np.max([max_negs, max_pos], axis = 0)
+                # Step 5: Reshape to multichromatic format
+                area_by_colour = pygor.utilities.multicolour_reshape(abs_max, self.numcolour).T
             return area_by_colour #transpose for simplicity, invert for UV - R by wavelength (increasing)
         else:
             raise AttributeError("Operation cannot be done since object contains no property '.multicolour.")
