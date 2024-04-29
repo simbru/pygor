@@ -10,6 +10,7 @@ import pygor.data_helpers
 import pygor.utils.helpinfo
 import pygor.strf.space
 import pygor.strf.contouring
+import pygor.strf.contouring_beta
 import pygor.strf.temporal
 import pygor.strf.plot
 import pygor.utils
@@ -188,7 +189,7 @@ class STRF(Core):
                 if none_default_key:
                     print(f"Keys set to default values: {[(i, default_dict[i]) for i in none_default_key]}")
 
-    def run_bootstrap(self) -> None:
+    def run_bootstrap(self, force = False) -> None:
         """run_bootstrap Runs bootstrapping according to self.bs_settings
 
         Returns
@@ -200,19 +201,22 @@ class STRF(Core):
             raise AttributeError("self.bs_settings['do_bootstrap'] is not True")
         if self.bs_settings["do_bootstrap"] == True:
             if self.bs_settings["bs_already_ran"] == True:
-                user_verify = input("Do you want re-do bootstrap? Type 'y'/'yes' or 'n'/'no'")
-                user_verify = user_verify.lower()
+                if force == False:
+                    user_verify = input("Do you want re-do bootstrap? Type 'y'/'yes' or 'n'/'no'")
+                    user_verify = user_verify.lower()
+                else:
+                    user_verify = 'y'
                 if user_verify == 'y' or user_verify == "yes":
                     before_time = datetime.datetime.now()
                     self.__calc_pval_time()
                     self.__calc_pval_space()
                     after_time = datetime.datetime.now()
-                if user_verify == 'n' or user_verify == "no":
+                elif user_verify == 'n' or user_verify == "no":
                     print(f"Skipping recomputing bootstrap due to user input:'{user_verify}'")
-                    return
+                    return self
                 else:
                     print(f"Input '{user_verify}' is invalid, no action done. Please use 'y'/'n'.")
-                    return
+                    return self
             else:
                 before_time = datetime.datetime.now()
                 self.__calc_pval_time()
@@ -223,7 +227,7 @@ class STRF(Core):
             self.bs_settings["bs_datetime"] = before_time
             self.bs_settings["bs_datetime_str"] = before_time.strftime("%d/%m/%y %H:%M:%S")
             self.bs_settings["bs_dur_timedelta"] = after_time - before_time
-            
+            return self
     @property
     def pval_time(self) -> np.ndarray:
         """
@@ -314,17 +318,33 @@ class STRF(Core):
         #     return self.__contours
         # except AttributeError:
             #self.__contours = [space.contour(x) for x in self.collapse_times()]
+        
+        # if self.bs_settings["do_bootstrap"] == True:
+        #     time_pvals = self.pval_time
+        #     space_pvals = self.pval_space
+        #     __contours = [pygor.strf.contouring.contour(arr) # ensures no contour is drawn if pval not sig enough
+        #                     if time_pvals[count] < self.bs_settings["time_sig_thresh"] and space_pvals[count] < self.bs_settings["space_sig_thresh"]
+        #                     else  ([], [])
+        #                     for count, arr in enumerate(self.collapse_times())]
+        # if self.bs_settings["do_bootstrap"] == False:
+        #     __contours = [pygor.strf.contouring.contour(arr) for count, arr in enumerate(self.collapse_times())]
+        # __contours = np.array(__contours, dtype = "object")
+        # return __contours
+
+
         if self.bs_settings["do_bootstrap"] == True:
             time_pvals = self.pval_time
             space_pvals = self.pval_space
-            __contours = [pygor.strf.contouring.contour(arr) # ensures no contour is drawn if pval not sig enough
+            __contours = [pygor.strf.contouring_beta.bipolar_contour(arr) # ensures no contour is drawn if pval not sig enough
                             if time_pvals[count] < self.bs_settings["time_sig_thresh"] and space_pvals[count] < self.bs_settings["space_sig_thresh"]
                             else  ([], [])
                             for count, arr in enumerate(self.collapse_times())]
         if self.bs_settings["do_bootstrap"] == False:
-            __contours = [pygor.strf.contouring.contour(arr) for count, arr in enumerate(self.collapse_times())]
+            __contours = [pygor.strf.contouring_beta.bipolar_contour(arr) for count, arr in enumerate(self.collapse_times())]
         __contours = np.array(__contours, dtype = "object")
         return __contours
+
+
             # self.__contours = np.array(__contours, dtype = "object")
             # return self.__contours    
     def get_contours_count(self) -> list:
@@ -391,7 +411,7 @@ class STRF(Core):
         # try:
         #     return self.__timecourses 
         # except AttributeError:
-        timecourses = np.average(self.get_strf_masks(), axis = (3,4))
+        timecourses = np.ma.average(self.get_strf_masks(), axis = (3,4))
         first_indexes = np.expand_dims(timecourses[:, :, 0], -1)
         if centre_on_zero:
             timecourses_centred = timecourses - first_indexes
@@ -418,29 +438,52 @@ class STRF(Core):
 
     ## Methods__________________________________________________________________________________________________________
 
-    def plot_chromatic_overview(self):
+    def plot_chromatic_overview(self, roi = None):
         with warnings.catch_warnings(record=True) as w:
             # Cause all warnings to always be triggered.
             warnings.simplefilter("always")
-            return pygor.strf.plots.chroma_overview(self)
+            return pygor.strf.plot.chroma_overview(self, roi, contours=True)
 
+    # def plot_roi(self, roi):
+    #     fig, ax = plt.subplots(1, 3)
 
-    def get_strf_masks(self, level = None):
+    def get_strf_masks(self, level = None) -> (np.ndarray, np.ndarray):
         """
-        Return masked array of space.rf_mask3d applied to all arrays, with masks based on pval_time and pval_space.
+        Return masked array of space.rf_mask3d applied to all arrays, with masks based on pval_time and pval_space,
+        with polarity intact.
         """
         if self.strfs is np.nan:
             return np.nan
         else:
-            # Apply space.rf_mask3d to all arrays and return as a new masksed array
-            all_strf_masks = np.ma.array([pygor.strf.space.rf_mask3d(x, level = None) for x in self.strfs])
-            # # Get masks that fail criteria
-            pval_fail_time = np.argwhere(np.array(self.pval_time) > self.bs_settings["time_sig_thresh"]) # nan > thresh always yields false, so thats really convenient 
-            pval_fail_space = np.argwhere(np.array(self.pval_space) > self.bs_settings["space_sig_thresh"]) # because if pval is nan, it returns everything
-            pval_fail = np.unique(np.concatenate((pval_fail_time, pval_fail_space)))
-            # Set entire mask to True conditionally 
-            all_strf_masks.mask[pval_fail] = True
-        return all_strf_masks
+            # raise NotImplementedError("Implementation error, does not work yet")
+            # get 2d masks
+            all_masks = np.array([pygor.strf.contouring_beta.bipolar_mask(i) for i in self.collapse_times()])
+            all_masks = np.repeat(np.expand_dims(all_masks, 2), 20, axis = 2)
+            # Apply mask to expanded and repeated strfs (to get negative and positive)
+            strfs_expanded = np.repeat(np.expand_dims(self.strfs, axis = 1), 2, axis = 1)
+            all_strfs_masked = np.ma.array(strfs_expanded, mask = all_masks, keep_mask=True)
+            """
+            TODO
+            - Kill masks where pval > threshold
+            """
+            # # # Get masks that fail criteria
+            # pval_fail_time = np.argwhere(np.array(self.pval_time) > self.bs_settings["time_sig_thresh"]) # nan > thresh always yields false, so thats really convenient 
+            # pval_fail_space = np.argwhere(np.array(self.pval_space) > self.bs_settings["space_sig_thresh"]) # because if pval is nan, it returns everything
+            # pval_fail = np.unique(np.concatenate((pval_fail_time, pval_fail_space)))
+            # # Set entire mask to True conditionally 
+            # all_strfs_masked[pval_fail] = True
+            return all_strfs_masked
+
+            ## old:
+            # # Apply space.rf_mask3d to all arrays and return as a new masksed array
+            # all_strf_masks = np.ma.array([pygor.strf.space.rf_mask3d(x, level = None) for x in self.strfs])
+            # # # Get masks that fail criteria
+            # pval_fail_time = np.argwhere(np.array(self.pval_time) > self.bs_settings["time_sig_thresh"]) # nan > thresh always yields false, so thats really convenient 
+            # pval_fail_space = np.argwhere(np.array(self.pval_space) > self.bs_settings["space_sig_thresh"]) # because if pval is nan, it returns everything
+            # pval_fail = np.unique(np.concatenate((pval_fail_time, pval_fail_space)))
+            # # Set entire mask to True conditionally 
+            # all_strf_masks.mask[pval_fail] = True
+        # return all_strf_masks
 
     ## Methods 
     def calc_LED_offset(self, reference_LED_index = [0,1,2], compare_LED_index = [3]) -> np.ndarray:

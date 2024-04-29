@@ -2,9 +2,10 @@
 import numpy as np
 import skimage.filters
 import matplotlib.pyplot as plt
+import warnings
+global_thresh_val = 2
 
-
-def _detect_targets(spatial_filter, thresh_value = 2.5, result_plot = False, **kwargs):
+def _detect_targets(spatial_filter, thresh_value = global_thresh_val, min_targets = 4,result_plot = False, **kwargs):
     """
     Detect targets based on the spatial filter values and return the indices of the detected targets.
     In short, the algorithm detects targets over the given threshold value on the first pass. On the 
@@ -25,6 +26,8 @@ def _detect_targets(spatial_filter, thresh_value = 2.5, result_plot = False, **k
          detected_targets : list
              A list of indices corresponding to the detected targets.
     """
+    if isinstance(spatial_filter, np.ma.core.MaskedArray):
+        spatial_filter = spatial_filter.data
      # Detect targets
     spatial_filter_abs_flat = np.abs(spatial_filter).flatten()
     detected_targets_firstpass = np.where(spatial_filter_abs_flat > thresh_value)[0]
@@ -44,9 +47,11 @@ def _detect_targets(spatial_filter, thresh_value = 2.5, result_plot = False, **k
         ax.scatter(detected_targets, spatial_filter_abs_flat[detected_targets], c="g", label = "second pass")
         ax.legend()
         ax.set_title("Thresholded values")
+    if len(detected_targets) < min_targets:
+        detected_targets = []
     return detected_targets
 
-def _gen_filter_mask(spatial_filter, thresh_value = 2.5, min_hole_size = 2, min_object_size = 3, result_plot = False, **kwargs):
+def _gen_filter_mask(spatial_filter, thresh_value = global_thresh_val, min_hole_size = 2, min_object_size = 4, result_plot = False, **kwargs):
     """
     Generate a binary mask based on spatial filtering of detected targets. This is the third pass 
     of the target detection algorithm. In short, the algorithm removes small holes and objects
@@ -82,13 +87,18 @@ def _gen_filter_mask(spatial_filter, thresh_value = 2.5, min_hole_size = 2, min_
     # Mask processing
     mask = np.zeros(len(spatial_filter.flatten()))
     mask[targets] = 1
-    mask = mask.astype(int).reshape(shape)
+    mask = mask.astype(bool).reshape(shape)
     mask = skimage.morphology.remove_small_holes(mask, area_threshold = min_hole_size)
     mask = skimage.morphology.remove_small_objects(mask, min_size = min_object_size)
     # Double dialation is intentional
     mask = skimage.morphology.binary_dilation(mask)
-    mask = skimage.morphology.binary_dilation(mask)
+
+    # mask = skimage.morphology.binary_dilation(mask)
     if result_plot:
+        if kwargs.get("color") is not None: 
+            kwargs["c"] = kwargs["color"]
+        if kwargs.get("c") is None:
+            kwargs["c"] = "yellow"
         # Apply mask to signal and output 
         spatial_filter_output = np.copy(spatial_filter.flatten())
         spatial_filter_output[~mask.flatten()] = 0
@@ -103,17 +113,17 @@ def _gen_filter_mask(spatial_filter, thresh_value = 2.5, min_hole_size = 2, min_
             if a == ax[-1]:
                 non_zero_spatial_filter = spatial_filter.flatten()[spatial_filter.flatten()!=~0]
                 post_processing_tarets = np.where(mask.flatten() == 1)[0]
-                plt.plot(post_processing_tarets, non_zero_spatial_filter[post_processing_tarets], c="yellow", 
+                a.plot(non_zero_spatial_filter, c="orange", label = "org signal")
+                a.plot(post_processing_tarets, non_zero_spatial_filter[post_processing_tarets], c=kwargs["c"], 
                     label = "final pass targets", lw = 5, dash_joinstyle = "miter")
-                plt.plot(non_zero_spatial_filter, c="b", label = "org signal")
                 #plt.scatter(post_processing_tarets, non_zero_spatial_filter[post_processing_tarets], c="b",  s = 2, label = "final pass targets")
-                plt.legend()
+                a.legend()
             else:
                 a.imshow(images[n], origin = "lower")
                 a.set_title(titles[n])
     return mask
 
-def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1,result_plot = False, **kwargs):
+def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1, result_plot = False, **kwargs):
     """
     This function applies a Gaussian filter to the input binary mask to smooth 
     it. Then, it finds the contours of the smoothed mask. Optionally, it can 
@@ -154,10 +164,63 @@ def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1,result_plot = False
             for a in ax[:3]:
                 for contour_n in contour:
                     a.plot(contour_n[:, 1], contour_n[:, 0], lw = 3, ls = '-',alpha = .8, c = kwargs["c"])
-    return contour
+    return contour    
 
+def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val):
+    if np.ma.isMaskedArray(spatial_filter):
+        spatial_filter = spatial_filter.data
+    neg_filter = np.clip(spatial_filter, None, 0)
+    pos_filter = np.clip(spatial_filter, 0, None)
+    neg_mask = _gen_filter_mask(neg_filter, thresh_value=abs_thresh_val)
+    pos_mask = _gen_filter_mask(pos_filter, thresh_value=abs_thresh_val)
+    # Then, segment the masks into its constituent parts
+    neg_mask_labeled = skimage.measure.label(neg_mask)
+    pos_mask_labeled = skimage.measure.label(pos_mask)
+    # Loop logic: Sort the labelled mask into positive and negative masks, then combine separately
+    neg_unique_labels = np.unique(neg_mask_labeled) # unique_labels[unique_labels > 0]
+    pos_unique_labels = np.unique(pos_mask_labeled)
+    neg_unique_labels = neg_unique_labels[neg_unique_labels > 0] 
+    pos_unique_labels = pos_unique_labels[pos_unique_labels > 0] 
+    # Loop through the unique labels and append the masks accordingly
+    neg_mask = []
+    pos_mask = []
+    for n, label in enumerate(neg_unique_labels):
+        # Get the average value within the labelled region of the mask
+        current_mask_vals = neg_filter[neg_mask_labeled == label]
+        label_average = np.average(current_mask_vals)
+        # Append the mask accordingly
+        if label_average < 0:
+            neg_mask.append(np.where(neg_mask_labeled == label, 1, 0))
+        else:
+            raise ValueError("Negative mask contains a region with positive average value. This is not allowed.")
+    for n, label in enumerate(pos_unique_labels):
+        # Get the average value within the labelled region of the mask
+        current_mask_vals = pos_filter[pos_mask_labeled == label]
+        label_average = np.average(current_mask_vals)
+        # Append the mask accordingly
+        if label_average > 0:
+            pos_mask.append(np.where(pos_mask_labeled == label, 1, 0))
+        else:
+            raise ValueError("Positive mask contains a region with negative average value. This is not allowed.")
+    # Sum to combine the masks according to polarity
+    if neg_mask == []:
+        neg_mask = np.ones(spatial_filter.shape).astype(bool)
+    else:
+        neg_mask = np.invert(np.sum(np.array(neg_mask), axis = 0).astype(bool))
+    if pos_mask == []:
+        pos_mask = np.ones(spatial_filter.shape).astype(bool)
+    else:
+        pos_mask = np.invert(np.sum(np.array(pos_mask), axis = 0).astype(bool))
+    if np.all(neg_mask == 1) and 0 in pos_mask:
+        neg_mask = np.invert(pos_mask.astype(bool))
+    if 0 in neg_mask and np.all(pos_mask == 1):
+        pos_mask = np.invert(neg_mask.astype(bool))    
+    # Throw error if overlap exists
+    if np.any(neg_mask > 1) or np.any(pos_mask > 1):
+        raise ValueError("Masking logic insufficient, leading to overlapping masks. Manual fix required.")
+    return (neg_mask, pos_mask)
 
-def contour_on_processed_mask(spatial_filter, plot_results = False, **kwargs):
+def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_results = False, **kwargs):
     """
     Processes a spatial filter mask to segment and contour areas based on polarity.
 
@@ -187,54 +250,41 @@ def contour_on_processed_mask(spatial_filter, plot_results = False, **kwargs):
     ValueError
         If the masking logic is insufficient and leads to overlapping masks.
     """
-    # Get mask first
+    # Split arrays
+    neg_filter = np.clip(spatial_filter, None, 0)
+    pos_filter = np.clip(spatial_filter, 0, None)
+    # Determine if there are targets
+    _neg_targets = _detect_targets(neg_filter, thresh_value = abs_thresh_val)
+    _pos_targets = _detect_targets(pos_filter, thresh_value = abs_thresh_val)
+    # Plot that process, conditionally
     if plot_results is True:
-        fig, ax = plt.subplots(1, 5, figsize = (20, 3))
-        _ = _detect_targets(spatial_filter, thresh_value = 2, result_plot=1, ax = ax.flat[0])
-        mask = _gen_filter_mask(spatial_filter, result_plot=1, ax = ax.flat[1:])
-    else:
-        mask = _gen_filter_mask(spatial_filter)
-    # Then, segment the mask into its constituent parts
-    mask_labeled = skimage.measure.label(mask)
-    # Loop logic: Sort the labelled mask into positive and negative masks, then combine separately
-    unique_labels = np.unique(mask_labeled)
-    unique_labels = unique_labels[unique_labels > 0]
-    # Keeping track of some stats for troubleshooting
-    label_polarity = []
-    label_value = []
-    # Loop through the unique labels and append the masks accordingly
-    neg_mask = []
-    pos_mask = []
-    for n, label in enumerate(unique_labels):
-        # Get the average value within the labelled region of the mask
-        current_mask_vals = spatial_filter[mask_labeled == label]
-        label_average = np.average(current_mask_vals)
-        label_value.append(label_average)
-        # Append the mask accordingly
-        if label_average > 0:
-            label_polarity.append(1)
-            pos_mask.append(np.where(mask_labeled == label, 1, 0))
-        else:
-            label_polarity.append(-1)
-            neg_mask.append(np.where(mask_labeled == label, 1, 0))
-    # Sum to combine the masks according to polarity
-    if neg_mask == []:
-        neg_mask = np.ones(mask.shape)
-    else:
-        neg_mask = np.sum(np.array(neg_mask), axis = 0)
-    if pos_mask == []:
-        pos_mask = np.ones(mask.shape)
-    else:
-        pos_mask = np.sum(np.array(pos_mask), axis = 0)
-    # Throw error if overlap exists
-    if np.any(neg_mask > 1) or np.any(pos_mask > 1):
-        raise ValueError("Masking logic insufficient, leading to overlapping masks. Manual fix required.")
+        neg_filter = np.clip(spatial_filter, None, 0)
+        pos_filter = np.clip(spatial_filter, 0, None)
+        fig, ax = plt.subplots(2, 5, figsize = (10*1.5, 3*1.5))
+        _neg_targets = _detect_targets(neg_filter, thresh_value = abs_thresh_val, result_plot=1, ax = ax[0, 0])
+        _pos_targets = _detect_targets(pos_filter, thresh_value = abs_thresh_val, result_plot=1, ax = ax[1, 0])
+        neg_mask = _gen_filter_mask(neg_filter, thresh_value=abs_thresh_val, result_plot=1, ax = ax[0, 1:].flatten(), c = "blue")
+        pos_mask = _gen_filter_mask(pos_filter, thresh_value=abs_thresh_val, result_plot=1, ax = ax[1, 1:].flatten(), c = "red")
+    # Get masks
+    neg_mask, pos_mask = bipolar_mask(spatial_filter)
     # Contour seperately based on polarity
-    # neg_contours = _fit_filter_contour(neg_mask)
     if plot_results is True:
-        neg_contours = _fit_filter_contour(neg_mask, result_plot = plot_results, ax = ax[1:], c = "blue", **kwargs)
-        pos_contours = _fit_filter_contour(pos_mask, result_plot = plot_results, ax = ax[1:], c = "red", **kwargs)
+        if _neg_targets == []:
+            neg_contours = []
+        else:
+            neg_contours = _fit_filter_contour(neg_mask, result_plot = 1, ax = ax[0, 1:], c = "blue", **kwargs)
+        if _pos_targets == []:
+            pos_contours = []
+        else:
+            pos_contours = _fit_filter_contour(pos_mask, result_plot = 1, ax = ax[1, 1:], c = "red", **kwargs)
+        plt.tight_layout()
     else:
-        neg_contours = _fit_filter_contour(neg_mask)
-        pos_contours = _fit_filter_contour(pos_mask)
+        if isinstance(_neg_targets, list) and _neg_targets == []:
+            neg_contours = []
+        else:
+            neg_contours = _fit_filter_contour(neg_mask)
+        if isinstance(_pos_targets, list) and _pos_targets == []:
+            pos_contours = []
+        else:
+            pos_contours = _fit_filter_contour(pos_mask)
     return (neg_contours, pos_contours)
