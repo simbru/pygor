@@ -15,7 +15,7 @@ from pygor.plotting.custom import red_map, green_map, blue_map, violet_map, fish
 
 def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_crop = (0, 0), x_crop = (0 ,0),
     column_titles = ["588 nm", "478 nm", "422 nm", "375 nm"], colour_maps = [red_map, green_map, blue_map, violet_map],
-    contours = False, ax = None, high_contrast = True):
+    contours = False, ax = None, high_contrast = True, remove_border = True):
     if isinstance(colour_maps, Iterable) is False:
         colour_maps = [colour_maps] * len(column_titles)
     strfs_chroma = pygor.utilities.multicolour_reshape(data_strf_object.collapse_times(), data_strf_object.numcolour)
@@ -36,8 +36,12 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
     else:
         fig = plt.gcf()
     for n, roi in enumerate(specify_rois):
-        spaces = np.copy(pygor.utilities.auto_remove_border(strfs_chroma[:, roi])) # this works
-        border_tup = pygor.utilities.check_border(strfs_chroma[:, roi])
+        if remove_border is True:
+            spaces = np.copy(pygor.utilities.auto_remove_border(strfs_chroma[:, roi])) # this works
+            border_tup = pygor.utilities.check_border(strfs_chroma[:, roi])
+        else:
+            spaces = strfs_chroma[:, roi]
+            border_tup = (0, 0, 0, 0)
         if y_crop != (0, 0) or x_crop != (0, 0):
             spaces = spaces[:, y_crop[0]:y_crop[1], x_crop[0]:x_crop[1]]
         # plotting depending on specified number of rois (more or less than 1)
