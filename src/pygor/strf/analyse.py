@@ -117,7 +117,8 @@ def _roi_by_roi_dict(data_strf_obj): #
         #dict["pos_contour_areas"] = pos_contour_areas_corrected
         dict["neg_contour_area_total"] = tot_neg_areas_corrected
         dict["pos_contour_area_total"] = tot_pos_areas_corrected
-        dict["contour_area_total"] = np.sum((tot_neg_areas_corrected, tot_pos_areas_corrected), axis = 0)
+        contour_area_total = np.sum((tot_neg_areas_corrected, tot_pos_areas_corrected), axis = 0)
+        dict["contour_area_total"] = contour_area_total
         dict["contour_complexity"] = np.nanmean(data_strf_obj.calc_contours_complexities(), axis = 1)
 
          # Time
@@ -144,7 +145,9 @@ def _roi_by_roi_dict(data_strf_obj): #
         neg_centroids, pos_centroids = data_strf_obj.calc_spectral_centroids()
         dict["neg_centroids"] = neg_centroids
         dict["pos_centroids"] = pos_centroids
-        dict["dom_centroids"] = np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_centroids, pos_centroids)
+        dom_centroid = np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_centroids, pos_centroids)
+        dom_centroid = np.where(contour_area_total > 0, dom_centroid, 0)
+        dict["dom_centroids"] = dom_centroid
         
         # Proof of concept for assigning entire arrays 
         #dict["-timecourse"] = data_strf_obj.get_timecourses()[:, 0].tolist()
@@ -278,6 +281,8 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
             neg_cent_t, pos_cent_t = neg_cent_t.T, pos_cent_t.T
             neg_peak_t, pos_peak_t = data_strf_obj.calc_tunings_peaktime()
             neg_peak_t, pos_peak_t =  neg_peak_t.T, pos_peak_t.T
+            cent_dom_t = np.where(ampl_t.T > 0, pos_cent_t.T, neg_cent_t.T).T
+            cent_dom_t = np.where(area_t.T, cent_dom_t.T, 0).T
 
             # Chromatic aspects
             temporal_filter = pygor.utilities.multicolour_reshape(data_strf_obj.get_timecourses(), num_wavelengths)
@@ -290,6 +295,7 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
                 dict[f"ampl_{i}"] = ampl_t[n]
                 dict[f"centneg_{i}"] = neg_cent_t[n]
                 dict[f"centpos_{i}"] = pos_cent_t[n]
+                dict[f"centdom_{i}"] = cent_dom_t[n]
                 dict[f"peakneg_{i}"] = neg_peak_t[n]
                 dict[f"peakpos_{i}"] = pos_peak_t[n]
                 dict[f"comp_{i}"] = complexities[n]
