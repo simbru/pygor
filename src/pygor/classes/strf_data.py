@@ -25,7 +25,7 @@ import h5py
 import natsort
 import warnings
 import pandas as pd
-
+import matplotlib.pyplot as plt
 
 @dataclass(repr = False)
 class STRF(Core):
@@ -729,6 +729,23 @@ class STRF(Core):
         spectrum_pos = np.array([pygor.strf.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 1]])
         return spectrum_neg, spectrum_pos
 
+    def demo_contouring(self, roi, chromatic_reshape = False):
+        fig, ax = plt.subplots(2, 6, figsize = (16*1.5, 4*1.5))
+        neg_c, pos_c = pygor.strf.contouring_beta.bipolar_contour(self.collapse_times()[roi], plot_results= True, ax = ax)
+        ax[0, -1].plot(self.get_timecourses()[roi].T, label = ["neg", "pos"])
+        ax[0, -1].legend()
+        ax[1, -1].imshow((self.get_spatial_masks()[0][roi] * -1) + self.get_spatial_masks()[1][roi], origin = "lower")
+        gs = ax[1, 2].get_gridspec()
+        for a in ax[0:, 0]:
+            a.remove()
+        axbig = fig.add_subplot(gs[:, 0])
+        axbig.imshow(self.collapse_times()[roi], origin = "lower")
+        for i in neg_c:
+            axbig.plot(i[:, 1], i[:, 0], color = "blue")
+        for i in pos_c:
+            axbig.plot(i[:, 1], i[:, 0], color = "red")
+        
+    
     # def check_ipl_orientation(self):
     #     raise NotImplementedError("Current implementation does not yield sensible result")
     #     maxes = np.max(self.dominant_timecourses(), axis = 1)

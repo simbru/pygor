@@ -2,10 +2,14 @@
 import numpy as np
 import skimage.filters
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import warnings
-global_thresh_val = 2
+global_thresh_val = 3
+min_targets =     0
+min_hole_size =   0
+min_object_size = 2
 
-def _detect_targets(spatial_filter, thresh_value = global_thresh_val, min_targets = 4,result_plot = False, **kwargs):
+def _detect_targets(spatial_filter, thresh_value = global_thresh_val, min_targets = min_targets,result_plot = False, **kwargs):
     """
     Detect targets based on the spatial filter values and return the indices of the detected targets.
     In short, the algorithm detects targets over the given threshold value on the first pass. On the 
@@ -43,15 +47,15 @@ def _detect_targets(spatial_filter, thresh_value = global_thresh_val, min_target
             ax = kwargs.get("ax")
         ax.plot(np.abs(spatial_filter).flatten())
         ax.plot(spatial_filter_abs_flat)
-        ax.scatter(detected_targets_firstpass, spatial_filter_abs_flat[detected_targets_firstpass], c="r", label = "first pass")
+        ax.scatter(detected_targets_firstpass, spatial_filter_abs_flat[detected_targets_firstpass], c="r", label = "first pass", marker = 7)
         ax.scatter(detected_targets, spatial_filter_abs_flat[detected_targets], c="g", label = "second pass")
-        ax.legend()
+        # ax.legend()
         ax.set_title("Thresholded values")
     if len(detected_targets) < min_targets:
         detected_targets = []
     return detected_targets
 
-def _gen_filter_mask(spatial_filter, thresh_value = global_thresh_val, min_hole_size = 2, min_object_size = 4, result_plot = False, **kwargs):
+def _gen_filter_mask(spatial_filter, thresh_value = global_thresh_val, min_hole_size = min_hole_size, min_object_size = min_object_size, result_plot = False, **kwargs):
     """
     Generate a binary mask based on spatial filtering of detected targets. This is the third pass 
     of the target detection algorithm. In short, the algorithm removes small holes and objects
@@ -68,7 +72,7 @@ def _gen_filter_mask(spatial_filter, thresh_value = global_thresh_val, min_hole_
     thresh_value : float, optional
         The threshold value for target detection. Default is 2.5.
     min_hole_size : int, optional
-        The minimum hole size in the binary mask that will not be removed. Default is 2.
+        Remove contiguous holes smaller than the specified size.. Default is 2.
     min_object_size : int, optional
         The minimum object size in the binary mask that will not be removed. Default is 3.
     result_plot : bool, optional
@@ -88,11 +92,10 @@ def _gen_filter_mask(spatial_filter, thresh_value = global_thresh_val, min_hole_
     mask = np.zeros(len(spatial_filter.flatten()))
     mask[targets] = 1
     mask = mask.astype(bool).reshape(shape)
-    mask = skimage.morphology.remove_small_holes(mask, area_threshold = min_hole_size)
     mask = skimage.morphology.remove_small_objects(mask, min_size = min_object_size)
+    mask = skimage.morphology.remove_small_holes(mask, area_threshold = min_hole_size)
     # Double dialation is intentional
     mask = skimage.morphology.binary_dilation(mask)
-
     # mask = skimage.morphology.binary_dilation(mask)
     if result_plot:
         if kwargs.get("color") is not None: 
@@ -107,20 +110,14 @@ def _gen_filter_mask(spatial_filter, thresh_value = global_thresh_val, min_hole_
             fig, ax = plt.subplots(1, 3, figsize = (20, 4))
         else:
             ax = kwargs.get("ax")
-        images = [spatial_filter, spatial_filter_output, mask]
-        titles = ["Original signal", "Signal masked", "Mask (returned)"]
-        for n, a in enumerate(ax.flat):
-            if a == ax[-1]:
-                non_zero_spatial_filter = spatial_filter.flatten()[spatial_filter.flatten()!=~0]
-                post_processing_tarets = np.where(mask.flatten() == 1)[0]
-                a.plot(non_zero_spatial_filter, c="orange", label = "org signal")
-                a.plot(post_processing_tarets, non_zero_spatial_filter[post_processing_tarets], c=kwargs["c"], 
-                    label = "final pass targets", lw = 5, dash_joinstyle = "miter")
-                #plt.scatter(post_processing_tarets, non_zero_spatial_filter[post_processing_tarets], c="b",  s = 2, label = "final pass targets")
-                a.legend()
-            else:
-                a.imshow(images[n], origin = "lower")
-                a.set_title(titles[n])
+        non_zero_spatial_filter = spatial_filter.flatten()[spatial_filter.flatten()!=~0]
+        post_processing_tarets = np.where(mask.flatten() == 1)[0]
+        ax[0].plot(non_zero_spatial_filter, c="orange")
+        ax[0].scatter(post_processing_tarets, non_zero_spatial_filter[post_processing_tarets], c=kwargs["c"], 
+            label = "third pass")
+        # ax[0].legend()
+        ax[1].imshow(spatial_filter, origin = "lower")
+        # ax[2].imshow(mask)
     return mask
 
 def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1, result_plot = False, **kwargs):
@@ -161,12 +158,12 @@ def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1, result_plot = Fals
             plt.show()
         else:
             ax = kwargs.get("ax")
-            for a in ax[:3]:
+            for a in ax[:1]:
                 for contour_n in contour:
                     a.plot(contour_n[:, 1], contour_n[:, 0], lw = 3, ls = '-',alpha = .8, c = kwargs["c"])
     return contour    
 
-def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val):
+def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val, plot_results = False, ax = None):
     if np.ma.isMaskedArray(spatial_filter):
         spatial_filter = spatial_filter.data
     neg_filter = np.clip(spatial_filter, None, 0)
@@ -202,6 +199,9 @@ def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val):
             pos_mask.append(np.where(pos_mask_labeled == label, 1, 0))
         else:
             raise ValueError("Positive mask contains a region with negative average value. This is not allowed.")
+    # Check if masks conflict
+    # plt.close('all')
+    # plt.imshow(pos_mask[0])
     # Sum to combine the masks according to polarity
     if neg_mask == []:
         neg_mask = np.ones(spatial_filter.shape).astype(bool)
@@ -215,12 +215,32 @@ def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val):
         neg_mask = np.invert(pos_mask.astype(bool))
     if 0 in neg_mask and np.all(pos_mask == 1):
         pos_mask = np.invert(neg_mask.astype(bool))    
-    # Throw error if overlap exists
-    if np.any(neg_mask > 1) or np.any(pos_mask > 1):
-        raise ValueError("Masking logic insufficient, leading to overlapping masks. Manual fix required.")
-    return (neg_mask, pos_mask)
+    # # Throw error if overlap exists
+    # if np.any(neg_mask > 1) or np.any(pos_mask > 1):
+    #     raise ValueError("Masking logic insufficient, leading to overlapping masks. Manual fix required.")
+    # Check if masks conflict (prioritise bigger mask)
+    neg_mask_indices = np.argwhere(neg_mask == 0)
+    pos_mask_indices = np.argwhere(pos_mask == 0)
+    if len(neg_mask_indices) > len(pos_mask_indices):
+        matching_indices = np.array((pos_mask_indices[:,None] == neg_mask_indices).all(2).any(1))
+        prune_indices = pos_mask_indices[matching_indices]
+        pos_mask[prune_indices[:, 0], prune_indices[:, 1]] = 1
+    else:
+        matching_indices = np.array((neg_mask_indices[:,None] == pos_mask_indices).all(2).any(1))
+        prune_indices = neg_mask_indices[matching_indices]
+        neg_mask[prune_indices[:, 0], prune_indices[:, 1]] = 1
+    if plot_results:
+        ax[0].imshow(neg_mask, origin = "lower")
+        ax[1].imshow(pos_mask, origin = "lower")
+        # final_neg = np.argwhere(neg_mask.flatten() == 0)
+        # final_pos = np.argwhere(pos_mask.flatten() == 0)
+        # ax[0, 1].scatter(final_neg, neg_filter.flatten()[final_neg], c = 'cyan', label = 'final', marker = 'o')
+        # ax[0, 1].legend()
+        # ax[1, 1].scatter(final_pos, pos_filter.flatten()[final_pos], c = 'cyan', label = 'final', marker = 'o')
+        # ax[1, 1].legend()
+    return neg_mask, pos_mask
 
-def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_results = False, **kwargs):
+def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_results = False, ax = None, **kwargs):
     """
     Processes a spatial filter mask to segment and contour areas based on polarity.
 
@@ -256,35 +276,68 @@ def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_res
     # Determine if there are targets
     _neg_targets = _detect_targets(neg_filter, thresh_value = abs_thresh_val)
     _pos_targets = _detect_targets(pos_filter, thresh_value = abs_thresh_val)
+    # Threshold targets 
+    if len(_neg_targets) < min_targets:
+        _neg_targets = []
+    if len(_pos_targets) < min_targets:
+        _pos_targets = []
     # Plot that process, conditionally
     if plot_results is True:
         neg_filter = np.clip(spatial_filter, None, 0)
         pos_filter = np.clip(spatial_filter, 0, None)
-        fig, ax = plt.subplots(2, 5, figsize = (10*1.5, 3*1.5))
-        _neg_targets = _detect_targets(neg_filter, thresh_value = abs_thresh_val, result_plot=1, ax = ax[0, 0])
-        _pos_targets = _detect_targets(pos_filter, thresh_value = abs_thresh_val, result_plot=1, ax = ax[1, 0])
-        neg_mask = _gen_filter_mask(neg_filter, thresh_value=abs_thresh_val, result_plot=1, ax = ax[0, 1:].flatten(), c = "blue")
-        pos_mask = _gen_filter_mask(pos_filter, thresh_value=abs_thresh_val, result_plot=1, ax = ax[1, 1:].flatten(), c = "red")
-    # Get masks
+        if ax is None:
+            fig, ax = plt.subplots(2, 4, figsize = (10*1.5, 3*1.5))
+            offset = 1
+        else:
+            fig = plt.gcf()
+            offset = 0
+        _neg_targets = _detect_targets(neg_filter, thresh_value = abs_thresh_val, result_plot=1, ax = ax[0, 1 - offset])
+        _pos_targets = _detect_targets(pos_filter, thresh_value = abs_thresh_val, result_plot=1, ax = ax[1, 1 - offset])
+        neg_mask = _gen_filter_mask(neg_filter, thresh_value=abs_thresh_val, result_plot=1, ax = ax[0, 2 - offset:].flatten(), c = "yellow")
+        pos_mask = _gen_filter_mask(pos_filter, thresh_value=abs_thresh_val, result_plot=1, ax = ax[1, 2 - offset:].flatten(), c = "yellow")
+        neg_mask, pos_mask = bipolar_mask(spatial_filter, plot_results=plot_results, ax = ax[:,  4 - offset])
+        ax[0, 2 - offset].scatter(_neg_targets, neg_filter.flatten()[_neg_targets], c = 'cyan', label = 'final', marker = 5)
+        ax[1, 2 - offset].scatter(_pos_targets, pos_filter.flatten()[_pos_targets], c = 'cyan', label = 'final', marker = 5)
+        # Combine all legends
+        lines_labels = [ax.get_legend_handles_labels() for ax in fig.axes[:4]]
+        lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]
+        fig.legend(lines, labels, loc = 'lower left', ncol = 4, bbox_to_anchor = (.175, -.075))
+
+   # Get masks
     neg_mask, pos_mask = bipolar_mask(spatial_filter)
-    # Contour seperately based on polarity
+    # Determine which mask is the inverted one
+    is_inverse = np.all(np.invert(neg_mask) == pos_mask)
+    skip_mask = 0
+    if is_inverse:
+        # Determine which mask is the inverted one
+        pos_mask_sum = np.sum(pos_mask)
+        neg_mask_sum = np.sum(neg_mask)
+        # Assign value to skip that mask
+        if neg_mask_sum > pos_mask_sum:
+            skip_mask = -1
+        if pos_mask_sum > neg_mask_sum:
+            skip_mask = 1
+    # Contour seperately based on polarity and skip mask
+    # Here we plot
     if plot_results is True:
-        if _neg_targets == []:
+        if isinstance(_neg_targets, list) and _neg_targets == [] or skip_mask == 1: 
             neg_contours = []
         else:
-            neg_contours = _fit_filter_contour(neg_mask, result_plot = 1, ax = ax[0, 1:], c = "blue", **kwargs)
-        if _pos_targets == []:
+            neg_contours = _fit_filter_contour(neg_mask, result_plot = 1, ax = ax[0, 3 - offset:], c = "blue", **kwargs)
+        if isinstance(_pos_targets, list) and _pos_targets == [] or skip_mask == -1:
             pos_contours = []
         else:
-            pos_contours = _fit_filter_contour(pos_mask, result_plot = 1, ax = ax[1, 1:], c = "red", **kwargs)
+            pos_contours = _fit_filter_contour(pos_mask, result_plot = 1, ax = ax[1, 3 - offset:], c = "red", **kwargs)
         plt.tight_layout()
+    # Here we don't plot
     else:
-        if isinstance(_neg_targets, list) and _neg_targets == []:
+        if isinstance(_neg_targets, list) and _neg_targets == [] or skip_mask == 1:
             neg_contours = []
         else:
             neg_contours = _fit_filter_contour(neg_mask)
-        if isinstance(_pos_targets, list) and _pos_targets == []:
+        if isinstance(_pos_targets, list) and _pos_targets == [] or skip_mask == -1:
             pos_contours = []
         else:
             pos_contours = _fit_filter_contour(pos_mask)
     return (neg_contours, pos_contours)
+
