@@ -110,29 +110,32 @@ def _roi_by_roi_dict(data_strf_obj): #
         dict["neg_contour_count"] = neg_contour_count
         dict["pos_contour_count"] = pos_contour_count
         dict["total_contour_count"] = neg_contour_count + pos_contour_count
-        neg_contour_areas_corrected = [i[0] for i in data_strf_obj.get_contours_area(pygor.utils.unit_conversion.au_to_visang(size)/4)]
-        pos_contour_areas_corrected = [i[1] for i in data_strf_obj.get_contours_area(pygor.utils.unit_conversion.au_to_visang(size)/4)]        
+        neg_contour_areas_corrected = [i[0] for i in data_strf_obj.get_contours_area()]
+        pos_contour_areas_corrected = [i[1] for i in data_strf_obj.get_contours_area()]        
         tot_neg_areas_corrected, tot_pos_areas_corrected = [np.sum(i) for i in neg_contour_areas_corrected], [np.sum(i) for i in pos_contour_areas_corrected]
-        #dict["neg_contour_areas"] = neg_contour_areas_corrected
-        #dict["pos_contour_areas"] = pos_contour_areas_corrected
+        dict["neg_contour_areas"] = neg_contour_areas_corrected
+        dict["pos_contour_areas"] = pos_contour_areas_corrected
         dict["neg_contour_area_total"] = tot_neg_areas_corrected
         dict["pos_contour_area_total"] = tot_pos_areas_corrected
         contour_area_total = np.sum((tot_neg_areas_corrected, tot_pos_areas_corrected), axis = 0)
         dict["contour_area_total"] = contour_area_total
+        neg_largest = np.max(pygor.utilities.numpy_fillna(neg_contour_areas_corrected), axis = 1)
+        pos_largest = np.max(pygor.utilities.numpy_fillna(pos_contour_areas_corrected), axis = 1)
+        dict["neg_contour_area_largest"] = neg_largest
+        dict["pos_contour_area_largest"] = pos_largest
+        check_largest = np.vstack((neg_largest, pos_largest))
+        total_area_largest = np.max(check_largest, axis = 0)
+        dict["total_contour_area_largest"] = total_area_largest
         dict["contour_complexity"] = np.nanmean(data_strf_obj.calc_contours_complexities(), axis = 1)
 
          # Time
         timecourses = data_strf_obj.get_timecourses()
         timecourses_neg, timecourses_pos = timecourses[:, 0], timecourses[:, 1]
-        neg_extrema, pos_extrema = np.min(timecourses_neg, axis = 1), np.max(timecourses_pos, axis = 1)
-        dict["neg_extrema"] = neg_extrema
-        dict["pos_extrema"] = pos_extrema
-        #dict["dom_extrema"] =  np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_extrema, pos_extrema)
         dict["polarity"] = data_strf_obj.get_polarities()
         neg_biphasic, pos_biphasic = pygor.strf.temporal.biphasic_index(timecourses_neg), pygor.strf.temporal.biphasic_index(timecourses_pos)
         dict["neg_biphasic_index"] = neg_biphasic
         dict["pos_biphasic_index"] = pos_biphasic
-        dict["dom_biphasic_index"] = np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_biphasic, pos_biphasic)
+        dict["dom_biphasic_index"] = np.where(np.nan_to_num(neg_largest) > np.nan_to_num(pos_largest), neg_biphasic, pos_biphasic)
         spearmans_rho = np.array([scipy.stats.spearmanr(i[0], i[1]) for i in timecourses])[:, 0] # slice away the p vals (not accurate for low sample n)
         dict["pols_corr"] =  spearmans_rho # corrcoef/Pearosns via [np.corrcoef(x)[0, 1] for x in timecourses]
         dict["neg_auc"]     = np.trapz(timecourses_neg)
@@ -141,11 +144,11 @@ def _roi_by_roi_dict(data_strf_obj): #
         pos_peaktime = np.argmax(timecourses_pos, axis = 1)
         dict["neg_peaktime"] = neg_peaktime
         dict["pos_peaktime"] = pos_peaktime
-        dict["dom_peaktime"] = np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_peaktime, pos_peaktime)
+        dict["dom_peaktime"] = np.where(np.nan_to_num(neg_largest) > np.nan_to_num(pos_largest), neg_peaktime, pos_peaktime)
         neg_centroids, pos_centroids = data_strf_obj.calc_spectral_centroids()
         dict["neg_centroids"] = neg_centroids
         dict["pos_centroids"] = pos_centroids
-        dom_centroid = np.where(np.nan_to_num(tot_neg_areas_corrected) > np.nan_to_num(tot_pos_areas_corrected), neg_centroids, pos_centroids)
+        dom_centroid = np.where(np.nan_to_num(neg_largest) > np.nan_to_num(pos_largest), neg_centroids, pos_centroids)
         dom_centroid = np.where(contour_area_total > 0, dom_centroid, 0)
         dict["dom_centroids"] = dom_centroid
         

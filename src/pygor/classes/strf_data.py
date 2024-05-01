@@ -10,7 +10,7 @@ import pygor.data_helpers
 import pygor.utils.helpinfo
 import pygor.strf.space
 import pygor.strf.contouring
-import pygor.strf.contouring_beta
+import pygor.strf.contouring
 import pygor.strf.temporal
 import pygor.strf.plot
 import pygor.utils
@@ -26,6 +26,7 @@ import natsort
 import warnings
 import pandas as pd
 import matplotlib.pyplot as plt
+import natsort
 
 @dataclass(repr = False)
 class STRF(Core):
@@ -66,7 +67,29 @@ class STRF(Core):
         self.set_bootstrap_settings_default()
         if self.bs_settings["do_bootstrap"] == True:
             self.run_bootstrap()
-    
+        
+    @property #
+    def stim_size_arbitrary(self):
+        """
+        Get the largest stimulus size from the object's name.
+
+        The `name` is expected to contain numbers separated by underscores.
+        The method extracts all numeric parts, sorts them naturally (as opposed
+        to lexicographically), and returns the largest number as the stimulus size.
+
+        Returns
+        -------
+        int
+            The largest number extracted from the `name` attribute, representing
+            the stimulus size.
+        """
+        stim_size = natsort.natsorted([int(i) for i in self.name.split("_") if i.isdigit()])[-1]
+        return stim_size
+
+    @property
+    def stim_size(self, upscaling_factor = 4):
+        return pygor.utils.unit_conversion.au_to_visang(self.stim_size_arbitrary) / upscaling_factor
+
     ## Bootstrapping
     def __calc_pval_time(self) -> np.ndarray:
         """
@@ -335,12 +358,12 @@ class STRF(Core):
         if self.bs_settings["do_bootstrap"] == True:
             time_pvals = self.pval_time
             space_pvals = self.pval_space
-            __contours = [pygor.strf.contouring_beta.bipolar_contour(arr) # ensures no contour is drawn if pval not sig enough
+            __contours = [pygor.strf.contouring.bipolar_contour(arr) # ensures no contour is drawn if pval not sig enough
                             if time_pvals[count] < self.bs_settings["time_sig_thresh"] and space_pvals[count] < self.bs_settings["space_sig_thresh"]
                             else  ([], [])
                             for count, arr in enumerate(self.collapse_times())]
         if self.bs_settings["do_bootstrap"] == False:
-            __contours = [pygor.strf.contouring_beta.bipolar_contour(arr) for count, arr in enumerate(self.collapse_times())]
+            __contours = [pygor.strf.contouring.bipolar_contour(arr) for count, arr in enumerate(self.collapse_times())]
         __contours = np.array(__contours, dtype = "object")
         return __contours
 
@@ -355,7 +378,7 @@ class STRF(Core):
             count_list.append(count_tup)
         return count_list
 
-    def get_contours_area(self, scaling_factor = 1) -> list:
+    def get_contours_area(self, scaling_factor = None) -> list:
         """
         Generate the area for each contour in the list of contours using the contours_area_bipolar function with a specified scaling factor.
 
@@ -365,7 +388,13 @@ class STRF(Core):
         Returns:
             list: A list of areas for each contour in the list.
         """
+        if scaling_factor is None:
+            scaling_factor = self.stim_size
         return [pygor.strf.contouring.contours_area_bipolar(__contours, scaling_factor = scaling_factor) for __contours in self.fit_contours()]
+
+    def get_centsurr_area(self, scaling_factor = 1) -> list:
+        raise NotImplementedError("Not implemented yet, will give 2xn array with size for centre and surround component (if present, otherwise (s, 0))")
+        return
 
     def calc_contours_centroids(self) -> np.ndarray:
         try: 
@@ -457,7 +486,7 @@ class STRF(Core):
         else:
             # raise NotImplementedError("Implementation error, does not work yet")
             # get 2d masks
-            all_masks = np.array([pygor.strf.contouring_beta.bipolar_mask(i) for i in self.collapse_times()])
+            all_masks = np.array([pygor.strf.contouring.bipolar_mask(i) for i in self.collapse_times()])
             all_masks = np.repeat(np.expand_dims(all_masks, 2), 20, axis = 2)
             # Apply mask to expanded and repeated strfs (to get negative and positive)
             strfs_expanded = np.repeat(np.expand_dims(self.strfs, axis = 1), 2, axis = 1)
@@ -594,13 +623,20 @@ class STRF(Core):
 
     
     def get_polarities(self, exclude_FirstLast=(1,1)) -> np.ndarray:
-        if self.strfs is np.nan:
-            return np.array([np.nan])
-        # Get polarities for time courses (which are 2D arrays containing a 
-        # timecourse for negative and positive)
-        polarities = pygor.strf.temporal.polarity(self.get_timecourses(), exclude_FirstLast)
-        # Feed that to helper function to break it down into 1D/category
-        return pygor.utilities.polarity_neat(polarities)
+        # Get the time as absolute values, then get the max value
+        abs_time_max = np.max(np.abs(self.get_timecourses().data), axis = 2)
+        # First find the obvious polarities
+        pols = np.where(abs_time_max[:, 0] > abs_time_max[:, 1], -1, 1)
+        # Now we check if values are close
+        ## We reoder, becasue np.isclose(a, b) assumes b is the reference 
+        ## and we will use the largst value as the reference
+        abs_time_max_reordered = np.sort(abs_time_max, axis = 1)
+        outcome = np.isclose(abs_time_max_reordered[:, 0], abs_time_max_reordered[:, 1], rtol = .5, atol = .01)
+        # If values were close, we assign 2
+        pols = np.where(outcome, 2, pols)
+        # Now we need to set values to 0 where there is no signal
+        pols = pols * np.prod(np.where(abs_time_max == 0, 0, 1), axis = 1)
+        return pols
 
     def get_opponency_bool(self) -> [bool]:
         if self.multicolour == True:
@@ -731,7 +767,7 @@ class STRF(Core):
 
     def demo_contouring(self, roi, chromatic_reshape = False):
         fig, ax = plt.subplots(2, 6, figsize = (16*1.5, 4*1.5))
-        neg_c, pos_c = pygor.strf.contouring_beta.bipolar_contour(self.collapse_times()[roi], plot_results= True, ax = ax)
+        neg_c, pos_c = pygor.strf.contouring.bipolar_contour(self.collapse_times()[roi], plot_results= True, ax = ax)
         ax[0, -1].plot(self.get_timecourses()[roi].T, label = ["neg", "pos"])
         ax[0, -1].legend()
         ax[1, -1].imshow((self.get_spatial_masks()[0][roi] * -1) + self.get_spatial_masks()[1][roi], origin = "lower")
@@ -745,7 +781,12 @@ class STRF(Core):
         for i in pos_c:
             axbig.plot(i[:, 1], i[:, 0], color = "red")
         
+    def plot_timecourse(self, roi):
+        plt.plot(self.get_timecourses()[roi].T)
     
+    def play_strf(self, roi):
+        anim = pygor.plotting.play_movie(self.strfs[roi])
+        return anim
     # def check_ipl_orientation(self):
     #     raise NotImplementedError("Current implementation does not yield sensible result")
     #     maxes = np.max(self.dominant_timecourses(), axis = 1)
