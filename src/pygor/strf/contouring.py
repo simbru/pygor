@@ -1,235 +1,348 @@
+
 import numpy as np
-import numpy.ma as ma
-import skimage.measure
-import math 
-import scipy
-import warnings
+import skimage.filters
 import matplotlib.pyplot as plt
-# Local imports
-import pygor.utilities
+import matplotlib as mpl
+import warnings
+import scipy
+global_thresh_val = 3
+min_targets =     0
+min_hole_size =   0
+min_object_size = 2
 
-# Global vars
-"""
-TODO Move these into strf object
-"""
-abs_criteria_global = 2.5     ## Rectified STRF must pass this threshold to attempt contour draw at all 
-criteria_modifier_global = 2.5  ## At which multiple of metric (SD) to draw contour lines
-# arth_criteria_global = 1     ## Split STRF (lower, upper) must each pass this for contours to be drawn
-
-#def cfar_calc():
-
-"""Contour generation"""
-def _contour_arithtmatic_threshold_passfail(arr_2d, criteria, metric = np.std):
+def _detect_targets(spatial_filter, thresh_value = global_thresh_val, min_targets = min_targets,result_plot = False, **kwargs):
     """
-    Helper function which simply checks if input-data meets criteria for computing
-    RF mask via scikit.image.contour(). 
-    """
-    assert arr_2d.ndim == 2 # do not allow 3d arrs since would mess with 
-    # Compute the value in the present data
-    _value = metric(np.abs(arr_2d))
-    # Check if that value is above or below criteria
-    if _value > criteria:
-        return True
-    if _value <= criteria:
-        return False
+    Detect targets based on the spatial filter values and return the indices of the detected targets.
+    In short, the algorithm detects targets over the given threshold value on the first pass. On the 
+    second pass, the algorithm detects targets over the median of the detected targets on the first pass
+    (to prune out noise).
 
-def _contour_absolute_threshold_passfail(arr_2d, criteria = abs_criteria_global):
-    """
-    Helper function which simply checks if input-data meets criteria for computing
-    RF mask via scikit.image.contour().
-    """
-    assert arr_2d.ndim == 2 # do not allow 3d arrs (must be time-collapsed)
-    # Rectify input
-    arr_2d_rectified = np.abs(arr_2d)
-    # Check if that value is above or below criteria
-    if np.max(arr_2d_rectified) > criteria:
-        return True
-    if np.max(arr_2d_rectified) <= criteria:
-        return False
-
-def _contour_determine_level(arr, metric = np.std, modifier = criteria_modifier_global):
-    """
-    Helper function that computes the level at which contours used for masks are
-    drawn, in accordance with skimage.measure.find_contours(arr, level = n) where
-    n is the copmuted level value. 
-
-    Drawn at modifier * metric (default: 3x the STDev)
-    """
-    rectified_arr = np.abs(arr)
-    level = metric(rectified_arr) * modifier
-    level_val = level
-    return level_val
-
-# def contour_points_QualityControl(contours_list, conotur_total_max = 5, contour_points_min = 10):
-#     """
-#     TODO
-#     - Kick out the n smallest contours (e.g., max 8 allowed, kick out from smallest upwards)
-#     """
-#     # Make a copy and turn it into an array
-#     contours_list_new = np.copy(np.array(contours_list, dtype='object'))
-#     # Check how many points each contour has
-#     contour_points_counter = np.array([n.shape[0] for n in contours_list_new])
-#     sub_counter_threshold = np.where(contour_points_counter <= contour_points_min)[0]
-#     if any(sub_counter_threshold) is True: # any as in if any is below threshold 
-#         contours_list_new = np.delete(contours_list_new, sub_counter_threshold, axis = 0)
-#         return contours_list_new
-#     else: # If all is fine just return input list as is 
-#         return contours_list
-
-
-def contour_points_QualityControl(contours_list, contour_total_max = 5, contour_points_min = 10):
-    # Make a copy and turn it into an array for vecotrisation/utility purposes
-    contours_list_QC = np.copy(np.array(contours_list, dtype ="object"))
-    # Check how many points each contour has
-    contour_points_counter = np.array([len(n) for n in contours_list_QC])
-    # Remove contours that fall below point number threshold
-    sub_counter_threshold = np.where(contour_points_counter <= contour_points_min)[0]
-    if sub_counter_threshold.size > 0: #if any is below threshold
-        contours_list_QC = np.delete(contours_list_QC, sub_counter_threshold, axis = 0)
-    # Remove contours starting with smallest if more contours than contour_points_min
-    if len(contours_list_QC) > contour_total_max:
-        # Update how many points there are now 
-        contour_points_counter = np.array([len(n) for n in contours_list_QC])
-        total_contours = len(contour_points_counter)
-        # Partition smallest k values to begining (as indeces)
-        remove_n = total_contours - contour_total_max
-        indeces_to_delete = np.argpartition(contour_points_counter, remove_n)[:remove_n]
-        contours_list_QC = np.delete(contours_list_QC, indeces_to_delete, axis = 0)
-    # Loop through and ensure sub-arrays are lists again 
-    contours_list_QC = [i.astype("float") for i in contours_list_QC] # This ensures structure is exactly 1:1 as the input structure,
-    # even after all the array shannanigans above
-    return contours_list_QC
-
-def contour_unipolar(arr_2d, abs_criteria = abs_criteria_global, qc = True, **kwargs):#, force_polarity = False):
-    """
-    Accessible helper for main function 'contour()'.
-
-    Finds the contour of the input 2D array by first determining the polarity 
-    of the array, then masking the array accordingly, and finally wrapping contours
-    to the masked array.
-    
     Parameters:
-    ----------
-    arr_2d (ndarray): 2D array to find the contour of.
-    
+         spatial_filter : np.array
+             The spatial filter values to analyze.
+         thresh_value : float, optional
+             The threshold value for target detection (default is 2.5).
+         result_plot : bool, optional
+             A flag to indicate if a plot of the detected targets should be displayed (default is False).
+         **kwargs
+             Additional keyword arguments for customization.
+
     Returns:
-    ----------
-    list: List of contour points in (row, column) format.
+         detected_targets : list
+             A list of indices corresponding to the detected targets.
+    """
+    if isinstance(spatial_filter, np.ma.core.MaskedArray):
+        spatial_filter = spatial_filter.data
+     # Detect targets
+    spatial_filter_abs_flat = np.abs(spatial_filter).flatten()
+    detected_targets_firstpass = np.where(spatial_filter_abs_flat > thresh_value)[0]
+    if len(detected_targets_firstpass) == 0: 
+        detected_targets = []
+    else:
+        level_set_abs = np.median(spatial_filter_abs_flat[detected_targets_firstpass])
+        detected_targets = np.where(spatial_filter_abs_flat > level_set_abs)[0]
+    if result_plot:
+        if kwargs.get("ax") is None:
+            fig, ax = plt.subplots(1,1, figsize = (5, 3))
+        else:
+            ax = kwargs.get("ax")
+        ax.plot(np.abs(spatial_filter).flatten())
+        ax.plot(spatial_filter_abs_flat)
+        ax.scatter(detected_targets_firstpass, spatial_filter_abs_flat[detected_targets_firstpass], c="r", label = "first pass", marker = 7)
+        ax.scatter(detected_targets, spatial_filter_abs_flat[detected_targets], c="g", label = "second pass")
+        # ax.legend()
+        ax.set_title("Thresholded values")
+    if len(detected_targets) < min_targets:
+        detected_targets = []
+    return detected_targets
+
+def _gen_filter_mask(spatial_filter, thresh_value = global_thresh_val, min_hole_size = min_hole_size, min_object_size = min_object_size, result_plot = False, **kwargs):
+    """
+    Generate a binary mask based on spatial filtering of detected targets. This is the third pass 
+    of the target detection algorithm. In short, the algorithm removes small holes and objects
+    before dilating the binary mask. The logic here is to include proximal pixels close to the 
+    initial mask generated by _detect_targets, which only considers raw values. In other words,
+    this step considers the spatial component of the data.
     
+    If `result_plot` is True, it plots the original signal, the masked signal, and the binary mask.
+    
+    Parameters
+    ----------
+    spatial_filter : array_like
+        The spatial data to filter.
+    thresh_value : float, optional
+        The threshold value for target detection. Default is 2.5.
+    min_hole_size : int, optional
+        Remove contiguous holes smaller than the specified size.. Default is 2.
+    min_object_size : int, optional
+        The minimum object size in the binary mask that will not be removed. Default is 3.
+    result_plot : bool, optional
+        If True, the function will plot the results. Default is False.
+    **kwargs : dict, optional
+        Additional keyword arguments.
+        
+    Returns
+    -------
+    mask : ndarray
+        The processed binary mask after detecting targets, removing small holes and objects, and dilation.
     """
-    # If level is given, pass it along
-    if "level" in kwargs:
-        warnings.warn("Keyword arg 'level' specified, ignoring threshold criteria.",  stacklevel=2)
-        if kwargs["level"] == "scikit-default":
-            contour = skimage.measure.find_contours(arr_2d)
+    # Keep track of input shape (for reshaping)
+    shape = spatial_filter.data.shape
+    targets = _detect_targets(spatial_filter, thresh_value = thresh_value)
+    # Mask processing
+    mask = np.zeros(len(spatial_filter.flatten()))
+    mask[targets] = 1
+    mask = mask.astype(bool).reshape(shape)
+    mask = skimage.morphology.remove_small_objects(mask, min_size = min_object_size)
+    mask = skimage.morphology.remove_small_holes(mask, area_threshold = min_hole_size)
+    # Double dialation is intentional
+    mask = skimage.morphology.binary_dilation(mask)
+    # mask = skimage.morphology.binary_dilation(mask)
+    if result_plot:
+        if kwargs.get("color") is not None: 
+            kwargs["c"] = kwargs["color"]
+        if kwargs.get("c") is None:
+            kwargs["c"] = "yellow"
+        # Apply mask to signal and output 
+        spatial_filter_output = np.copy(spatial_filter.flatten())
+        spatial_filter_output[~mask.flatten()] = 0
+        spatial_filter_output = spatial_filter_output.reshape(shape)
+        if kwargs.get("ax") is None:
+            fig, ax = plt.subplots(1, 3, figsize = (20, 4))
         else:
-            contour = skimage.measure.find_contours(arr_2d, level = kwargs["level"])
-    # If no level is given, compute it 
-    else:
-        # Check if arr_2d passes criteria 
-        if _contour_absolute_threshold_passfail(arr_2d) == True:
-            level = _contour_determine_level(arr_2d)
-            contour = skimage.measure.find_contours(arr_2d, level = level)
-        else:
-            contour = [] #Empty contour
-            warnings.warn("Contour did not pass threshold criteria") 
-    if qc == True:
-        contour = contour_points_QualityControl(contour)
-    return contour
+            ax = kwargs.get("ax")
+        non_zero_spatial_filter = spatial_filter.flatten()[spatial_filter.flatten()!=~0]
+        post_processing_tarets = np.where(mask.flatten() == 1)[0]
+        ax[0].plot(non_zero_spatial_filter, c="orange")
+        ax[0].scatter(post_processing_tarets, non_zero_spatial_filter[post_processing_tarets], c=kwargs["c"], 
+            label = "third pass")
+        # ax[0].legend()
+        ax[1].imshow(spatial_filter, origin = "lower")
+        # ax[2].imshow(mask)
+    return mask
 
-def _draw_contour_bipolar(arr_2d, abs_criteria, silence_warnings = True):
-    """Helper function for contour_bipolar()"""
-    arr_2d_lower = np.clip(arr_2d, np.min(arr_2d), -0)
-    arr_2d_upper = np.clip(arr_2d, 0, np.max(arr_2d))
-    # Generate empty arrays that will be filled 
-    contour_lower = np.ones((250, 2)) * np.nan
-    contour_upper = np.ones((250, 2)) * np.nan
-    # Check if arr_2d as a whole passes criteria
-    if _contour_absolute_threshold_passfail(arr_2d) == True:
-        # Determine half max of abs values 
-        arithmetic_criteria = np.max(np.abs(arr_2d)) / 2
-        if _contour_arithtmatic_threshold_passfail(arr_2d_upper, criteria = arithmetic_criteria, metric = np.max) == True:
-            level_upper = _contour_determine_level(arr_2d) # note uses global determinant
-            contour_upper = skimage.measure.find_contours(arr_2d_upper, level = level_upper)
-        else:
-            contour_upper = [] #Empty contour
-            if silence_warnings == False:
-                warnings.warn(f"Upper contour did not pass arithmetic threshold criteria (half abs-max = {arithmetic_criteria})", stacklevel = 2)
-        # if np.min(arr_2d) < -abs_criteria:
-        if _contour_arithtmatic_threshold_passfail(arr_2d_lower, criteria = arithmetic_criteria, metric = np.max) == True:
-            level_lower = -1 * _contour_determine_level(arr_2d) # note uses global determinant
-            contour_lower = skimage.measure.find_contours(arr_2d_lower, level = level_lower)
-        else:
-            contour_lower = [] #Empty contour
-            if silence_warnings == False:
-                warnings.warn(f"Lower contour did not pass arithmetic threshold criteria (half abs-max = {arithmetic_criteria})", stacklevel = 2)
-        return contour_lower, contour_upper
-    else:
-        contour_lower = [] #Empty contour
-        contour_upper = [] #Empty contour
-        warnings.warn(f"Passed array did not meet absolute threshold criteria of {abs_criteria}", stacklevel = 2)
-        return contour_lower, contour_upper
-
-def contour_bipolar(arr_2d, abs_criteria = abs_criteria_global, qc = True, **kwargs):
-    """Accessible helper for main function 'contour()'."""
-    # If level is given, pass it along (behaviour depends on input type)
-    if "level" in kwargs:
-        warnings.warn("Keyword arg 'level' specified, ignoring threshold criteria.",  stacklevel=2)
-        # Only allow "level" to be type tuple for contour_bipolar()
-        if type(kwargs["level"]) is float or type(kwargs["level"]) is int:
-            raise TypeError("contour_bipolar execpted keyword argument 'level' to be tuple.")
-        # if input is tuple, the 0th index is lower contour and 1th index is upper contour,
-        # passed to contour_tuple, and returned at end of script
-        if type(kwargs["level"]) is tuple:
-            contour_lower = skimage.measure.find_contours(arr_2d, level = kwargs["level"][0])
-            contour_upper = skimage.measure.find_contours(arr_2d, level = kwargs["level"][1])
-    # If no level is given, compute it
-    if "level" not in kwargs:
-        contour_lower, contour_upper = _draw_contour_bipolar(arr_2d, abs_criteria)
-    if "level" in kwargs and kwargs["level"] == "scikit-default":
-        scikit_contour = skimage.measure.find_contours(arr_2d)
-        return scikit_contour
-    # Filter the smallest contours 
-    if qc == True:
-        contour_lower = contour_points_QualityControl(contour_lower)
-        contour_upper = contour_points_QualityControl(contour_upper)
-    contour_tuple = (contour_lower, contour_upper)
-    return contour_tuple
-
-def contour(arr_2d, abs_criteria = abs_criteria_global, expect_bipolar = True, **kwargs):
+def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1, result_plot = False, **kwargs):
     """
-    Finds and returns the contours of a 2D array.
+    This function applies a Gaussian filter to the input binary mask to smooth 
+    it. Then, it finds the contours of the smoothed mask. Optionally, it can 
+    plot the contours over the mask for visualization purposes.
 
     Parameters
     ----------
-    arr_2d : numpy.ndarray
-        A 2D numpy array representing the image or data for which contours are to be found.
-
-    abs_criteria : int, optional
-        A threshold value that determines the minimum absolute value of the gradient magnitude
-        required to include a point in the contour. Defaults to 45.
-
-    expect_bipolar : bool, optional
-        A flag indicating whether to expect a bipolar image or not. If True, `contour_bipolar`
-        is called to find the contours. Otherwise, `contour_unipolar` is called. Defaults to True.
-
-    **kwargs : optional
-        Additional keyword arguments to be passed on to `contour_bipolar` or `contour_unipolar`.
+    spatial_filter_mask : ndarray
+        Binary mask to which the Gaussian filter is applied.
+    gauss_sigma : float, optional
+        The sigma (standard deviation) of the Gaussian filter, by default 1.
+    result_plot : bool, optional
+        If True, the function will plot the contours over the mask, by default False.
+    **kwargs : dict
+        Additional keyword arguments for plotting, such as 'color', 'ax', etc.
 
     Returns
     -------
-    contours_tuple : tuple or numpy.ndarray
-        If `expect_bipolar` is True, returns a tuple containing the positive and negative contours
-        as numpy arrays. Otherwise, returns a single numpy array containing the contours.
-    contour : numpy.ndarray
-        If `expect_bipolar` is False, returns a single numpy array containing the contours.
+    list of ndarray
+        A list containing the coordinates of the contours of the filtered mask.
     """
-    if expect_bipolar == True:
-        contours_tuple = contour_bipolar(arr_2d, abs_criteria, **kwargs)
-        return contours_tuple
-    if expect_bipolar == False:
-        contour = contour_unipolar(arr_2d, abs_criteria, **kwargs)
-        return contour 
+    spatial_filter_mask = skimage.filters.gaussian(spatial_filter_mask, sigma = gauss_sigma, mode = "nearest")
+    contour = skimage.measure.find_contours(spatial_filter_mask)
+    if result_plot:
+        if kwargs.get("color") is not None: 
+            kwargs["c"] = kwargs["color"]
+        if kwargs.get("c") is None:
+            kwargs["c"] = "red"
+        if kwargs.get("ax") is None:
+            fig, ax = plt.subplots(1, 1, figsize = (10, 5))
+            ax
+            ax.imshow(spatial_filter_mask, origin = "lower")
+            for contour_n in contour:
+                ax.plot(contour_n[:, 1], contour_n[:, 0], lw = 3, ls = '-',alpha = .8, c = kwargs["c"])
+            plt.show()
+        else:
+            ax = kwargs.get("ax")
+            for a in ax[:1]:
+                for contour_n in contour:
+                    a.plot(contour_n[:, 1], contour_n[:, 0], lw = 3, ls = '-',alpha = .8, c = kwargs["c"])
+    return contour    
+
+def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val, plot_results = False, ax = None):
+    if np.ma.isMaskedArray(spatial_filter):
+        spatial_filter = spatial_filter.data
+    neg_filter = np.clip(spatial_filter, None, 0)
+    pos_filter = np.clip(spatial_filter, 0, None)
+    neg_mask = _gen_filter_mask(neg_filter, thresh_value=abs_thresh_val)
+    pos_mask = _gen_filter_mask(pos_filter, thresh_value=abs_thresh_val)
+    # Then, segment the masks into its constituent parts
+    neg_mask_labeled = skimage.measure.label(neg_mask)
+    pos_mask_labeled = skimage.measure.label(pos_mask)
+    # Loop logic: Sort the labelled mask into positive and negative masks, then combine separately
+    neg_unique_labels = np.unique(neg_mask_labeled) # unique_labels[unique_labels > 0]
+    pos_unique_labels = np.unique(pos_mask_labeled)
+    neg_unique_labels = neg_unique_labels[neg_unique_labels > 0] 
+    pos_unique_labels = pos_unique_labels[pos_unique_labels > 0] 
+    # Loop through the unique labels and append the masks accordingly
+    neg_mask = []
+    pos_mask = []
+    for n, label in enumerate(neg_unique_labels):
+        # Get the average value within the labelled region of the mask
+        current_mask_vals = neg_filter[neg_mask_labeled == label]
+        label_average = np.average(current_mask_vals)
+        # Append the mask accordingly
+        if label_average < 0:
+            neg_mask.append(np.where(neg_mask_labeled == label, 1, 0))
+        else:
+            raise ValueError("Negative mask contains a region with positive average value. This is not allowed.")
+    for n, label in enumerate(pos_unique_labels):
+        # Get the average value within the labelled region of the mask
+        current_mask_vals = pos_filter[pos_mask_labeled == label]
+        label_average = np.average(current_mask_vals)
+        # Append the mask accordingly
+        if label_average > 0:
+            pos_mask.append(np.where(pos_mask_labeled == label, 1, 0))
+        else:
+            raise ValueError("Positive mask contains a region with negative average value. This is not allowed.")
+    # Check if masks conflict
+    # plt.close('all')
+    # plt.imshow(pos_mask[0])
+    # Sum to combine the masks according to polarity
+    if neg_mask == []:
+        neg_mask = np.ones(spatial_filter.shape).astype(bool)
+    else:
+        neg_mask = np.invert(np.sum(np.array(neg_mask), axis = 0).astype(bool))
+    if pos_mask == []:
+        pos_mask = np.ones(spatial_filter.shape).astype(bool)
+    else:
+        pos_mask = np.invert(np.sum(np.array(pos_mask), axis = 0).astype(bool))
+    if np.all(neg_mask == 1) and 0 in pos_mask:
+        neg_mask = np.invert(pos_mask.astype(bool))
+    if 0 in neg_mask and np.all(pos_mask == 1):
+        pos_mask = np.invert(neg_mask.astype(bool))    
+    # # Throw error if overlap exists
+    # if np.any(neg_mask > 1) or np.any(pos_mask > 1):
+    #     raise ValueError("Masking logic insufficient, leading to overlapping masks. Manual fix required.")
+    # Check if masks conflict (prioritise bigger mask)
+    neg_mask_indices = np.argwhere(neg_mask == 0)
+    pos_mask_indices = np.argwhere(pos_mask == 0)
+    if len(neg_mask_indices) > len(pos_mask_indices):
+        matching_indices = np.array((pos_mask_indices[:,None] == neg_mask_indices).all(2).any(1))
+        prune_indices = pos_mask_indices[matching_indices]
+        pos_mask[prune_indices[:, 0], prune_indices[:, 1]] = 1
+    else:
+        matching_indices = np.array((neg_mask_indices[:,None] == pos_mask_indices).all(2).any(1))
+        prune_indices = neg_mask_indices[matching_indices]
+        neg_mask[prune_indices[:, 0], prune_indices[:, 1]] = 1
+    if plot_results:
+        ax[0].imshow(neg_mask, origin = "lower")
+        ax[1].imshow(pos_mask, origin = "lower")
+        # final_neg = np.argwhere(neg_mask.flatten() == 0)
+        # final_pos = np.argwhere(pos_mask.flatten() == 0)
+        # ax[0, 1].scatter(final_neg, neg_filter.flatten()[final_neg], c = 'cyan', label = 'final', marker = 'o')
+        # ax[0, 1].legend()
+        # ax[1, 1].scatter(final_pos, pos_filter.flatten()[final_pos], c = 'cyan', label = 'final', marker = 'o')
+        # ax[1, 1].legend()
+    return neg_mask, pos_mask
+
+def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_results = False, ax = None, **kwargs):
+    """
+    Processes a spatial filter mask to segment and contour areas based on polarity.
+
+    This function takes a spatial filter mask, segments it into its constituent parts,
+    and identifies contours of areas with positive and negative average values within
+    the labeled regions. If `plot_results` is set to True, it also plots the segmentation
+    and contouring results. The function returns separate contours for positive and negative
+    regions.
+
+    Parameters
+    ----------
+    spatial_filter : array_like
+        The spatial filter mask to be processed.
+    plot_results : bool, optional
+        Flag to indicate whether to plot the segmentation and contour results.
+    **kwargs : dict
+        Additional keyword arguments passed to contour fitting function.
+
+    Returns
+    -------
+    tuple of (array_like, array_like)
+        A tuple containing two elements; the first for negative contours, and
+        the second for positive contours.
+
+    Raises
+    ------
+    ValueError
+        If the masking logic is insufficient and leads to overlapping masks.
+    """
+    # Split arrays
+    neg_filter = np.clip(spatial_filter, None, 0)
+    pos_filter = np.clip(spatial_filter, 0, None)
+    # Determine if there are targets
+    _neg_targets = _detect_targets(neg_filter, thresh_value = abs_thresh_val)
+    _pos_targets = _detect_targets(pos_filter, thresh_value = abs_thresh_val)
+    # Threshold targets 
+    if len(_neg_targets) < min_targets:
+        _neg_targets = []
+    if len(_pos_targets) < min_targets:
+        _pos_targets = []
+    # Plot that process, conditionally
+    if plot_results is True:
+        neg_filter = np.clip(spatial_filter, None, 0)
+        pos_filter = np.clip(spatial_filter, 0, None)
+        if ax is None:
+            fig, ax = plt.subplots(2, 4, figsize = (10*1.5, 3*1.5))
+            offset = 1
+        else:
+            fig = plt.gcf()
+            offset = 0
+        _neg_targets = _detect_targets(neg_filter, thresh_value = abs_thresh_val, result_plot=1, ax = ax[0, 1 - offset])
+        _pos_targets = _detect_targets(pos_filter, thresh_value = abs_thresh_val, result_plot=1, ax = ax[1, 1 - offset])
+        neg_mask = _gen_filter_mask(neg_filter, thresh_value=abs_thresh_val, result_plot=1, ax = ax[0, 2 - offset:].flatten(), c = "yellow")
+        pos_mask = _gen_filter_mask(pos_filter, thresh_value=abs_thresh_val, result_plot=1, ax = ax[1, 2 - offset:].flatten(), c = "yellow")
+        neg_mask, pos_mask = bipolar_mask(spatial_filter, plot_results=plot_results, ax = ax[:,  4 - offset])
+        ax[0, 2 - offset].scatter(_neg_targets, neg_filter.flatten()[_neg_targets], c = 'cyan', label = 'final', marker = 5)
+        ax[1, 2 - offset].scatter(_pos_targets, pos_filter.flatten()[_pos_targets], c = 'cyan', label = 'final', marker = 5)
+        # Combine all legends
+        lines_labels = [ax.get_legend_handles_labels() for ax in fig.axes[:4]]
+        lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]
+        fig.legend(lines, labels, loc = 'lower left', ncol = 4, bbox_to_anchor = (.175, -.075))
+
+   # Get masks
+    neg_mask, pos_mask = bipolar_mask(spatial_filter)
+    # Determine which mask is the inverted one
+    is_inverse = np.all(np.invert(neg_mask) == pos_mask)
+    skip_mask = 0
+    if is_inverse:
+        # Determine which mask is the inverted one
+        pos_mask_sum = np.sum(pos_mask)
+        neg_mask_sum = np.sum(neg_mask)
+        # Assign value to skip that mask
+        if neg_mask_sum > pos_mask_sum:
+            skip_mask = -1
+        if pos_mask_sum > neg_mask_sum:
+            skip_mask = 1
+    # Contour seperately based on polarity and skip mask
+    # Here we plot
+    if plot_results is True:
+        if isinstance(_neg_targets, list) and _neg_targets == [] or skip_mask == 1: 
+            neg_contours = []
+        else:
+            neg_contours = _fit_filter_contour(neg_mask, result_plot = 1, ax = ax[0, 3 - offset:], c = "blue", **kwargs)
+        if isinstance(_pos_targets, list) and _pos_targets == [] or skip_mask == -1:
+            pos_contours = []
+        else:
+            pos_contours = _fit_filter_contour(pos_mask, result_plot = 1, ax = ax[1, 3 - offset:], c = "red", **kwargs)
+        plt.tight_layout()
+    # Here we don't plot
+    else:
+        if isinstance(_neg_targets, list) and _neg_targets == [] or skip_mask == 1:
+            neg_contours = []
+        else:
+            neg_contours = _fit_filter_contour(neg_mask)
+        if isinstance(_pos_targets, list) and _pos_targets == [] or skip_mask == -1:
+            pos_contours = []
+        else:
+            pos_contours = _fit_filter_contour(pos_mask)
+    return (neg_contours, pos_contours)
+
+""""Contour metrics"""
 
 def contour_centroid(contours):
     """
@@ -248,33 +361,6 @@ def contour_centroid(contours):
         centroid = np.average(contour, 0)
         centroids_array[n] = centroid
     return centroids_array
-    # THIS NEEDS A FIX! CAN TRY TO USE THIS IMPLEMENTATINO BUT SEEMED WEIRD https://scikit-image.org/docs/stable/api/skimage.measure.html ctrl f centroid
-
-# def single_contour_area(contour_list):
-#     """
-#     Calculates the area of a single contour.
-
-#     Parameters
-#     ----------
-#     contour_list : array_like
-#         A list of (x, y) coordinate tuples representing the contour.
-
-#     Returns
-#     -------
-#     float
-#         The area of the contour.
-
-#     Notes
-#     -----
-#     This function uses OpenCV's `cv2.contourArea` method to calculate the area of the contour.
-#     """
-#     # Expand numpy dimensions
-#     c = np.expand_dims(contour_list.astype(np.float32), 1)
-#     # Convert it to UMat object
-#     c = cv2.UMat(c)
-#     area = cv2.contourArea(c)
-#     warnings.warn("New implementation incoming")
-#     return area
 
 def contours_area(list_of_contour_lists, scaling_factor = 1):
     """
@@ -319,106 +405,7 @@ def contours_area_bipolar(tuple_of_contours_list, scaling_factor = 1):
     pos_areas = contours_area(tuple_of_contours_list[1], scaling_factor = scaling_factor)
     return neg_areas, pos_areas
 
-"""
-TODO:
-- Contour masking breaks at edges (becuase values there are not filled with 1s)
-HACK: 
-- If not already the case, insert first point after the last point. 
-    This will ensure closer of the contour
-"""
 
-def _contour_mask_unipolar(contour_list, shape_tuple):
-    """
-    Generate a binary mask from a list of contours and a shape tuple.
-    
-    Parameters
-    ----------
-    contour_list : list of numpy.ndarray
-        A list of contours, where each contour is a Nx2 array of (x, y) coordinates.
-    shape_tup : tuple
-        A tuple of integers representing the shape of the desired mask, in the 
-        form (height, width).
-    
-    Returns
-    -------
-    numpy.ndarray
-        A binary mask of the specified shape, with 1s at the pixels corresponding 
-        to the contours and 0s elsewhere.
-    """
-    bool_array = np.zeros(shape_tuple)
-    for i in contour_list:
-        for y, x in i:
-            bool_array[math.floor(y), math.floor(x)] = 1 # force pixel-wise
-    # Fill (pixelated) contour
-    filled_bool_array = scipy.ndimage.binary_fill_holes(bool_array)
-    # # Flip it to behave as mask properly 
-    inverted_bool_array = np.invert(filled_bool_array)
-    return inverted_bool_array
-
-def _contour_mask_bipolar(contour_tuple, shape_tuple): # tuple needs to be size 2 and tuple of lists
-    bool_array_pos = np.zeros(shape_tuple)
-    bool_array_neg = np.zeros(shape_tuple)
-    for i in contour_tuple[0]:
-        for y, x in i:
-            bool_array_neg[math.floor(y), math.floor(x)] = 1 # force pixel-wise
-    for i in contour_tuple[1]:
-        for y, x in i:
-            bool_array_pos[math.floor(y), math.floor(x)] = 1 # force pixel-wise
-    # Fill (pixelated) contour
-    bool_array_pos = scipy.ndimage.binary_fill_holes(bool_array_pos)
-    bool_array_neg = scipy.ndimage.binary_fill_holes(bool_array_neg)
-    # Flip it to behave as mask properly 
-    bool_array_pos = np.invert(bool_array_pos)
-    bool_array_neg = np.invert(bool_array_neg)
-    return (bool_array_neg, bool_array_pos)
-
-def contour_mask(contour_input, shape_tuple, expect_bipolar = None):
-    """
-    Maybe it would be better to make this choise explicit... ^^^^
-    e.g., skip all the deduction...
-    """
-    """Calls the above helper functions and draws contours based on input. If 
-    a single list is given, it is deduced that unipolar contouring is wanted. If 
-    a tuple of len == 2 containing two lists is provided, it is deduced that 
-    bipolar contouring is wanted.
-    
-    If output is not what is expected, user can override deduction by passing 
-    a bool to argument 'expect_bipolar' (default: None).
-    """
-    # Check that input makes sense according to what we expect
-    allowed_inputs = (tuple, list, np.ndarray)
-    if type(contour_input) not in allowed_inputs:
-        raise AttributeError(f"Argument 'contour_input' expected either a single list or a list of lists, tuple of lists, or array of lists. Instead\
-    got {type(contour_input)} as input.")
-    # If specified, just run contour masking directly
-    if expect_bipolar == True:
-        contour_mask = _contour_mask_bipolar(contour_input, shape_tuple)
-    if expect_bipolar == False:
-        contour_mask = _contour_mask_unipolar(contour_input, shape_tuple)
-    # If not specified, deduce: 
-    if expect_bipolar == None:
-        # If there are two elements in the input  
-        if len(contour_input) == 2:
-            # Need to prevent cases where a contour set which has 2 elements (can have arbitrarily many) is
-            # interpreted as being two seperate contour sets. This should work reliably, as it is a design principle 
-            # that the 2 elements should be lists if bipolar return is expected from space.contour() (which is assumed input). 
-            if all([isinstance(element, np.ndarray) for element in contour_input]) is True:
-                    contour_mask = _contour_mask_unipolar(contour_input, shape_tuple)
-            # Check that the 2 elements are lists (confirming design principle)
-            elif all([isinstance(element, list) for element in contour_input]) is False:
-                raise AttributeError(f"Expected 'contour_input' with size 2 to contain two lists. Elements in 'contour_inputs are instead {[type(element) for element in contour_input]}.")
-            # If no error then everything conforms with design princples, go ahead with bipolar contour mask
-            else:
-                contour_mask = _contour_mask_bipolar(contour_input, shape_tuple)
-        # Otherwise go ahead with unipolar contour mask
-        else:
-            if all([isinstance(element, np.ndarray) for element in contour_input]) is False:
-                raise AttributeError("'contour_input' expected elements to be np.ndarray.")
-            contour_mask = _contour_mask_unipolar(contour_input, shape_tuple)
-    return contour_mask
-
-
-""""Contour metrics"""
 def _extend_2darray(arr_2d):
     """arr_2d is 2d list of points"""
     return np.append(arr_2d[:-1], arr_2d[:3,], axis = 0)
@@ -675,4 +662,3 @@ def complexity_weighted(contours_tup, contours_areas):
             # print(n, "before:", pos_comp, "after:", np.round(area_weighted_pos_comp, 4))
         final_complexity_metric.append((area_weighted_neg_comp, area_weighted_pos_comp))
     return np.array(final_complexity_metric)
-

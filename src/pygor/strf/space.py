@@ -12,7 +12,7 @@ import warnings
 
 # Local imports
 import pygor.strf.contouring
-import pygor.strf.contouring_beta
+import pygor.strf.contouring
 import pygor.utilities
 
 def centroid(arr):#
