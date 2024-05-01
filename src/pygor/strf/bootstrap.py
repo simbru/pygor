@@ -105,7 +105,7 @@ def stationary_shuffle(arr_1d, max_sample_length = None, output_length = None, r
     # deal with output being longer than input
     return output[:output_length]
 
-def bootstrap_time(arr_3d, bootstrap_n = 2500, mode_param = 2, mode = "sd", 
+def bootstrap_time(arr_3d, bootstrap_n = 2500, mode_param = 3, mode = "sd", 
     collapse_space = np.ma.std, metric = np.max, plot = False, parallel = False, 
     seed = None, **kwargs): # these metrics work so leave them
     if np.ma.is_masked(arr_3d) == True:
