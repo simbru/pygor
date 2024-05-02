@@ -110,17 +110,17 @@ def _roi_by_roi_dict(data_strf_obj): #
         dict["neg_contour_count"] = neg_contour_count
         dict["pos_contour_count"] = pos_contour_count
         dict["total_contour_count"] = neg_contour_count + pos_contour_count
-        neg_contour_areas_corrected = [i[0] for i in data_strf_obj.get_contours_area()]
-        pos_contour_areas_corrected = [i[1] for i in data_strf_obj.get_contours_area()]        
-        tot_neg_areas_corrected, tot_pos_areas_corrected = [np.sum(i) for i in neg_contour_areas_corrected], [np.sum(i) for i in pos_contour_areas_corrected]
-        dict["neg_contour_areas"] = neg_contour_areas_corrected
-        dict["pos_contour_areas"] = pos_contour_areas_corrected
+        neg_contour_areas = [i[0] for i in data_strf_obj.get_contours_area()]
+        pos_contour_areas = [i[1] for i in data_strf_obj.get_contours_area()]        
+        tot_neg_areas_corrected, tot_pos_areas_corrected = [np.sum(i) for i in neg_contour_areas], [np.sum(i) for i in pos_contour_areas]
+        dict["neg_contour_areas"] = neg_contour_areas
+        dict["pos_contour_areas"] = pos_contour_areas
         dict["neg_contour_area_total"] = tot_neg_areas_corrected
         dict["pos_contour_area_total"] = tot_pos_areas_corrected
         contour_area_total = np.sum((tot_neg_areas_corrected, tot_pos_areas_corrected), axis = 0)
         dict["contour_area_total"] = contour_area_total
-        neg_largest = np.max(pygor.utilities.numpy_fillna(neg_contour_areas_corrected), axis = 1)
-        pos_largest = np.max(pygor.utilities.numpy_fillna(pos_contour_areas_corrected), axis = 1)
+        neg_largest = np.max(pygor.utilities.numpy_fillna(neg_contour_areas), axis = 1)
+        pos_largest = np.max(pygor.utilities.numpy_fillna(pos_contour_areas), axis = 1)
         dict["neg_contour_area_largest"] = neg_largest
         dict["pos_contour_area_largest"] = pos_largest
         check_largest = np.vstack((neg_largest, pos_largest))
@@ -380,6 +380,53 @@ def rec_info(exp_obj : pygor.classes.experiment.Experiment) -> pd.DataFrame:
         rec_dict.append(pd.DataFrame(curr_dict))
     return pd.concat(rec_dict, ignore_index=True)
 
+def cs_df(exp_obj : pygor.classes.experiment.Experiment) -> pd.DataFrame:
+    cent_surr_areas = []
+    cent_surr_label = []
+    cent_surr_ampls = []
+    pol_list =  []
+    roi = []
+    filename = []
+    for object in exp_obj.recording:
+        pols = object.get_polarities()
+        areas = object.get_contours_area()
+        pos_ampls = np.max(object.get_timecourses()[:, 1], axis = 1)
+        neg_ampls = np.min(object.get_timecourses()[:, 0], axis = 1)
+        ampls = np.squeeze(np.dstack((neg_ampls, pos_ampls)))
+        for n, (pol, area, amp) in enumerate(zip(pols, areas, ampls)):
+            if pol == -1:
+                cent_area, surr_area = np.sum(area[0]), np.sum(area[1])
+                cent_ampl, surr_ampl = amp[0], amp[1]
+            if pol == 1:
+                cent_area, surr_area = np.sum(area[1]), np.sum(area[0])
+                cent_ampl, surr_ampl = amp[1], amp[0]            
+            if pol == 0:
+                cent_area, surr_area = 0, 0
+                cent_ampl, surr_ampl = 0, 0
+            if pol == 2:
+                cent_area, surr_area = np.sum(area[0]),  np.sum(area[1])
+                cent_ampl, surr_ampl = amp[0], amp[1]
+            pol_list.extend([pol, pol])
+            cent_surr_areas.append(cent_area)
+            cent_surr_areas.append(surr_area)
+            cent_surr_ampls.append(cent_ampl)
+            cent_surr_ampls.append(surr_ampl)
+            cent_surr_label.append("Centre")
+            cent_surr_label.append("Surround")
+            filename.extend(np.repeat(object.filename, 2))
+            roi.extend((n, n))
+    dfdict = {}
+    dfdict["Areas"] = cent_surr_areas
+    dfdict["C/S"] = cent_surr_label
+    colour = np.repeat(("R", "R", "G", "G", "B", "B", "UV", "UV"), len(cent_surr_label) / 4 / 2)
+    dfdict["Colour"] = colour
+    dfdict["pol"] = pol_list
+    dfdict["Amplitude"] = cent_surr_ampls
+    dfdict["ROI"] = roi
+    dfdict["Filename"] = filename
+    cs_df = pd.DataFrame(dfdict)
+    return cs_df
+    # return dfdict
 def split_df_by(DataFrame, category_str):
     raise NotImplementedError("Not implemented yet")
     dfs_by_pol = {accepted: sub_df
