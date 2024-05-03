@@ -390,8 +390,17 @@ def cs_df(exp_obj : pygor.classes.experiment.Experiment) -> pd.DataFrame:
     for object in exp_obj.recording:
         pols = object.get_polarities()
         areas = object.get_contours_area()
-        pos_ampls = np.max(object.get_timecourses()[:, 1], axis = 1)
-        neg_ampls = np.min(object.get_timecourses()[:, 0], axis = 1)
+        # Old logic:
+        # pos_ampls = np.max(object.get_timecourses()[:, 1], axis = 1)
+        # neg_ampls = np.min(object.get_timecourses()[:, 0], axis = 1)
+        # New logic: Don't split into min/max fjrst, instead go by absmax indices
+        neg_abs = np.ma.abs(object.get_timecourses()[:, 0])
+        pos_abs = np.ma.abs(object.get_timecourses()[:, 1])
+        # This really scary looking bit finds the index of the abs max value and extracts the value at that index
+        # to give the amplitude of the peak with its correct sign
+        neg_ampls = np.take_along_axis(object.get_timecourses()[:, 0], np.expand_dims(np.argmax(neg_abs, axis = 1), 1), axis = 1)
+        pos_ampls = np.take_along_axis(object.get_timecourses()[:, 1], np.expand_dims(np.argmax(pos_abs, axis = 1), 1), axis = 1)
+        # Squeeze to correct dimensionliaty
         ampls = np.squeeze(np.dstack((neg_ampls, pos_ampls)))
         for n, (pol, area, amp) in enumerate(zip(pols, areas, ampls)):
             if pol == -1:
