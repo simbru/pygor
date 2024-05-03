@@ -4,11 +4,12 @@ import matplotlib.pyplot as plt
 #from sklearn.decomposition import PCA
 # Import the sklearn function
 from sklearn.preprocessing import MinMaxScaler, MaxAbsScaler #StandardScaler, RobustScaler, 
-from pygor.clustering.clustering_funcs import cols_like, df_GMM, apply_clusters, prep_input_df, df_pca
+from pygor.strf.clustering.clustering_funcs import cols_like, df_GMM, apply_clusters, prep_input_df, df_pca
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline#, make_pipeline
 import pandas as pd
 import pygor.filehandling
+import pygor.strf
 import copy
 
 clustering_params = ["ampl", "area", "peak", "cent"]
@@ -55,7 +56,7 @@ def run_clustering(clust_df):
 
     ## Step 1: Split the data into groups depending on cat_pol (can be optional step)
     # Add cat_pol and wavelength pol back into output for filtering (reset_index is crucial here for correct merging of indeces)
-    split_df = pygor.filehandling.split_df_by(output_df.join(pruned_df.filter(like = "pol"), how = "inner", validate = "one_to_one"), "cat_pol")
+    split_df = pygor.strf.analyse.split_df_by(output_df.join(pruned_df.filter(like = "pol"), how = "inner", validate = "one_to_one"), "cat_pol")
     ## Step 2: Apply PCA to each split independently
     pca_results = {key : df_pca(split_df[key].filter(regex=clust_params_regex), whiten = False) for key in split_df.keys()}
     pca_dict = {key : pca_results[key][0] for key in split_df.keys()}

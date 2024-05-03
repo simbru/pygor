@@ -275,7 +275,8 @@ def prep_input_df(input_df, select_cols = None, scaler = StandardScaler(), nan_r
     # Can specify columns, otherwise use everything available
     if select_cols == None:
         select_cols = list(input_df.columns)
-        select_cols.remove("curr_path")
+        if "curr_path" in select_cols:
+            select_cols.remove("curr_path")
         """
         TODO Fix the above, its a temporary solution and I do not understand where the problem comes from 
         Basically it solves a bug where "curr_path" within the input_df seemingly gets duplicated recurisvely,

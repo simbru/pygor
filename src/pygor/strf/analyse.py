@@ -428,7 +428,7 @@ def cs_df(exp_obj : pygor.classes.experiment.Experiment) -> pd.DataFrame:
     return cs_df
     # return dfdict
 def split_df_by(DataFrame, category_str):
-    raise NotImplementedError("Not implemented yet")
+    # raise NotImplementedError("Not implemented yet")
     dfs_by_pol = {accepted: sub_df
     for accepted, sub_df in DataFrame.groupby(category_str)}
     if category_str == "cat_pol":
