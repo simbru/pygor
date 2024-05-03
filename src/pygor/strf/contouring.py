@@ -6,7 +6,7 @@ import matplotlib as mpl
 import warnings
 import scipy
 global_thresh_val = 3
-min_targets =     0
+min_targets =     4
 min_hole_size =   0
 min_object_size = 2
 
@@ -96,7 +96,7 @@ def _gen_filter_mask(spatial_filter, thresh_value = global_thresh_val, min_hole_
     mask = skimage.morphology.remove_small_objects(mask, min_size = min_object_size)
     mask = skimage.morphology.remove_small_holes(mask, area_threshold = min_hole_size)
     # Double dialation is intentional
-    mask = skimage.morphology.binary_dilation(mask)
+    mask = skimage.morphology.binary_dilation(mask, footprint=skimage.morphology.disk(2))
     # mask = skimage.morphology.binary_dilation(mask)
     if result_plot:
         if kwargs.get("color") is not None: 
@@ -163,8 +163,8 @@ def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1, result_plot = Fals
                 for contour_n in contour:
                     a.plot(contour_n[:, 1], contour_n[:, 0], lw = 3, ls = '-',alpha = .8, c = kwargs["c"])
     return contour    
-
-def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val, plot_results = False, ax = None):
+ 
+def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val, plot_results = False, surround_disksize = 4, ax = None):
     if np.ma.isMaskedArray(spatial_filter):
         spatial_filter = spatial_filter.data
     neg_filter = np.clip(spatial_filter, None, 0)
@@ -200,26 +200,32 @@ def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val, plot_result
             pos_mask.append(np.where(pos_mask_labeled == label, 1, 0))
         else:
             raise ValueError("Positive mask contains a region with negative average value. This is not allowed.")
-    # Check if masks conflict
-    # plt.close('all')
-    # plt.imshow(pos_mask[0])
     # Sum to combine the masks according to polarity
     if neg_mask == []:
         neg_mask = np.ones(spatial_filter.shape).astype(bool)
     else:
-        neg_mask = np.invert(np.sum(np.array(neg_mask), axis = 0).astype(bool))
+        neg_mask = np.invert(np.sum(neg_mask, axis = 0).astype(bool)) #summing to combine labels if multiple sub-masks are found
     if pos_mask == []:
         pos_mask = np.ones(spatial_filter.shape).astype(bool)
     else:
-        pos_mask = np.invert(np.sum(np.array(pos_mask), axis = 0).astype(bool))
+        pos_mask = np.invert(np.sum(pos_mask, axis = 0).astype(bool))
+    # Build surround mask if two polarities are not present
     if np.all(neg_mask == 1) and 0 in pos_mask:
-        neg_mask = np.invert(pos_mask.astype(bool))
+        ignore_area = np.copy(pos_mask).astype(bool)
+        neg_mask = skimage.morphology.binary_dilation(np.invert(ignore_area.astype(bool)), footprint = skimage.morphology.disk(surround_disksize))
+        neg_mask = np.invert(pos_mask * neg_mask)
+
+        # old: neg_mask = np.invert(pos_mask.astype(bool))
     if 0 in neg_mask and np.all(pos_mask == 1):
-        pos_mask = np.invert(neg_mask.astype(bool))    
+        ignore_area = np.copy(neg_mask).astype(bool)
+        pos_mask = skimage.morphology.binary_dilation(np.invert(ignore_area.astype(bool)), footprint = skimage.morphology.disk(surround_disksize))
+        pos_mask = np.invert(neg_mask * pos_mask)
+        # old: pos_mask = np.invert(neg_mask.astype(bool))
+
     # # Throw error if overlap exists
     # if np.any(neg_mask > 1) or np.any(pos_mask > 1):
     #     raise ValueError("Masking logic insufficient, leading to overlapping masks. Manual fix required.")
-    # Check if masks conflict (prioritise bigger mask)
+    # Prune overlapping masks: Check if masks conflict (prioritise bigger mask)
     neg_mask_indices = np.argwhere(neg_mask == 0)
     pos_mask_indices = np.argwhere(pos_mask == 0)
     if len(neg_mask_indices) > len(pos_mask_indices):
@@ -233,12 +239,6 @@ def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val, plot_result
     if plot_results:
         ax[0].imshow(neg_mask, origin = "lower")
         ax[1].imshow(pos_mask, origin = "lower")
-        # final_neg = np.argwhere(neg_mask.flatten() == 0)
-        # final_pos = np.argwhere(pos_mask.flatten() == 0)
-        # ax[0, 1].scatter(final_neg, neg_filter.flatten()[final_neg], c = 'cyan', label = 'final', marker = 'o')
-        # ax[0, 1].legend()
-        # ax[1, 1].scatter(final_pos, pos_filter.flatten()[final_pos], c = 'cyan', label = 'final', marker = 'o')
-        # ax[1, 1].legend()
     return neg_mask, pos_mask
 
 def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_results = False, ax = None, **kwargs):
@@ -307,7 +307,8 @@ def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_res
    # Get masks
     neg_mask, pos_mask = bipolar_mask(spatial_filter)
     # Determine which mask is the inverted one
-    is_inverse = np.all(np.invert(neg_mask) == pos_mask)
+    # is_inverse = np.all(np.invert(neg_mask) == pos_mask)
+    is_inverse = np.all((neg_mask + pos_mask) == True)
     skip_mask = 0
     if is_inverse:
         # Determine which mask is the inverted one
