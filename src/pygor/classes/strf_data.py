@@ -631,7 +631,7 @@ class STRF(Core):
         ## We reoder, becasue np.isclose(a, b) assumes b is the reference 
         ## and we will use the largst value as the reference
         abs_time_max_reordered = np.sort(abs_time_max, axis = 1)
-        outcome = np.isclose(abs_time_max_reordered[:, 0], abs_time_max_reordered[:, 1], rtol = .5, atol = .01)
+        outcome = np.isclose(abs_time_max_reordered[:, 0], abs_time_max_reordered[:, 1], rtol = .33, atol = .01)
         # If values were close, we assign 2
         pols = np.where(outcome, 2, pols)
         # Now we need to set values to 0 where there is no signal
