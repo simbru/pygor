@@ -491,28 +491,7 @@ class STRF(Core):
             # Apply mask to expanded and repeated strfs (to get negative and positive)
             strfs_expanded = np.repeat(np.expand_dims(self.strfs, axis = 1), 2, axis = 1)
             all_strfs_masked = np.ma.array(strfs_expanded, mask = all_masks, keep_mask=True)
-            """
-            TODO
-            - Kill masks where pval > threshold
-            """
-            # # # Get masks that fail criteria
-            # pval_fail_time = np.argwhere(np.array(self.pval_time) > self.bs_settings["time_sig_thresh"]) # nan > thresh always yields false, so thats really convenient 
-            # pval_fail_space = np.argwhere(np.array(self.pval_space) > self.bs_settings["space_sig_thresh"]) # because if pval is nan, it returns everything
-            # pval_fail = np.unique(np.concatenate((pval_fail_time, pval_fail_space)))
-            # # Set entire mask to True conditionally 
-            # all_strfs_masked[pval_fail] = True
             return all_strfs_masked
-
-            ## old:
-            # # Apply space.rf_mask3d to all arrays and return as a new masksed array
-            # all_strf_masks = np.ma.array([pygor.strf.space.rf_mask3d(x, level = None) for x in self.strfs])
-            # # # Get masks that fail criteria
-            # pval_fail_time = np.argwhere(np.array(self.pval_time) > self.bs_settings["time_sig_thresh"]) # nan > thresh always yields false, so thats really convenient 
-            # pval_fail_space = np.argwhere(np.array(self.pval_space) > self.bs_settings["space_sig_thresh"]) # because if pval is nan, it returns everything
-            # pval_fail = np.unique(np.concatenate((pval_fail_time, pval_fail_space)))
-            # # Set entire mask to True conditionally 
-            # all_strf_masks.mask[pval_fail] = True
-        # return all_strf_masks
 
     ## Methods 
     def calc_LED_offset(self, reference_LED_index = [0,1,2], compare_LED_index = [3]) -> np.ndarray:
@@ -766,6 +745,7 @@ class STRF(Core):
         return spectrum_neg, spectrum_pos
 
     def demo_contouring(self, roi, chromatic_reshape = False):
+        plt.close()
         fig, ax = plt.subplots(2, 6, figsize = (16*1.5, 4*1.5))
         neg_c, pos_c = pygor.strf.contouring.bipolar_contour(self.collapse_times()[roi], plot_results= True, ax = ax)
         ax[0, -1].plot(self.get_timecourses()[roi].T, label = ["neg", "pos"])
@@ -780,7 +760,7 @@ class STRF(Core):
             axbig.plot(i[:, 1], i[:, 0], color = "blue")
         for i in pos_c:
             axbig.plot(i[:, 1], i[:, 0], color = "red")
-        
+        plt.show()
     def plot_timecourse(self, roi):
         plt.plot(self.get_timecourses()[roi].T)
     
