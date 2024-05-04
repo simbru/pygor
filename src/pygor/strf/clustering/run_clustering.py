@@ -33,7 +33,12 @@ def run_clustering(clust_df):
     standard_minmax_transformer  = Pipeline(steps=[("minmax", MinMaxScaler())])
     sparse_transformer  = Pipeline(steps=[('maxsabs', MaxAbsScaler()),])
     # Initialise preprocessor job
-    "NB! Here the order is VERY IMPORTANT! --> Need to automate"
+    """
+    NB! Here the order is VERY IMPORTANT! --> Need to automate
+    
+    Issue is that depending on the clusterimg_params, the preprocessor column
+    transformer *should* update... At least for ease of use...
+    """
     preprocessor = ColumnTransformer(
             remainder='drop', #passthough features not listed
             transformers=[
@@ -61,9 +66,8 @@ def run_clustering(clust_df):
     pca_results = {key : df_pca(split_df[key].filter(regex=clust_params_regex), whiten = False) for key in split_df.keys()}
     pca_dict = {key : pca_results[key][0] for key in split_df.keys()}
     pca_df_dict = {key : pca_results[key][1] for key in split_df.keys()}
-
     # ## Step 3: Apply clustering to each split
-    clust_dict = {i : clust_pipeline(pca_df_dict[i].filter(like = "PC").dropna(axis=1)) for i in split_df.keys()}
+    clust_dict = {i : clust_pipeline(pca_df_dict[i].filter(like = "PC")) for i in split_df.keys() if i != "empty"}
     ## Ste 3.5: Rename cluster IDs to prep for merging
     for i in clust_dict.keys():
         if clust_dict[i]["cluster_id"].dtype != "object":
@@ -75,8 +79,11 @@ def run_clustering(clust_df):
     merged_pca_df["cluster_id"] = merged_pca_df["cluster_id"].astype('category')
     merged_pca_df["cluster"] = merged_pca_df.cluster_id.cat.codes
     merged_pca_df["cat_pol"] = pruned_df["cat_pol"]
+    # merged_pca_df["pca_obj"] = pca_results
+
     ### To scaled DF
     merged_stats_df = pd.concat(split_df[i] for i in clust_dict.keys())
+    merged_stats_df = merged_stats_df[merged_stats_df.columns.drop(list(merged_stats_df.filter(like='pol_')))]
     merged_stats_df["ipl_depths"] = pruned_df["ipl_depths"]
     merged_stats_df["cluster_id"] = merged_pca_df["cluster_id"].astype('category')
     merged_stats_df["cluster"] = merged_pca_df.cluster_id.cat.codes
@@ -87,9 +94,10 @@ def run_clustering(clust_df):
     org_stats_df["cluster"] = merged_pca_df.cluster_id.cat.codes
     org_stats_df["cat_pol"] = pruned_df["cat_pol"]
     org_stats_df["ipl_depths"] = pruned_df["ipl_depths"]
-    
+    org_stats_df["roi"] = pruned_df["roi"]
+    org_stats_df["strf_obj"] = pruned_df["strf_obj"]
     ## Finally, define outputs 
-    return merged_pca_df, merged_stats_df, org_stats_df
+    return merged_pca_df, merged_stats_df, org_stats_df, pca_dict
 
 # if __name__ == "__main__":
 #     data_argument = globals().get(sys.argv[1])
@@ -98,24 +106,24 @@ def run_clustering(clust_df):
 
 
 # script.py
-import pandas as pd
-import sys
+# import pandas as pd
+# import sys
 
-def main(data):
-    # Your script logic using the DataFrame 'data'
-    print(data.head())
+# def main(data):
+#     # Your script logic using the DataFrame 'data'
+#     print(data.head())
 
-if __name__ == "__main__":
-    # Check if the script is being run directly
-    if len(sys.argv) > 1:
-        # Retrieve the DataFrame from the global namespace
-        data_argument = globals().get(sys.argv[1], None)
+# if __name__ == "__main__":
+#     # Check if the script is being run directly
+#     if len(sys.argv) > 1:
+#         # Retrieve the DataFrame from the global namespace
+#         data_argument = globals().get(sys.argv[1], None)
 
-        if isinstance(data_argument, pd.DataFrame):
-            # Call the main function with the DataFrame as an argument
-            main(data_argument)
-        else:
-            print("Error: Invalid DataFrame argument.")
-    else:
-        print("Error: Please provide a DataFrame argument.")
+#         if isinstance(data_argument, pd.DataFrame):
+#             # Call the main function with the DataFrame as an argument
+#             main(data_argument)
+#         else:
+#             print("Error: Invalid DataFrame argument.")
+#     else:
+#         print("Error: Please provide a DataFrame argument.")
 

@@ -27,6 +27,7 @@ import warnings
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline#, make_pipeline
 import pygor.filehandling as filehandling
+import pygor.strf.analyse 
 
 palette = sns.color_palette("bright", 10)
 
@@ -289,16 +290,16 @@ def prep_input_df(input_df, select_cols = None, scaler = StandardScaler(), nan_r
     # Drop irrelevant cols (lazy by searching any match, meaning more
     # specific search criteria will yield less data)
     input_df = input_df[cols_like(select_cols, input_df)]
-    # Drop columns where all is the same 
-    if drop_redundant == True:
-        nunique = input_df.nunique()
-        cols_to_drop = nunique[nunique == 1].index
-        input_df = input_df.drop(cols_to_drop, axis=1)
     # Remove missing values (but crucially keep index the same)
     if remove_missing == True: # need a better way of automatiing the below
         input_df = remove_missing_vals(input_df)
     # Kill nans 
     input_df = input_df.fillna(nan_replace)
+    # Drop columns where all is the same 
+    # if drop_redundant == True:
+    #     nunique = input_df.nunique()
+    #     cols_to_drop = nunique[nunique == 1].index
+    #     input_df = input_df.drop(cols_to_drop, axis=1)
     # Can scale, otherwise just return the cleaned DF
     if scaler != None:
         # If specified, ignore these columns in the scaling process
@@ -368,7 +369,7 @@ def df_BayesGMM(input_df, n_components=30, random_state=0, max_iter = 1000, cova
     #     input_df["cluster_id"] = clusters
     return output_df
 
-def df_GMM(input_df, n_components="auto", random_state=0, max_iter = 1000, max_comp = 15, covariance_type="full", apply_cluster_id = True):
+def df_GMM(input_df, n_components="auto", random_state=0, max_iter = 1000, max_comp = 8, covariance_type="full", apply_cluster_id = True):
     input_df = input_df.copy()
     if n_components == "auto":
         # If there are more components than samples, we need an exception 
@@ -451,54 +452,6 @@ def get_cluster_cols(cluster_id, col_str_list, df):
 #     plt.fill_between(range(len(errors)), means - errors, means + errors, alpha = 0.25)
 #     plt.axhline(0)
 
-def plot_df_tuning(post_cluster_df, clusters = 0, group_by = "cluster", plot_cols = "all", specify_cluster = None, print_stat = False, ax = None):
-    if group_by not in post_cluster_df.columns:
-        raise AttributeError(f"Please ensure {group_by} columns exists in input DF.")
-    if plot_cols == "all":
-        # This goes through the DataFrames and identifies which columns are present and extracts them 
-        # independent of wavelength (more on parsing that below) 
-        unique_cols_sans_wavelength = np.unique([i.split("_")[0] for i in post_cluster_df.columns if i != group_by])
-        unique_cols_sans_wavelength = unique_cols_sans_wavelength[unique_cols_sans_wavelength != group_by]
-        check_cols = np.unique([i.split("_")[0] for i in post_cluster_df.columns if i != group_by])
-        if "ipl" in unique_cols_sans_wavelength:
-            unique_cols_sans_wavelength = unique_cols_sans_wavelength.astype(object)
-            unique_cols_sans_wavelength[np.where(unique_cols_sans_wavelength == "ipl")] = "ipl_depths"
-        #assert np.all(check_cols == unique_cols_sans_wavelength)
-        num_stats = len(unique_cols_sans_wavelength)
-    else:
-        raise NotImplementedError("plot_cols must currently be = 'all'")
-    if np.all(ax == None):
-        fig, ax = plt.subplots(1, num_stats, figsize=np.array([num_stats, .75])*4)
-        fig.tight_layout()
-        if num_stats == 1:
-            ax = [ax]
-        
-    if type(clusters) == int:
-        clusters = [clusters]
-    for m, clust_num in enumerate(clusters):
-        for n, (i, param) in enumerate(zip(ax, unique_cols_sans_wavelength)):
-            # if n == 0:
-            #      i.set_ylabel("Mean ± STD by paramter")
-            results = get_cluster_cols(clust_num, unique_cols_sans_wavelength, post_cluster_df).describe()
-            wavelength_params = cols_like([param], results)
-            means =  results[wavelength_params].loc["mean"]
-            errors = results[wavelength_params].loc["std"]
-            # 
-            if print_stat == True:  
-                print(results)
-            if param == "ipl_depths":
-                sns.histplot(data = post_cluster_df.query(f"{group_by} == {clust_num}"), y = "ipl_depths", binrange = (0, 100), binwidth = 10, ax = i)
-                i.set_xlim(0, 20)
-            else:
-                # plot individuals
-                i.plot(post_cluster_df.query(f"cluster == {clust_num}")[wavelength_params].T, alpha = 0.1, color = 'k')
-                # plot stats
-                i.plot(means)
-                i.set_xticks(range(len(wavelength_params)), [i.split("_")[-1] for i in wavelength_params])
-                i.fill_between(range(len(errors)), means - errors, means + errors, alpha = 0.25)
-                # set a lil line at 0 for easier viz
-                i.axhline(0, color = "lightgrey", alpha = 1, ls = '--')
-            i.set_title(param)
 def sum_normalize_data(data):
     """
     scaling values to sum to 1 while preserving their relative proportions
@@ -523,105 +476,3 @@ def scale_data_points(data_array):
     scaled_data_array = data_array / areas[:, np.newaxis]
 
     return scaled_data_array
-
-def run_clustering(clust_df, clustering_params = ["ampl", "area", "peak", "cent"]):
-
-    clust_params_regex = '|'.join(clustering_params)
-    def clust_pipeline(input_df, cluster_params = clustering_params, *args):
-        # Run clustering on PCA result
-        _df_clust = df_GMM(input_df)
-        # Apply output by writing clusters to input data
-        df_output = apply_clusters(input_df.copy(), _df_clust)
-        return df_output
-    ## Step 0: Remove all-zero enteries from data
-    pruned_df = prep_input_df(clust_df, scaler = None).reset_index()
-    ## Step 1: Scale data
-    # Initialise transfomers 
-    standard_maxabs_transformer  = Pipeline(steps=[("maxabs", MaxAbsScaler())])
-    standard_minmax_transformer  = Pipeline(steps=[("minmax", MinMaxScaler())])
-    sparse_transformer  = Pipeline(steps=[('maxsabs', MaxAbsScaler()),])
-    # Initialise preprocessor job
-    "NB! Here the order is VERY IMPORTANT! --> Need to automate"
-    preprocessor = ColumnTransformer(
-            remainder='drop', #passthough features not listed
-            transformers=[
-                ('ampl',   standard_maxabs_transformer, cols_like(["ampl"], pruned_df)),
-                ('area', standard_minmax_transformer , cols_like(["area"], pruned_df)),
-                ("peak, cent", sparse_transformer, cols_like(["peak", "cent"], pruned_df)),
-            ])
-    # Fit transform and write result to DataFrame 
-    output_df = pd.DataFrame(preprocessor.fit_transform(pruned_df.copy()), columns=cols_like(clustering_params, pruned_df))
-    # output_df = pruned_df[]
-    # Check that we are happy with outcome
-    pruned_df.filter(regex= clust_params_regex).plot(kind = "box", figsize = (10, 3))
-    # plt.ylim(-15, 15)
-    plt.axhline(0, c = "red", alpha = 0.25)
-    plt.xticks(rotation=90);
-    output_df.plot(kind = "box", figsize = (10, 3))
-    for j in [0, -1, 1]:
-        plt.axhline(j, c = "red", alpha = 0.25)
-    plt.xticks(rotation=90);
-
-    ## Step 1: Split the data into groups depending on cat_pol (can be optional step)
-    # Add cat_pol and wavelength pol back into output for filtering (reset_index is crucial here for correct merging of indeces)
-    split_df = filehandling.split_df_by(output_df.join(pruned_df.filter(like = "pol"), how = "inner", validate = "one_to_one"), "cat_pol")
-    ## Step 2: Apply PCA to each split independently
-    pca_results = {key : df_pca(split_df[key].filter(regex=clust_params_regex), whiten = False) for key in split_df.keys()}
-    pca_dict = {key : pca_results[key][0] for key in split_df.keys()}
-    pca_df_dict = {key : pca_results[key][1] for key in split_df.keys()}
-
-    # ## Step 3: Apply clustering to each split
-    clust_dict = {i : clust_pipeline(pca_df_dict[i].filter(like = "PC").dropna(axis=1)) for i in split_df.keys()}
-    ## Ste 3.5: Rename cluster IDs to prep for merging
-    for i in clust_dict.keys():
-        if clust_dict[i]["cluster_id"].dtype != "object":
-            split_df[i]["cluster_id"] = f'{i}' + '_' + clust_dict[i]["cluster_id"].astype(str)
-            clust_dict[i]["cluster_id"] = f'{i}' + '_' + clust_dict[i]["cluster_id"].astype(str)
-    ## Step 4: Merge results
-    ### To PCA DF
-    merged_pca_df = pd.concat(clust_dict[i] for i in clust_dict.keys())
-    merged_pca_df["cluster_id"] = merged_pca_df["cluster_id"].astype('category')
-    merged_pca_df["cluster"] = merged_pca_df.cluster_id.cat.codes
-    merged_pca_df["cat_pol"] = pruned_df["cat_pol"]
-    ### To scaled DF
-    merged_stats_df = pd.concat(split_df[i] for i in clust_dict.keys())
-    merged_stats_df["ipl_depths"] = pruned_df["ipl_depths"]
-    merged_stats_df["cluster_id"] = merged_pca_df["cluster_id"].astype('category')
-    merged_stats_df["cluster"] = merged_pca_df.cluster_id.cat.codes
-    ### And write that to an unprocessed copy
-
-    org_stats_df = copy.deepcopy(clust_df)
-    org_stats_df = prep_input_df(org_stats_df, scaler=None, select_cols=clustering_params).reset_index()
-    org_stats_df["cluster_id"] = merged_pca_df["cluster_id"].astype('category')
-    org_stats_df["cluster"] = merged_pca_df.cluster_id.cat.codes
-    org_stats_df["cat_pol"] = pruned_df["cat_pol"]
-    org_stats_df["ipl_depths"] = pruned_df["ipl_depths"]
-    org_stats_df["path"] = pruned_df["path"]
-    org_stats_df["filename"] = pruned_df["filename"]
-    org_stats_df["date"] = pruned_df["date"]
-    org_stats_df["curr_path"] = pruned_df["curr_path"]
-    org_stats_df["roi"] = pruned_df["roi"]
-    org_stats_df["cell_id"] = pruned_df["cell_id"]
-    org_stats_df["curr_path"] = pruned_df["curr_path"]
-    
-    org_stats_df["spatial_588"] = pruned_df["spatial_588"]
-    org_stats_df["spatial_478"] = pruned_df["spatial_478"]
-    org_stats_df["spatial_422"] = pruned_df["spatial_422"]
-    org_stats_df["spatial_375"] = pruned_df["spatial_375"]
-    org_stats_df["spatial_X"] = pruned_df["spatial_X"]
-    org_stats_df["spatial_Y"] = pruned_df["spatial_Y"]
-    org_stats_df["temporal_588"] = pruned_df["temporal_588"]
-    org_stats_df["temporal_478"] = pruned_df["temporal_478"]
-    org_stats_df["temporal_422"] = pruned_df["temporal_422"]
-    org_stats_df["temporal_375"] = pruned_df["temporal_375"]
-
-        
-
-# org_stats_df["curr_path"] = pruned_df["curr_path"][:, 0]
-    """
-    TODO Fix "curr_path" bug
-    """
-    test_out = clust_df
-    
-    ## Finally, define outputs 
-    return merged_pca_df, merged_stats_df, org_stats_df, pca_results
