@@ -271,7 +271,7 @@ def remove_missing_vals(input_df, ignore_cols = ["ipl_depths"], numerical_only =
         non_empty_df = input_df.drop(drop_list, axis = 0)
     return non_empty_df
 
-def prep_input_df(input_df, select_cols = None, scaler = StandardScaler(), nan_replace = 0, remove_missing = True, ignore_scale = None):
+def prep_input_df(input_df, select_cols = None, scaler = StandardScaler(), nan_replace = 0, remove_missing = True, drop_redundant = True, ignore_scale = None):
     # Can specify columns, otherwise use everything available
     if select_cols == None:
         select_cols = list(input_df.columns)
@@ -284,9 +284,16 @@ def prep_input_df(input_df, select_cols = None, scaler = StandardScaler(), nan_r
         """
     # Prevent overwriting 
     input_df = input_df.copy()
+    if "roi" in input_df.columns:
+        input_df.drop("roi", axis = 1)
     # Drop irrelevant cols (lazy by searching any match, meaning more
     # specific search criteria will yield less data)
     input_df = input_df[cols_like(select_cols, input_df)]
+    # Drop columns where all is the same 
+    if drop_redundant == True:
+        nunique = input_df.nunique()
+        cols_to_drop = nunique[nunique == 1].index
+        input_df = input_df.drop(cols_to_drop, axis=1)
     # Remove missing values (but crucially keep index the same)
     if remove_missing == True: # need a better way of automatiing the below
         input_df = remove_missing_vals(input_df)
@@ -364,6 +371,9 @@ def df_BayesGMM(input_df, n_components=30, random_state=0, max_iter = 1000, cova
 def df_GMM(input_df, n_components="auto", random_state=0, max_iter = 1000, max_comp = 15, covariance_type="full", apply_cluster_id = True):
     input_df = input_df.copy()
     if n_components == "auto":
+        # If there are more components than samples, we need an exception 
+        if input_df.shape[-1] < max_comp:
+            max_comp = input_df.shape[-1]
         n_components = range(1, max_comp)
         covariance_type = ['spherical', 'tied', 'diag', 'full']
         score=[]
@@ -413,7 +423,13 @@ def apply_clusters(input_df, cluster_id_df, inplace = False):
 
 def df_pca(input_df, n_comps = "auto", whiten = False):
     if n_comps == "auto":
-        n_comps = input_df.shape[-1]
+        # Maximaise availible dimesnions always
+        n_samples = input_df.shape[0]
+        n_measures = input_df.shape[-1]
+        if n_samples > n_measures:
+            n_comps = n_measures
+        else:
+            n_comps = n_samples
     pca = PCA(n_components=n_comps, whiten = whiten)
     pca.fit(input_df)
     reduced = pca.transform(input_df)
