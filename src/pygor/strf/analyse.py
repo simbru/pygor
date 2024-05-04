@@ -227,7 +227,7 @@ def _recording_dict(data_strf_obj):
     dict["ObjXYZ"] = [metadata.pop("objectiveXYZ")]
     return dict
 
-def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
+def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], store_data = True):
         """
         Generate a chromaticity dictionary from a data structure object.
 
@@ -302,9 +302,11 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"]):
                 dict[f"peakneg_{i}"] = neg_peak_t[n]
                 dict[f"peakpos_{i}"] = pos_peak_t[n]
                 dict[f"comp_{i}"] = complexities[n]
-                #dict[f"temporal_{i}"] = temporal_filter[n].tolist()
-                #dict[f"spatial_{i}"] = spatial_filter[n].tolist()
-            
+                if store_data is True:
+                    dict[f"temporal_{i}"] = temporal_filter[n].tolist()
+                    dict[f"spatial_{i}"] = spatial_filter[n].tolist()
+                dict["strf_obj"] = data_strf_obj
+
             dict["spatial_X"] = [spatial_filter[0, 0].shape[0]] * expected_lengths
             dict["spatial_Y"] = [spatial_filter[0, 0].shape[1]] * expected_lengths
             dict["temporal_len"] = [temporal_filter.shape[0]] * expected_lengths
