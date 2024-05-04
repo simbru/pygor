@@ -337,10 +337,7 @@ class STRF(Core):
             data = DataObject()
             contours = data.fit_contours()
         """        
-        # try:
-        #     return self.__contours
-        # except AttributeError:
-            #self.__contours = [space.contour(x) for x in self.collapse_times()]
+
         
         # if self.bs_settings["do_bootstrap"] == True:
         #     time_pvals = self.pval_time
@@ -354,7 +351,10 @@ class STRF(Core):
         # __contours = np.array(__contours, dtype = "object")
         # return __contours
 
-
+        # try:
+        #     return self.__contours
+        # except AttributeError:
+            #self.__contours = [space.contour(x) for x in self.collapse_times()]
         if self.bs_settings["do_bootstrap"] == True:
             time_pvals = self.pval_time
             space_pvals = self.pval_space
@@ -436,13 +436,21 @@ class STRF(Core):
     TODO Add lazy processing back into contouring (maybe skip timecourses, should be fast enough)
     """
     
-    def get_timecourses(self, centre_on_zero = True) -> np.ndarray:
+    def get_timecourses(self, centre_on_zero = True, mask_empty = False) -> np.ndarray:
         # try:
         #     return self.__timecourses 
         # except AttributeError:
         timecourses = np.ma.average(self.get_strf_masks(), axis = (3,4))
-        first_indexes = np.expand_dims(timecourses[:, :, 0], -1)
+        if mask_empty is False:
+            # Sometimes we may/may not want to keep data where space has no correlations (all masked)
+            # Fill timecourses with noise array where space is masked
+            empty_mask_indices = np.argwhere(timecourses.mask.any(axis = (1,2)))
+            noise_times = np.expand_dims(np.average(self.strfs[empty_mask_indices], axis = (3, 4)), axis = 1)
+            noise_times = np.repeat(noise_times, 2, axis = 2)
+            timecourses[empty_mask_indices] = noise_times
+        # Most of the time it makes sense to centre on zero
         if centre_on_zero:
+            first_indexes = np.expand_dims(timecourses[:, :, 0], -1)
             timecourses_centred = timecourses - first_indexes
         else:
             timecourses_centred = timecourses
@@ -584,18 +592,22 @@ class STRF(Core):
         for n, strf in enumerate(self.strfs):
             collapsed_strf_arr[n] = pygor.strf.space.collapse_3d(self.strfs[n], zscore = zscore, mode = mode)
         if spatial_centre == True:
-            # Calculate shifts required for each image (vectorised)
-            arr3d = collapsed_strf_arr
-            # Ideally (but does not seem to work correctly, skewed by spurrious contours)
-            contours_centers = np.where(self.get_contours_centres() > 0, np.floor(self.get_contours_centres()), np.ceil(self.get_contours_centres()))
-            target_pos = np.array(arr3d.shape[1:]) / 2
-            shift_by = target_pos - contours_centers
-            #print("Shift by", shift_by)
-            shift_by = np.nan_to_num(shift_by).astype(int) 
-            shift_by = shift_by
-            # np.roll does not support rolling 3D along depth, so 
-            shifted = np.ma.array([np.roll(arr, shift_by[i], axis = (0,1)) for i, arr in enumerate(arr3d)])
-            return shifted
+            try:
+                return self._spatial_centered_collapse
+            except AttributeError:
+                # Calculate shifts required for each image (vectorised)
+                arr3d = collapsed_strf_arr
+                # Ideally (but does not seem to work correctly, skewed by spurrious contours)
+                contours_centers = np.where(self.get_contours_centres() > 0, np.floor(self.get_contours_centres()), np.ceil(self.get_contours_centres()))
+                target_pos = np.array(arr3d.shape[1:]) / 2
+                shift_by = target_pos - contours_centers
+                #print("Shift by", shift_by)
+                shift_by = np.nan_to_num(shift_by).astype(int) 
+                shift_by = shift_by
+                # np.roll does not support rolling 3D along depth, so 
+                shifted = np.ma.array([np.roll(arr, shift_by[i], axis = (0,1)) for i, arr in enumerate(arr3d)])
+                self._spatial_centered_collapse = shifted
+            return self._spatial_centered_collapse
             #collapsed_strf_arr = shifted
         return collapsed_strf_arr
         # space.collapse_3d(recording.strfs[strf_num])
@@ -603,7 +615,7 @@ class STRF(Core):
     
     def get_polarities(self, exclude_FirstLast=(1,1)) -> np.ndarray:
         # Get the time as absolute values, then get the max value
-        abs_time_max = np.max(np.abs(self.get_timecourses().data), axis = 2)
+        abs_time_max = np.max(np.abs(self.get_timecourses(mask_empty = True).data), axis = 2)
         # First find the obvious polarities
         pols = np.where(abs_time_max[:, 0] > abs_time_max[:, 1], -1, 1)
         # Now we check if values are close
