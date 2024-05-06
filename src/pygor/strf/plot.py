@@ -331,60 +331,17 @@ def multi_chroma_movie(strf_object, roi, show_cbar = False, **kwargs):
 
     num_colours = strf_object.numcolour
     multichrom = pygor.utilities.multicolour_reshape(strf_object.strfs, num_colours)[:, roi]
-    frames = multichrom.shape[1]
     # Use RC context manager to temporarily use the modified rc dict 
-
-    # Scale colormap
-    max_abs_val = np.max(np.abs(multichrom))
-    
-    if kwargs.get('cmap_list') == None:
-        cmap_list = [
-            pygor.plotting.red_map,
-            pygor.plotting.green_map,
-            pygor.plotting.blue_map,
-            pygor.plotting.violet_map,
-        ]
-    else:
-        cmap_list = kwargs.get('cmap_list')
-    # im.set_clim(min_val, max_val)
-
-        # # Create a function that plot updates data in plt.imshow for each frame
-        # print(multichrom[0].shape)
-    with mpl.rc_context(rc=plot_settings):
-        # Initiate the figure, change themeing to Seaborn, create axes to tie colorbar too (for scaling)
-        plt.ion()
-        fig, axs = plt.subplots(1, num_colours, figsize = (4*num_colours, 1*num_colours),
-            gridspec_kw = {'wspace' : 0.0, 'hspace' : 0.0})
-        def video(frame):
-            for n, ax in enumerate(axs):
-                # Plotting 
-                im1 = ax.pcolormesh(multichrom[n, 0], cmap = cmap_list[n])
-                ax.set_aspect('equal')
-                if show_cbar is True:
-                    # Optional colorbars
-                    div = make_axes_locatable(ax)
-                    cax = div.append_axes('right', '5%', '2%')
-                    fig.colorbar(im1, cax = cax)
-                    cax.get_xaxis().set_visible(False)
-                    cax.get_yaxis().set_visible(False)
-                    cax.axis('off')
-                # Hide grid lines
-                ax.get_xaxis().set_visible(False)
-                ax.get_yaxis().set_visible(False)
-                ax.grid(False)
-                ax.axis('off')
-                # Equalise the colormap
-                im1.set_clim(-max_abs_val, max_abs_val)
-                # Fill the animation with data
-                im1.set_array(multichrom[n][frame])
-    # Create the animation based on the above function
-    animation = mpl.animation.FuncAnimation(fig, video, frames=frames, interval = 80*1.5, repeat_delay = 500)
-    
-    if kwargs.get('save') == True:
-        filename = 'multi_chroma_movie.gif'
-        print("stored as:", filename)
-        animation.save(filename)
-    # Close the animation 
-    plt.close()
+    animation = pygor.plotting.play_movie_4d(multichrom, show_cbar=show_cbar, cmap_list = pygor.plotting.maps_concat)
     return animation
+
+def spatial_colors(d3_srf_arr):
+    minmax_abs = np.max(np.abs(srf_avgs))
+    fig, axs = plt.subplots(1, 4, figsize = (10, 4))
+    for n, ax in enumerate(axs):
+        ax.pcolormesh(srf_avgs[n], vmin = -minmax_abs, vmax = minmax_abs, cmap = pygor.plotting.maps_concat[n])
+        ax.set_aspect("equal")
+        ax.axis('off')
+    plt.close()
+    return fig
 
