@@ -1,4 +1,7 @@
+import matplotlib as mpl
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+import matplotlib.colors as colors
 from matplotlib import cm
 import numpy as np
 try:
@@ -10,6 +13,7 @@ import pygor.utilities
 import pygor.strf.space
 import pygor.strf.temporal
 import pygor.strf.contouring
+import seaborn as sns
 
 from pygor.plotting.custom import red_map, green_map, blue_map, violet_map, fish_palette
 
@@ -47,7 +51,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
         # plotting depending on specified number of rois (more or less than 1)
         if len(specify_rois) > 1:
             for i in range(4):
-                strf = ax[-n-1, i].imshow(spaces[i], cmap = colour_maps[i], origin = "lower")
+                strf = ax[-n-1, i].pcolormesh(spaces[i], cmap = colour_maps[i])
                 strf.set_clim(-25, 25)
                 if n == 0:
                     for j in range(data_strf_object.numcolour):
@@ -59,7 +63,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
             np.abs(np.diff(ax[n, 0].get_ylim())[0] / np.diff(ax[0,0].get_xlim())[0])
         else:
             for i in range(4):
-                strf = ax[i].imshow(spaces[i], cmap = colour_maps[i], origin = "lower")
+                strf = ax[i].pcolormesh(spaces[i], cmap = colour_maps[i])
                 strf.set_clim(-25, 25)
                 if roi == 0:
                     for j in range(4):
@@ -314,4 +318,73 @@ def tiling(Data_strf_object, deletion_threshold = 0, chromatic = False, x_lim = 
             a.set_ylim(y_lim[0], y_lim[1])
     # ax[3].imshow(np.average(load.images, axis = 0), cmap = 'Greys_r', origin = "lower")
     # plt.savefig(r"C:\Users\SimenLab\OneDrive\Universitet\PhD\Conferences\Life Sciences PhD Careers Symposium 2023\RF_tiling.svg")
+
+def multi_chroma_movie(strf_object, roi, show_cbar = False, **kwargs):
+    # This is way more efficient than the legacy version and does not rely on ipywidgets
+    # https://stackoverflow.com/questions/39472017/how-to-animate-the-colorbar-in-matplotlib
+
+    # Return default matplotlib plotting parameters to new dict and change those needed
+    plot_settings = plt.rcParams
+    plot_settings["animation.html"] = "jshtml"
+    plot_settings["figure.dpi"] = 100
+    plot_settings["savefig.facecolor"] = "white"
+
+    num_colours = strf_object.numcolour
+    multichrom = pygor.utilities.multicolour_reshape(strf_object.strfs, num_colours)[:, roi]
+    frames = multichrom.shape[1]
+    # Use RC context manager to temporarily use the modified rc dict 
+
+    # Scale colormap
+    max_abs_val = np.max(np.abs(multichrom))
+    
+    if kwargs.get('cmap_list') == None:
+        cmap_list = [
+            pygor.plotting.red_map,
+            pygor.plotting.green_map,
+            pygor.plotting.blue_map,
+            pygor.plotting.violet_map,
+        ]
+    else:
+        cmap_list = kwargs.get('cmap_list')
+    # im.set_clim(min_val, max_val)
+
+        # # Create a function that plot updates data in plt.imshow for each frame
+        # print(multichrom[0].shape)
+    with mpl.rc_context(rc=plot_settings):
+        # Initiate the figure, change themeing to Seaborn, create axes to tie colorbar too (for scaling)
+        plt.ion()
+        fig, axs = plt.subplots(1, num_colours, figsize = (4*num_colours, 1*num_colours),
+            gridspec_kw = {'wspace' : 0.0, 'hspace' : 0.0})
+        def video(frame):
+            for n, ax in enumerate(axs):
+                # Plotting 
+                im1 = ax.pcolormesh(multichrom[n, 0], cmap = cmap_list[n])
+                ax.set_aspect('equal')
+                if show_cbar is True:
+                    # Optional colorbars
+                    div = make_axes_locatable(ax)
+                    cax = div.append_axes('right', '5%', '2%')
+                    fig.colorbar(im1, cax = cax)
+                    cax.get_xaxis().set_visible(False)
+                    cax.get_yaxis().set_visible(False)
+                    cax.axis('off')
+                # Hide grid lines
+                ax.get_xaxis().set_visible(False)
+                ax.get_yaxis().set_visible(False)
+                ax.grid(False)
+                ax.axis('off')
+                # Equalise the colormap
+                im1.set_clim(-max_abs_val, max_abs_val)
+                # Fill the animation with data
+                im1.set_array(multichrom[n][frame])
+    # Create the animation based on the above function
+    animation = mpl.animation.FuncAnimation(fig, video, frames=frames, interval = 80*1.5, repeat_delay = 500)
+    
+    if kwargs.get('save') == True:
+        filename = 'multi_chroma_movie.gif'
+        print("stored as:", filename)
+        animation.save(filename)
+    # Close the animation 
+    plt.close()
+    return animation
 
