@@ -69,6 +69,58 @@ def play_movie(d3_arr, figaxim_return = False,**kwargs):
         else:
             return animation
 
+def play_movie_4d(d4_arr, figaxim_return = False, show_cbar = True, **kwargs):
+    # This is way more efficient than the legacy version and does not rely on ipywidgets
+    # https://stackoverflow.com/questions/39472017/how-to-animate-the-colorbar-in-matplotlib
+    if d4_arr.ndim != 4:
+        raise AttributeError("Array passed to function is not four dimensional (4D). Please use 'play_movie' instead.")
+    # Return default matplotlib plotting parameters to new dict and change those needed
+    plot_settings = plt.rcParams
+    plot_settings["animation.html"] = "jshtml"
+    plot_settings["figure.dpi"] = 100
+    plot_settings["savefig.facecolor"] = "white"
+    # Check attributes and kwargs
+    if d4_arr.ndim != 4:
+        raise AttributeError("Array passed to function is not four dimensional (4D). Please consider 'play_movie' instead, or check inputs.")
+    len_4d = d4_arr.shape[0]
+    frames_time = d4_arr.shape[1]
+    max_abs_val = np.max(np.abs(d4_arr))
+    if 'cmap_list' not in kwargs:
+        cmap_list = ['Greys_r'] * len_4d
+    else:
+        cmap_list = kwargs['cmap_list']
+    # Use RC context manager to temporarily use the modified rc dict 
+    with matplotlib.rc_context(rc=plot_settings):
+        # Initiate the figure, change themeing to Seaborn, create axes to tie colorbar too (for scaling)
+        fig, axs = plt.subplots(1, len_4d, figsize = (4*len_4d, 1*len_4d),
+            gridspec_kw = {'wspace' : 0.2, 'hspace' : 0.0})
+        def video(frame):
+            for n, ax in enumerate(axs):
+                # Plotting 
+                im1 = ax.pcolormesh(d4_arr[n, 0], cmap = cmap_list[n])
+                ax.set_aspect('equal')
+                if show_cbar is True:
+                    # Optional colorbars
+                    div = make_axes_locatable(ax)
+                    cax = div.append_axes('right', '5%', '2%')
+                    fig.colorbar(im1, cax = cax)
+                    cax.get_xaxis().set_visible(False)
+                    cax.get_yaxis().set_visible(False)
+                    cax.axis('off')
+                # Hide grid lines
+                ax.get_xaxis().set_visible(False)
+                ax.get_yaxis().set_visible(False)
+                ax.grid(False)
+                ax.axis('off')
+                # Equalise the colormap
+                im1.set_clim(-max_abs_val, max_abs_val)
+                # Fill the animation with data
+                im1.set_array(d4_arr[n][frame])
+        # Create the animation based on the above function
+        animation = matplotlib.animation.FuncAnimation(fig, video, frames=frames_time, interval = 80*1.5, repeat_delay = 500)    
+        plt.close()
+        return animation
+
 def _legacy_play_movie(d3_arr, **kwargs):
     if d3_arr.ndim != 3:
         raise AttributeError(f"Array passed to function is not three dimensional (3D). Shape should be: (time,x,y)")
@@ -217,60 +269,60 @@ def basic_stim_overlay(stack, frame_duration = 32, frame_width = 125,
         rgb_array[0:frame_duration, xy_loc[1]:xy_loc[1]+size, xy_loc[0] + frame_width*i: xy_loc[0] + size+frame_width*i] = np.array(colors.to_rgb(colour_list[i])) * 255
     return rgb_array
 
-def ipl_summary_chroma(chroma_df):
-    polarities = [-1, 1]
-    colours = ["R", "G", "B", "UV"]
-    fig, ax = plt.subplots(2, 4, figsize = (12, 7), sharex = True, sharey=True)
-    bins = 10
-    # sns.set_style("whitegrid")
-    for n, i in enumerate(polarities):
-        for m, j in enumerate(colours):
-            hist_vals_per_condition = np.histogram(chroma_df.query(f"polarities ==  {i} & colour == '{j}'")["ipl_depths"], bins = bins)[0]
-            hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
-            # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
-            percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
-            # percentages = hist_vals_per_condition
-            ax[n, m].barh(np.arange(0, 100, 10), width= percentages, height=10, color = custom.fish_palette[m], edgecolor="black", alpha = 0.75)        
-            ax[n, m].grid(False)
-            ax[n, m].axhline(55, c = "k", ls = "--")
-            # ax[n, m].get_xaxis().set_visible(False)
-            # ax[n, m].spines["bottom"].set_visible(False)
-            if m == 0:
-                ax[n, m].set_ylabel("IPL depth (%)")
-                ax[n, m].text(x = 14, y = 53+5, s = "OFF", size = 10)
-                ax[n, m].text(x = 14, y = 53-5, s = "ON", size = 10)
-                if i == -1:
-                    ax[n, m].set_title("OFF", weight = "bold", c = "grey", loc = "left")
-                if i == 1:
-                    ax[n, m].set_title("ON", weight = "bold", loc = "left")
-            ax[0, m].set_title(custom.nanometers[m] + "nm", size = 12)
-            num_cells = len(pd.unique(chroma_df["cell_id"]))
-            """
-            TODO this counts cell number incorrectly, duplicate cell_ids
-            """
-            ax[1, 0].set_xlabel(f"Percentage by colour (n = {num_cells})", size = 15)
-    plt.show()
-    raise UserWarning("Fix 'cell_ID' implementation in roi_df")
+# def ipl_summary_chroma(chroma_df):
+#     polarities = [-1, 1]
+#     colours = ["R", "G", "B", "UV"]
+#     fig, ax = plt.subplots(2, 4, figsize = (12, 7), sharex = True, sharey=True)
+#     bins = 10
+#     # sns.set_style("whitegrid")
+#     for n, i in enumerate(polarities):
+#         for m, j in enumerate(colours):
+#             hist_vals_per_condition = np.histogram(chroma_df.query(f"polarities ==  {i} & colour == '{j}'")["ipl_depths"], bins = bins)[0]
+#             hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
+#             # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
+#             percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
+#             # percentages = hist_vals_per_condition
+#             ax[n, m].barh(np.arange(0, 100, 10), width= percentages, height=10, color = custom.fish_palette[m], edgecolor="black", alpha = 0.75)        
+#             ax[n, m].grid(False)
+#             ax[n, m].axhline(55, c = "k", ls = "--")
+#             # ax[n, m].get_xaxis().set_visible(False)
+#             # ax[n, m].spines["bottom"].set_visible(False)
+#             if m == 0:
+#                 ax[n, m].set_ylabel("IPL depth (%)")
+#                 ax[n, m].text(x = 14, y = 53+5, s = "OFF", size = 10)
+#                 ax[n, m].text(x = 14, y = 53-5, s = "ON", size = 10)
+#                 if i == -1:
+#                     ax[n, m].set_title("OFF", weight = "bold", c = "grey", loc = "left")
+#                 if i == 1:
+#                     ax[n, m].set_title("ON", weight = "bold", loc = "left")
+#             ax[0, m].set_title(custom.nanometers[m] + "nm", size = 12)
+#             num_cells = len(pd.unique(chroma_df["cell_id"]))
+#             """
+#             TODO this counts cell number incorrectly, duplicate cell_ids
+#             """
+#             ax[1, 0].set_xlabel(f"Percentage by colour (n = {num_cells})", size = 15)
+#     plt.show()
+#     raise UserWarning("Fix 'cell_ID' implementation in roi_df")
 
-def ipl_summary_polarity(roi_df):
-    polarities = [-1, 1, 2]
-    fig, axs = plt.subplots(1, 3, figsize = (8, 4), sharex = True, sharey=True)
-    bins = 10
-    titles = ["OFF", "ON", "Mixed polarity"]
-    # sns.set_style("whitegrid")
-    for n, ax in enumerate(axs.flatten()):
-        hist_vals_per_condition = np.histogram(roi_df.query(f"polarities ==  {polarities[n]}")["ipl_depths"], bins = bins)[0]
-        hist_vals_population = np.histogram(roi_df["ipl_depths"], bins = bins)[0]
-        # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
-        percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
-        ax.barh(np.arange(0, 100, 10), width= percentages, height=10, color = custom.polarity_palette[n], edgecolor="black", alpha = 0.75)        
-        ax.set_title(titles[n], size = 12)
-        ax.axhline(55, c = "k", ls = "--")
-    axs[0].text(x = 14, y = 53+5, s = "OFF", size = 10)
-    axs[0].text(x = 14, y = 53-5, s = "ON", size = 10)
-    num_cells = len(pd.unique(roi_df["cell_id"]))
-    axs[0].set_xlabel(f"Percentage by polarity (n = {num_cells})", size = 15)
-    plt.show()
+# def ipl_summary_polarity(roi_df):
+#     polarities = [-1, 1, 2]
+#     fig, axs = plt.subplots(1, 3, figsize = (8, 4), sharex = True, sharey=True)
+#     bins = 10
+#     titles = ["OFF", "ON", "Mixed polarity"]
+#     # sns.set_style("whitegrid")
+#     for n, ax in enumerate(axs.flatten()):
+#         hist_vals_per_condition = np.histogram(roi_df.query(f"polarities ==  {polarities[n]}")["ipl_depths"], bins = bins)[0]
+#         hist_vals_population = np.histogram(roi_df["ipl_depths"], bins = bins)[0]
+#         # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
+#         percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
+#         ax.barh(np.arange(0, 100, 10), width= percentages, height=10, color = custom.polarity_palette[n], edgecolor="black", alpha = 0.75)        
+#         ax.set_title(titles[n], size = 12)
+#         ax.axhline(55, c = "k", ls = "--")
+#     axs[0].text(x = 14, y = 53+5, s = "OFF", size = 10)
+#     axs[0].text(x = 14, y = 53-5, s = "ON", size = 10)
+#     num_cells = len(pd.unique(roi_df["cell_id"]))
+#     axs[0].set_xlabel(f"Percentage by polarity (n = {num_cells})", size = 15)
+#     plt.show()
 
 def plot_traces(array_2d, mode = None, on_dur = None, off_dur = None, plot_type = "traces", axis = -1):
     if plot_type == "traces":
