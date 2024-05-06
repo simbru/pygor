@@ -280,12 +280,11 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], 
             complexities = pygor.utilities.multicolour_reshape(np.nanmean(pygor.strf.contouring.complexity_weighted(data_strf_obj.fit_contours(), data_strf_obj.get_contours_area()), axis = 1), num_wavelengths)
             area_t = data_strf_obj.calc_tunings_area(size).T
             ampl_t = data_strf_obj.calc_tunings_amplitude().T
-            neg_cent_t, pos_cent_t = data_strf_obj.calc_tunings_centroids()
-            neg_cent_t, pos_cent_t = neg_cent_t.T, pos_cent_t.T
             neg_peak_t, pos_peak_t = data_strf_obj.calc_tunings_peaktime()
             neg_peak_t, pos_peak_t =  neg_peak_t.T, pos_peak_t.T
-            cent_dom_t = np.where(ampl_t.T > 0, pos_cent_t.T, neg_cent_t.T).T
-            cent_dom_t = np.where(area_t.T, cent_dom_t.T, 0).T
+            neg_cent_t, pos_cent_t = data_strf_obj.calc_tunings_centroids(dominant_only=False)
+            neg_cent_t, pos_cent_t = neg_cent_t.T, pos_cent_t.T
+            cent_dom_t = data_strf_obj.calc_tunings_centroids().T
 
             # Chromatic aspects
             temporal_filter = pygor.utilities.multicolour_reshape(data_strf_obj.get_timecourses(), num_wavelengths)
