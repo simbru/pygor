@@ -415,14 +415,21 @@ class STRF(Core):
                 [np.average(i, axis = 0) for i in self.calc_contours_centroids()[1, :]]])
             return self.__centres_by_pol
 
-    def get_contours_centres(self, center_on = "biggest") -> np.ndarray:
+    def get_contours_centres(self, center_on = "amplitude") -> np.ndarray:
         if center_on == "pols":
             return np.nanmean(self.contours_centres_by_pol(), axis = 0)
-        if center_on == "biggest":
+        if center_on == "largest":
             pos_conts_cents = np.array([i[0] if i.size != 0 else np.array([np.nan, np.nan]) for i in self.calc_contours_centroids()[1, :]])
             neg_conts_cents = np.array([i[0] if i.size != 0 else np.array([np.nan, np.nan]) for i in self.calc_contours_centroids()[0, :]])
             area_cents = self.get_contours_area()
             neg_pos_largest = np.array([(i[np.argmax(i)], j[np.argmax(j)]) for i,j in area_cents])
+            xs = np.where(neg_pos_largest[:, 0] > neg_pos_largest[:, 1], neg_conts_cents[:, 0], pos_conts_cents[:, 0])
+            ys = np.where(neg_pos_largest[:, 0] > neg_pos_largest[:, 1], neg_conts_cents[:, 1], pos_conts_cents[:, 1])
+            return np.array([xs, ys]).T #centres by biggest area, irrespective of polarity
+        if center_on == "amplitude":
+            pos_conts_cents = np.array([i[0] if i.size != 0 else np.array([np.nan, np.nan]) for i in self.calc_contours_centroids()[1, :]])
+            neg_conts_cents = np.array([i[0] if i.size != 0 else np.array([np.nan, np.nan]) for i in self.calc_contours_centroids()[0, :]])
+            neg_pos_largest = np.max(np.abs(self.get_timecourses()), axis=2)
             xs = np.where(neg_pos_largest[:, 0] > neg_pos_largest[:, 1], neg_conts_cents[:, 0], pos_conts_cents[:, 0])
             ys = np.where(neg_pos_largest[:, 0] > neg_pos_largest[:, 1], neg_conts_cents[:, 1], pos_conts_cents[:, 1])
             return np.array([xs, ys]).T #centres by biggest area, irrespective of polarity
@@ -474,12 +481,6 @@ class STRF(Core):
         return np.array([np.reshape(i, (i.shape[0], -1)) for i in self.strfs])
 
     ## Methods__________________________________________________________________________________________________________
-
-    def plot_chromatic_overview(self, roi = None):
-        with warnings.catch_warnings(record=True) as w:
-            # Cause all warnings to always be triggered.
-            warnings.simplefilter("always")
-            return pygor.strf.plot.chroma_overview(self, roi, contours=True)
 
     # def plot_roi(self, roi):
     #     fig, ax = plt.subplots(1, 3)
@@ -584,6 +585,15 @@ class STRF(Core):
     #     collapsed_strf_arr = overlap
     #     return 
 
+    def centre_strfs(self):
+        # arr4d = np.copy(self.strfs)
+        centres = np.round(self.get_contours_centres())
+        target_pos = np.array(self.strfs.shape[2:]) / 2
+        shift_by = target_pos - centres
+        shift_by = np.nan_to_num(shift_by).astype(int)
+        strf_shifted = np.ma.array([np.roll(arr, shift_by[i], axis = (1,2)) for i, arr in enumerate(self.strfs)])
+        return strf_shifted
+
     def collapse_times(self, zscore = False, mode = "var", spatial_centre = False) -> np.ma.masked_array:
         target_shape = (self.strfs.shape[0], 
                         self.strfs.shape[2], 
@@ -611,7 +621,6 @@ class STRF(Core):
             #collapsed_strf_arr = shifted
         return collapsed_strf_arr
         # space.collapse_3d(recording.strfs[strf_num])
-
     
     def get_polarities(self, exclude_FirstLast=(1,1)) -> np.ndarray:
         # Get the time as absolute values, then get the max value
@@ -707,7 +716,7 @@ class STRF(Core):
         else:
             raise AttributeError("Operation cannot be done since object contains no property '.multicolour.")
     
-    def calc_tunings_centroids(self) -> np.ndarray:
+    def calc_tunings_centroids(self, dominant_only = True) -> np.ndarray:
         if self.multicolour == True:
             # Step 1: Pull centroids
             # Step 2: Not sure how to treat ons and offs yet, just do ONS for now 
@@ -715,15 +724,11 @@ class STRF(Core):
             pos_centroids = self.calc_spectral_centroids()[1]
             # Step 3: Reshaoe ti multichromatic 
             speed_by_colour_neg = pygor.utilities.multicolour_reshape(neg_centroids, self.numcolour).T
-            speed_by_colour_pos = pygor.utilities.multicolour_reshape(pos_centroids, self.numcolour).T 
-            # NaNs are 0 
-            # roi = 4
-            # speed_by_colour_neg = np.nan_to_num(speed_by_colour_neg)
-            # speed_by_colour_pos = np.nan_to_num(speed_by_colour_pos)
-            # plt.plot(speed_by_colour_neg[roi])
-            # plt.plot(speed_by_colour_pos[roi])
-            # speed_by_colour[1]
-            return np.array([speed_by_colour_neg, speed_by_colour_pos])
+            speed_by_colour_pos = pygor.utilities.multicolour_reshape(pos_centroids, self.numcolour).T         
+            if dominant_only == False:
+                return np.array([speed_by_colour_neg, speed_by_colour_pos])
+            else:
+                return np.where(self.calc_tunings_amplitude() < 0, speed_by_colour_neg, speed_by_colour_pos)            
         else:
             raise AttributeError("Operation cannot be done since object contains no property '.multicolour.")
 
@@ -776,8 +781,24 @@ class STRF(Core):
     def plot_timecourse(self, roi):
         plt.plot(self.get_timecourses()[roi].T)
     
-    def play_strf(self, roi):
-        anim = pygor.plotting.play_movie(self.strfs[roi])
+    def plot_chromatic_overview(self, roi = None, contours = True):
+        with warnings.catch_warnings(record=True) as w:
+            # Cause all warnings to always be triggered.
+            warnings.simplefilter("always")
+            return pygor.strf.plot.chroma_overview(self, roi, contours=contours)
+
+    def play_strf(self, roi, **kwargs):
+        if isinstance(roi, tuple):
+            chroma_arr = pygor.utilities.multicolour_reshape(
+                self.strfs, self.numcolour)
+            use_map = pygor.plotting.maps_concat[roi[0]]
+            anim = pygor.plotting.play_movie(chroma_arr[roi], cmap = use_map,**kwargs)
+        else:
+            anim = pygor.plotting.play_movie(self.strfs[roi], **kwargs)
+        return anim
+
+    def play_multichrom_strf(self, roi, **kwargs):
+        anim = pygor.strf.plot.multi_chroma_movie(self, roi, **kwargs)
         return anim
     # def check_ipl_orientation(self):
     #     raise NotImplementedError("Current implementation does not yield sensible result")
