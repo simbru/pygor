@@ -369,7 +369,8 @@ def df_BayesGMM(input_df, n_components=30, random_state=0, max_iter = 1000, cova
     #     input_df["cluster_id"] = clusters
     return output_df
 
-def df_GMM(input_df, n_components="auto", random_state=0, max_iter = 1000, max_comp = 8, covariance_type="full", apply_cluster_id = True):
+def df_GMM(input_df, n_components="auto", random_state=200, max_iter = 25000, max_comp = 8, covariance_type="full", apply_cluster_id = True):
+    np.random.seed(random_state)
     input_df = input_df.copy()
     if n_components == "auto":
         # If there are more components than samples, we need an exception 
