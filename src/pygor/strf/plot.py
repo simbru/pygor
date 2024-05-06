@@ -51,7 +51,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
         # plotting depending on specified number of rois (more or less than 1)
         if len(specify_rois) > 1:
             for i in range(4):
-                strf = ax[-n-1, i].pcolormesh(spaces[i], cmap = colour_maps[i])
+                strf = ax[-n-1, i].imshow(spaces[i], cmap = colour_maps[i])
                 strf.set_clim(-25, 25)
                 if n == 0:
                     for j in range(data_strf_object.numcolour):
@@ -74,6 +74,8 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
     for axis in ax.flat:
         axis.axis(False)
     fig.tight_layout(pad = 0.3, h_pad = .2, w_pad=.4)
+    plt.close()
+    return fig
 
 def _contours_plotter(data_strf_object, roi, index =  None, xy_offset = (0, 0), high_contrast = True, ax = None):
     if ax is None:
@@ -336,10 +338,10 @@ def multi_chroma_movie(strf_object, roi, show_cbar = False, **kwargs):
     return animation
 
 def spatial_colors(d3_srf_arr):
-    minmax_abs = np.max(np.abs(srf_avgs))
+    minmax_abs = np.max(np.abs(d3_srf_arr))
     fig, axs = plt.subplots(1, 4, figsize = (10, 4))
     for n, ax in enumerate(axs):
-        ax.pcolormesh(srf_avgs[n], vmin = -minmax_abs, vmax = minmax_abs, cmap = pygor.plotting.maps_concat[n])
+        ax.pcolormesh(d3_srf_arr[n], vmin = -minmax_abs, vmax = minmax_abs, cmap = pygor.plotting.maps_concat[n])
         ax.set_aspect("equal")
         ax.axis('off')
     plt.close()
