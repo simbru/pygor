@@ -5,12 +5,12 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import warnings
 import scipy
-global_thresh_val = 3
-min_targets =     4
+global_thresh_val = 2.5
+min_targets =     2
 min_hole_size =   0
-min_object_size = 2
+min_object_size = min_targets
 
-def _detect_targets(spatial_filter, thresh_value = global_thresh_val, min_targets = min_targets,result_plot = False, **kwargs):
+def _detect_targets(spatial_filter, thresh_value = global_thresh_val, min_targets = min_targets, result_plot = False, **kwargs):
     """
     Detect targets based on the spatial filter values and return the indices of the detected targets.
     In short, the algorithm detects targets over the given threshold value on the first pass. On the 
@@ -143,7 +143,7 @@ def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1, result_plot = Fals
     list of ndarray
         A list containing the coordinates of the contours of the filtered mask.
     """
-    spatial_filter_mask = skimage.filters.gaussian(spatial_filter_mask, sigma = gauss_sigma, mode = "nearest")
+    # spatial_filter_mask = skimage.filters.gaussian(spatial_filter_mask, sigma = gauss_sigma, mode = "nearest")
     contour = skimage.measure.find_contours(spatial_filter_mask)
     if result_plot:
         if kwargs.get("color") is not None: 
@@ -278,9 +278,9 @@ def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_res
     _neg_targets = _detect_targets(neg_filter, thresh_value = abs_thresh_val)
     _pos_targets = _detect_targets(pos_filter, thresh_value = abs_thresh_val)
     # Threshold targets 
-    if len(_neg_targets) < min_targets:
+    if len(_neg_targets) <= min_targets:
         _neg_targets = []
-    if len(_pos_targets) < min_targets:
+    if len(_pos_targets) <= min_targets:
         _pos_targets = []
     # Plot that process, conditionally
     if plot_results is True:
@@ -304,43 +304,42 @@ def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_res
         lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]
         fig.legend(lines, labels, loc = 'lower left', ncol = 4, bbox_to_anchor = (.175, -.075))
 
-   # Get masks
+    # Get masks to contour seperately based on polarity
     neg_mask, pos_mask = bipolar_mask(spatial_filter)
-    # Determine which mask is the inverted one
-    # is_inverse = np.all(np.invert(neg_mask) == pos_mask)
-    is_inverse = np.all((neg_mask + pos_mask) == True)
-    skip_mask = 0
-    if is_inverse:
-        # Determine which mask is the inverted one
-        pos_mask_sum = np.sum(pos_mask)
-        neg_mask_sum = np.sum(neg_mask)
-        # Assign value to skip that mask
-        if neg_mask_sum > pos_mask_sum:
-            skip_mask = -1
-        if pos_mask_sum > neg_mask_sum:
-            skip_mask = 1
-    # Contour seperately based on polarity and skip mask
-    # Here we plot
-    if plot_results is True:
-        if isinstance(_neg_targets, list) and _neg_targets == [] or skip_mask == 1: 
-            neg_contours = []
-        else:
-            neg_contours = _fit_filter_contour(neg_mask, result_plot = 1, ax = ax[0, 3 - offset:], c = "blue", **kwargs)
-        if isinstance(_pos_targets, list) and _pos_targets == [] or skip_mask == -1:
-            pos_contours = []
-        else:
-            pos_contours = _fit_filter_contour(pos_mask, result_plot = 1, ax = ax[1, 3 - offset:], c = "red", **kwargs)
-        plt.tight_layout()
-    # Here we don't plot
+    
+    # Neg contours quality check
+    if isinstance(_neg_targets, list) and _neg_targets == []:
+        neg_contours = []
     else:
-        if isinstance(_neg_targets, list) and _neg_targets == [] or skip_mask == 1:
+        # Check that mask is not inverse RF surround
+        neg_mask_flood = skimage.morphology.flood_fill(neg_mask, (0, 0), 0)
+        neg_mask_sum = neg_mask_flood + pos_mask
+        if np.all(neg_mask_sum == 1):
             neg_contours = []
+        # Otherwise, go ahead and get contour
         else:
-            neg_contours = _fit_filter_contour(neg_mask)
-        if isinstance(_pos_targets, list) and _pos_targets == [] or skip_mask == -1:
+            if plot_results is True:
+                neg_contours = _fit_filter_contour(neg_mask, result_plot = 1, ax = ax[0, 3 - offset:], c = "blue", **kwargs)
+            else:
+                neg_contours = _fit_filter_contour(neg_mask)
+        
+    # Pos contours quality check
+    if isinstance(_pos_targets, list) and _pos_targets == []:
+        pos_contours = []
+    else:
+        # Check that mask is not inverse RF surround 
+        pos_mask_flood = skimage.morphology.flood_fill(pos_mask, (0, 0), 0) 
+        pos_mask_sum = pos_mask_flood + neg_mask
+        if np.all(pos_mask_sum == 1):
             pos_contours = []
+        # Otherwise, go ahead and get contour
         else:
-            pos_contours = _fit_filter_contour(pos_mask)
+            if plot_results is True:
+                pos_contours = _fit_filter_contour(pos_mask, result_plot = 1, ax = ax[1, 3 - offset:], c = "red", **kwargs)
+            else:
+                pos_contours = _fit_filter_contour(pos_mask)
+    if plot_results is True:
+        plt.tight_layout()
     return (neg_contours, pos_contours)
 
 """"Contour metrics"""
