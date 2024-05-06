@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 #from sklearn.mixture import GaussianMixture, BayesianGaussianMixture
 #from sklearn.decomposition import PCA
 # Import the sklearn function
-from sklearn.preprocessing import MinMaxScaler, MaxAbsScaler #StandardScaler, RobustScaler, 
+from sklearn.preprocessing import MinMaxScaler, MaxAbsScaler, StandardScaler, RobustScaler
 from pygor.strf.clustering.clustering_funcs import cols_like, df_GMM, apply_clusters, prep_input_df, df_pca
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline#, make_pipeline
@@ -12,7 +12,7 @@ import pygor.filehandling
 import pygor.strf
 import copy
 
-clustering_params = ["ampl", "area", "peak", "cent"]
+clustering_params = ["ampl", "area", "centdom"]#, "peak", "cent"]
 clust_params_regex = '|'.join(clustering_params)
 
 """
@@ -32,6 +32,7 @@ def run_clustering(clust_df):
     standard_maxabs_transformer  = Pipeline(steps=[("maxabs", MaxAbsScaler())])
     standard_minmax_transformer  = Pipeline(steps=[("minmax", MinMaxScaler())])
     sparse_transformer  = Pipeline(steps=[('maxsabs', MaxAbsScaler()),])
+    standard_transformer = Pipeline(steps=[("standard", StandardScaler())])
     # Initialise preprocessor job
     """
     NB! Here the order is VERY IMPORTANT! --> Need to automate
@@ -44,7 +45,8 @@ def run_clustering(clust_df):
             transformers=[
                 ('ampl',   standard_maxabs_transformer, cols_like(["ampl"], pruned_df)),
                 ('area', standard_minmax_transformer , cols_like(["area"], pruned_df)),
-                ("peak, cent", sparse_transformer, cols_like(["peak", "cent"], pruned_df)),
+                ("cent", sparse_transformer, cols_like(["centdom"], pruned_df)),
+                # ("standard", standard_transformer, cols_like(clustering_params, pruned_df)),
             ])
     # Fit transform and write result to DataFrame 
     output_df = pd.DataFrame(preprocessor.fit_transform(pruned_df.copy()), columns=cols_like(clustering_params, pruned_df))

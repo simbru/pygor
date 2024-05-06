@@ -77,14 +77,16 @@ def plot_df_tuning(post_cluster_df, clusters = 0, group_by = "cluster", plot_col
                 i.set_xlim(0, 20)
             else:
                 df = post_cluster_df.query(f"cluster == {clust_num}").filter(like=f"{param}")
-                sns.boxplot(df, palette = pygor.plotting.fish_palette, ax = i)
+                i.axhline(0, color = "grey", ls = "--")
+                sns.boxplot(df, palette = reversed(pygor.plotting.fish_palette), ax = i)
                 sns.stripplot(df, palette = 'dark:k', ax = i)
                 i.set_xticks([])
                 # i.sharey()
 
 def stats_summary(clust_df, cat = "on", **kwargs):
     # # Vizualize n clusters
-    clust_labels = pd.unique(clust_df.query(f'cat_pol == "{cat}"')["cluster"])
+    clust_labels = natsort.natsorted(pd.unique(clust_df.query(f'cat_pol == "{cat}"')["cluster"]))
+    clust_ids    = natsort.natsorted(pd.unique(clust_df.query(f'cat_pol == "{cat}"')["cluster_id"]))
     # print(np.unique(clust_labels))
     # print(pd.unique(pca_df.query(f"cat_pol == '{cat}'")["cluster_id"]))
     chromatic_cols = clust_df.filter(regex = r"_\d").columns
@@ -101,6 +103,8 @@ def stats_summary(clust_df, cat = "on", **kwargs):
                 a.set_title(param_label)
         # Do the rest of the plotting
         plot_df_tuning(clust_df.query(f"cat_pol == '{cat}'").filter(regex = "ampl|area|cent|peak|ipl|cluster|cluster_id"), [i], ax = ax[n, 0:num_stats], **kwargs)
+    for i, cl_id in zip(ax[:, 0], clust_ids):
+        i.set_ylabel(f"{cl_id}", rotation = 0,  labelpad = 30)
     fig.tight_layout() #merged_stats_df
     plt.suptitle(f"Category: {cat}", size = 20, y = 1.01)
 
@@ -112,3 +116,5 @@ def pc_summary(clust_pca_df, pca_dict, axis_ranks = [(1, 0)]):
         pca_dict[category], axis_ranks, ax = ax)
         ax.set_title(f"Category '{category}' for PC{axis_ranks[0][0]} and PC{axis_ranks[0][1]}")
     fig.tight_layout()
+
+# def strf_summary():
