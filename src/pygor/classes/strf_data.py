@@ -90,6 +90,10 @@ class STRF(Core):
     def stim_size(self, upscaling_factor = 4):
         return pygor.utils.unit_conversion.au_to_visang(self.stim_size_arbitrary) / upscaling_factor
 
+    @property
+    def strfs_chroma(self):
+        return pygor.utilities.multicolour_reshape(self.strfs, self.numcolour)
+    
     ## Bootstrapping
     def __calc_pval_time(self) -> np.ndarray:
         """
@@ -781,11 +785,11 @@ class STRF(Core):
     def plot_timecourse(self, roi):
         plt.plot(self.get_timecourses()[roi].T)
     
-    def plot_chromatic_overview(self, roi = None, contours = True):
+    def plot_chromatic_overview(self, roi = None, contours = True, **kwargs):
         with warnings.catch_warnings(record=True) as w:
             # Cause all warnings to always be triggered.
             warnings.simplefilter("always")
-            return pygor.strf.plot.chroma_overview(self, roi, contours=contours)
+            return pygor.strf.plot.chroma_overview(self, roi, contours=contours, **kwargs)
 
     def play_strf(self, roi, **kwargs):
         if isinstance(roi, tuple):
@@ -797,8 +801,12 @@ class STRF(Core):
             anim = pygor.plotting.play_movie(self.strfs[roi], **kwargs)
         return anim
 
-    def play_multichrom_strf(self, roi, **kwargs):
-        anim = pygor.strf.plot.multi_chroma_movie(self, roi, **kwargs)
+    def play_multichrom_strf(self, roi = None, **kwargs):
+        # anim = pygor.strf.plot.multi_chroma_movie(self, roi, **kwargs)
+        if roi == None:
+            anim = pygor.plotting.play_movie_4d(self.strfs_chroma, cmap_list =  pygor.plotting.maps_concat, **kwargs)
+        else:
+            anim = pygor.plotting.play_movie_4d(self.strfs_chroma[:, roi], cmap_list =  pygor.plotting.maps_concat, **kwargs)
         return anim
     # def check_ipl_orientation(self):
     #     raise NotImplementedError("Current implementation does not yield sensible result")
