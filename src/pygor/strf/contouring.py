@@ -96,7 +96,7 @@ def _gen_filter_mask(spatial_filter, thresh_value = global_thresh_val, min_hole_
     mask = skimage.morphology.remove_small_objects(mask, min_size = min_object_size)
     mask = skimage.morphology.remove_small_holes(mask, area_threshold = min_hole_size)
     # Double dialation is intentional
-    mask = skimage.morphology.binary_dilation(mask, footprint=skimage.morphology.disk(2))
+    mask = skimage.morphology.binary_dilation(mask, footprint=skimage.morphology.disk(1))
     # mask = skimage.morphology.binary_dilation(mask)
     if result_plot:
         if kwargs.get("color") is not None: 
@@ -143,7 +143,8 @@ def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1, result_plot = Fals
     list of ndarray
         A list containing the coordinates of the contours of the filtered mask.
     """
-    # spatial_filter_mask = skimage.filters.gaussian(spatial_filter_mask, sigma = gauss_sigma, mode = "nearest")
+    spatial_filter_mask = skimage.filters.gaussian(spatial_filter_mask, sigma = gauss_sigma, mode = "nearest")
+    spatial_filter_mask = skimage.filters.unsharp_mask(spatial_filter_mask, radius = gauss_sigma, amount = 5)
     contour = skimage.measure.find_contours(spatial_filter_mask)
     if result_plot:
         if kwargs.get("color") is not None: 
