@@ -1,3 +1,4 @@
+import warnings
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -22,7 +23,14 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
     contours = False, ax = None, high_contrast = True, remove_border = True):
     if isinstance(colour_maps, Iterable) is False:
         colour_maps = [colour_maps] * len(column_titles)
-    strfs_chroma = pygor.utilities.multicolour_reshape(data_strf_object.collapse_times(), data_strf_object.numcolour)
+    if isinstance(data_strf_object, pygor.classes.strf_data.STRF) is False:
+        warnings.warn("Input object is not a STRF object. Attempting to treat as nxm Numpy array. Use-case not intended, expect errors.")
+        strfs_chroma = data_strf_object
+        numcolour = strfs_chroma.shape[0]
+        remove_border = False
+    else:
+        strfs_chroma = pygor.utilities.multicolour_reshape(data_strf_object.collapse_times(), data_strf_object.numcolour)
+        numcolour =  data_strf_object.numcolour
     # Create iterators depneding on desired output
     if isinstance(specify_rois, int): # user specifies number of rois from "start", although negative is also allowed
         specify_rois = range(specify_rois, specify_rois+1)
@@ -36,7 +44,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
         if ipl_sort == True:
             specify_rois = data_strf_object.ipl_depths.argsort()
     if ax is None:
-        fig, ax = plt.subplots(len(specify_rois), data_strf_object.numcolour, figsize = (8, len(specify_rois)))
+        fig, ax = plt.subplots(len(specify_rois), numcolour, figsize = (numcolour*1.5*2, len(specify_rois) * 2))
     else:
         fig = plt.gcf()
     for n, roi in enumerate(specify_rois):
@@ -54,7 +62,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
                 strf = ax[-n-1, i].imshow(spaces[i], cmap = colour_maps[i])
                 strf.set_clim(-25, 25)
                 if n == 0:
-                    for j in range(data_strf_object.numcolour):
+                    for j in range(numcolour):
                         ax[-n, j].set_title(column_titles[j])
                 # Handle contours optionally 
                 if contours == True:
@@ -63,7 +71,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
             np.abs(np.diff(ax[n, 0].get_ylim())[0] / np.diff(ax[0,0].get_xlim())[0])
         else:
             for i in range(4):
-                strf = ax[i].pcolormesh(spaces[i], cmap = colour_maps[i])
+                strf = ax[i].imshow(spaces[i], cmap = colour_maps[i])
                 strf.set_clim(-25, 25)
                 if roi == 0:
                     for j in range(4):
@@ -73,7 +81,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
                     _contours_plotter(data_strf_object, roi = roi, index = i, ax = ax[i], xy_offset = (-border_tup[0], -border_tup[2]), high_contrast = high_contrast)
     for axis in ax.flat:
         axis.axis(False)
-    fig.tight_layout(pad = 0.3, h_pad = .2, w_pad=.4)
+    fig.tight_layout(pad = 0, h_pad = .1, w_pad=.1)
     plt.close()
     return fig
 
@@ -102,7 +110,7 @@ def _contours_plotter(data_strf_object, roi, index =  None, xy_offset = (0, 0), 
                     ax.plot(contour_p[:, 1] + xy_offset[1], contour_p[:, 0] + xy_offset[0], lw = 1, ls = "-", c = fish_palette[colour], alpha = 1)
 
 def rgb_representation(data_strf_object, colours_dims = [0, 1, 2, 3], specify_rois=None, ipl_sort = False, y_crop = (0, 0), x_crop = (0 ,0),
-    ax = None):
+    ax = None, contours = False, remove_border = True):
 
     strfs_chroma = pygor.utilities.multicolour_reshape(data_strf_object.collapse_times(), data_strf_object.numcolour)
     # Create iterators depneding on desired output
@@ -124,19 +132,41 @@ def rgb_representation(data_strf_object, colours_dims = [0, 1, 2, 3], specify_ro
         n_cols = np.ceil(len(colours_dims)/3).astype("int") # At most, RGB can be represented in one column
     # Generate axes accordingly
     if ax is None:
-        fig, ax = plt.subplots(len(specify_rois), n_cols, sharex=True, sharey=True)
+        fig, axs = plt.subplots(len(specify_rois), n_cols, sharex=True, sharey=True, figsize = (n_cols * 4, len(specify_rois) * 2))
     else:
         fig = plt.gcf()
     rois = list(specify_rois) * 2
-    b_vals = np.repeat([2, 3], len(specify_rois))
-    # Loop through column by column
-    for n, ax in enumerate(ax.flat):
-        spaces = np.copy(pygor.utilities.auto_remove_border(strfs_chroma[:, rois[n]])) # this works
-        rgb = np.abs(spaces[[0, 1, b_vals[n]]])
+    if len(specify_rois) == 1:
+        axs = [axs]
+    for n, ax in enumerate(axs):
+        roi = specify_rois[n] # Because each row represents a roi
+        if remove_border is True:
+            spaces = np.copy(pygor.utilities.auto_remove_border(strfs_chroma[:, rois[n]])) # this works
+        else:
+            spaces = strfs_chroma[:, rois[n]]
+        # Summary of spatial components 
+        #spaces = np.copy(pygor.utilities.auto_remove_border(strfs_chroma[:, roi])) # this works
+        spaces = strfs_chroma[:, roi]
+        # Prepare for RGB representation (by intiger)
+        # led_offset = data_strf_object.calc_LED_offset()
+        # print(led_offset)
+        # spaces[3] = np.roll(spaces[3], np.round(led_offset, 0).astype("int"), axis =(0 ,1))
+        if y_crop != (0, 0) or x_crop != (0, 0):
+            spaces = spaces[:, y_crop[0]:y_crop[1], x_crop[0]:x_crop[1]]
+        r, g, b, uv = spaces[0], spaces[1], spaces[2], spaces[3]
+        rgb = np.abs(np.array([r,g,b]))
+        rgu = np.abs(np.array([r,g,uv]))
         processed_rgb = np.rollaxis(pygor.utilities.min_max_norm(rgb, 0, 1), axis = 0, start = 3)
-        ax.imshow(processed_rgb, origin = "lower")
-        ax.axis(False)
+        processed_rgu = np.rollaxis(pygor.utilities.min_max_norm(rgu, 0, 1), axis = 0, start = 3)
+        # for cax in roi_ax[0]:
+        rgb_plot = ax[0].imshow(processed_rgb, origin = "lower", interpolation = "none")
+        ax[0].axis(False)
+        _contours_plotter(data_strf_object, index = [0,1,2], roi = roi, ax = ax[0])#, xy_offset = (led_offset, led_offset))
+        rgu_plot = ax[1].imshow(processed_rgu, origin = "lower", interpolation = "none")
+        ax[1].axis(False)
+        _contours_plotter(data_strf_object, index=[0,1,3], roi = roi, ax = ax[1])#, xy_offset = (led_offset, led_offset[0]))
     fig.tight_layout(pad = 0.1, h_pad = .1, w_pad=.1)
+    return fig
 
 def visualise_summary(data_strf_object, specify_rois, ipl_sort = False,  y_crop = (0, 0), x_crop = (0 , 0)):
     strfs_chroma = pygor.utilities.multicolour_reshape(data_strf_object.collapse_times(), 4)
@@ -181,7 +211,7 @@ def visualise_summary(data_strf_object, specify_rois, ipl_sort = False,  y_crop 
             cax.axis(False)
             _contours_plotter(data_strf_object, roi = roi, ax = cax)
         for cax in roi_ax.flat[1::3]:
-            rgb_plot = cax.imshow(processed_rgu, origin = "lower", interpolation = "none")
+            rgu_plot = cax.imshow(processed_rgu, origin = "lower", interpolation = "none")
             cax.axis(False)
             _contours_plotter(data_strf_object, roi = roi, ax = cax)
         # Reshape times for convenience
