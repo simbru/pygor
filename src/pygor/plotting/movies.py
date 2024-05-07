@@ -155,7 +155,7 @@ def play_movie_4d(input_arr, figaxim_return = False, show_cbar = False,
     plot_settings["figure.dpi"] = 200
     plot_settings["savefig.facecolor"] = "white"
     if input_arr.ndim == 4:
-        input_arr = np.expand_dims(input_arr, 0)
+        input_arr = np.expand_dims(input_arr, 1)
     # Reshape and treat sequentially (for sanity)
     elif input_arr.ndim == 5:
         pass
@@ -168,8 +168,11 @@ def play_movie_4d(input_arr, figaxim_return = False, show_cbar = False,
         axes[0], axes[axis] = axes[axis], axes[0]
     columns = input_arr.shape[axes[0]]
     rows    = input_arr.shape[axes[1]]
-    frames  = input_arr.shape[axes[2]]  
-    input_arr = np.vstack(input_arr)
+    frames  = input_arr.shape[axes[2]]
+    y       = input_arr.shape[3]
+    x       = input_arr.shape[4]
+    # input_arr = np.concatenate(input_arr, axis = 0)
+    input_arr = input_arr.reshape(columns * rows, frames, y, x, order = "f")
     if norm_by == 'input':
         max_abs_val = np.max(np.abs(input_arr))
     # Check attributes and kwargs
@@ -181,7 +184,7 @@ def play_movie_4d(input_arr, figaxim_return = False, show_cbar = False,
     with matplotlib.rc_context(rc=plot_settings):
         # Initiate the figure, change themeing to Seaborn, create axes to tie colorbar too (for scaling)
         fig, axs = plt.subplots(rows, columns, figsize = (columns*1.9, rows), frameon = frameon,
-        gridspec_kw = {'wspace' : 0.1, 'hspace' : 0.1, 'bottom': 0.01, 'top': .99})
+        gridspec_kw = {'wspace' : 0.0, 'hspace' : 0.0, 'bottom': 0.01, 'top': .99})
         for n, ax in enumerate(axs.flat):
             fig = plt.gcf()
             # Hide grid lines

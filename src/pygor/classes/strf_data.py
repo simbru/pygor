@@ -803,7 +803,7 @@ class STRF(Core):
 
     def play_multichrom_strf(self, roi = None, **kwargs):
         # anim = pygor.strf.plot.multi_chroma_movie(self, roi, **kwargs)
-        if roi == None:
+        if roi is None:
             anim = pygor.plotting.play_movie_4d(self.strfs_chroma, cmap_list =  pygor.plotting.maps_concat, **kwargs)
         else:
             anim = pygor.plotting.play_movie_4d(self.strfs_chroma[:, roi], cmap_list =  pygor.plotting.maps_concat, **kwargs)
