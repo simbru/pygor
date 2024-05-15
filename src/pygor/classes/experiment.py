@@ -91,3 +91,18 @@ class Experiment:
              to_print = to_print.to_list()
         print(f"Detaching data: {to_print}")
         self.__exp_forgetter__(indices)
+
+    def fetch_all(self, key:str, **kwargs):
+        all_collated = []
+        for i in self.recording:
+            requested_attr = getattr(i, key)
+            if hasattr(requested_attr, '__call__'):
+                all_collated.append(requested_attr(**kwargs))
+            else:
+                all_collated.append(requested_attr)
+        try:
+            all_collated = np.ma.array(all_collated)
+        except Exception as e:
+            print(e)
+            print("Returning as Numpy array failed, returning as list instead.")
+        return all_collated
