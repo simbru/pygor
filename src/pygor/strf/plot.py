@@ -20,7 +20,7 @@ from pygor.plotting.custom import red_map, green_map, blue_map, violet_map, fish
 
 def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_crop = (0, 0), x_crop = (0 ,0),
     column_titles = ["588 nm", "478 nm", "422 nm", "375 nm"], colour_maps = [red_map, green_map, blue_map, violet_map],
-    contours = False, ax = None, high_contrast = True, remove_border = True):
+    contours = False, ax = None, high_contrast = True, remove_border = True, labels = None):
     if isinstance(colour_maps, Iterable) is False:
         colour_maps = [colour_maps] * len(column_titles)
     if isinstance(data_strf_object, pygor.classes.strf_data.STRF) is False:
@@ -67,7 +67,6 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
                 # Handle contours optionally 
                 if contours == True:
                     _contours_plotter(data_strf_object, roi = roi, index = i, ax = ax[-n-1, i], xy_offset = (-border_tup[0], -border_tup[2]), high_contrast = high_contrast)
-
             np.abs(np.diff(ax[n, 0].get_ylim())[0] / np.diff(ax[0,0].get_xlim())[0])
         else:
             for i in range(4):
@@ -81,7 +80,17 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
                     _contours_plotter(data_strf_object, roi = roi, index = i, ax = ax[i], xy_offset = (-border_tup[0], -border_tup[2]), high_contrast = high_contrast)
     for axis in ax.flat:
         axis.axis(False)
-    fig.tight_layout(pad = 0, h_pad = .1, w_pad=.1)
+    if labels != None:
+        for axis, label in zip(ax.flat[::numcolour], labels):
+            axis.axis(True)
+            axis.spines['top'].set_visible(False)
+            axis.spines['right'].set_visible(False)
+            axis.spines['bottom'].set_visible(False)
+            axis.spines['left'].set_visible(False)
+            axis.set_xticklabels([])
+            axis.set_yticklabels([])
+            axis.set_ylabel(label, rotation = 'horizontal', labelpad = 15)
+    # fig.tight_layout(pad = 0, h_pad = .1, w_pad=.1)
     plt.close()
     return fig
 
