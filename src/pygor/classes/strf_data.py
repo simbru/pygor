@@ -470,6 +470,17 @@ class STRF(Core):
             # self.__timecourses = timecourses_centred
             # return self.__timecourses
 
+    def get_chroma_times(self, filter = 'all'):
+        if filter == 'all':
+            return pygor.utilities.multicolour_reshape(self.get_timecourses(), self.numcolour)
+        if filter == 'dominant':
+            return pygor.utilities.multicolour_reshape(self.get_timecourses_dominant(), self.numcolour)
+        else:
+            raise ValueError("filter must be 'all' or 'dominant'")
+
+    def get_chroma_strf(self):
+        return pygor.utilities.multicolour_reshape(self.strfs, self.numcolour)
+
     def get_timecourses_dominant(self):
         dominant_times = []
         for arr in self.get_timecourses().data:
@@ -479,7 +490,6 @@ class STRF(Core):
                 dominant_times.append(arr[1])
         dominant_times = np.array(dominant_times)
         return dominant_times
-
 
     def get_pix_times(self):
         return np.array([np.reshape(i, (i.shape[0], -1)) for i in self.strfs])
