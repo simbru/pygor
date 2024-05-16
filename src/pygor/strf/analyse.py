@@ -301,7 +301,7 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], 
                 dict[f"peakneg_{i}"] = neg_peak_t[n]
                 dict[f"peakpos_{i}"] = pos_peak_t[n]
                 dict[f"comp_{i}"] = complexities[n]
-                if store_data is True:
+                if store_data == True:
                     dict[f"temporal_{i}"] = temporal_filter[n].tolist()
                     dict[f"spatial_{i}"] = spatial_filter[n].tolist()
                 dict["strf_obj"] = data_strf_obj
@@ -315,6 +315,13 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], 
             flexible_info = natsort.natsorted(list(set(dict.keys() - set(core_info))))
             final_order = core_info + flexible_info
             dict = {key : dict[key] for key in final_order}
+
+            # Check for differences in key-value lengths
+            for i in [i for i in dict.keys() if i != 'strf_obj']:
+                try:
+                    assert len(dict[i]) == expected_lengths
+                except AssertionError:
+                    raise AttributeError(f"Length of {i} was {len(dict[i])} and does not match expected length of {expected_lengths}. Manual fix required for {path}.")
 
             return dict
         else:

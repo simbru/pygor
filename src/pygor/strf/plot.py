@@ -11,7 +11,7 @@ except ImportError:
     from collections.abc import Iterable
 # Local imports
 import pygor.utilities
-import pygor.strf.space
+import pygor.strf.spatial
 import pygor.strf.temporal
 import pygor.strf.contouring
 import seaborn as sns

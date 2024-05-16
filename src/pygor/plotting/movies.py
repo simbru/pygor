@@ -15,7 +15,7 @@ from ipywidgets import interact
 import ipywidgets as widgets
 # Local imports
 import pygor.utilities
-import pygor.strf.space
+import pygor.strf.spatial
 import pygor.strf.temporal
 import pygor.strf.contouring
 from . import custom

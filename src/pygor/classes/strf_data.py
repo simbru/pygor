@@ -8,7 +8,7 @@ import pygor.utils.unit_conversion as unit_conversion
 import pygor.strf.bootstrap
 import pygor.data_helpers
 import pygor.utils.helpinfo
-import pygor.strf.space
+import pygor.strf.spatial
 import pygor.strf.contouring
 import pygor.strf.contouring
 import pygor.strf.temporal
@@ -58,7 +58,8 @@ class STRF(Core):
             if True in bool_partofmulticolour_list and False in bool_partofmulticolour_list:
                 raise AttributeError("There are both single-coloured and multi-coloured STRFs loaded. Manual fix required.")
             if multicolour_bool is True:
-                self.numcolour = len(np.unique([int(i.split('_')[-1]) for i in self.strf_keys]))
+                identified_labels = np.unique([(i.split('_')[-1]) for i in self.strf_keys])
+                self.numcolour = len([i for i in identified_labels if i.isdigit()])
                 self.multicolour = True
             else:
                 self.numcolour = 1
@@ -83,8 +84,13 @@ class STRF(Core):
             The largest number extracted from the `name` attribute, representing
             the stimulus size.
         """
-        stim_size = natsort.natsorted([int(i) for i in self.name.split("_") if i.isdigit()])[-1]
-        return stim_size
+        found_items = [int(i) for i in self.name.split("_") if i.isdigit()]
+        if len(found_items) == 0:
+            warnings.warn("No numbers found in name, cannot extract stimulus size. Returning np.nan instead.")
+            return np.nan
+        else:
+            stim_size = natsort.natsorted(found_items)[-1] # Fetch the largest number
+            return stim_size
 
     @property
     def stim_size(self, upscaling_factor = 4):
@@ -358,7 +364,7 @@ class STRF(Core):
         # try:
         #     return self.__contours
         # except AttributeError:
-            #self.__contours = [space.contour(x) for x in self.collapse_times()]
+            #self.__contours = [spatial.contour(x) for x in self.collapse_times()]
         if self.bs_settings["do_bootstrap"] == True:
             time_pvals = self.pval_time
             space_pvals = self.pval_space
@@ -501,7 +507,7 @@ class STRF(Core):
 
     def get_strf_masks(self, level = None) -> (np.ndarray, np.ndarray):
         """
-        Return masked array of space.rf_mask3d applied to all arrays, with masks based on pval_time and pval_space,
+        Return masked array of spatial.rf_mask3d applied to all arrays, with masks based on pval_time and pval_space,
         with polarity intact.
         """
         if self.strfs is np.nan:
@@ -510,7 +516,7 @@ class STRF(Core):
             # raise NotImplementedError("Implementation error, does not work yet")
             # get 2d masks
             all_masks = np.array([pygor.strf.contouring.bipolar_mask(i) for i in self.collapse_times()])
-            all_masks = np.repeat(np.expand_dims(all_masks, 2), 20, axis = 2)
+            all_masks = np.repeat(np.expand_dims(all_masks, 2), self.strfs.shape[1], axis = 2)
             # Apply mask to expanded and repeated strfs (to get negative and positive)
             strfs_expanded = np.repeat(np.expand_dims(self.strfs, axis = 1), 2, axis = 1)
             all_strfs_masked = np.ma.array(strfs_expanded, mask = all_masks, keep_mask=True)
@@ -614,7 +620,7 @@ class STRF(Core):
                         self.strfs.shape[3])    
         collapsed_strf_arr = np.ma.empty(target_shape)
         for n, strf in enumerate(self.strfs):
-            collapsed_strf_arr[n] = pygor.strf.space.collapse_3d(self.strfs[n], zscore = zscore, mode = mode)
+            collapsed_strf_arr[n] = pygor.strf.spatial.collapse_3d(self.strfs[n], zscore = zscore, mode = mode)
         if spatial_centre == True:
             try:
                 return self._spatial_centered_collapse
@@ -634,7 +640,7 @@ class STRF(Core):
             return self._spatial_centered_collapse
             #collapsed_strf_arr = shifted
         return collapsed_strf_arr
-        # space.collapse_3d(recording.strfs[strf_num])
+        # spatial.collapse_3d(recording.strfs[strf_num])
     
     def get_polarities(self, exclude_FirstLast=(1,1)) -> np.ndarray:
         # Get the time as absolute values, then get the max value

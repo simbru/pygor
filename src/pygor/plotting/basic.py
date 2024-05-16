@@ -15,7 +15,7 @@ from ipywidgets import interact
 import ipywidgets as widgets
 # Local imports
 import pygor.utilities
-import pygor.strf.space
+import pygor.strf.spatial
 import pygor.strf.temporal
 import pygor.strf.contouring
 from . import custom
@@ -44,9 +44,9 @@ def _legacy_play_movie(d3_arr, **kwargs):
 
 def contouring_demo(arr_3d, level = None, display_time = True, returns = False, **kwargs):        
     # Collapse time to give us 2d representation
-    arr_3d_collapsed = pygor.strf.space.collapse_3d(arr_3d, zscore=False)
+    arr_3d_collapsed = pygor.strf.spatial.collapse_3d(arr_3d, zscore=False)
     # Extract content from masks
-    neg_masked, pos_masked = pygor.strf.space.rf_mask3d(arr_3d, level = level)
+    neg_masked, pos_masked = pygor.strf.spatial.rf_mask3d(arr_3d, level = level)
     neg_mask = neg_masked.mask[0]
     pos_mask = pos_masked.mask[1]
     # Extract time courses
