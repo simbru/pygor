@@ -375,7 +375,7 @@ def df_GMM(input_df, n_components="auto", random_state=200, max_iter = 25000, ma
     if n_components == "auto":
         # If there are more components than samples, we need an exception 
         if input_df.shape[-1] < max_comp:
-            max_comp = input_df.shape[-1]
+            max_comp = input_df.shape[-1] + 1
         n_components = range(1, max_comp)
         covariance_type = ['spherical', 'tied', 'diag', 'full']
         score=[]

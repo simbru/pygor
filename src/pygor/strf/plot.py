@@ -31,6 +31,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
     else:
         strfs_chroma = pygor.utilities.multicolour_reshape(data_strf_object.collapse_times(), data_strf_object.numcolour)
         numcolour =  data_strf_object.numcolour
+    absmax = np.max(np.abs(strfs_chroma))
     # Create iterators depneding on desired output
     if isinstance(specify_rois, int): # user specifies number of rois from "start", although negative is also allowed
         specify_rois = range(specify_rois, specify_rois+1)
@@ -60,7 +61,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
         if len(specify_rois) > 1:
             for i in range(4):
                 strf = ax[-n-1, i].imshow(spaces[i], cmap = colour_maps[i])
-                strf.set_clim(-25, 25)
+                strf.set_clim(-absmax, absmax)
                 if n == 0:
                     for j in range(numcolour):
                         ax[-n, j].set_title(column_titles[j])
@@ -71,7 +72,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
         else:
             for i in range(4):
                 strf = ax[i].imshow(spaces[i], cmap = colour_maps[i])
-                strf.set_clim(-25, 25)
+                strf.set_clim(-absmax, absmax)
                 if roi == 0:
                     for j in range(4):
                         ax[j].set_title(column_titles[j])

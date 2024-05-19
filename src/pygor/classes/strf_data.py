@@ -314,9 +314,10 @@ class STRF(Core):
             space_sig = space_vals < self.bs_settings["space_sig_thresh"]
             time_sig = time_vals < self.bs_settings["time_sig_thresh"]
             both_sig = time_sig * space_sig
-            final_arr = np.hstack((space_vals, time_vals, both_sig), dtype="object")
+            any_sig = np.expand_dims(np.any(both_sig, axis = 1), 1)
+            final_arr = np.hstack((space_vals, time_vals, both_sig, any_sig), dtype="object")
             column_labels = ["space_R", "space_G", "space_B", "space_UV", "time_R", "time_G", "time_B", "time_UV",
-            "sig_R", "sig_G", "sig_B", "sig_UV"]
+            "sig_R", "sig_G", "sig_B", "sig_UV", "sig_any"]
             return pd.DataFrame(final_arr, columns=column_labels)
         else:
             space_vals = self.pval_space()
@@ -327,7 +328,11 @@ class STRF(Core):
             final_arr = np.stack((space_vals, time_vals, both_sig), dtype = "object").T
             column_labels = ["space", "time", "sig"]
             return pd.DataFrame(final_arr, columns = column_labels)
-     
+    
+    @property
+    def num_rois_sig(self) -> int:
+        return self.get_pvals_table()["sig_any"].sum()
+
     def fit_contours(self) -> np.array(list[list[list[float, float]]]):
         """
         Returns the contours of the collapse times.

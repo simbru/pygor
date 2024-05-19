@@ -10,6 +10,7 @@ import pandas as pd
 import pathlib
 import warnings
 import numpy as np
+import joblib
 # Local imports
 import pygor.filehandling
 
@@ -106,3 +107,9 @@ class Experiment:
             print(e)
             print("Returning as Numpy array failed, returning as list instead.")
         return all_collated
+
+    def pickle_store(self, save_path, filename):
+        final_path = pathlib.Path(save_path, filename).with_suffix(".pkl")
+        print("Storing as:", final_path, end = "\r")
+        with open(final_path, 'wb') as outp:
+            joblib.dump(object, outp, compress='zlib')

@@ -231,7 +231,10 @@ def load_pkl(full_path):
     """
     with open(full_path, 'rb') as inp:
         object = joblib.load(inp)
-        object.metadata["curr_path"] = full_path
+        try:
+            object.metadata["curr_path"] = full_path
+        except AttributeError:
+            warnings.warn(f"Object {full_path} has no metadata attribute")
         return object
 
 
