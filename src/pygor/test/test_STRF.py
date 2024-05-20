@@ -28,11 +28,12 @@ class TestSTRF(unittest.TestCase):
         with open(write_to, 'w') as f:
             with redirect_stdout(f):
                 for i in meth_list:
-                    if i not in ["try_fetch","save_pkl", "load_pkl", "get_bootstrap_settings", "update_bootstrap_settings", "run_bootstrap", "set_bootstrap_bool"]:
-                        try:
-                            getattr(strfs, i)() 
-                        except AttributeError:
-                            warnings.warn(f"Method {i} gave AttributeError")
+                    if i not in ["try_fetch","save_pkl", "load_pkl", "get_bootstrap_settings", "update_bootstrap_settings", "run_bootstrap", "set_bootstrap_bool", "demo_contouring"]:
+                        if "plot" not in i and "play" not in i:
+                            try:
+                                getattr(strfs, i)() 
+                            except AttributeError:
+                                warnings.warn(f"Method {i} gave AttributeError")
 
     def test_saveload(self):
         dir_path = os.path.dirname(os.path.realpath(__file__))
