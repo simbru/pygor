@@ -19,7 +19,7 @@ import warnings
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline#, make_pipeline
 import pygor.filehandling as filehandling
-import pygor.strf.analyse 
+import pygor.strf.analyse.analyse 
 
 
 
