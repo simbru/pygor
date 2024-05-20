@@ -94,6 +94,23 @@ class STRF(Core):
 
     @property
     def stim_size(self, upscaling_factor = 4):
+        '''This Python function calculates the visual angle size of a stimulus based on an arbitrary size
+        input and an upscaling factor.
+        
+        Parameters
+        ----------
+        upscaling_factor, optional
+            The `upscaling_factor` parameter is used to determine the factor by which the stimulus size
+        will be upscaled. In the provided code snippet, the `stim_size` method takes an optional
+        `upscaling_factor` argument with a default value of 4. This argument is used to divide the
+        stimulus
+        
+        Returns
+        -------
+            The function `stim_size` returns the size of the stimulus in visual angle units after
+        converting it from arbitrary units and dividing by the upscaling factor.
+        
+        '''
         return pygor.utils.unit_conversion.au_to_visang(self.stim_size_arbitrary) / upscaling_factor
 
     @property
@@ -156,6 +173,24 @@ class STRF(Core):
         return self.bs_settings
 
     def set_bootstrap_bool(self, bool : bool) -> bool:
+        '''This Python function sets a boolean value for a bootstrap setting and returns the updated
+        boolean value.
+        
+        Parameters
+        ----------
+        bool : bool
+            The `bool` parameter in the `set_bootstrap_bool` method is a boolean value that indicates
+        whether to enable or disable a certain feature related to bootstrapping. It is used to set the
+        `bs_bool` attribute of the object to the provided boolean value and update a corresponding
+        setting in the `
+        
+        Returns
+        -------
+            The method `set_bootstrap_bool` is returning the value of the `self.bs_bool` variable after it
+        has been set to the input boolean value and also updating the `do_bootstrap` key in the
+        `bs_settings` dictionary with the input boolean value.
+        
+        '''
         self.bs_bool = bool
         self.bs_settings["do_bootstrap"] = bool
         return self.bs_bool
@@ -407,9 +442,9 @@ class STRF(Core):
             scaling_factor = self.stim_size
         return [pygor.strf.contouring.contours_area_bipolar(__contours, scaling_factor = scaling_factor) for __contours in self.fit_contours()]
 
-    def get_centsurr_area(self, scaling_factor = 1) -> list:
-        raise NotImplementedError("Not implemented yet, will give 2xn array with size for centre and surround component (if present, otherwise (s, 0))")
-        return
+    # def get_centsurr_area(self, scaling_factor = 1) -> list:
+    #     raise NotImplementedError("Not implemented yet, will give 2xn array with size for centre and surround component (if present, otherwise (s, 0))")
+    #     return
 
     def calc_contours_centroids(self) -> np.ndarray:
         try: 
