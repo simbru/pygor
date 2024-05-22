@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import warnings
 import scipy
-global_thresh_val = 2.5
+global_thresh_val = 3
 min_targets =     2
 min_hole_size =   0
 min_object_size = min_targets
@@ -18,22 +18,22 @@ def _detect_targets(spatial_filter, thresh_value = global_thresh_val, min_target
     (to prune out noise).
 
     Parameters:
-         spatial_filter : np.array
-             The spatial filter values to analyze.
-         thresh_value : float, optional
-             The threshold value for target detection (default is 2.5).
-         result_plot : bool, optional
-             A flag to indicate if a plot of the detected targets should be displayed (default is False).
-         **kwargs
-             Additional keyword arguments for customization.
+        spatial_filter : np.array
+            The spatial filter values to analyze.
+        thresh_value : float, optional
+            The threshold value for target detection (default is 2.5).
+        result_plot : bool, optional
+            A flag to indicate if a plot of the detected targets should be displayed (default is False).
+        **kwargs
+            Additional keyword arguments for customization.
 
     Returns:
-         detected_targets : list
-             A list of indices corresponding to the detected targets.
+        detected_targets : list
+            A list of indices corresponding to the detected targets.
     """
     if isinstance(spatial_filter, np.ma.core.MaskedArray):
         spatial_filter = spatial_filter.data
-     # Detect targets
+    # Detect targets
     spatial_filter_abs_flat = np.abs(spatial_filter).flatten()
     detected_targets_firstpass = np.where(spatial_filter_abs_flat > thresh_value)[0]
     if len(detected_targets_firstpass) == 0: 
@@ -153,7 +153,6 @@ def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1, result_plot = Fals
             kwargs["c"] = "red"
         if kwargs.get("ax") is None:
             fig, ax = plt.subplots(1, 1, figsize = (10, 5))
-            ax
             ax.imshow(spatial_filter_mask, origin = "lower")
             for contour_n in contour:
                 ax.plot(contour_n[:, 1], contour_n[:, 0], lw = 3, ls = '-',alpha = .8, c = kwargs["c"])
@@ -164,7 +163,7 @@ def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1, result_plot = Fals
                 for contour_n in contour:
                     a.plot(contour_n[:, 1], contour_n[:, 0], lw = 3, ls = '-',alpha = .8, c = kwargs["c"])
     return contour    
- 
+
 def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val, plot_results = False, surround_disksize = 4, ax = None):
     if np.ma.isMaskedArray(spatial_filter):
         spatial_filter = spatial_filter.data
