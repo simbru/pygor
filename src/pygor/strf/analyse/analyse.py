@@ -279,13 +279,15 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], 
             polarities = pygor.utilities.multicolour_reshape(data_strf_obj.get_polarities(), num_wavelengths)
             complexities = pygor.utilities.multicolour_reshape(np.nanmean(pygor.strf.contouring.complexity_weighted(data_strf_obj.fit_contours(), data_strf_obj.get_contours_area()), axis = 1), num_wavelengths)
             area_t = data_strf_obj.calc_tunings_area(size).T
+            diam_t = 2 * np.sqrt(area_t / np.pi)
             ampl_t = data_strf_obj.calc_tunings_amplitude().T
             neg_peak_t, pos_peak_t = data_strf_obj.calc_tunings_peaktime()
             neg_peak_t, pos_peak_t =  neg_peak_t.T, pos_peak_t.T
             neg_cent_t, pos_cent_t = data_strf_obj.calc_tunings_centroids(dominant_only=False)
             neg_cent_t, pos_cent_t = neg_cent_t.T, pos_cent_t.T
             cent_dom_t = data_strf_obj.calc_tunings_centroids().T
-
+            pval_time_t = pygor.utilities.multicolour_reshape(data_strf_obj.pval_time, num_wavelengths)
+            pval_space_t = pygor.utilities.multicolour_reshape(data_strf_obj.pval_space, num_wavelengths)
             # Chromatic aspects
             temporal_filter = pygor.utilities.multicolour_reshape(data_strf_obj.get_timecourses(), num_wavelengths)
             spatial_filter = pygor.utilities.multicolour_reshape(data_strf_obj.collapse_times(spatial_centre=True), num_wavelengths)
@@ -294,6 +296,7 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], 
                 dict[f"pol_{i}"] = polarities[n]
                 # Tuning functions
                 dict[f"area_{i}"] = area_t[n]
+                dict[f"diam_{i}"] = diam_t[n]
                 dict[f"ampl_{i}"] = ampl_t[n]
                 dict[f"centneg_{i}"] = neg_cent_t[n]
                 dict[f"centpos_{i}"] = pos_cent_t[n]
@@ -305,7 +308,8 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], 
                     dict[f"temporal_{i}"] = temporal_filter[n].tolist()
                     dict[f"spatial_{i}"] = spatial_filter[n].tolist()
                 dict["strf_obj"] = data_strf_obj
-
+                dict[f"pval_time_{i}"] = pval_time_t[n].tolist()
+                dict[f"pval_space_{i}"] = pval_space_t[n].tolist()
             dict["spatial_X"] = [spatial_filter[0, 0].shape[0]] * expected_lengths
             dict["spatial_Y"] = [spatial_filter[0, 0].shape[1]] * expected_lengths
             dict["temporal_len"] = [temporal_filter.shape[0]] * expected_lengths
@@ -327,7 +331,7 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], 
         else:
             raise AttributeError("Attribute 'multicolour' is not True. Manual fix required.")
 
-def chromatic_stats(exp_obj : pygor.classes.experiment.Experiment) -> pd.DataFrame:
+def chromatic_stats(exp_obj : pygor.classes.experiment.Experiment, **kwargs) -> pd.DataFrame:
     """
     Generate a DataFrame containing chromatic statistics from an Experiment object.
 
@@ -344,7 +348,7 @@ def chromatic_stats(exp_obj : pygor.classes.experiment.Experiment) -> pd.DataFra
 
     chromatic_dict_list = []
     for object in exp_obj.recording:
-        curr_dict = _chromatic_dict(object)
+        curr_dict = _chromatic_dict(object, **kwargs)
         chromatic_dict_list.append(pd.DataFrame(curr_dict))
     return pd.concat(chromatic_dict_list, ignore_index=True)
 
