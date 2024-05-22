@@ -87,9 +87,9 @@ class Experiment:
     def detach_data(self, indices:int or list(int)):
         to_print = self.recording_id.iloc[indices]["name"]
         if isinstance(to_print, str):
-             to_print = to_print
+            to_print = to_print
         if isinstance(to_print, pd.Series) or isinstance(to_print, np.ndarray):
-             to_print = to_print.to_list()
+            to_print = to_print.to_list()
         print(f"Detaching data: {to_print}")
         self.__exp_forgetter__(indices)
 
@@ -112,4 +112,4 @@ class Experiment:
         final_path = pathlib.Path(save_path, filename).with_suffix(".pkl")
         print("Storing as:", final_path, end = "\r")
         with open(final_path, 'wb') as outp:
-            joblib.dump(object, outp, compress='zlib')
+            joblib.dump(self, outp, compress=('zlib', 1))
