@@ -58,7 +58,9 @@ def _roi_by_roi_dict(data_strf_obj): #
         # Make note of how many ROIs for easy indexing later
         dict["roi"] = [int(i.split('_')[1]) for i in data_strf_obj.strf_keys]
         # Get IPL info
-        dict["ipl_depths"] = data_strf_obj.ipl_depths
+        dict["ipl_depths"] = np.repeat(data_strf_obj.ipl_depths, data_strf_obj.numcolour)
+        if np.all(np.isnan(dict["ipl_depths"]) == True):
+            raise AttributeError("ipl_depths are all NaNs")
         dict["multicolour"] = np.repeat(data_strf_obj.multicolour, expected_lengths)
         #fish_n_plane = pygor.data_helpers.label_from_str(path.name, (np.arange(0, 10).astype('str')))[:2]
         colours_set = ('BW', 'BWnoUV', 'R', 'G', 'B', 'UV')
@@ -128,7 +130,7 @@ def _roi_by_roi_dict(data_strf_obj): #
         dict["total_contour_area_largest"] = total_area_largest
         dict["contour_complexity"] = np.nanmean(data_strf_obj.calc_contours_complexities(), axis = 1)
 
-         # Time
+        # Time
         timecourses = data_strf_obj.get_timecourses()
         timecourses_neg, timecourses_pos = timecourses[:, 0], timecourses[:, 1]
         dict["polarity"] = data_strf_obj.get_polarities()
@@ -165,11 +167,11 @@ def _roi_by_roi_dict(data_strf_obj): #
             if isinstance(dict[i], Iterable) == False:
                 dict[i] = [dict[i]] * data_strf_obj.num_strfs
             #Otherwise, continue and check that all entries are the correct length
-            # If not, fill with nan
             if len(dict[i]) != expected_lengths and isinstance(dict[i], (str)) is False:
                 if len(dict[i]) > expected_lengths:
                     # Just a little test to make sure dictionary entries make sense (e.g, one for each ROI/STRF)
                     raise AttributeError(f"Dict key {i} was longer than number of expected RFs. Manual fix required.")
+                # If not, fill with nan
                 else:
                     dict[i] = dict[i].astype(float)
                     difference = expected_lengths - len(dict[i])
