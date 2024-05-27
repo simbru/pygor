@@ -250,3 +250,4 @@ def plot_traces(array_2d, mode = None, on_dur = None, off_dur = None, plot_type 
                         ax.axvspan(assumed_onoff_dur * reps, assumed_onoff_dur * reps + assumed_onoff_dur, color = "lightgrey", lw=0, alpha = 0.25)
     plt.subplots_adjust(wspace=0, hspace=0)
     plt.show()
+    
