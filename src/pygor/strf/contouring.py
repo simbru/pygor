@@ -6,8 +6,8 @@ import matplotlib as mpl
 import warnings
 import scipy
 global_thresh_val = 3
-min_targets =     2
-min_hole_size =   0
+min_targets =     5
+min_hole_size =   2
 min_object_size = min_targets
 
 def _detect_targets(spatial_filter, thresh_value = global_thresh_val, min_targets = min_targets, result_plot = False, **kwargs):
