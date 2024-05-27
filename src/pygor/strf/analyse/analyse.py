@@ -307,9 +307,10 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], 
                 if store_data == True:
                     dict[f"temporal_{i}"] = temporal_filter[n].tolist()
                     dict[f"spatial_{i}"] = spatial_filter[n].tolist()
-                dict["strf_obj"] = data_strf_obj
+                dict["strf_obj"] = data_strf_obj 
                 dict[f"pval_time_{i}"] = pval_time_t[n].tolist()
                 dict[f"pval_space_{i}"] = pval_space_t[n].tolist()
+                dict[f"pval_combined_{i}"] = scipy.stats.combine_pvalues([pval_time_t[n], pval_space_t[n]], method = 'pearson')[1].T
             dict["spatial_X"] = [spatial_filter[0, 0].shape[0]] * expected_lengths
             dict["spatial_Y"] = [spatial_filter[0, 0].shape[1]] * expected_lengths
             dict["temporal_len"] = [temporal_filter.shape[0]] * expected_lengths
@@ -331,7 +332,7 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], 
         else:
             raise AttributeError("Attribute 'multicolour' is not True. Manual fix required.")
 
-def chromatic_stats(exp_obj : pygor.classes.experiment.Experiment, **kwargs) -> pd.DataFrame:
+def chromatic_stats(exp_obj : pygor.classes.experiment.Experiment, store_data = True) -> pd.DataFrame:
     """
     Generate a DataFrame containing chromatic statistics from an Experiment object.
 
@@ -345,10 +346,9 @@ def chromatic_stats(exp_obj : pygor.classes.experiment.Experiment, **kwargs) -> 
     pandas.DataFrame
         A concatenated DataFrame of chromatic statistics from all recordings in the Experiment object.
     """
-
     chromatic_dict_list = []
     for object in exp_obj.recording:
-        curr_dict = _chromatic_dict(object, **kwargs)
+        curr_dict = _chromatic_dict(object, store_data=store_data)
         chromatic_dict_list.append(pd.DataFrame(curr_dict))
     return pd.concat(chromatic_dict_list, ignore_index=True)
 
