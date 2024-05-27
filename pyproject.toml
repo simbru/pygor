@@ -28,7 +28,7 @@ dependencies = [
   "seaborn-image",
   "scikit-learn",
   "scikit-image",
-  "scipy",
+  "scipy >= 1.13.1",
   "napari[all]",
   "dacite",
   "ipywidgets",

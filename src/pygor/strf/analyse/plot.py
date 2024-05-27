@@ -11,6 +11,8 @@ import matplotlib
 import copy
 import scipy.stats
 import warnings
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from matplotlib.legend_handler import HandlerTuple
 
 label_mappings = {
     "588"  : "LWS",
@@ -41,7 +43,8 @@ pval_mappings = {
 }
 
 def plot_areas_vs(df, rowX : str, rowY : str, colour = None, ax : plt.axes = None, legend : bool = True, 
-        labels : tuple = None,  strategy : str = 'singles', pval_map = True) -> (plt.figure, plt.axis):
+        labels : tuple = None,  strategy : str = 'singles', pval_map = True,
+        axlim = None) -> (plt.figure, plt.axis):
     '''The function `plot_areas_vs` generates a plot comparing two variables from a
     DataFrame, with options for customizing colors, labels, and plotting strategies.
     
@@ -122,13 +125,9 @@ def plot_areas_vs(df, rowX : str, rowY : str, colour = None, ax : plt.axes = Non
     if strategy != 'singles' and strategy != 'pooled':
         raise AttributeError("Strategy not recognised. Please use 'single' or 'pooled'.")
     both_df = df[[rowX, rowY]].query(f"{rowX} > 0 & {rowY} > 0").replace(0, np.nan) # contains all vals but nan empties
-        # Get max value for axis limit
+    # Get max value for axis limit
     max_val = np.nanmax(filtered_df)
     max_val_leeway = max_val * 1.05
-    # max_val = np.nanmax([both_df[rowX], both_df[rowY]]) 
-    # max_val_leeway = max_val + (max_val * 0.025)
-    # min_val = np.nanmin([both_df[rowX], both_df[rowY]])
-    # min_val_leeway = min_val - (max_val * 0.2)
     # Generate figure
     fig = plt.figure(figsize = (5, 5))
     # Generate gridspec
@@ -150,23 +149,31 @@ def plot_areas_vs(df, rowX : str, rowY : str, colour = None, ax : plt.axes = Non
     ax.set_ylabel(labels[1])
     ax.set_xlabel(labels[0])
     # Plot the central figure
-    ax.scatter(both_df[rowX], both_df[rowY], s = 20, c = "k", label = f"{labels[0]} and {labels[1]}")
-    # Handle pval_mapping 
-    if pval_map != None:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            df_pvals = df.filter(like = "pval_space")[["pval_space_375", "pval_space_588"]]
-            combined = scipy.stats.combine_pvalues(df_pvals, axis = 1)[1]
-        scatter_color = df
+    ## Handle pval_mapping 
+    if pval_map:
+        if f'pval_combined_{nm_Y}' in df.columns and f'pval_combined_{nm_X}' in df.columns:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                pval_pairs = df.iloc[both_df.index].filter(items = (f'pval_combined_{nm_X}', f'pval_combined_{nm_Y}'))
+                combined_pvals = scipy.stats.combine_pvalues(pval_pairs, axis = 1, method = 'pearson')[1]
+                scatter_colour = combined_pvals
+            scatter = ax.scatter(both_df[rowX], both_df[rowY], s = 20, c = scatter_colour, 
+                                cmap = "Greys_r", label = f"{labels[0]} and {labels[1]}",
+                                alpha = .33, edgecolors = "k")
     else:
-        scatter_color = 'k'
+        scatter = ax.scatter(both_df[rowX], both_df[rowY], s = 20, c = 'k', 
+                            label = f"{labels[0]} and {labels[1]}",
+                            alpha = 0.33)
+#    plt.colorbar(scatter, cax = ax, orientation = "horizontal", pad = 2)
+    
+    
     ax.plot(np.arange(0, max_val_leeway * 1.5, 1), np.arange(0, max_val_leeway * 1.5, 1), color = "grey", ls = "--", alpha = .5)
     # Plot X KDE and stripplot
     ax_histx = fig.add_subplot(gs[1, 0], sharex=ax)
     sns.kdeplot(both_df[rowX], color =  "k", ax = ax_histx)
     sns.kdeplot(rowX_df, color = cX, ax = ax_histx)
     ax_stackx = fig.add_subplot(gs[0, 0], sharex=ax)
-    sns.stripplot(x = rowX_df, s = 5, c = cX, label = f"{labels[0]} {strategy}", ax = ax_stackx)
+    sns.stripplot(x = rowX_df, s = 5, c = cX, label = f"{labels[0]} {strategy}", ax = ax_stackx, alpha = .33, edgecolor='gray', linewidth=.6)
     try:
         ax_stackx.legend_.remove()
     except AttributeError:
@@ -176,19 +183,25 @@ def plot_areas_vs(df, rowX : str, rowY : str, colour = None, ax : plt.axes = Non
     sns.kdeplot(y = both_df[rowY], color =  "k", ax = ax_histy)
     sns.kdeplot(y = rowY_df, color = cY, ax = ax_histy)
     ax_stacky = fig.add_subplot(gs[2, 2], sharey=ax)
-    sns.stripplot(y = rowY_df, s = 5, c =cY, label = f"{labels[1]} {strategy}", ax = ax_stacky)
+    sns.stripplot(y = rowY_df, s = 5, c =cY, label = f"{labels[1]} {strategy}", ax = ax_stacky, alpha = .33, edgecolor='gray', linewidth=.6)
     try:
         ax_stacky.legend_.remove()
     except AttributeError:
         pass
+    if pval_map:
+        fig.colorbar(scatter, ax = ax_stacky, orientation="vertical", pad=0)
     # Remove their axes for beauty
     ax_histx.axis("off")
     ax_histy.axis("off")
     ax_stackx.axis("off")
     ax_stacky.axis("off")
     # Fix axes limits
-    ax.set_xlim(0, max_val_leeway)
-    ax.set_ylim(0, max_val_leeway)
+    if axlim is None:
+        ax.set_xlim(0, max_val_leeway)
+        ax.set_ylim(0, max_val_leeway)
+    else:
+        ax.set_xlim(axlim[0], axlim[1])
+        ax.set_ylim(axlim[0], axlim[1])
     if test_statistic in title_mappings.keys():
         ax.set_title(title_mappings[test_statistic], y = -.3)
     else:
@@ -308,3 +321,161 @@ def ipl_summary_polarity(roi_df, numcolours = 4):
     print(num_cells, tot_sum)
     axs[0].set_xlabel(f"Proportion by polarity (n = {num_cells})", size = 10)
     plt.show()
+    
+def _multi_vs_single_vert(df, metric, subset_list, colour = None, labels = None) -> (plt.figure, plt.axis):
+    # Generate filtered dataframe by metric
+    metric_df = df.filter(like = metric)
+    # Generate figures according to subset list
+    fig, ax = plt.subplots(1, 4, figsize = (5, 5), sharex=False, sharey=True,
+                        gridspec_kw={'width_ratios': [1.25, 1, 1, 1.25], 'wspace': 0})
+    ax[0].get_shared_x_axes().join(ax[0], ax[3])
+    # Loop through subsets and plot data
+    labels_used = []
+    for n, subset in enumerate(subset_list):
+        existing_rows = metric_df.columns
+        current_subset = '_'.join([metric, subset])
+        query_str =  f'{metric}_{subset} > 0 & ' + ' == 0 & '.join([i for i in existing_rows if i != current_subset]) + " == 0"
+        print(query_str)
+        singles = metric_df.query(query_str)[current_subset] # if you want only singles
+        pooled = metric_df.query(f"{current_subset} > 0")[current_subset] # if you want all other combined cases        
+        pooled = pooled.drop(singles.index)
+        # # Handle colour input
+        if isinstance(colour, tuple):
+            c = colour
+        if isinstance(colour, str):
+            c = colour
+        elif colour is None:
+            if subset in color_mappings.keys() and subset in color_mappings.keys():   
+                c = color_mappings[subset]
+            else:
+                c = "lightgrey"
+        # Dynamically handle labels
+        if labels is not None and isinstance(labels, Iterable) is False: 
+            raise ValueError("Labels must be a tuple or list-like of strings")
+        if labels is None:
+            if subset in label_mappings.keys():   
+                label = label_mappings[subset]
+        else:
+            label = labels[n]
+        labels_used.append(label)
+        alpha_val = .66        
+        sns.kdeplot(y = singles, ax = ax[1], color = c, alpha = alpha_val, lw = 2)
+        sns.kdeplot(y = pooled, ax = ax[2], color = c, alpha = alpha_val, lw = 2)
+        sns.stripplot(y = singles, x = n, color = c, ax = ax[0], jitter=True, 
+                    alpha = alpha_val/3, orient = 'v', edgecolor = 'k', linewidth = .5,
+                    marker = 'D', label = label)
+        sns.stripplot(y = pooled, x = n, color = c, ax = ax[3], jitter=True,
+                    alpha = alpha_val/3, orient = 'v', edgecolor = 'k', linewidth = .5,
+                    marker = 'o', label = label)
+    if metric in title_mappings.keys():
+        ax[0].set_ylabel(title_mappings[metric])
+    else:
+        ax[0].set_ylabel(metric)
+    # Take care of eaxes
+    for cax in ax:
+        cax.set_xticklabels([])
+        cax.set_xlabel("")
+        cax.spines.right.set_visible(False)
+        cax.spines.left.set_visible(False)
+        cax.grid(True, axis = 'y')
+    ax[0].spines.left.set_visible(True)
+    ax[-1].spines.right.set_visible(True)
+    ax[2].spines.left.set_visible(True)
+    if ax[1].get_xlim()[-1] > ax[2].get_xlim()[-1]:
+        ax[2].set_xlim(ax[1].get_xlim())
+    if ax[1].get_xlim()[-1] < ax[2].get_xlim()[-1]:
+        ax[1].set_xlim(ax[2].get_xlim())
+    ax[1].invert_xaxis()    
+    ax[0].set_title("Singular-colour RFs", loc = 'left')
+    ax[3].set_title("Multi-colour RF RFs", loc = 'right')
+    handles1, labels1 = ax[0].get_legend_handles_labels()
+    handles2, labels2 = ax[-1].get_legend_handles_labels()
+    hand_labl = np.array([[handles1, labels1], [handles2, labels2]])
+    handles = [(i, j) for i, j in zip(handles1, handles2)]
+    print(handles1[0], labels1)
+    ax[0].legend(handles, labels_used, handler_map={tuple: HandlerTuple(ndivide=None)})
+    l = ax[-1].legend()
+    l.remove()
+    plt.show()
+
+def _multi_vs_single_horz(df, metric, subset_list, colour = None, labels = None) -> (plt.figure, plt.axis):
+    # Generate filtered dataframe by metric
+    metric_df = df.filter(like = metric)
+    # Generate figures according to subset list
+    fig, ax = plt.subplots(4, 1, figsize = (5, 5), sharey=False, sharex=True,
+                        gridspec_kw={'height_ratios': [1.25, 1, 1, 1.25], 'hspace': 0})
+    # Loop through subsets and plot data
+    labels_used = []
+    for n, subset in enumerate(subset_list):
+        existing_rows = metric_df.columns
+        current_subset = '_'.join([metric, subset])
+        query_str =  f'{metric}_{subset} > 0 & ' + ' == 0 & '.join([i for i in existing_rows if i != current_subset]) + " == 0"
+        print(query_str)
+        singles = metric_df.query(query_str)[current_subset] # if you want only singles
+        pooled = metric_df.query(f"{current_subset} > 0")[current_subset] # if you want all other combined cases        
+        pooled = pooled.drop(singles.index)
+        # # Handle colour input
+        if isinstance(colour, tuple):
+            c = colour
+        if isinstance(colour, str):
+            c = colour
+        elif colour is None:
+            if subset in color_mappings.keys() and subset in color_mappings.keys():   
+                c = color_mappings[subset]
+            else:
+                c = "lightgrey"
+                # Dynamically handle labels
+        if labels is not None and isinstance(labels, Iterable) is False: 
+            raise ValueError("Labels must be a tuple or list-like of strings")
+        if labels is None:
+            if subset in label_mappings.keys():   
+                label = label_mappings[subset]
+        else:
+            label = labels[n]
+        labels_used.append(label)
+        alpha_val = .66
+        sns.kdeplot(x = pooled, ax = ax[2], color = c, alpha = alpha_val, lw = 2)
+        sns.kdeplot(x = singles, ax = ax[1], color = c, alpha = alpha_val, lw = 2)
+        sns.stripplot(x = singles, y = n, color = c, ax = ax[0], jitter=True, size = 4,
+                    alpha = alpha_val/3, orient = 'h', edgecolor = 'k', linewidth = .5,
+                    marker = 'D', label = label)
+        sns.stripplot(x = pooled, y = n, color = c, ax = ax[3], jitter=True, size = 4,
+                    alpha = alpha_val/3, orient = 'h', edgecolor = 'k', linewidth = .5,
+                    label = label)
+    if metric in title_mappings.keys():
+        ax[-1].set_xlabel(title_mappings[metric])
+    else:
+        ax[-1].set_xlabel(metric)
+    # Take care of eaxes
+    for cax in ax:
+        cax.set_yticklabels([])
+        cax.set_ylabel("")
+        cax.spines.top.set_visible(False)
+        cax.spines.bottom.set_visible(False)
+        cax.grid(True, axis = 'x')
+    ax[0].spines.top.set_visible(True)
+    ax[-1].spines.bottom.set_visible(True)
+    ax[1].spines.bottom.set_visible(True)
+    ax[2].spines.top.set_visible(True)
+    if ax[1].get_ylim()[-1] > ax[2].get_ylim()[-1]:
+        ax[2].set_ylim(ax[1].get_ylim())
+    if ax[1].get_ylim()[-1] < ax[2].get_ylim()[-1]:
+        ax[1].set_ylim(ax[2].get_ylim())
+    ax[2].invert_yaxis()
+    ax[0].set_ylabel("Singular-colour RFs", loc = 'top')
+    ax[3].set_ylabel("Multi-colour RFs", loc = 'bottom')    
+    handles1, labels1 = ax[0].get_legend_handles_labels()
+    handles2, labels2 = ax[-1].get_legend_handles_labels()
+    hand_labl = np.array([[handles1, labels1], [handles2, labels2]])
+    handles = [(i, j) for i, j in zip(handles1, handles2)]
+    ax[0].legend(handles, labels_used, handler_map={tuple: HandlerTuple(ndivide=None)})
+    l = ax[-1].legend()
+    l.remove()
+    plt.show()
+    
+def plot_multi_vs_single(df, metric, subset_list, orientation = 'v', labels = None):
+    if orientation == 'v' or orientation == 'vertical':
+        _multi_vs_single_vert(df, metric, subset_list)
+    if orientation == 'h' or orientation == 'horizontal':
+        _multi_vs_single_horz(df, metric, subset_list)
+        

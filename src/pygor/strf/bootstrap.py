@@ -305,10 +305,16 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
     - If 'plot' is set to True, a histogram of the permuted test statistics is plotted, with the original test statistic indicated by a vertical black line.
     """
     org_arr = np.copy(arr_3d)
+        
     if np.ma.is_masked(arr_3d):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             org_arr = pygor.utilities.auto_remove_border(org_arr)
+    
+    # Smooth it 
+    #org_arr_avg = np.average(org_arr, axis = 0)
+    #rg_arr = org_arr - org_arr_avg
+    #org_arr = org_arr[:, 0:8, 0:8]
     org_stat = metric(collapse_time(org_arr, axis=0))
     
     def _single_permute_compute(inp_arr, rng):
@@ -329,7 +335,8 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
         permuted_stat_list = Parallel(n_jobs=-1)(delayed(_single_permute_compute)(org_arr, streams[i]) for i in range(bootstrap_n))
     
     permuted_stat_list = np.array(permuted_stat_list)
-    p_value = (np.sum(permuted_stat_list >= org_stat) + 1) / (bootstrap_n + 1)
+    epsilon = 1e-10
+    p_value = (np.sum(permuted_stat_list >= org_stat) + 1 + epsilon) / (bootstrap_n + 1 + epsilon)
     
     if plot == True:
         if "figsize" not in kwargs:
