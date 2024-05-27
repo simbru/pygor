@@ -248,3 +248,63 @@ def plot_distribution(chroma_df, columns_like = "area", animate = True):
             plt.close()
             return animation
         
+def ipl_summary_chroma(roi_df, numcolours = 4):
+    polarities = [-1, 1]
+    colours = ["R", "G", "B", "UV"]
+    fig, ax = plt.subplots(2, 4, figsize = (12, 7), sharex = True, sharey=True)
+    bins = 10
+    # sns.set_style("whitegrid")
+    for n, i in enumerate(polarities):
+        for m, j in enumerate(colours):
+            hist_vals_per_condition = np.histogram(roi_df.query(f"polarity ==  {i} & colour == '{j}'")["ipl_depths"], bins = bins, range = (0, 100))[0]
+            hist_vals_population = np.histogram(roi_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins, range = (0, 100))[0]
+            # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
+            percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
+            # percentages = hist_vals_per_condition
+            ax[n, m].barh(np.arange(0, 100, 10), width= percentages, height=10, color = pygor.plotting.custom.fish_palette[m], edgecolor="black", alpha = 0.75)        
+            ax[n, m].grid(False)
+            ipl_border = 55
+            ax[n, m].axhline(ipl_border, c = "k", ls = "--")
+            # ax[n, m].get_xaxis().set_visible(False)
+            # ax[n, m].spines["bottom"].set_visible(False)
+            if m == 0:
+                ax[n, m].set_ylabel("IPL depth (%)")
+                ax[n, m].text(x = ax[n, m].get_xlim()[1] - ax[n, m].get_xlim()[1] * 0.175, y = ipl_border + 5, va = 'center', s = "OFF", size = 10)
+                ax[n, m].text(x = ax[n, m].get_xlim()[1] - ax[n, m].get_xlim()[1] * 0.175, y = ipl_border - 5, va = 'center', s = "ON", size = 10)
+                if i == -1:
+                    ax[n, m].set_title("OFF", weight = "bold", c = "grey", loc = "left")
+                if i == 1:
+                    ax[n, m].set_title("ON", weight = "bold", loc = "left")
+            #ax[0, m].set_title(custom.nanometers[m] + "nm", size = 12)
+            num_cells = int(len(np.unique(roi_df.index)) / numcolours)
+            ax[1, 0].set_xlabel(f"Percentage by colour (n = {num_cells})", size = 10)
+    plt.show()
+    
+def ipl_summary_polarity(roi_df, numcolours = 4):
+    skip_df = roi_df[::numcolours]
+    # roi_df.iloc[roi_df["ipl_depths"].dropna().index]
+    polarities = [-1, 1, 2]
+    fig, axs = plt.subplots(1, 3, figsize = (8, 4), sharex = True, sharey=True)
+    bins = 10
+    titles = ["OFF", "ON", "Mixed polarity"]
+    # sns.set_style("whitegrid")
+    tot_sum = 0
+    for n, ax in enumerate(axs.flatten()):
+        query_df = skip_df.query(f"polarity ==  {polarities[n]}")["ipl_depths"]
+        hist = np.histogram(query_df, bins = bins, range = (0, 100))
+        tot_sum += np.sum(hist[0])
+        hist_vals_per_condition = hist[0]
+        hist_vals_population = np.histogram(skip_df["ipl_depths"], bins = bins, range = (0, 100))[0]
+        # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
+#        percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
+        percentages = hist_vals_per_condition
+        ax.barh(np.arange(0, 100, 10), width= percentages, height=10, color = pygor.plotting.custom.polarity_palette[n], edgecolor="black", alpha = 0.75)        
+        ax.set_title(titles[n], size = 12)
+        ipl_border = 55
+        ax.axhline(ipl_border, c = "k", ls = "--")
+    axs[0].text(x = axs[0].get_xlim()[1] - axs[0].get_xlim()[1] * 0.175, y = ipl_border + 5, va = 'center', s = "OFF", size = 10)
+    axs[0].text(x = axs[0].get_xlim()[1] - axs[0].get_xlim()[1] * 0.175, y = ipl_border - 5, va = 'center', s = "ON", size = 10)
+    num_cells = len(skip_df.index)
+    print(num_cells, tot_sum)
+    axs[0].set_xlabel(f"Proportion by polarity (n = {num_cells})", size = 10)
+    plt.show()
