@@ -48,33 +48,30 @@ def block_shuffle(arr_1d, block_size = None):
 #     # output = output.ravel()
 #     return output
 
-def circular_shuffle(arr_1d, max_sample_length = None, output_length = None, rng = None):
+def circular_shuffle(arr_1d, max_sample_length=None, output_length=None, rng=None):
     """
     Shuffle 1D array by a random block size in random order, with resampling 
     """
-    if output_length == None:
+    if output_length is None:
         output_length = len(arr_1d)
-    if max_sample_length == None:
+    if max_sample_length is None:
         max_sample_length = output_length
-    if rng == None:
+    if rng is None:
         rng = np.random.default_rng()
-    # Create  array to insert values into. This will be our bootstrapped time series
-    output = np.array([])
+    
+    output = []
+    arr_length = len(arr_1d)
+    
     while len(output) < output_length:
-        # randomly pick an index to start sample
-        start_index = rng.choice(output_length-1, 1)
-        # randomly pick index to end sample (duration)
+        start_index = rng.choice(arr_length, 1)[0]
         max_index = start_index + max_sample_length
-        end_index = rng.integers(start_index+1, max_index)
-        # take that data (sample)
-        taken_sample = np.take(arr_1d, np.arange(start_index, end_index), mode = "warp")
-        # insert that into the output array and resetart loop
-        output = np.append(output, taken_sample)
-    # deal with output being longer than input
-    if len(output) > len(arr_1d):
-        output = output[:output_length]
-    # output = output.ravel()
-    return output
+        end_index = rng.integers(start_index + 1, max_index)
+        taken_sample = np.take(arr_1d, np.arange(start_index, end_index), mode="wrap")
+        output.extend(taken_sample.tolist())
+    
+    output = output[:output_length]
+    
+    return np.array(output)
 
 def stationary_shuffle(arr_1d, max_sample_length = None, output_length = None, rng = rng):
     """
@@ -191,7 +188,7 @@ def spectral_entropy(fft_values):
 
 def bootstrap_time(arr_3d, bootstrap_n=2500, mode_param=2, mode="sd", 
         collapse_space=np.ma.var, metric=spectral_entropy, plot=False, parallel=True, 
-        seed=None, **kwargs):
+        seed=111, **kwargs):
     if np.ma.is_masked(arr_3d):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -271,7 +268,7 @@ def bootstrap_time(arr_3d, bootstrap_n=2500, mode_param=2, mode="sd",
     return p_value
     
     
-def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metric = np.max, plot = False, parallel = True, seed = None,**kwargs): # these metrics work so leave them
+def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metric = np.var, plot = False, parallel = True, seed = 111,**kwargs): # these metrics work so leave them
     """
     Perform a spatial permutation test to compute p-value for a given metric on the spatial data.
 
@@ -316,7 +313,8 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
     
     def _single_permute_compute(inp_arr, rng):
         # Get space stat
-        permuted_arr = np.swapaxes(np.swapaxes(rng.permuted(rng.permuted(org_arr, axis=2), axis=1), 0, 1), 1, 2)
+        # /permuted_arr =rng.shuffle(inp_arr)
+        permuted_arr = rng.permuted(rng.permuted(org_arr, axis=1), axis=2) #permute space, leave time alone
         permuted_stat = metric(collapse_time(permuted_arr, axis=0))
         return permuted_stat
     
