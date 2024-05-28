@@ -109,7 +109,7 @@ class Experiment:
         return all_collated
 
     def pickle_store(self, save_path, filename):
-        final_path = pathlib.Path(save_path, filename).with_suffix(".pkl")
+        final_path = pathlib.Path(save_path, filename).with_suffix(".pklexp")
         print("Storing as:", final_path, end = "\r")
         with open(final_path, 'wb') as outp:
             joblib.dump(self, outp, compress=('zlib', 1))

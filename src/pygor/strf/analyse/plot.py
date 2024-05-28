@@ -292,7 +292,8 @@ def ipl_summary_chroma(roi_df, numcolours = 4):
             num_cells = int(len(np.unique(roi_df.index)) / numcolours)
             ax[1, 0].set_xlabel(f"Percentage by colour (n = {num_cells})", size = 10)
     plt.show()
-    
+    return fig, ax 
+
 def ipl_summary_polarity(roi_df, numcolours = 4):
     skip_df = roi_df[::numcolours]
     # roi_df.iloc[roi_df["ipl_depths"].dropna().index]
@@ -321,7 +322,8 @@ def ipl_summary_polarity(roi_df, numcolours = 4):
     print(num_cells, tot_sum)
     axs[0].set_xlabel(f"Proportion by polarity (n = {num_cells})", size = 10)
     plt.show()
-    
+    return fig, ax
+
 def _multi_vs_single_vert(df, metric, subset_list, colour = None, labels = None) -> (plt.figure, plt.axis):
     # Generate filtered dataframe by metric
     metric_df = df.filter(like = metric)
