@@ -26,6 +26,9 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None, text_align="mid",
             except:  # Default to a constant
                 text_size = 15
 
+    # Rotation 
+    #https://matplotlib.org/stable/gallery/text_labels_and_annotations/text_rotation_relative_to_line.html
+
     # Get fig stats
     fig_width = fig.get_figwidth()
     fig_height = fig.get_figheight()
@@ -61,31 +64,34 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None, text_align="mid",
     points = rotate(points, origin=midpoint, degrees=rotation)
     
     line_width = 2 * np.max([fig_width, fig_height])
-    myster_offset = 0.05
+    myster_offset = 1/text_size
     if orientation == 'v':
         text_x = points[0, 0] - myster_offset * (ax.get_xlim()[1] - ax.get_xlim()[0])
         text_y = {'close': points[0, 1], 'mid': midpoint[1], 'far': points[1, 1]}[text_align]
         if rotation == 180:
             text_x = points[0, 0] + myster_offset * (ax.get_xlim()[1] - ax.get_xlim()[0])
         rotation_angle = 90 + rotation
-        # # # Offset the text to avoid clipping
-        # text_x_offset =  1 / ((line_width + text_size) / ax_width)
-        # if rotation == 0:
-        #     text_x -= text_x_offset
-        # elif rotation == 180:
-        #     text_x += text_x_offset
+
     else:  # 'h'
         text_x = {'close': points[0, 0], 'mid': midpoint[0], 'far': points[1, 0]}[text_align]
-        text_y = points[0, 1] - 1/text_size * (ax.get_ylim()[1] - ax.get_ylim()[0])
+        text_y = points[0, 1] - myster_offset * (ax.get_ylim()[1] - ax.get_ylim()[0])
         if rotation == 180:
             text_y = points[0, 1] + myster_offset * (ax.get_ylim()[1] - ax.get_ylim()[0])
         rotation_angle = 0 + rotation
-        # # Offset the text to avoid clipping
-        # text_y_offset =  1 / ((line_width + text_size) / ax_height) #+ (line_width * 1/ax_height)  #+ (text_size + line_width) * 2 / fig_dpi
-        # if rotation == 0:
-        #     text_y -= text_y_offset
-        # elif rotation == 180:
-        #     text_y += text_y_offset
+        
+        
+    # # Offset the text to avoid clipping
+    # text_y_offset =  1 / ((line_width + text_size) / ax_height) #+ (line_width * 1/ax_height)  #+ (text_size + line_width) * 2 / fig_dpi
+    # if rotation == 0:
+    #     text_y -= text_y_offset
+    # elif rotation == 180:
+    #     text_y += text_y_offset
+    # # # Offset the text to avoid clipping
+    # text_x_offset =  1 / ((line_width + text_size) / ax_width)
+    # if rotation == 0:
+    #     text_x -= text_x_offset
+    # elif rotation == 180:
+    #     text_x += text_x_offset
 
     line = plt.Line2D(points[:, 0], points[:, 1], color='k', linewidth=line_width,
         clip_on=False, clip_box=False, mew=0, solid_capstyle="butt")    
