@@ -188,8 +188,8 @@ def plot_areas_vs(df, rowX : str, rowY : str, colour = None, ax : plt.axes = Non
         ax_stacky.legend_.remove()
     except AttributeError:
         pass
-    if pval_map:
-        fig.colorbar(scatter, ax = ax_stacky, orientation="vertical", pad=0)
+    # if pval_map:
+    #     fig.colorbar(scatter, ax = ax_stacky, orientation="vertical", pad=0)
     # Remove their axes for beauty
     ax_histx.axis("off")
     ax_histy.axis("off")
