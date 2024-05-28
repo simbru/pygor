@@ -1,3 +1,4 @@
+from logging import exception
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,11 +12,19 @@ def rotate(p, origin=(0, 0), degrees=0):
     p = np.atleast_2d(p)
     return np.squeeze((R @ (p.T-o.T) + o.T).T)
 
-def add_scalebar(x, y, length, ax = None, string = None, text_align = "mid", orientation = 'v', rotation = 0):
+def add_scalebar(x, y, length, ax = None, string = None, text_align = "mid", orientation = 'v', rotation = 0, text_size = None):
     if ax == None:
         ax = plt.gca()
+    fig = ax.get_figure()
     line_width = 8
-    text_size = 15
+    if text_size == None: #"steal" text size from parent plot
+        try:
+            fig.get_axes()[0].xaxis.label.get_size()
+        except AttributeError:
+            try:
+                fig.get_axes().yaxis.label.get_size()
+            except: # Default to a constant
+                text_size = 15
     start = np.array([x + 1, y + 1])
     stop = np.array([x + 1, y + 1 + length]).T
     points=np.array([start, stop])
