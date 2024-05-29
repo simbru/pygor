@@ -261,10 +261,10 @@ def plot_distribution(chroma_df, columns_like = "area", animate = True):
             plt.close()
             return animation
         
-def ipl_summary_chroma(roi_df, numcolours = 4):
+def ipl_summary_chroma(roi_df, numcolours = 4, figsize = (12, 7)):
     polarities = [-1, 1]
     colours = ["R", "G", "B", "UV"]
-    fig, ax = plt.subplots(2, 4, figsize = (12, 7), sharex = True, sharey=True)
+    fig, ax = plt.subplots(2, 4, figsize = figsize, sharex = True, sharey=True)
     bins = 10
     # sns.set_style("whitegrid")
     for n, i in enumerate(polarities):
@@ -294,25 +294,26 @@ def ipl_summary_chroma(roi_df, numcolours = 4):
     plt.show()
     return fig, ax 
 
-def ipl_summary_polarity(roi_df, numcolours = 4):
-    skip_df = roi_df[::numcolours]
+def ipl_summary_polarity_roi(roi_df, numcolours = 4, figsize = (8, 4), polarities = [-1, 1]):
+    skip_df = roi_df
     # roi_df.iloc[roi_df["ipl_depths"].dropna().index]
-    polarities = [-1, 1, 2]
-    fig, axs = plt.subplots(1, 3, figsize = (8, 4), sharex = True, sharey=True)
+    fig, axs = plt.subplots(1, len(polarities), sharex = True, sharey=True, figsize = figsize)
     bins = 10
-    titles = ["OFF", "ON", "Mixed polarity"]
+    titles = ["OFF", "ON", "Mixed polarity", "other"]
+    palette = pygor.plotting.custom.polarity_palette
+    palette.append('r')
     # sns.set_style("whitegrid")
     tot_sum = 0
     for n, ax in enumerate(axs.flatten()):
         query_df = skip_df.query(f"polarity ==  {polarities[n]}")["ipl_depths"]
         hist = np.histogram(query_df, bins = bins, range = (0, 100))
-        tot_sum += np.sum(hist[0])
+        tot_sum += len(query_df)
         hist_vals_per_condition = hist[0]
         hist_vals_population = np.histogram(skip_df["ipl_depths"], bins = bins, range = (0, 100))[0]
         # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
-#        percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
-        percentages = hist_vals_per_condition
-        ax.barh(np.arange(0, 100, 10), width= percentages, height=10, color = pygor.plotting.custom.polarity_palette[n], edgecolor="black", alpha = 0.75)        
+        percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
+        #percentages = hist_vals_per_condition
+        ax.barh(np.arange(0, 100, 10), width= percentages, height=10, color = palette[n], edgecolor="black", alpha = 0.75)        
         ax.set_title(titles[n], size = 12)
         ipl_border = 55
         ax.axhline(ipl_border, c = "k", ls = "--")
@@ -320,7 +321,37 @@ def ipl_summary_polarity(roi_df, numcolours = 4):
     axs[0].text(x = axs[0].get_xlim()[1] - axs[0].get_xlim()[1] * 0.175, y = ipl_border - 5, va = 'center', s = "ON", size = 10)
     num_cells = len(skip_df.index)
     print(num_cells, tot_sum)
-    axs[0].set_xlabel(f"Proportion by polarity (n = {num_cells})", size = 10)
+    axs[0].set_xlabel(f"Percentage by polarity (n = {num_cells})", size = 10)
+    plt.show()
+    return fig, ax
+
+def ipl_summary_polarity_chroma(chroma_df, numcolours = 4, figsize = (8, 4), cat_pol = ['off', 'on']):
+    polarities = ['off', 'on']#, 'opp']
+    fig, axs = plt.subplots(1, len(polarities), sharex = True, sharey=True, figsize = (4.8, 2.5))
+    bins = 10
+    titles = ["OFF", "ON", "Opponent", "empty", "mix"]
+    palette = pygor.plotting.custom.polarity_palette
+    palette.append('r')
+    # sns.set_style("whitegrid")
+    tot_sum = 0
+    for n, ax in enumerate(axs.flatten()):
+        query_df = chroma_df.query(f"cat_pol ==  '{polarities[n]}'")["ipl_depths"]
+        hist = np.histogram(query_df, bins = bins, range = (0, 100))
+        tot_sum += len(query_df)
+        hist_vals_per_condition = hist[0]
+        hist_vals_population = np.histogram(chroma_df["ipl_depths"], bins = bins, range = (0, 100))[0]
+        # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
+        percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
+        #percentages = hist_vals_per_condition
+        ax.barh(np.arange(0, 100, 10), width= percentages, height=10, color = palette[n], edgecolor="black", alpha = 0.75)        
+        ax.set_title(titles[n], size = 12)
+        ipl_border = 55
+        ax.axhline(ipl_border, c = "k", ls = "--")
+    axs[0].text(x = axs[0].get_xlim()[1] - axs[0].get_xlim()[1] * 0.175, y = ipl_border + 5, va = 'center', s = "OFF", size = 10)
+    axs[0].text(x = axs[0].get_xlim()[1] - axs[0].get_xlim()[1] * 0.175, y = ipl_border - 5, va = 'center', s = "ON", size = 10)
+    num_cells = len(chroma_df.index)
+    print(num_cells, tot_sum)
+    axs[0].set_xlabel(f"Percentage by polarity (n = {num_cells})", size = 10)
     plt.show()
     return fig, ax
 
