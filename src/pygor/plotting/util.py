@@ -42,8 +42,7 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None, text_align="mid",
     ax_xlowerlim, ax_xupperlim = ax.get_xbound()
     print(fig_aspect, text_size)
     if orientation == 'v':        
-        offset_v =  0.05 / fig_aspect
-        print("V", offset_v)
+        offset_v =  (0.05 / fig_aspect) + .05
         if x is None:
             x = -.1 
         if y is None:
@@ -52,8 +51,7 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None, text_align="mid",
         start = np.array([x_, y * ax_yupperlim + ax_ylowerlim])
         stop = np.array([x_, y * ax_yupperlim + ax_ylowerlim + length])
     else:  # 'h'
-        offset_h =  0.05 / np.reciprocal(fig_aspect)
-        print("H", offset_h)
+        offset_h =  (0.05 / np.reciprocal(fig_aspect)) + .05
         if x is None:
             x = 0
         if y is None:
@@ -87,6 +85,7 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None, text_align="mid",
     ax.add_line(line)
 
     ax.text(text_x, text_y, string, ha='center', va='center', fontsize=text_size, rotation=rotation_angle)
+
 
     # # Adjust the subplot parameters to ensure there is enough space for the scalebar
     # if orientation == 'v':
