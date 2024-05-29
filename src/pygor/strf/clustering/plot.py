@@ -48,7 +48,7 @@ def pc_project(pca_DF, pca, axis_ranks = [(0, 1)], alpha=1, cmap = "viridis", ax
             #plt.show(block=False)
 
 def plot_df_tuning(post_cluster_df, clusters = 0, group_by = "cluster", plot_cols = "all", specify_cluster = None, 
-    print_stat = False, ax = None, add_cols = ["ipl_depths"], sharey = False):
+    print_stat = False, ax = None, add_cols = ["ipl_depths"], sharey = False, ipl_percentage = True):
     if group_by not in post_cluster_df.columns:
         raise AttributeError(f"Please ensure {group_by} columns exists in input DF.")
     if plot_cols == "all":
@@ -73,8 +73,13 @@ def plot_df_tuning(post_cluster_df, clusters = 0, group_by = "cluster", plot_col
             if param == "ipl_depths":
                 i.axhspan(0, 55, color = "lightgrey", lw = 0)
                 i.axhspan(60, 100, color = "lightgrey", lw = 0)
-                sns.histplot(data = post_cluster_df.query(f"{group_by} == {clust_num}"), y = "ipl_depths", binrange = (0, 100), binwidth = 10, ax = i)
-                i.set_xlim(0, 20)
+                if ipl_percentage == True:
+                    percentage_hist_vals_population = np.histogram(post_cluster_df["ipl_depths"], bins = 10, range=(0, 100))[0]
+                    percentage_hist_vals_condition = np.histogram(post_cluster_df.query(f"{group_by} == {clust_num}")["ipl_depths"], bins = 10, range=(0, 100))[0]
+                    percentages = percentage_hist_vals_condition  / np.sum(percentage_hist_vals_population) * 100
+                    i.barh(np.arange(0, 100, 10), width= percentages, height=10, color = 'b', edgecolor="black", alpha = .75)
+                else:
+                    sns.histplot(data = post_cluster_df.query(f"{group_by} == {clust_num}"), y = "ipl_depths", binrange = (0, 100), binwidth = 10, ax = i)
             else:
                 df = post_cluster_df.query(f"cluster == {clust_num}").filter(like=f"{param}")
                 i.axhline(0, color = "grey", ls = "--")
