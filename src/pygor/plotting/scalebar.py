@@ -14,7 +14,6 @@ def rotate(p, origin=(0, 0), degrees=0):
 def add_scalebar(length, x=None, y=None, ax=None, string=None, text_align="mid", orientation='v', rotation=0, text_size=None):
     if ax is None:
         ax = plt.gca()
-        ax.set_clip_on(False)
     fig = ax.get_figure()
 
     if text_size is None:  # "steal" text size from parent plot
@@ -81,20 +80,19 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None, text_align="mid",
         rotation_angle = 0 + rotation         
 
     line = plt.Line2D(points[:, 0], points[:, 1], color='k', linewidth=line_width,
-        clip_on=False, clip_box=False, mew=0, solid_capstyle="butt")    
+        clip_on=False, clip_box=True, mew=1, solid_capstyle="butt")    
     ax.add_line(line)
-
     ax.text(text_x, text_y, string, ha='center', va='center', fontsize=text_size, rotation=rotation_angle)
 
 
-    # # Adjust the subplot parameters to ensure there is enough space for the scalebar
-    # if orientation == 'v':
-    #     if x <= 0:
-    #         plt.subplots_adjust(left=0.2)
-    #     if x >= 1:
-    #         plt.subplots_adjust(right=0.8) 
-    # else:  # 'h'
-    #     if y <= 0:
-    #         plt.subplots_adjust(bottom=0.2)
-    #     if y >= 1:
-    #         plt.subplots_adjust(top=0.8)
+    # Adjust the subplot parameters to ensure there is enough space for the scalebar
+    if orientation == 'v':
+        if x <= 0:
+            plt.subplots_adjust(left=0.2)
+        if x >= 1:
+            plt.subplots_adjust(right=0.8) 
+    else:  # 'h'
+        if y <= 0:
+            plt.subplots_adjust(bottom=0.2)
+        if y >= 1:
+            plt.subplots_adjust(top=0.8)
