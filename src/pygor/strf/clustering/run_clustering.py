@@ -12,7 +12,7 @@ import pygor.filehandling
 import pygor.strf
 import copy
 
-clustering_params = ["ampl", "area", "cent"]# "peak", "comp", "ipl"]#, "peak", "cent"]
+clustering_params = ["ampl", "area", "centdom"]# "peak", "comp", "ipl"]#, "peak", "cent"]
 clust_params_regex = '|'.join(clustering_params)
 
 """
@@ -46,7 +46,7 @@ def run_clustering(clust_df):
                 ('ampl',   standard_maxabs_transformer, cols_like(["ampl"], pruned_df)),
                 ('area', standard_minmax_transformer , cols_like(["area"], pruned_df)),
                 # ('ipl', standard_minmax_transformer , cols_like(["ipl"], pruned_df)),
-                ("cent", standard_minmax_transformer, cols_like(["cent"], pruned_df)),
+                ("centdom", standard_minmax_transformer, cols_like(["centdom"], pruned_df)),
                 # ("peak", sparse_transformer, cols_like(["peak"], pruned_df)),
                 # ("comp", standard_minmax_transformer, cols_like(["comp"], pruned_df)),
                 # ("ipl", standard_minmax_transformer, cols_like(["ipl"], pruned_df)),
