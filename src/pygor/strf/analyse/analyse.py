@@ -17,6 +17,7 @@ except ImportError:
 import natsort
 import pandas as pd
 import warnings
+import joblib 
 
 def _roi_by_roi_dict(data_strf_obj): #
     """
@@ -229,7 +230,7 @@ def _recording_dict(data_strf_obj):
     dict["ObjXYZ"] = [metadata.pop("objectiveXYZ")]
     return dict
 
-def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], store_data = True):
+def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], ampl_thresh = 1, store_data = True, df_return = False):
         """
         Generate a chromaticity dictionary from a data structure object.
 
@@ -330,11 +331,14 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], 
                 except AssertionError:
                     raise AttributeError(f"Length of {i} was {len(dict[i])} and does not match expected length of {expected_lengths}. Manual fix required for {path}.")
 
-            return dict
+            if df_return is False:
+                return dict
+            if df_return is True:
+                return pd.DataFrame(dict)
         else:
             raise AttributeError("Attribute 'multicolour' is not True. Manual fix required.")
 
-def chromatic_stats(exp_obj : pygor.classes.experiment.Experiment, store_data = True) -> pd.DataFrame:
+def chromatic_stats(exp_obj : pygor.classes.experiment.Experiment, store_data = True, parallel = False) -> pd.DataFrame:
     """
     Generate a DataFrame containing chromatic statistics from an Experiment object.
 
@@ -348,11 +352,19 @@ def chromatic_stats(exp_obj : pygor.classes.experiment.Experiment, store_data = 
     pandas.DataFrame
         A concatenated DataFrame of chromatic statistics from all recordings in the Experiment object.
     """
-    chromatic_dict_list = []
-    for object in exp_obj.recording:
-        curr_dict = _chromatic_dict(object, store_data=store_data)
-        chromatic_dict_list.append(pd.DataFrame(curr_dict))
-    return pd.concat(chromatic_dict_list, ignore_index=True)
+    if parallel is False:
+        chromatic_df_list = []
+        for object in exp_obj.recording:
+            curr_dict = _chromatic_dict(object, store_data=store_data)
+            chromatic_df_list.append(pd.DataFrame(curr_dict))
+    else:
+        with joblib.Parallel(n_jobs=-1) as parallel:
+            chromatic_df_list = parallel(joblib.delayed(_chromatic_dict)(object, store_data=store_data, df_return=True) for object in exp_obj.recording)                                                    
+    final_df = pd.concat(chromatic_df_list, ignore_index=True)
+    final_df["bool_area"] = np.any(np.abs(final_df.filter(like = "ampl")) > 1 , axis = 1)
+    final_df["bool_ampl"] = np.any(np.abs(final_df.filter(like = "area")) > 0 , axis = 1)
+    final_df["bool_pass"]  = np.all([final_df["bool_ampl"], final_df["bool_area"]], axis = 0)
+    return final_df
 
 def roi_stats(exp_obj : pygor.classes.experiment.Experiment) -> pd.DataFrame:
     """
