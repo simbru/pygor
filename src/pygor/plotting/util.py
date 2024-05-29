@@ -40,16 +40,20 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None, text_align="mid",
     ax_aspect = ax_width / ax_height
     ax_ylowerlim, ax_yupperlim = ax.get_ybound()
     ax_xlowerlim, ax_xupperlim = ax.get_xbound()
-
-    if orientation == 'v':
+    print(fig_aspect, text_size)
+    if orientation == 'v':        
+        offset_v =  0.05 / fig_aspect
+        print("V", offset_v)
         if x is None:
-            x = -.1
+            x = -.1 
         if y is None:
             y = 0
         x_ = (x * ax_xupperlim) + (ax_xlowerlim * (1 - x) / 1)
         start = np.array([x_, y * ax_yupperlim + ax_ylowerlim])
         stop = np.array([x_, y * ax_yupperlim + ax_ylowerlim + length])
     else:  # 'h'
+        offset_h =  0.05 / np.reciprocal(fig_aspect)
+        print("H", offset_h)
         if x is None:
             x = 0
         if y is None:
@@ -64,34 +68,19 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None, text_align="mid",
     points = rotate(points, origin=midpoint, degrees=rotation)
     
     line_width = 2 * np.max([fig_width, fig_height])
-    myster_offset = 1/text_size
     if orientation == 'v':
-        text_x = points[0, 0] - myster_offset * (ax.get_xlim()[1] - ax.get_xlim()[0])
+        text_x = points[0, 0] - offset_v * (ax.get_xlim()[1] - ax.get_xlim()[0])
         text_y = {'close': points[0, 1], 'mid': midpoint[1], 'far': points[1, 1]}[text_align]
         if rotation == 180:
-            text_x = points[0, 0] + myster_offset * (ax.get_xlim()[1] - ax.get_xlim()[0])
+            text_x = points[0, 0] + offset_v * (ax.get_xlim()[1] - ax.get_xlim()[0])
         rotation_angle = 90 + rotation
 
     else:  # 'h'
         text_x = {'close': points[0, 0], 'mid': midpoint[0], 'far': points[1, 0]}[text_align]
-        text_y = points[0, 1] - myster_offset * (ax.get_ylim()[1] - ax.get_ylim()[0])
+        text_y = points[0, 1] - offset_h * (ax.get_ylim()[1] - ax.get_ylim()[0])
         if rotation == 180:
-            text_y = points[0, 1] + myster_offset * (ax.get_ylim()[1] - ax.get_ylim()[0])
-        rotation_angle = 0 + rotation
-        
-        
-    # # Offset the text to avoid clipping
-    # text_y_offset =  1 / ((line_width + text_size) / ax_height) #+ (line_width * 1/ax_height)  #+ (text_size + line_width) * 2 / fig_dpi
-    # if rotation == 0:
-    #     text_y -= text_y_offset
-    # elif rotation == 180:
-    #     text_y += text_y_offset
-    # # # Offset the text to avoid clipping
-    # text_x_offset =  1 / ((line_width + text_size) / ax_width)
-    # if rotation == 0:
-    #     text_x -= text_x_offset
-    # elif rotation == 180:
-    #     text_x += text_x_offset
+            text_y = points[0, 1] + offset_h * (ax.get_ylim()[1] - ax.get_ylim()[0])
+        rotation_angle = 0 + rotation         
 
     line = plt.Line2D(points[:, 0], points[:, 1], color='k', linewidth=line_width,
         clip_on=False, clip_box=False, mew=0, solid_capstyle="butt")    
