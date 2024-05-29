@@ -95,7 +95,7 @@ def plot_areas_vs(df, rowX : str, rowY : str, colour = None, ax : plt.axes = Non
     #     raise AttributeError("Input queries are not the same statistic.")
     else:
         test_statistic = rowX.split('_')[0]
-        filtered_df = df.filter(like = test_statistic)
+        filtered_df = df.filter(regex = test_statistic  + '_' + r"\d+")
     nm_X = rowX.split("_")[-1]
     nm_Y = rowY.split("_")[-1]
     # Handle colour input
@@ -114,9 +114,9 @@ def plot_areas_vs(df, rowX : str, rowY : str, colour = None, ax : plt.axes = Non
     # rowY_df = df.filter(like = test_statistic)[[rowX, rowY]]
     # Generate queries for either and both
     existing_rows = filtered_df.columns
-    query_str_x =  f'{rowX} > 0 & ' + ' == 0 & '.join([i for i in existing_rows if i != rowX]) + " == 0"
-    query_str_y =  f'{rowY} > 0 & ' + ' == 0 & '.join([i for i in existing_rows if i != rowY]) + " == 0"
     if strategy == 'singles':
+        query_str_x =  f'{rowX} > 0 & ' + ' == 0 & '.join([i for i in existing_rows if i != rowX]) + " == 0"
+        query_str_y =  f'{rowY} > 0 & ' + ' == 0 & '.join([i for i in existing_rows if i != rowY]) + " == 0"
         rowX_df = filtered_df.query(query_str_x)[rowX] # if you want only singles
         rowY_df = filtered_df.query(query_str_y)[rowY]
     if strategy == 'pooled':
