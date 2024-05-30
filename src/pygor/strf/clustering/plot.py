@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import matplotlib as mlp
 import seaborn as sns
 import matplotlib
 import numpy as np
@@ -6,6 +7,19 @@ import seaborn
 import natsort
 import pandas as pd
 import pygor.strf.clustering
+try:
+    from collections import Iterable
+except ImportError:
+    from collections.abc import Iterable
+
+param_map = {
+    "ampl" : "Max abs. amplitude (SD)",
+    "area" : "Area (° vis. ang.$^2$)",
+    "centdom":"Dominant spectral centroid (Hz)" ,
+    "centneg":"Neg. spectral centroid (Hz)",
+    "centpos":"Pos. spectral centroid (Hz)",
+    "ipl_depths":"Cluster % " ,
+}
 
 def pc_project(pca_DF, pca, axis_ranks = [(0, 1)], alpha=1, cmap = "viridis", ax = None):
     # (X_projected, pca, axis_ranks, labels = None, alpha=1, clust_labels=None, cmap = "viridis"):
@@ -49,6 +63,8 @@ def pc_project(pca_DF, pca, axis_ranks = [(0, 1)], alpha=1, cmap = "viridis", ax
 
 def plot_df_tuning(post_cluster_df, clusters = 0, group_by = "cluster", plot_cols = "all", specify_cluster = None, 
     print_stat = False, ax = None, add_cols = ["ipl_depths"], sharey = False, ipl_percentage = True):
+    if isinstance(clusters, Iterable) is False:
+        clusters = [clusters]
     if group_by not in post_cluster_df.columns:
         raise AttributeError(f"Please ensure {group_by} columns exists in input DF.")
     if plot_cols == "all":
@@ -69,24 +85,60 @@ def plot_df_tuning(post_cluster_df, clusters = 0, group_by = "cluster", plot_col
     for m, clust_num in enumerate(clusters):
         for n, (i, param) in enumerate(zip(ax.flat, unique_cols_sans_wavelength)): 
             if m == 0 and ax.any() == None:
-                i.set_title(param)
+                i.set_title(param_map[param])
             if param == "ipl_depths":
                 i.axhspan(0, 55, color = "lightgrey", lw = 0)
                 i.axhspan(60, 100, color = "lightgrey", lw = 0)
                 if ipl_percentage == True:
-                    percentage_hist_vals_population = np.histogram(post_cluster_df["ipl_depths"], bins = 10, range=(0, 100))[0]
+                    population_hist_vals_population = np.histogram(post_cluster_df["ipl_depths"], bins = 10, range=(0, 100))[0]
                     percentage_hist_vals_condition = np.histogram(post_cluster_df.query(f"{group_by} == {clust_num}")["ipl_depths"], bins = 10, range=(0, 100))[0]
-                    percentages = percentage_hist_vals_condition  / np.sum(percentage_hist_vals_population) * 100
+                    percentages = (percentage_hist_vals_condition  / population_hist_vals_population) * 100
                     i.barh(np.arange(0, 100, 10), width= percentages, height=10, color = 'b', edgecolor="black", alpha = .75)
+                    i.set_label("skip_this")
+                    i.set_xlim(0, 105)
                 else:
-                    sns.histplot(data = post_cluster_df.query(f"{group_by} == {clust_num}"), y = "ipl_depths", binrange = (0, 100), binwidth = 10, ax = i)
+                    hist = np.histogram(post_cluster_df.query(f"{group_by} == {clust_num}")["ipl_depths"], bins = 10, range=(0, 100))[0]
+                    i.barh(np.arange(0, 100, 10), width= hist, height=10, color = 'b', edgecolor="black", alpha = .75)
+                    i.set_label("skip_this")
             else:
                 df = post_cluster_df.query(f"cluster == {clust_num}").filter(like=f"{param}")
                 i.axhline(0, color = "grey", ls = "--")
-                sns.boxplot(df, palette = reversed(pygor.plotting.fish_palette), ax = i)
+                colour_scheme = reversed(pygor.plotting.fish_palette)
+                sns.boxplot(df.replace(0, np.nan), palette = colour_scheme, ax = i)
                 sns.stripplot(df, palette = 'dark:k', ax = i)
                 i.set_xticks([])
-                # i.sharey()
+        # Okay, now we need to figure out which columns to lower the oppacity on 
+        # depending on if area == 0... Hold my beer:
+        ## First let's find where we need to make changes 
+        where_no_area = np.all(post_cluster_df.query(f"cluster == {clust_num}").filter(regex = "area_\d+$") == 0, axis = 0)
+        index_true = np.where(where_no_area == True)[0]
+        index_mapping = {"375" : 0, "422" : 1, "478" : 2, "588" : 3}
+        wavelength_only = [i.split('_')[-1] for i in where_no_area[index_true].index]
+        change_index = [index_mapping[i] for i in wavelength_only]
+        alpha_val = 0.1
+        for ax_ in ax.flat:
+            ## Now deal with main portion of plot
+            for idx in change_index:
+                if ax_.get_label() == "skip_this": #prevents messing with histogram
+                    continue
+                patch = ax_.patches[idx]
+                fc = patch.get_facecolor()
+                patch.set_facecolor(mlp.colors.to_rgba(fc, alpha_val))
+                patch.set_edgecolor((0.33, 0.33, 0.33, alpha_val))
+            ## Each box has 6 associated lines: 2 whiskers, 2 caps, and 1 median (PLEASE MATPLOTLIB DON'T CHANGE THIS:/ )
+            lines_per_box = 6
+            for idx in change_index:
+                start_index = idx * lines_per_box
+                end_index = start_index + lines_per_box
+                for line in ax_.lines[start_index:end_index]:
+                    line.set_alpha(alpha_val)
+                    # i.sharey()
+            # Modify stripplot points
+            for idx in change_index:
+                try:
+                    ax_.collections[idx].set_alpha(alpha_val)
+                except IndexError:
+                    pass
 
 def stats_summary(clust_df, cat = "on", **kwargs):
     # # Vizualize n clusters
@@ -105,13 +157,22 @@ def stats_summary(clust_df, cat = "on", **kwargs):
         # Assign label accordingly
         if n == 0:
             for a, param_label in zip(ax[0, 0:num_stats], unique_cols_sans_wavelength):
-                a.set_title(param_label)
-        # Do the rest of the plotting
-        plot_df_tuning(clust_df.query(f"cat_pol == '{cat}'").filter(regex = "ampl|area|cent|peak|ipl|cluster|cluster_id"), [i], ax = ax[n, 0:num_stats], **kwargs)
+                a.set_title(param_map[param_label])
+        # Do the rest of the plotting # Regex for fetching all columns wiht name_000 combo, and ipl_depths, and cluser columns
+        plot_df_tuning(clust_df.query(f"cat_pol == '{cat}'").filter(regex = "^\w+_\d+$|^ipl_depths$|^cluster"), [i], ax = ax[n, 0:num_stats], **kwargs)
     for i, cl_id in zip(ax[:, 0], clust_ids):
         i.set_ylabel(f"{cl_id}", rotation = 0,  labelpad = 30)
     fig.tight_layout() #merged_stats_df
     plt.suptitle(f"Category: {cat}", size = 20, y = 1.01)
+    for col in range(num_stats):
+        ylims = np.array([i.get_ylim() for i in ax[:, col].flat])
+        print(np.argmax(np.abs(ylims), axis = 0))
+        index = np.argmax(np.abs(ylims), axis = 0)
+        min_val = np.min(ylims[index][0, :])
+        max_val = np.max(ylims[index][1, :])
+        min_val, max_val
+        for a in ax[:, col]:
+            a.set_ylim(min_val, max_val)
 
 def pc_summary(clust_pca_df, pca_dict, axis_ranks = [(1, 0)]):
     categories = pd.unique(clust_pca_df["cat_pol"])
