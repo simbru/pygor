@@ -18,7 +18,7 @@ param_map = {
     "centdom":"Dominant spectral centroid (Hz)" ,
     "centneg":"Neg. spectral centroid (Hz)",
     "centpos":"Pos. spectral centroid (Hz)",
-    "ipl_depths":"Cluster % " ,
+    "ipl_depths":"Cluster % ",
 }
 
 def pc_project(pca_DF, pca, axis_ranks = [(0, 1)], alpha=1, cmap = "viridis", ax = None):
@@ -104,7 +104,7 @@ def plot_df_tuning(post_cluster_df, clusters = 0, group_by = "cluster", plot_col
                 df = post_cluster_df.query(f"cluster == {clust_num}").filter(like=f"{param}")
                 i.axhline(0, color = "grey", ls = "--")
                 colour_scheme = reversed(pygor.plotting.fish_palette)
-                sns.boxplot(df.replace(0, np.nan), palette = colour_scheme, ax = i)
+                sns.boxplot(df, palette = colour_scheme, ax = i)
                 sns.stripplot(df, palette = 'dark:k', ax = i)
                 i.set_xticks([])
         # Okay, now we need to figure out which columns to lower the oppacity on 
@@ -116,29 +116,31 @@ def plot_df_tuning(post_cluster_df, clusters = 0, group_by = "cluster", plot_col
         wavelength_only = [i.split('_')[-1] for i in where_no_area[index_true].index]
         change_index = [index_mapping[i] for i in wavelength_only]
         alpha_val = 0.1
+        ## Each box has 6 associated lines: 2 whiskers, 2 caps, and 1 median (PLEASE MATPLOTLIB DON'T CHANGE THIS:/ )
+        lines_per_box = 6
         for ax_ in ax.flat:
             ## Now deal with main portion of plot
             for idx in change_index:
                 if ax_.get_label() == "skip_this": #prevents messing with histogram
                     continue
-                patch = ax_.patches[idx]
-                fc = patch.get_facecolor()
-                patch.set_facecolor(mlp.colors.to_rgba(fc, alpha_val))
-                patch.set_edgecolor((0.33, 0.33, 0.33, alpha_val))
-            ## Each box has 6 associated lines: 2 whiskers, 2 caps, and 1 median (PLEASE MATPLOTLIB DON'T CHANGE THIS:/ )
-            lines_per_box = 6
-            for idx in change_index:
-                start_index = idx * lines_per_box
-                end_index = start_index + lines_per_box
-                for line in ax_.lines[start_index:end_index]:
-                    line.set_alpha(alpha_val)
-                    # i.sharey()
-            # Modify stripplot points
-            for idx in change_index:
+                # Modify stripplot points
                 try:
                     ax_.collections[idx].set_alpha(alpha_val)
                 except IndexError:
                     pass
+                # Now deal with boxplots
+                try:
+                    patch = ax_.patches[idx]
+                except IndexError:
+                    patch = ax_.patch
+                fc = patch.get_facecolor()
+                patch.set_facecolor(mlp.colors.to_rgba(fc, alpha_val))
+                patch.set_edgecolor((0.33, 0.33, 0.33, alpha_val))
+                # Modify dots
+                start_index = idx * lines_per_box
+                end_index = start_index + lines_per_box
+                for line in ax_.lines[start_index:end_index]:
+                    line.set_alpha(alpha_val)    
 
 def stats_summary(clust_df, cat = "on", **kwargs):
     # # Vizualize n clusters
@@ -166,7 +168,6 @@ def stats_summary(clust_df, cat = "on", **kwargs):
     plt.suptitle(f"Category: {cat}", size = 20, y = 1.01)
     for col in range(num_stats):
         ylims = np.array([i.get_ylim() for i in ax[:, col].flat])
-        print(np.argmax(np.abs(ylims), axis = 0))
         index = np.argmax(np.abs(ylims), axis = 0)
         min_val = np.min(ylims[index][0, :])
         max_val = np.max(ylims[index][1, :])
