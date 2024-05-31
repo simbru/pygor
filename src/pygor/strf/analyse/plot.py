@@ -261,9 +261,15 @@ def plot_distribution(chroma_df, columns_like = "area", animate = True):
             plt.close()
             return animation
         
-def ipl_summary_chroma(roi_df, numcolours = 4, figsize = (12, 7)):
+def ipl_summary_chroma(roi_df, numcolours = 4, figsize = (12, 7), legend = True):
     polarities = [-1, 1]
     colours = ["R", "G", "B", "UV"]
+    colours_map = {
+        "R"  : "LWS",
+        "G"  : "RH2",
+        "B"  : "SWS2",
+        "UV" : "SWS1",
+    }
     fig, ax = plt.subplots(2, 4, figsize = figsize, sharex = True, sharey=True)
     bins = 10
     # sns.set_style("whitegrid")
@@ -274,7 +280,7 @@ def ipl_summary_chroma(roi_df, numcolours = 4, figsize = (12, 7)):
             # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
             percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
             # percentages = hist_vals_per_condition
-            ax[n, m].barh(np.arange(0, 100, 10), width= percentages, height=10, color = pygor.plotting.custom.fish_palette[m], edgecolor="black", alpha = 0.75)        
+            ax[n, m].barh(np.arange(0, 100, 10), width= percentages, height=10, color = pygor.plotting.custom.fish_palette[m], edgecolor="black", alpha = 0.75, label  = colours_map[j])        
             ax[n, m].grid(False)
             ipl_border = 55
             ax[n, m].axhline(ipl_border, c = "k", ls = "--")
@@ -291,7 +297,16 @@ def ipl_summary_chroma(roi_df, numcolours = 4, figsize = (12, 7)):
             #ax[0, m].set_title(custom.nanometers[m] + "nm", size = 12)
             num_cells = int(len(np.unique(roi_df.index)) / numcolours)
             ax[1, 0].set_xlabel(f"Percentage by colour (n = {num_cells})", size = 10)
-    plt.show()
+    if legend is True:
+        handles, labels = [], []
+        for i in ax.flat:
+            handle, label = i.get_legend_handles_labels()
+            handles.append(handle)
+            labels.append(label)
+            # ax[0, 3].legend(handles, labels)
+            labels_ = list(set([i[0] for i in labels]))
+            handles_ = [i[0] for i in handles[:len(labels_)]]
+            ax.flat[-1].legend(handles_, labels_, handler_map={tuple: HandlerTuple(ndivide=None)}, bbox_to_anchor=(1.04, 1.4), loc="upper left")
     return fig, ax 
 
 def ipl_summary_polarity_roi(roi_df, numcolours = 4, figsize = (8, 4), polarities = [-1, 1]):
@@ -497,9 +512,9 @@ def _multi_vs_single_horz(df, metric, subset_list, colour = None, labels = None)
     ax[2].invert_yaxis()
     ax[0].set_ylabel("Singular-colour RFs", loc = 'top')
     ax[3].set_ylabel("Multi-colour RFs", loc = 'bottom')    
-    handles1, labels1 = ax[0].get_legend_handles_labels()
-    handles2, labels2 = ax[-1].get_legend_handles_labels()
-    hand_labl = np.array([[handles1, labels1], [handles2, labels2]])
+    handles1, _ = ax[0].get_legend_handles_labels()
+    handles2, _ = ax[-1].get_legend_handles_labels()
+#    hand_labl = np.array([[handles1, labels1], [handles2, labels2]])
     handles = [(i, j) for i, j in zip(handles1, handles2)]
     ax[0].legend(handles, labels_used, handler_map={tuple: HandlerTuple(ndivide=None)})
     l = ax[-1].legend()
