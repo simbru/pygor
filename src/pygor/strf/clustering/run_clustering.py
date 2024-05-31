@@ -80,6 +80,9 @@ def run_clustering(clust_df):
         if clust_dict[i]["cluster_id"].dtype != "object":
             split_df[i]["cluster_id"] = f'{i}' + '_' + clust_dict[i]["cluster_id"].astype(str)
             clust_dict[i]["cluster_id"] = f'{i}' + '_' + clust_dict[i]["cluster_id"].astype(str)
+    
+    
+    
     ## Step 4: Merge results
     ### To PCA DF
     merged_pca_df = pd.concat(clust_dict[i] for i in clust_dict.keys())

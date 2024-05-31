@@ -12,6 +12,8 @@ try:
 except ImportError:
     from collections.abc import Iterable
 import warnings
+from joblib import Parallel, delayed
+import joblib
 
 param_map = {
     "ampl" : "Max abs. amplitude (SD)",
@@ -61,6 +63,15 @@ def pc_project(pca_DF, pca, axis_ranks = [(0, 1)], alpha=1, cmap = "viridis", ax
             ax.set_ylabel('PC{} ({}%)'.format(d2+1, round(100*pca.explained_variance_ratio_[d2],1)))
             ax.set_title("Projection of points (on PC{} and PC{})".format(d1+1, d2+1))
             #plt.show(block=False)
+
+def pc_summary(clust_pca_df, pca_dict, axis_ranks = [(1, 0)]):
+    categories = pd.unique(clust_pca_df["cat_pol"])
+    fig, axs = plt.subplots(1, len(categories), figsize = (7.5 * len(categories), 5.5))
+    for category, ax in zip(categories, axs):
+        pygor.strf.clustering.plot.pc_project(clust_pca_df.query(f"cat_pol == '{category}'"), 
+        pca_dict[category], axis_ranks, ax = ax)
+        ax.set_title(f"Category '{category}' for PC{axis_ranks[0][0]} and PC{axis_ranks[0][1]}")
+    fig.tight_layout()
 
 def plot_df_tuning(post_cluster_df, cluster_ids, group_by = "cluster_id", plot_cols = "all",        
     print_stat = False, ax = None, add_cols = ["ipl_depths"], ipl_percentage = True):
@@ -193,7 +204,9 @@ def stats_summary(clust_df, cat = "on", **kwargs):
     for i, cl_id in zip(ax[:, 0], clust_ids):
         i.set_ylabel(f"{cl_id}", rotation = 0,  labelpad = 30)
     fig.tight_layout() #merged_stats_df
-    plt.suptitle(f"Category: {cat}", size = 20, y = 1.01)
+    plt.suptitle(f"Category: {cat}", size = 20, y = .98)
+    plt.subplots_adjust(top = .95)
+
     for col in range(num_stats):
         ylims = np.array([i.get_ylim() for i in ax[:, col].flat])
         index = np.argmax(np.abs(ylims), axis = 0)
@@ -204,13 +217,112 @@ def stats_summary(clust_df, cat = "on", **kwargs):
             a.set_ylim(min_val, max_val)
     return fig, ax
 
-def pc_summary(clust_pca_df, pca_dict, axis_ranks = [(1, 0)]):
-    categories = pd.unique(clust_pca_df["cat_pol"])
-    fig, axs = plt.subplots(1, len(categories), figsize = (7.5 * len(categories), 5.5))
-    for category, ax in zip(categories, axs):
-        pygor.strf.clustering.plot.pc_project(clust_pca_df.query(f"cat_pol == '{category}'"), 
-        pca_dict[category], axis_ranks, ax = ax)
-        ax.set_title(f"Category '{category}' for PC{axis_ranks[0][0]} and PC{axis_ranks[0][1]}")
-    fig.tight_layout()
+def _imshow_spatial_reconstruct(df, cluster_id_str, axs=None, parallel=None, **kwargs):
+    # Figure out how many columns we need 
+    chromatic_cols = df.filter(regex=r"_\d").columns
+    unique_wavelengths = list(np.unique([i.split('_')[-1] for i in chromatic_cols]))
+    # Deal with passing axes    
+    if axs is None:
+        fig, axs = plt.subplots(1, len(unique_wavelengths))
+    else:
+        fig = plt.gcf()
+    # Reconstruct the RFs (here optionally passing parallel workers)    
+    rf_recons = pygor.strf.clustering.reconstruct.reconstruct_cluster_spatial(df, cluster_id_str, parallel=parallel)
+    max_abs = np.max(np.abs(rf_recons))
+    # Loop over axes and plot, etc:
+    for (n, ax) in enumerate(rf_recons):
+        if n == 0:
+            axs.flat[n].set_ylabel(cluster_id_str)
+        im = axs.flat[n].imshow(rf_recons[n], cmap=pygor.plotting.custom.maps_concat[n])
+        #axs.flat[n].axis('off')
+        axs.flat[n].spines["top"].set_visible(False)
+        axs.flat[n].spines["bottom"].set_visible(False)
+        axs.flat[n].spines["left"].set_visible(False)
+        axs.flat[n].spines["right"].set_visible(False)
+        axs.flat[n].set_xticks([])
+        axs.flat[n].set_yticks([])
+        im.set_clim(-max_abs, max_abs)
+        
+def _plot_temporal_reconstruct(df, cluster_id_str, axs=None, parallel=None, **kwargs):
+    # Figure out how many columns we need 
+    chromatic_cols = df.filter(regex=r"_\d").columns
+    unique_wavelengths = list(np.unique([i.split('_')[-1] for i in chromatic_cols]))
+    # Deal with passing axes    
+    if axs is None:
+        fig, axs = plt.subplots(1, len(unique_wavelengths))
+    else:
+        fig = plt.gcf()
+    # Reconstruct the RFs (here optionally passing parallel workers)    
+    times_recons = pygor.strf.clustering.reconstruct.reconstruct_cluster_temporal(df, cluster_id_str, parallel=parallel)
+    # Loop over axes and plot, etc:
+    for (n, ax) in enumerate(times_recons):
+        if n != 0:
+            axs.flat[n].sharey(axs.flat[n-1])
+        plot = axs.flat[n].plot(times_recons[n, 0].T, c = "grey")
+        plot = axs.flat[n].plot(times_recons[n, 1].T, c = pygor.plotting.fish_palette[n])#, cmap=pygor.plotting.custom.maps_concat[n])
+        axs.flat[n].axis('off')
+    pygor.plotting.add_scalebar(2.5, ax = axs.flat[-1], rotation = 180, x = 1.1, line_width = 5)
 
+def plot_spatial_reconstruct(clust_df, cluster_id_strings, parallel=True):
+    # Figure out how many columns we need 
+    chromatic_cols = clust_df.filter(regex=r"_\d").columns
+    unique_wavelengths = list(set([i.split('_')[-1] for i in chromatic_cols]))
+    if isinstance(cluster_id_strings, str):
+        cluster_id_strings = [cluster_id_strings]
+    # Determine how many rows and columns
+    rows, columns = len(cluster_id_strings), len(unique_wavelengths)
+    # Create final plot (and wrap ax in array)
+    fig, ax = plt.subplots(rows, columns, figsize = (columns*1.9, rows),
+    gridspec_kw = {'wspace' : 0.1, 'hspace' : 0.0, 'bottom': 0.01, 'top': .99})
+    if len(cluster_id_strings) == 1:
+        ax = np.array([ax])
+    # If parallel, initialise the worker
+    if parallel:
+        # Granted, this LOOKS like its thread un-safe! However, the worker only gets used for 
+        # calculations within the _imshow_spatial_reconstruct. And, in fact, the plotting is 
+        # done serially after the calculations are done. So it's fine. I think. Lord have mercy.
+        with Parallel(n_jobs=4) as worker:
+            for n, c_id in enumerate(cluster_id_strings):
+                _imshow_spatial_reconstruct(clust_df, c_id, axs=ax[n, 0:4], parallel=worker)
+    # Otherwise pass None, which gets processed serially
+    else:
+        for n, c_id in enumerate(cluster_id_strings):
+            _imshow_spatial_reconstruct(clust_df, c_id, axs=ax[n, 0:4], parallel=None)
+    # Now post-process plot however you'd like:
+
+    plt.show()
+
+def plot_spacetime_reconstruct(clust_df, cluster_id_strings, parallel=True):
+    # Figure out how many columns we need 
+    chromatic_cols = clust_df.filter(regex=r"_\d").columns
+    unique_wavelengths = list(set([i.split('_')[-1] for i in chromatic_cols]))
+    if isinstance(cluster_id_strings, str):
+        cluster_id_strings = [cluster_id_strings]
+    # Determine how many rows and columns
+    rows, columns = len(cluster_id_strings), len(unique_wavelengths) * 2
+    # Create final plot (and wrap ax in array)
+    fig, ax = plt.subplots(rows, columns, figsize = (columns*1.9, rows),
+    gridspec_kw = {'wspace' : 0.1, 'hspace' : 0.0, 'bottom': 0.01, 'top': .99})
+    if len(cluster_id_strings) == 1:
+        ax = np.array([ax])
+    # If parallel, initialise the worker
+    if parallel:
+        # Granted, this LOOKS like its thread un-safe! However, the worker only gets used for 
+        # calculations within the _imshow_spatial_reconstruct. And, in fact, the plotting is 
+        # done serially after the calculations are done. So it's fine. I think. Lord have mercy.
+        with Parallel(n_jobs=4) as worker:
+            for n, c_id in enumerate(cluster_id_strings):
+                _imshow_spatial_reconstruct(clust_df, c_id, axs=ax[n, 0:4], parallel=worker)
+            for n, c_id in enumerate(cluster_id_strings):
+                _plot_temporal_reconstruct(clust_df, c_id, axs=ax[n, 4:8], parallel=worker)
+    # Otherwise pass None, which gets processed serially
+    else:
+        for n, c_id in enumerate(cluster_id_strings):
+            _imshow_spatial_reconstruct(clust_df, c_id, axs=ax[n, 0:4], parallel=None)
+        for n, c_id in enumerate(cluster_id_strings):
+            _plot_temporal_reconstruct(clust_df, c_id, axs=ax[n, 4:8], parallel=None)
+    # Now post-process plot however you'd like:
+
+    plt.show()
+    return fig, ax
 # def strf_summary():
