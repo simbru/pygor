@@ -11,7 +11,7 @@ def rotate(p, origin=(0, 0), degrees=0):
     p = np.atleast_2d(p)
     return np.squeeze((R @ (p.T - o.T) + o.T).T)
 
-def add_scalebar(length, x=None, y=None, ax=None, string=None, text_align="mid", orientation='v', rotation=0, text_size=None):
+def add_scalebar(length, x=None, y=None, ax=None, string=None, text_align="mid", orientation='v', rotation=0, text_size=None, line_width = None):
     if ax is None:
         ax = plt.gca()
     fig = ax.get_figure()
@@ -39,7 +39,6 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None, text_align="mid",
     ax_aspect = ax_width / ax_height
     ax_ylowerlim, ax_yupperlim = ax.get_ybound()
     ax_xlowerlim, ax_xupperlim = ax.get_xbound()
-    print(fig_aspect, text_size)
     if orientation == 'v':        
         offset_v =  (0.05 / fig_aspect) + .05
         if x is None:
@@ -63,8 +62,8 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None, text_align="mid",
 
     midpoint = np.mean(points, axis=0)
     points = rotate(points, origin=midpoint, degrees=rotation)
-    
-    line_width = 2 * np.max([fig_width, fig_height])
+    if line_width == None:
+        line_width = 2 * np.max([fig_width, fig_height])
     if orientation == 'v':
         text_x = points[0, 0] - offset_v * (ax.get_xlim()[1] - ax.get_xlim()[0])
         text_y = {'close': points[0, 1], 'mid': midpoint[1], 'far': points[1, 1]}[text_align]
