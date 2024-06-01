@@ -20,7 +20,7 @@ from pygor.plotting.custom import red_map, green_map, blue_map, violet_map, fish
 
 def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_crop = (0, 0), x_crop = (0 ,0),
     column_titles = ["588 nm", "478 nm", "422 nm", "375 nm"], colour_maps = [red_map, green_map, blue_map, violet_map],
-    contours = False, ax = None, high_contrast = True, remove_border = True, labels = None):
+    contours = False, ax = None, high_contrast = True, remove_border = True, labels = None, clim = None):
     if isinstance(colour_maps, Iterable) is False:
         colour_maps = [colour_maps] * len(column_titles)
     if isinstance(data_strf_object, pygor.classes.strf_data.STRF) is False:
@@ -31,7 +31,11 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
     else:
         strfs_chroma = pygor.utilities.multicolour_reshape(data_strf_object.collapse_times(), data_strf_object.numcolour)
         numcolour =  data_strf_object.numcolour
-    absmax = np.max(np.abs(strfs_chroma))
+    if clim == None:
+        abs_max = np.max(np.abs(strfs_chroma))
+        clim_vals = (-abs_max, abs_max)
+    else:
+        clim_vals = clim
     # Create iterators depneding on desired output
     if isinstance(specify_rois, int): # user specifies number of rois from "start", although negative is also allowed
         specify_rois = range(specify_rois, specify_rois+1)
@@ -60,8 +64,8 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
         # plotting depending on specified number of rois (more or less than 1)
         if len(specify_rois) > 1:
             for i in range(4):
-                strf = ax[-n-1, i].imshow(spaces[i], cmap = colour_maps[i])
-                strf.set_clim(-absmax, absmax)
+                strf = ax[-n-1, i].imshow(spaces[i], cmap = colour_maps[i], origin = "lower")
+                strf.set_clim(clim_vals)
                 if n == 0:
                     for j in range(numcolour):
                         ax[-n, j].set_title(column_titles[j])
@@ -72,7 +76,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
         else:
             for i in range(4):
                 strf = ax[i].imshow(spaces[i], cmap = colour_maps[i])
-                strf.set_clim(-absmax, absmax)
+                strf.set_clim(clim_vals)
                 if roi == 0:
                     for j in range(4):
                         ax[j].set_title(column_titles[j])
@@ -92,8 +96,7 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
             axis.set_yticklabels([])
             axis.set_ylabel(label, rotation = 'horizontal', labelpad = 15)
     # fig.tight_layout(pad = 0, h_pad = .1, w_pad=.1)
-    plt.close()
-    return fig
+    return fig, ax
 
 def _contours_plotter(data_strf_object, roi, index =  None, xy_offset = (0, 0), high_contrast = True, ax = None):
     if ax is None:
@@ -197,8 +200,8 @@ def visualise_summary(data_strf_object, specify_rois, ipl_sort = False,  y_crop 
         specify_rois = range(len(strfs_chroma[0, :]))
         if ipl_sort == True:
             specify_rois = data_strf_object.ipl_depths.argsort()
-    fig, ax = plt.subplots(len(specify_rois), 3, figsize = (5 *3 , len(specify_rois) * 3))
-    for n, roi in enumerate(specify_rois):
+    fig, ax = plt.subplots(len(specify_rois), 3, figsize = (3*1.3*2 , len(specify_rois) * 1.7))
+    for n, roi in enumerate(reversed(specify_rois)):
         # Summary of spatial components 
         #spaces = np.copy(pygor.utilities.auto_remove_border(strfs_chroma[:, roi])) # this works
         spaces = strfs_chroma[:, roi]
@@ -230,8 +233,9 @@ def visualise_summary(data_strf_object, specify_rois, ipl_sort = False,  y_crop 
            for colour in range(4):
                curr_colour = times[colour].T
                cax.plot(curr_colour, c = fish_palette[colour])
-        
+               cax.set_xticks(np.linspace(0, 20, 5), np.round(np.linspace(0, 1.3, 5), 2))
     plt.tight_layout()
+    return fig, ax 
 
 def tiling(Data_strf_object, deletion_threshold = 0, chromatic = False, x_lim = None, y_lim = None, **kwargs):
     """
