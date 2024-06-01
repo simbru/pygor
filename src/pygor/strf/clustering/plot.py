@@ -6,6 +6,7 @@ import numpy as np
 import seaborn
 import natsort
 import pandas as pd
+import pygor.plotting
 import pygor.strf.clustering
 try:
     from collections import Iterable
@@ -18,9 +19,9 @@ import joblib
 param_map = {
     "ampl" : "Max abs. amplitude (SD)",
     "area" : "Area (° vis. ang.$^2$)",
-    "centdom":"Dominant spectral centroid (Hz)" ,
-    "centneg":"Neg. spectral centroid (Hz)",
-    "centpos":"Pos. spectral centroid (Hz)",
+    "centdom":"Speed (Hz)" ,
+    "centneg":"Neg. speed (Hz)",
+    "centpos":"Pos. speed (Hz)",
     "ipl_depths":"Proportion of IPL pop. (%)",
 }
 
@@ -133,7 +134,7 @@ def plot_df_tuning(post_cluster_df, cluster_ids, group_by = "cluster_id", plot_c
                             percentages = percentage_hist_vals_condition / population_hist_vals_population * 100
                         i.barh(np.arange(0, 100, 10), width= percentages, height=10, color = 'b', edgecolor="black", alpha = .75)
                         i.set_label("skip_this")
-                        i.set_xlim(0, 105)
+                        i.set_xlim(0,40)
                     else:
                         hist = np.histogram(analyse_df.query(f"{group_by} == '{clust_id}'")["ipl_depths"], bins = 10, range=(0, 100))[0]
                         i.barh(np.arange(0, 100, 10), width= hist, height=10, color = 'b', edgecolor="black", alpha = .75)
@@ -143,8 +144,9 @@ def plot_df_tuning(post_cluster_df, cluster_ids, group_by = "cluster_id", plot_c
                     i.axhline(0, color = "grey", ls = "--")
                     colour_scheme = reversed(pygor.plotting.fish_palette)
                     sns.boxplot(df, palette = colour_scheme, ax = i)
-                    sns.stripplot(df, palette = 'dark:k', ax = i)
+                    sns.stripplot(df, palette = 'dark:k', ax = i, alpha = .5)
                     i.set_xticks([])
+                    i.invert_xaxis()
         # Okay, now we need to figure out which columns to lower the oppacity on 
         # depending on if area == 0... Hold my beer:
         ## First let's find where we need to make changes 
@@ -193,18 +195,18 @@ def stats_summary(clust_df, cat = "on", **kwargs):
         unique_cols_sans_wavelength.append("ipl_depths")
     num_stats = len(unique_cols_sans_wavelength)
     # # pruned_df.filter(regex = "ampl|area|cluster")
-    fig, ax = plt.subplots(len(clust_labels), num_stats, figsize = (num_stats*3.5, len(clust_labels)*3), dpi = 80)
+    fig, ax = plt.subplots(len(clust_labels), num_stats, figsize = (num_stats*1.9*2, len(clust_labels)*2), dpi = 100)
     for n, i in enumerate(clust_ids):
         # Assign label accordingly
         if n == 0:
             for a, param_label in zip(ax[0, 0:num_stats], unique_cols_sans_wavelength):
-                a.set_title(param_map[param_label])
+                a.set_title(param_map[param_label], size = 10)
         # Do the rest of the plotting # Regex for fetching all columns wiht name_000 combo, and ipl_depths, and cluser columns
         plot_df_tuning(clust_df, [i], ax = ax[n, 0:num_stats], **kwargs)
     for i, cl_id in zip(ax[:, 0], clust_ids):
         i.set_ylabel(f"{cl_id}", rotation = 0,  labelpad = 30)
     fig.tight_layout() #merged_stats_df
-    plt.suptitle(f"Category: {cat}", size = 20, y = .98)
+    #plt.suptitle(f"Category: {cat}", size = 20, y = .98)
     plt.subplots_adjust(top = .95)
 
     for col in range(num_stats):
@@ -232,8 +234,8 @@ def _imshow_spatial_reconstruct(df, cluster_id_str, axs=None, parallel=None, **k
     # Loop over axes and plot, etc:
     for (n, ax) in enumerate(rf_recons):
         if n == 0:
-            axs.flat[n].set_ylabel(cluster_id_str)
-        im = axs.flat[n].imshow(rf_recons[n], cmap=pygor.plotting.custom.maps_concat[n])
+            axs.flat[n].set_ylabel(cluster_id_str, rotation = 0,  labelpad = 20)
+        im = axs.flat[n].imshow(rf_recons[n], cmap=pygor.plotting.custom.maps_concat[n], origin = "lower")
         #axs.flat[n].axis('off')
         axs.flat[n].spines["top"].set_visible(False)
         axs.flat[n].spines["bottom"].set_visible(False)
@@ -322,7 +324,9 @@ def plot_spacetime_reconstruct(clust_df, cluster_id_strings, parallel=True):
         for n, c_id in enumerate(cluster_id_strings):
             _plot_temporal_reconstruct(clust_df, c_id, axs=ax[n, 4:8], parallel=None)
     # Now post-process plot however you'd like:
-
+    pygor.plotting.add_scalebar(4.6153, string = "300 ms", ax = ax[-1, -4], x = 0, y = .1, orientation = 'h', line_width = 5, text_size = 8)
+    pygor.plotting.add_scalebar(10, string = f"35.3 °", ax = ax[-1, 0], x = 0, orientation = 'h', line_width = 5, text_size = 8)
+    
     plt.show()
     return fig, ax
 # def strf_summary():
