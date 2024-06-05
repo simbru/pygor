@@ -31,11 +31,19 @@ def chroma_overview(data_strf_object, specify_rois=None, ipl_sort = False, y_cro
     else:
         strfs_chroma = pygor.utilities.multicolour_reshape(data_strf_object.collapse_times(), data_strf_object.numcolour)
         numcolour =  data_strf_object.numcolour
+    # Handle colour limits
     if clim == None:
+        # Use the abs max of the entre input
         abs_max = np.max(np.abs(strfs_chroma))
         clim_vals = (-abs_max, abs_max)
     else:
+        # Otherwise use user input (two floats or ints)
         clim_vals = clim
+    """
+    TODO:
+        - Clim equalisation per ROI by passing clim = "roi"
+        - Calculate abs max for each 'spaces[i:i+4]' 
+    """
     # Create iterators depneding on desired output
     if isinstance(specify_rois, int): # user specifies number of rois from "start", although negative is also allowed
         specify_rois = range(specify_rois, specify_rois+1)

@@ -75,7 +75,8 @@ def pc_summary(clust_pca_df, pca_dict, axis_ranks = [(1, 0)]):
     fig.tight_layout()
 
 def plot_df_tuning(post_cluster_df, cluster_ids, group_by = "cluster_id", plot_cols = "all",        
-    print_stat = False, ax = None, add_cols = ["ipl_depths"], ipl_percentage = True):
+    print_stat = False, ax = None, add_cols = ["ipl_depths"], ipl_percentage = True,
+    boxplot = True, scatter = True):
     
     """
     TODO:
@@ -143,8 +144,12 @@ def plot_df_tuning(post_cluster_df, cluster_ids, group_by = "cluster_id", plot_c
                     df = analyse_df.query(f"{group_by} == '{clust_id}'").filter(like=f"{param}")
                     i.axhline(0, color = "grey", ls = "--")
                     colour_scheme = reversed(pygor.plotting.fish_palette)
-                    sns.boxplot(df, palette = colour_scheme, ax = i)
-                    sns.stripplot(df, palette = 'dark:k', ax = i, alpha = .5)
+                    if boxplot == True:
+                        sns.boxplot(df, palette = colour_scheme, ax = i)
+                    if boxplot == False and scatter == True:
+                        sns.stripplot(df, palette = colour_scheme, ax = i, alpha = .2)
+                    elif scatter == True:
+                        sns.stripplot(df, palette = 'dark:k', ax = i, alpha = .5)
                     i.set_xticks([])
                     i.invert_xaxis()
         # Okay, now we need to figure out which columns to lower the oppacity on 
@@ -183,7 +188,7 @@ def plot_df_tuning(post_cluster_df, cluster_ids, group_by = "cluster_id", plot_c
                     line.set_alpha(alpha_val)    
     return fig, ax
 
-def stats_summary(clust_df, cat = "on", **kwargs):
+def stats_summary(clust_df, cat = "on", boxplot = True, scatter = True, figsize = None, figsize_scaler = 2, **kwargs):
     # # Vizualize n clusters
     clust_labels = natsort.natsorted(pd.unique(clust_df.query(f'cat_pol == "{cat}"')["cluster"]))
     clust_ids    = natsort.natsorted(pd.unique(clust_df.query(f'cat_pol == "{cat}"')["cluster_id"]))
@@ -195,14 +200,16 @@ def stats_summary(clust_df, cat = "on", **kwargs):
         unique_cols_sans_wavelength.append("ipl_depths")
     num_stats = len(unique_cols_sans_wavelength)
     # # pruned_df.filter(regex = "ampl|area|cluster")
-    fig, ax = plt.subplots(len(clust_labels), num_stats, figsize = (num_stats*1.9*2, len(clust_labels)*2), dpi = 100)
+    if figsize == None:
+        figsize = (num_stats * figsize_scaler *1.2, len(clust_labels) * figsize_scaler)
+    fig, ax = plt.subplots(len(clust_labels), num_stats, figsize = figsize, dpi = 100)
     for n, i in enumerate(clust_ids):
         # Assign label accordingly
         if n == 0:
             for a, param_label in zip(ax[0, 0:num_stats], unique_cols_sans_wavelength):
                 a.set_title(param_map[param_label], size = 10)
         # Do the rest of the plotting # Regex for fetching all columns wiht name_000 combo, and ipl_depths, and cluser columns
-        plot_df_tuning(clust_df, [i], ax = ax[n, 0:num_stats], **kwargs)
+        plot_df_tuning(clust_df, [i], ax = ax[n, 0:num_stats], boxplot = boxplot, scatter = scatter, **kwargs)
     for i, cl_id in zip(ax[:, 0], clust_ids):
         i.set_ylabel(f"{cl_id}", rotation = 0,  labelpad = 30)
     fig.tight_layout() #merged_stats_df

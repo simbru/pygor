@@ -13,6 +13,7 @@ import scipy.stats
 import warnings
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.legend_handler import HandlerTuple
+import natsort
 
 label_mappings = {
     "588"  : "LWS",
@@ -280,7 +281,9 @@ def ipl_summary_chroma(roi_df, numcolours = 4, figsize = (12, 7), legend = True)
             # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
             percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
             # percentages = hist_vals_per_condition
-            ax[n, m].barh(np.arange(0, 100, 10), width= percentages, height=10, color = pygor.plotting.custom.fish_palette[m], edgecolor="black", alpha = 0.75, label  = colours_map[j])        
+            ax[n, m].barh(np.arange(0, 100, 10), width= percentages, height=10, 
+                color = pygor.plotting.custom.fish_palette[m], edgecolor="black", 
+                alpha = 0.75, label  = colours_map[j])
             ax[n, m].grid(False)
             ipl_border = 55
             ax[n, m].axhline(ipl_border, c = "k", ls = "--")
@@ -288,12 +291,12 @@ def ipl_summary_chroma(roi_df, numcolours = 4, figsize = (12, 7), legend = True)
             # ax[n, m].spines["bottom"].set_visible(False)
             if m == 0:
                 ax[n, m].set_ylabel("IPL depth (%)")
-                ax[n, m].text(x = ax[n, m].get_xlim()[1] - ax[n, m].get_xlim()[1] * 0.175, y = ipl_border + 5, va = 'center', s = "OFF", size = 10)
-                ax[n, m].text(x = ax[n, m].get_xlim()[1] - ax[n, m].get_xlim()[1] * 0.175, y = ipl_border - 5, va = 'center', s = "ON", size = 10)
+                ax[n, m].text(x = ax[n, m].get_xlim()[1] - ax[n, m].get_xlim()[1] * 0.175, y = ipl_border + 10, va = 'center', s = "OFF", size = 10)
+                ax[n, m].text(x = ax[n, m].get_xlim()[1] - ax[n, m].get_xlim()[1] * 0.175, y = ipl_border - 10, va = 'center', s = "ON", size = 10)
                 if i == -1:
-                    ax[n, m].set_title("OFF", weight = "bold", c = "grey", loc = "left")
+                    ax[n, m].set_title("OFF", weight = "bold", loc = "left")
                 if i == 1:
-                    ax[n, m].set_title("ON", weight = "bold", loc = "left")
+                    ax[n, m].set_title("ON", weight = "bold", c = "grey", loc = "left")
             #ax[0, m].set_title(custom.nanometers[m] + "nm", size = 12)
             num_cells = int(len(np.unique(roi_df.index)) / numcolours)
             ax[1, 0].set_xlabel(f"Percentage by colour (n = {num_cells})", size = 10)
@@ -304,9 +307,9 @@ def ipl_summary_chroma(roi_df, numcolours = 4, figsize = (12, 7), legend = True)
             handles.append(handle)
             labels.append(label)
             # ax[0, 3].legend(handles, labels)
-            labels_ = list(set([i[0] for i in labels]))
-            handles_ = [i[0] for i in handles[:len(labels_)]]
-            ax.flat[-1].legend(handles_, labels_, handler_map={tuple: HandlerTuple(ndivide=None)}, bbox_to_anchor=(1.04, 1.4), loc="upper left")
+        labels_ = natsort.natsorted(list(set([i[0] for i in labels])))
+        handles_ = [i[0] for i in handles[:len(labels_)]]
+        ax.flat[-1].legend(handles_, labels_, handler_map={tuple: HandlerTuple(ndivide=None)}, bbox_to_anchor=(1.04, 1.4), loc="upper left")
     return fig, ax 
 
 def ipl_summary_polarity_roi(roi_df, numcolours = 4, figsize = (8, 4), polarities = [-1, 1]):
