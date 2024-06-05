@@ -821,6 +821,9 @@ class STRF(Core):
         spectrum_pos = np.array([pygor.strf.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 1]])
         return spectrum_neg, spectrum_pos
 
+    def unravel_chroma_roi(strf_obj, roi, chroma_index, multichroma_dim = 0, roi_dim = 1):
+        return np.ravel_multi_index([roi, chroma_index], np.array(strf_obj.strfs_chroma.shape)[[roi_dim, multichroma_dim]])
+
     def demo_contouring(self, roi, chromatic_reshape = False):
         plt.close()
         fig, ax = plt.subplots(2, 6, figsize = (16*1.5, 4*1.5))
@@ -841,7 +844,7 @@ class STRF(Core):
     def plot_timecourse(self, roi):
         plt.plot(self.get_timecourses()[roi].T)
     
-    def plot_chromatic_overview(self, roi = None, contours = True, **kwargs):
+    def plot_chromatic_overview(self, roi = None, contours = False, **kwargs):
         with warnings.catch_warnings(record=True) as w:
             # Cause all warnings to always be triggered.
             warnings.simplefilter("always")
