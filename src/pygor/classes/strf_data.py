@@ -410,7 +410,7 @@ class STRF(Core):
             space_pvals = self.pval_space
             __contours = [pygor.strf.contouring.bipolar_contour(arr) # ensures no contour is drawn if pval not sig enough
                             if time_pvals[count] < self.bs_settings["time_sig_thresh"] and space_pvals[count] < self.bs_settings["space_sig_thresh"]
-                            else  ([], [])
+                            else  (np.array([]), np.array([]))
                             for count, arr in enumerate(self.collapse_times())]
         if self.bs_settings["do_bootstrap"] == False:
             __contours = [pygor.strf.contouring.bipolar_contour(arr) for count, arr in enumerate(self.collapse_times())]

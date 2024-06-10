@@ -279,9 +279,9 @@ def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_res
     _pos_targets = _detect_targets(pos_filter, thresh_value = abs_thresh_val)
     # Threshold targets 
     if len(_neg_targets) <= min_targets:
-        _neg_targets = []
+        _neg_targets = np.array([])
     if len(_pos_targets) <= min_targets:
-        _pos_targets = []
+        _pos_targets = np.array([])
     # Plot that process, conditionally
     if plot_results is True:
         neg_filter = np.clip(spatial_filter, None, 0)
@@ -309,13 +309,13 @@ def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_res
     
     # Neg contours quality check
     if isinstance(_neg_targets, list) and _neg_targets == []:
-        neg_contours = []
+        neg_contours = np.array([])
     else:
         # Check that mask is not inverse RF surround
         neg_mask_flood = skimage.morphology.flood_fill(neg_mask, (0, 0), 0)
         neg_mask_sum = neg_mask_flood + pos_mask
         if np.all(neg_mask_sum == 1):
-            neg_contours = []
+            neg_contours = np.array([])
         # Otherwise, go ahead and get contour
         else:
             if plot_results is True:
@@ -325,13 +325,13 @@ def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_res
         
     # Pos contours quality check
     if isinstance(_pos_targets, list) and _pos_targets == []:
-        pos_contours = []
+        pos_contours = np.array([])
     else:
         # Check that mask is not inverse RF surround 
         pos_mask_flood = skimage.morphology.flood_fill(pos_mask, (0, 0), 0) 
         pos_mask_sum = pos_mask_flood + neg_mask
         if np.all(pos_mask_sum == 1):
-            pos_contours = []
+            pos_contours = np.array([])
         # Otherwise, go ahead and get contour
         else:
             if plot_results is True:
