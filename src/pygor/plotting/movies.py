@@ -20,7 +20,7 @@ import pygor.strf.temporal
 import pygor.strf.contouring
 from . import custom
 
-def play_movie(d3_arr, figaxim_return = False,**kwargs):
+def play_movie(d3_arr, figaxim_return = False, rgb_repr=False,**kwargs):
     # This is way more efficient than the legacy version and does not rely on ipywidgets
     # https://stackoverflow.com/questions/39472017/how-to-animate-the-colorbar-in-matplotlib
 
@@ -30,8 +30,12 @@ def play_movie(d3_arr, figaxim_return = False,**kwargs):
     plot_settings["figure.dpi"] = 100
     plot_settings["savefig.facecolor"] = "white"
     # Check attributes and kwargs
-    if d3_arr.ndim != 3:
-        raise AttributeError("Array passed to function is not three dimensional (3D). Shape should be: (time,y,x)")
+    if rgb_repr is False:
+        if d3_arr.ndim != 3:
+            raise AttributeError("Array passed to function is not three dimensional (3D). Shape should be: (time,y,x)")
+    if rgb_repr is True:
+        if d3_arr.shape[-1] != 3:
+            raise AttributeError("Expected RGB representation in final index. Shape should be: (time,y,x,RGB)")
     if 'cmap' not in kwargs:
         kwargs['cmap'] = 'Greys_r'
     else:
