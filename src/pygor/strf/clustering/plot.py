@@ -142,7 +142,6 @@ def plot_df_tuning(post_cluster_df, cluster_ids, group_by = "cluster_id", plot_c
                         i.set_label("skip_this")
                 else:
                     df = analyse_df.query(f"{group_by} == '{clust_id}'").filter(like=f"{param}")
-                    i.axhline(0, color = "grey", ls = "--")
                     colour_scheme = reversed(pygor.plotting.fish_palette)
                     if boxplot == True:
                         sns.boxplot(df, palette = colour_scheme, ax = i)
@@ -152,6 +151,8 @@ def plot_df_tuning(post_cluster_df, cluster_ids, group_by = "cluster_id", plot_c
                         sns.stripplot(df, palette = 'dark:k', ax = i, alpha = .5)
                     i.set_xticks([])
                     i.invert_xaxis()
+        for ax in _ax.flat:
+            ax.axhline(0, color = "grey", ls = "--")
         # Okay, now we need to figure out which columns to lower the oppacity on 
         # depending on if area == 0... Hold my beer:
         ## First let's find where we need to make changes 
