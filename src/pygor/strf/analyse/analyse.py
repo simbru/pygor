@@ -19,7 +19,7 @@ import pandas as pd
 import warnings
 import joblib 
 
-def _roi_by_roi_dict(data_strf_obj): #
+def _roi_by_roi_dict(data_strf_obj, df_return=False): #
     """
     Process STRF objects and extract relevant information into a dictionary suitable for DataFrame creation.
 
@@ -177,7 +177,10 @@ def _roi_by_roi_dict(data_strf_obj): #
                     dict[i] = dict[i].astype(float)
                     difference = expected_lengths - len(dict[i])
                     dict[i]=  np.pad(dict[i], (difference,0), constant_values=np.nan)
+    if df_return is False:
         return dict
+    if df_return is True:
+        return pd.DataFrame(dict)
 
 def _recording_dict(data_strf_obj):
     """
@@ -230,7 +233,7 @@ def _recording_dict(data_strf_obj):
     dict["ObjXYZ"] = [metadata.pop("objectiveXYZ")]
     return dict
 
-def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], ampl_thresh = 1, store_data = True, df_return = False):
+def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], ampl_thresh = 1, store_exp = True, df_return = False):
         """
         Generate a chromaticity dictionary from a data structure object.
 
@@ -307,7 +310,7 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], 
                 dict[f"peakneg_{i}"] = neg_peak_t[n]
                 dict[f"peakpos_{i}"] = pos_peak_t[n]
                 dict[f"comp_{i}"] = complexities[n]
-                if store_data == True:
+                if store_exp == True:
                     dict[f"temporal_{i}"] = temporal_filter[n].tolist()
                     dict[f"spatial_{i}"] = spatial_filter[n].tolist()
                 dict["strf_obj"] = data_strf_obj 
@@ -338,7 +341,7 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], 
         else:
             raise AttributeError("Attribute 'multicolour' is not True. Manual fix required.")
 
-def chromatic_stats(exp_obj : pygor.classes.experiment.Experiment, store_data = True, parallel = False) -> pd.DataFrame:
+def chromatic_stats(exp_obj : pygor.classes.experiment.Experiment, store_exp = True, parallel = False) -> pd.DataFrame:
     """
     Generate a DataFrame containing chromatic statistics from an Experiment object.
 
@@ -355,18 +358,18 @@ def chromatic_stats(exp_obj : pygor.classes.experiment.Experiment, store_data = 
     if parallel is False:
         chromatic_df_list = []
         for object in exp_obj.recording:
-            curr_dict = _chromatic_dict(object, store_data=store_data)
+            curr_dict = _chromatic_dict(object, store_exp=store_exp)
             chromatic_df_list.append(pd.DataFrame(curr_dict))
     else:
         with joblib.Parallel(n_jobs=-1) as parallel:
-            chromatic_df_list = parallel(joblib.delayed(_chromatic_dict)(object, store_data=store_data, df_return=True) for object in exp_obj.recording)                                                    
+            chromatic_df_list = parallel(joblib.delayed(_chromatic_dict)(object, store_exp=store_exp, df_return=True) for object in exp_obj.recording)                                                    
     final_df = pd.concat(chromatic_df_list, ignore_index=True)
     final_df["bool_area"] = np.any(np.abs(final_df.filter(like = "ampl")) > 1 , axis = 1)
     final_df["bool_ampl"] = np.any(np.abs(final_df.filter(like = "area")) > 0 , axis = 1)
     final_df["bool_pass"]  = np.all([final_df["bool_ampl"], final_df["bool_area"]], axis = 0)
     return final_df
 
-def roi_stats(exp_obj : pygor.classes.experiment.Experiment) -> pd.DataFrame:
+def roi_stats(exp_obj : pygor.classes.experiment.Experiment, parallel = True) -> pd.DataFrame:
     """
     Generate statistics dataframe for regions of interest in the given experiment.
 
@@ -380,10 +383,14 @@ def roi_stats(exp_obj : pygor.classes.experiment.Experiment) -> pd.DataFrame:
     pandas.DataFrame
         Concatenated dataframe of statistics for each region of interest.
     """
-    roi_dict = []
-    for object in exp_obj.recording:
-        curr_dict = _roi_by_roi_dict(object)
-        roi_dict.append(pd.DataFrame(curr_dict))
+    if parallel is False:
+        roi_dict = []
+        for object in exp_obj.recording:
+            curr_dict = _roi_by_roi_dict(object)
+            roi_dict.append(pd.DataFrame(curr_dict))
+    else:
+        with joblib.Parallel(n_jobs=-1) as parallel:
+            roi_dict = parallel(joblib.delayed(_roi_by_roi_dict)(object, df_return = True) for object in exp_obj.recording)
     return pd.concat(roi_dict, ignore_index=True)
 
 def rec_info(exp_obj : pygor.classes.experiment.Experiment) -> pd.DataFrame:
