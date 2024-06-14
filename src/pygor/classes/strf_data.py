@@ -118,7 +118,7 @@ class STRF(Core):
         return pygor.utilities.multicolour_reshape(self.strfs, self.numcolour)
     
     ## Bootstrapping
-    def __calc_pval_time(self) -> np.ndarray:
+    def __calc_pval_time(self, parallel = True) -> np.ndarray:
         """
         Calculate the p-value for each time point in the data.
 
@@ -128,10 +128,10 @@ class STRF(Core):
         # Generate bar for beuty
         bar = tqdm(self.strfs, leave = False, position = 1, disable = None, 
             desc = f"Hang on, bootstrapping pygor.strf.temporal components {self.bs_settings['time_bs_n']} times")
-        self._pval_time = np.array([pygor.strf.bootstrap.bootstrap_time(x, bootstrap_n=self.bs_settings["time_bs_n"]) for x in bar])
+        self._pval_time = np.array([pygor.strf.bootstrap.bootstrap_time(x, bootstrap_n=self.bs_settings["time_bs_n"], parallel = parallel) for x in bar])
         return self._pval_time
 
-    def __calc_pval_space(self) -> np.ndarray:
+    def __calc_pval_space(self, parallel = True) -> np.ndarray:
         """
         Calculate the p-value space for the spatial components.
 
@@ -146,7 +146,7 @@ class STRF(Core):
         # Again, bar for niceness
         bar = tqdm(self.strfs, leave = False, position = 1, disable = None,
             desc = f"Hang on, bootstrapping spatial components {self.bs_settings['space_bs_n']} times")
-        self._pval_space = np.array([pygor.strf.bootstrap.bootstrap_space(x, bootstrap_n=self.bs_settings["space_bs_n"]) for x in bar])
+        self._pval_space = np.array([pygor.strf.bootstrap.bootstrap_space(x, bootstrap_n=self.bs_settings["space_bs_n"], parallel=parallel) for x in bar])
 
     def set_bootstrap_settings_default(self) -> None:
         """
@@ -257,7 +257,7 @@ class STRF(Core):
                 if none_default_key:
                     print(f"Keys set to default values: {[(i, default_dict[i]) for i in none_default_key]}")
 
-    def run_bootstrap(self, force = False) -> None:
+    def run_bootstrap(self, force = False, parallel = False) -> None:
         """run_bootstrap Runs bootstrapping according to self.bs_settings
 
         Returns
