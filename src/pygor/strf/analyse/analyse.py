@@ -154,7 +154,8 @@ def _roi_by_roi_dict(data_strf_obj, df_return=False): #
         dom_centroid = np.where(np.nan_to_num(neg_largest) > np.nan_to_num(pos_largest), neg_centroids, pos_centroids)
         dom_centroid = np.where(contour_area_total > 0, dom_centroid, 0)
         dict["dom_centroids"] = dom_centroid
-        
+        dict["time_amplitude"] = data_strf_obj.get_time_amps()
+        dict["space_amplitude"] = data_strf_obj.get_space_amps()
         # Proof of concept for assigning entire arrays 
         #dict["-timecourse"] = data_strf_obj.get_timecourses()[:, 0].tolist()
         #dict["+timecourse"] = data_strf_obj.get_timecourses()[:, 1].tolist()
