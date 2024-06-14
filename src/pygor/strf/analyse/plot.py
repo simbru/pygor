@@ -35,6 +35,14 @@ title_mappings = {
     "centdom" : "Spectral centroid (Hz)",
 }
 
+stat_mappings = {
+    "neg_contour_area" : "Area for negative contours (° vis. ang.$^2$)",
+    "pos_contour_area" : "Area for positive contours (° vis. ang.$^2$)",
+    "contour_area_total" : "Total area (° vis. ang.$^2$)",
+    "total_contour_area_largest" : "Largest contour area(° vis. ang.$^2$)",
+    "dom_centroids" : "Spectral centroid (Hz)",
+}
+
 pval_mappings = {
     "area" : "pval_space",
     "diam" : "pval_space",
@@ -342,6 +350,72 @@ def ipl_summary_polarity_roi(roi_df, numcolours = 4, figsize = (8, 4), polaritie
     axs[0].set_xlabel(f"Percentage by polarity (n = {num_cells})", size = 10)
     plt.show()
     return fig, ax
+
+def plot_roi_hist(roi_df, stat = "contour_area_total", conditional = None, category = "colour", bins = "auto", binwidth = None, **kwargs):
+    '''This function `plot_roi_hist` creates histograms of a specified statistic within regions of interest
+    (ROIs) based on different categories such as color or polarity.
+    
+    Parameters
+    ----------
+    roi_df
+        The `roi_df` parameter is a DataFrame containing data related to regions of interest (ROIs) that
+    you want to plot histograms for.
+    stat, optional
+        The `stat` parameter in the `plot_roi_hist` function represents the statistical measure that will
+    be plotted in the histogram. It could be values like "contour_area_total", "contour_complexity",
+    "dom_peaktime", etc., depending on the data you are working with.
+    conditional
+        The `conditional` parameter in the `plot_roi_hist` function is used to specify a condition that the
+    data must meet in order to be included in the histogram plot (condtional > 0). If the `conditional` parameter is not
+    provided, it defaults to the value of the `stat` parameter. This condition is used
+    category, optional
+        The `category` parameter in the `plot_roi_hist` function specifies how the data should be grouped
+    or categorized for plotting. It can take on two possible values:
+    bins, optional
+        The `bins` parameter in the `plot_roi_hist` function specifies the number of bins to use for the
+    histogram. If set to "auto", the function will automatically determine the number of bins to use
+    based on the data. If you have a specific number of bins in mind, you can provide
+    binwidth
+        The `binwidth` parameter in the `plot_roi_hist` function specifies the width of each bin in the
+    histogram. It allows you to control the size of the bins in the histogram plot. If you set a
+    specific `binwidth`, the histogram will be divided into bins of that width.
+    
+    '''
+    try:
+        title = stat_mappings[stat]
+    except KeyError:
+        title = stat
+    if conditional == None:
+        conditional = stat
+    if category == "colour":
+        fig, ax = plt.subplots(4,1, figsize = (2.5, 2.35* 2), sharex=True, sharey=True, gridspec_kw={'hspace': 0})
+        non_zeros = roi_df.query(f"{conditional} > 0")
+        sns.histplot(data = non_zeros.query("colour == 'R'"), x = stat, color=pygor.plotting.custom.fish_palette[0], ax = ax.flat[0], element="bars", kde = True, bins = bins, binwidth = binwidth, **kwargs)
+        sns.histplot(data = non_zeros.query("colour == 'G'"), x = stat, color=pygor.plotting.custom.fish_palette[1], ax = ax.flat[1], element="bars", kde = True, bins = bins, binwidth = binwidth, **kwargs)
+        sns.histplot(data = non_zeros.query("colour == 'B'"), x = stat, color=pygor.plotting.custom.fish_palette[2], ax = ax.flat[2], element="bars", kde = True, bins = bins, binwidth = binwidth, **kwargs)
+        sns.histplot(data = non_zeros.query("colour == 'UV'"),x = stat, color=pygor.plotting.custom.fish_palette[3], ax = ax.flat[3], element="bars", kde = True, bins = bins, binwidth = binwidth, **kwargs)
+        colours = ["R", "G", "B", "UV"]
+        for a, c in zip(ax.flat, colours):
+            a.set_ylabel("")
+            a.axvline(np.average(non_zeros.query(f"colour == '{c}'")[stat]), c = "k", ls = "--")
+            a.set_yticks([])
+        plt.tight_layout()
+    if category == "polarity":
+        fig, ax = plt.subplots(2,1, figsize = (2.2, 2.85), sharex=True, sharey=True, gridspec_kw={'hspace': 0})
+        non_zeros = roi_df.query(f"{conditional} > 0")
+        polarities = [-1, 1]
+        for n, polarity in enumerate(polarities):
+            sns.histplot(data = non_zeros.query(f"polarity == {polarity}"), x = stat, 
+                        color=pygor.plotting.custom.polarity_palette[n], ax = ax.flat[n], element="bars", 
+                        kde = True, line_kws = {"color": "k"}, bins = bins, binwidth = binwidth, **kwargs)
+            ax[n].lines[0].set_color('k')
+        for a, c in zip(ax.flat, polarities):
+            a.set_ylabel("")
+            a.axvline(np.median(non_zeros.query(f"polarity == {c}")[stat]), c = "k", ls = "--")
+            a.set_yticks([])
+            a.set_ylim(bottom = 0)
+    pygor.plotting.add_scalebar(25, string = "25 ROIs", ax = ax[-1], orientation = 'v', x = 1.1, rotation = 180)
+    a.set_xlabel(title)
 
 def ipl_summary_polarity_chroma(chroma_df, numcolours = 4, figsize = (8, 4), cat_pol = ['off', 'on']):
     polarities = ['off', 'on']#, 'opp']
