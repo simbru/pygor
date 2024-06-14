@@ -223,7 +223,7 @@ def bootstrap_time(arr_3d, bootstrap_n=2500, mode_param=2, mode="sd",
     
     if not parallel:
         perm_stat_list = np.array([_permute_iteration(org_time, rng) for _ in range(bootstrap_n)])
-    else:
+    if parallel:
         seeds = rng.integers(0, 1e9, size=bootstrap_n)
         
         def parallel_permute(seed_batch):
@@ -231,9 +231,9 @@ def bootstrap_time(arr_3d, bootstrap_n=2500, mode_param=2, mode="sd",
             return [_permute_iteration(org_time, local_rng) for _ in seed_batch]
         
         # Optimize batch size based on your system's capabilities
-        batch_size = 10  # Adjust batch size for optimal performance
+        batch_size = 20  # Adjust batch size for optimal performance
         seed_batches = [seeds[i:i + batch_size] for i in range(0, bootstrap_n, batch_size)]
-        perm_stat_batches = Parallel(n_jobs=-1, prefer="threads")(delayed(parallel_permute)(batch) for batch in seed_batches)
+        perm_stat_batches = Parallel(n_jobs=-1)(delayed(parallel_permute)(batch) for batch in seed_batches)
         perm_stat_list = np.concatenate(perm_stat_batches)
     
     epsilon = 1e-10

@@ -130,7 +130,7 @@ def load(file_path, as_class = None, **kwargs):
     """
     return _load_parser(file_path, as_class = as_class, **kwargs)
 
-def load_list(paths_list, as_class = None, **kwargs) -> [pathlib.WindowsPath]:
+def load_list(paths_list, as_class = None, parallel = True, **kwargs) -> list[pathlib.WindowsPath]:
     """
     Converts a list of paths to a list of objects, optionally using a specified class for instantiation
     of .h5 files (otherwise will throw an error).
@@ -154,18 +154,24 @@ def load_list(paths_list, as_class = None, **kwargs) -> [pathlib.WindowsPath]:
         reminding you to specify `as_class` for accurate initialisation.
     """
 
-    progress_bar = tqdm(paths_list, desc = "Iterating through and loading listed files", position = 0,
-    leave = True)
-    objects_list = []
-    out = Output()
-    display(out)  # noqa: F821
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=RuntimeWarning)
-        warnings.filterwarnings("ignore", category=UserWarning)
-        with out:
-            for i in progress_bar:
-                objects_list.append(_load_parser(i, as_class=as_class, **kwargs))
-                out.clear_output()
+    if parallel is True:
+        print("Launching parallel loading...")
+        objects_list = joblib.Parallel(n_jobs = -1)(joblib.delayed(_load_parser)(i, as_class=as_class, **kwargs) for i in paths_list)
+    else:
+        print("Iterating through and loading listed files...")
+        progress_bar = tqdm(paths_list, desc = "Iterating through and loading listed files", position = 0,
+        leave = True)
+
+        objects_list = []
+        out = Output()
+        display(out)  # noqa: F821
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            warnings.filterwarnings("ignore", category=UserWarning)
+            with out:
+                for i in progress_bar:
+                    objects_list.append(_load_parser(i, as_class=as_class, **kwargs))
+                    out.clear_output()
     return objects_list
 
 def _load_and_save(file_path, output_folder, as_class, **kwargs):
