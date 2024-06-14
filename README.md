@@ -7,9 +7,9 @@ Your one-stop shop for fetching Baden-lab processed IGOR data via H5 files, and 
 ## Here's the main points:
 
 - Pygor consists of data-objects, data-object-specific directories, and an Experiment (name to be decided) class that allows you to collect data-objects and analyse them using the data-directories.
-- Pygor classes are built using [dataclasses](https://docs.python.org/3/library/dataclasses.html), which are simple Python classes which store information and methods with minimal configuration and templating.
+- Pygor classes are built using [dataclasses](https://docs.python.org/3/library/dataclasses.html), which are simple Python classes that store information and methods with minimal configuration and templating.
 - The special Pygor class `pygor.classes.experiment.Experiment` provides a handy way to collate Pygor objects, in such a way that analyses can be ran on arbitrarily many datasets at a time.
-- Pygor classes can be built by inheriting the `pygor.classes.core_data.Core` object, which comes with handy methods like plotting your scan average, ROI positions, amd gettomg contextual help with parsing the data and methods availible in your new object.
+- Pygor classes can be built by inheriting the `pygor.classes.core_data.Core` object, which comes with handy methods like plotting your scan average, ROI positions, amd getting contextual help.
 - Pygor objects can be called simply by passing `from pygor.load import "class name"`, as the import logic dictated by `pygor.load.py` takes care of the potentially confusing (and mostly just annoying) navigation of the directory structure, which can serve as a barrier of entry to novice users.
 - Extending the functionality of Pygor is intended to be *simple*. There are certain design princples the user can follow in order to build out their own analyses pipelines, that can be shared and further improved by other users.
 
