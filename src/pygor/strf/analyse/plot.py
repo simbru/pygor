@@ -351,7 +351,7 @@ def ipl_summary_polarity_roi(roi_df, numcolours = 4, figsize = (8, 4), polaritie
     plt.show()
     return fig, ax
 
-def plot_roi_hist(roi_df, stat = "contour_area_total", conditional = None, category = "colour", bins = "auto", binwidth = None, **kwargs):
+def plot_roi_hist(roi_df, stat = "contour_area_total", conditional = 'default', category = "colour", bins = "auto", binwidth = None, **kwargs):
     '''This function `plot_roi_hist` creates histograms of a specified statistic within regions of interest
     (ROIs) based on different categories such as color or polarity.
     
@@ -385,33 +385,35 @@ def plot_roi_hist(roi_df, stat = "contour_area_total", conditional = None, categ
         title = stat_mappings[stat]
     except KeyError:
         title = stat
-    if conditional == None:
-        conditional = stat
+    if conditional == 'default':
+        roi_df = roi_df.query(f"contour_area_total > 0")
+    elif conditional != None or conditional != 'default':
+        roi_df = roi_df.query(f"{conditional} > 0")
     if category == "colour":
         fig, ax = plt.subplots(4,1, figsize = (2.5, 2.35* 2), sharex=True, sharey=True, gridspec_kw={'hspace': 0})
-        non_zeros = roi_df.query(f"{conditional} > 0")
-        sns.histplot(data = non_zeros.query("colour == 'R'"), x = stat, color=pygor.plotting.custom.fish_palette[0], ax = ax.flat[0], element="bars", kde = True, bins = bins, binwidth = binwidth, **kwargs)
-        sns.histplot(data = non_zeros.query("colour == 'G'"), x = stat, color=pygor.plotting.custom.fish_palette[1], ax = ax.flat[1], element="bars", kde = True, bins = bins, binwidth = binwidth, **kwargs)
-        sns.histplot(data = non_zeros.query("colour == 'B'"), x = stat, color=pygor.plotting.custom.fish_palette[2], ax = ax.flat[2], element="bars", kde = True, bins = bins, binwidth = binwidth, **kwargs)
-        sns.histplot(data = non_zeros.query("colour == 'UV'"),x = stat, color=pygor.plotting.custom.fish_palette[3], ax = ax.flat[3], element="bars", kde = True, bins = bins, binwidth = binwidth, **kwargs)
+        sns.histplot(data = roi_df.query("colour == 'R'"), x = stat, color=pygor.plotting.custom.fish_palette[0], ax = ax.flat[0], element="bars", kde = True, bins = bins, binwidth = binwidth, **kwargs)
+        sns.histplot(data = roi_df.query("colour == 'G'"), x = stat, color=pygor.plotting.custom.fish_palette[1], ax = ax.flat[1], element="bars", kde = True, bins = bins, binwidth = binwidth, **kwargs)
+        sns.histplot(data = roi_df.query("colour == 'B'"), x = stat, color=pygor.plotting.custom.fish_palette[2], ax = ax.flat[2], element="bars", kde = True, bins = bins, binwidth = binwidth, **kwargs)
+        sns.histplot(data = roi_df.query("colour == 'UV'"),x = stat, color=pygor.plotting.custom.fish_palette[3], ax = ax.flat[3], element="bars", kde = True, bins = bins, binwidth = binwidth, **kwargs)
         colours = ["R", "G", "B", "UV"]
         for a, c in zip(ax.flat, colours):
             a.set_ylabel("")
-            a.axvline(np.average(non_zeros.query(f"colour == '{c}'")[stat]), c = "k", ls = "--")
+            a.axvline(np.average(roi_df.query(f"colour == '{c}'")[stat]), c = "k", ls = "--")
             a.set_yticks([])
         plt.tight_layout()
     if category == "polarity":
         fig, ax = plt.subplots(2,1, figsize = (2.2, 2.85), sharex=True, sharey=True, gridspec_kw={'hspace': 0})
-        non_zeros = roi_df.query(f"{conditional} > 0")
+        if conditional != None:
+            roi_df = roi_df.query(f"{conditional} > 0")
         polarities = [-1, 1]
         for n, polarity in enumerate(polarities):
-            sns.histplot(data = non_zeros.query(f"polarity == {polarity}"), x = stat, 
+            sns.histplot(data = roi_df.query(f"polarity == {polarity}"), x = stat, 
                         color=pygor.plotting.custom.polarity_palette[n], ax = ax.flat[n], element="bars", 
                         kde = True, line_kws = {"color": "k"}, bins = bins, binwidth = binwidth, **kwargs)
             ax[n].lines[0].set_color('k')
         for a, c in zip(ax.flat, polarities):
             a.set_ylabel("")
-            a.axvline(np.median(non_zeros.query(f"polarity == {c}")[stat]), c = "k", ls = "--")
+            a.axvline(np.median(roi_df.query(f"polarity == {c}")[stat]), c = "k", ls = "--")
             a.set_yticks([])
             a.set_ylim(bottom = 0)
     pygor.plotting.add_scalebar(25, string = "25 ROIs", ax = ax[-1], orientation = 'v', x = 1.1, rotation = 180)
