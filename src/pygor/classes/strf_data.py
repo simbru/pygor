@@ -730,19 +730,31 @@ class STRF(Core):
                 result.append("other")
         return result
 
-    #def amplitude_tuning_functions(self):
+    def get_time_amps(self) -> np.ndarray:
+        maxes = np.max(self.get_timecourses_dominant().data, axis = (1))
+        mins = np.min(self.get_timecourses_dominant().data, axis = (1))
+        largest_mag = np.where(maxes > np.abs(mins), maxes, mins) # search and insert values to retain sign
+        return largest_mag
+
+    def get_space_amps(self) -> np.ndarray:
+        maxes = np.max(self.collapse_times(), axis = (1, 2))
+        mins =  np.min(self.collapse_times(), axis = (1, 2))
+        largest_mag = np.where(maxes > np.abs(mins), maxes, mins) # search and insert values to retain sign
+        return largest_mag
+
+    """
+    TODO get these calc_thigny methods to have their own per-ROI equivalents
+    that can then simply be reshaped to tuning function format. 
+    """
+    # def get_time_to_peak(self):
+
+
     def calc_tunings_amplitude(self) -> np.ndarray:
         if self.multicolour == True:
-            # maxes = np.max(self.collapse_times().data, axis = (1, 2))
-            # mins = np.min(self.collapse_times().data, axis = (1, 2))
-            maxes = np.max(self.get_timecourses_dominant().data, axis = (1))
-            mins = np.min(self.get_timecourses_dominant().data, axis = (1))
-            largest_mag = np.where(maxes > np.abs(mins), maxes, mins) # search and insert values to retain sign
-            largest_by_colour = pygor.utilities.multicolour_reshape(largest_mag, self.numcolour)
-            # signs = np.sign(largest_by_colour)
-            # min_max_scaled = np.apply_along_axis(pygor.utilities.min_max_norm, 1, np.abs(largest_by_colour), 0, 1)
+            largest_by_colour = pygor.utilities.multicolour_reshape(self.get_time_amps(), self.numcolour)
             tuning_functions = largest_by_colour
-            return tuning_functions.T #transpose for simplicity, invert for UV - R by wavelength (increasing)
+            # Returns wavelengths according to order in self.strfs, invert order for UV - R by wavelength (increasing)
+            return tuning_functions.T #transpose for simplicity
         else:
             raise AttributeError("Operation cannot be done since object property '.multicolour.' is False")
 
