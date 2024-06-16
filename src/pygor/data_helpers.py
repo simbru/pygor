@@ -12,7 +12,7 @@ import pygor.utilities
 
 def create_bs_dict(do_bootstrap = True, time_sig_thresh = 0.1,
     space_sig_thresh = 0.1, space_bs_n = 1000, time_bs_n = 2500):
-    now_time = datetime.datetime.now()
+    #now_time = datetime.datetime.now()
     bs_dict = {
         "do_bootstrap"      : do_bootstrap,
         "time_sig_thresh"   : time_sig_thresh, 
@@ -20,9 +20,11 @@ def create_bs_dict(do_bootstrap = True, time_sig_thresh = 0.1,
         "space_bs_n"        : space_bs_n, 
         "time_bs_n"         : time_bs_n, 
         "bs_already_ran"    : False,
-        "bs_datetime"       : now_time,
-        "bs_datetime_str"   : now_time.strftime("%d/%m/%y %H:%M:%S"),
+        "bs_datetime"       : "",
+        "bs_datetime_str"   : "",
         "bs_dur_timedelta"  : "",
+        "time_parallel"     : True,
+        "space_parallel"    : True,
     }
     return bs_dict
 

@@ -10,7 +10,6 @@ import pygor.data_helpers
 import pygor.utils.helpinfo
 import pygor.strf.spatial
 import pygor.strf.contouring
-import pygor.strf.contouring
 import pygor.strf.temporal
 import pygor.strf.plot
 import pygor.utils
@@ -26,7 +25,6 @@ import natsort
 import warnings
 import pandas as pd
 import matplotlib.pyplot as plt
-import natsort
 
 @dataclass(repr = False)
 class STRF(Core):
@@ -118,20 +116,22 @@ class STRF(Core):
         return pygor.utilities.multicolour_reshape(self.strfs, self.numcolour)
     
     ## Bootstrapping
-    def __calc_pval_time(self, parallel = True) -> np.ndarray:
+    def __calc_pval_time(self, parallel = None, **kwargs) -> np.ndarray:
         """
         Calculate the p-value for each time point in the data.
 
         Returns:
             np.ndarray: An array of p-values for each time point.
         """
+        if parallel is None:
+            parallel = self.bs_settings["time_parallel"]
         # Generate bar for beuty
         bar = tqdm(self.strfs, leave = False, position = 1, disable = None, 
             desc = f"Hang on, bootstrapping pygor.strf.temporal components {self.bs_settings['time_bs_n']} times")
         self._pval_time = np.array([pygor.strf.bootstrap.bootstrap_time(x, bootstrap_n=self.bs_settings["time_bs_n"], parallel = parallel) for x in bar])
         return self._pval_time
 
-    def __calc_pval_space(self, parallel = True) -> np.ndarray:
+    def __calc_pval_space(self, parallel = None, **kwargs) -> np.ndarray:
         """
         Calculate the p-value space for the spatial components.
 
@@ -143,6 +143,8 @@ class STRF(Core):
             np.ndarray: The p-value space array.
 
         """
+        if parallel is None:
+            parallel = self.bs_settings["space_parallel"]
         # Again, bar for niceness
         bar = tqdm(self.strfs, leave = False, position = 1, disable = None,
             desc = f"Hang on, bootstrapping spatial components {self.bs_settings['space_bs_n']} times")
@@ -171,6 +173,9 @@ class STRF(Core):
         :rtype: dict
         """
         return self.bs_settings
+
+    def set_bootstrap_setting(self, key : str, value) -> None:
+        self.bs_settings[key] = value
 
     def set_bootstrap_bool(self, bool : bool) -> bool:
         '''This Python function sets a boolean value for a bootstrap setting and returns the updated
@@ -248,7 +253,7 @@ class STRF(Core):
         # Handle prints and warnings
         if silence_print == False:
             if not_allowed_keys or not_found_keys:
-                warning_string = f"Input anomalies found"
+                warning_string = "Input anomalies found"
                 warnings.warn(warning_string, stacklevel=0)
                 if not_allowed_keys:
                     print(f"Disallowed keys: {not_allowed_keys}")
@@ -257,7 +262,7 @@ class STRF(Core):
                 if none_default_key:
                     print(f"Keys set to default values: {[(i, default_dict[i]) for i in none_default_key]}")
 
-    def run_bootstrap(self, force = False, parallel = False) -> None:
+    def run_bootstrap(self, force = False, parallel = False, plot_example = False) -> None:
         """run_bootstrap Runs bootstrapping according to self.bs_settings
 
         Returns
@@ -368,7 +373,7 @@ class STRF(Core):
     def num_rois_sig(self) -> int:
         return self.get_pvals_table()["sig_any"].sum()
 
-    def fit_contours(self) -> np.array(list[list[list[float, float]]]):
+    def fit_contours(self) -> np.ndarray[list[list[list[float, float]]]]:
         """
         Returns the contours of the collapse times.
 
@@ -485,10 +490,10 @@ class STRF(Core):
             return np.array([xs, ys]).T #centres by biggest area, irrespective of polarity
         else:
             raise ValueError("center_on must be 'pols' or 'biggest'")
-     
+
     def calc_contours_complexities(self) -> np.ndarray:
         return pygor.strf.contouring.complexity_weighted(self.fit_contours(), self.get_contours_area())
-     
+
     """
     TODO Add lazy processing back into contouring (maybe skip timecourses, should be fast enough)
     """
@@ -545,7 +550,7 @@ class STRF(Core):
     # def plot_roi(self, roi):
     #     fig, ax = plt.subplots(1, 3)
 
-    def get_strf_masks(self, level = None) -> (np.ndarray, np.ndarray):
+    def get_strf_masks(self, level = None) -> tuple[np.ndarray, np.ndarray]:
         """
         Return masked array of spatial.rf_mask3d applied to all arrays, with masks based on pval_time and pval_space,
         with polarity intact.
@@ -622,7 +627,7 @@ class STRF(Core):
         else:
             raise AttributeError("Not a multicoloured STRF, self.multicolour != True.")
 
-    def get_spatial_masks(self) -> (np.ndarray, np.ndarray):
+    def get_spatial_masks(self) -> tuple[np.ndarray, np.ndarray]:
         neg_mask2d, pos_mask2d = self.get_strf_masks().mask[:, :, 0][:, 0], self.get_strf_masks().mask[:, :, 0][:, 1]
         #return np.array([neg_mask2d, pos_mask2d])
         return (neg_mask2d, pos_mask2d)
@@ -698,7 +703,7 @@ class STRF(Core):
         pols = pols * np.prod(np.where(abs_time_max == 0, 0, 1), axis = 1)
         return pols
 
-    def get_opponency_bool(self) -> [bool]:
+    def get_opponency_bool(self) -> bool:
         if self.multicolour == True:
             arr = pygor.utilities.multicolour_reshape(self.get_polarities(), self.numcolour).T
             # This line looks through rearranged chromatic arr roi by roi 
@@ -710,7 +715,7 @@ class STRF(Core):
         else:
             raise AttributeError("Operation cannot be done since object property '.multicolour' is False")
 
-    def get_polarity_category(self) -> [str]:
+    def get_polarity_category(self) -> str:
         result = []
         arr = pygor.utilities.multicolour_reshape(self.get_polarities(), self.numcolour).T
         for i in arr:
@@ -742,6 +747,19 @@ class STRF(Core):
         largest_mag = np.where(maxes > np.abs(mins), maxes, mins) # search and insert values to retain sign
         return largest_mag
 
+    def get_time_to_peak(self, dur_s = 1.3) -> np.ndarray:
+        # First get timecourses
+        # Split by polarity 
+        neg_times, pos_times = self.get_timecourses()[:, 0], self.get_timecourses()[:, 1]
+        # Find max position in pos times and neg position in neg times 
+        argmins = np.ma.argmin(neg_times, axis = 1)
+        argmaxs = np.ma.argmax(pos_times, axis = 1) 
+        if dur_s != None:
+            return  (dur_s / neg_times.shape[1]) * np.array([argmins, argmaxs])
+        else:
+            warnings.warn("Time values are in arbitary numbers (frames)")
+            return np.array([argmins, argmaxs])
+
     """
     TODO get these calc_thigny methods to have their own per-ROI equivalents
     that can then simply be reshaped to tuning function format. 
@@ -749,10 +767,16 @@ class STRF(Core):
     # def get_time_to_peak(self):
 
 
-    def calc_tunings_amplitude(self) -> np.ndarray:
+    def calc_tunings_amplitude(self, dimstr = "time") -> np.ndarray:
         if self.multicolour == True:
-            largest_by_colour = pygor.utilities.multicolour_reshape(self.get_time_amps(), self.numcolour)
-            tuning_functions = largest_by_colour
+            if dimstr == "time":
+                largest_by_colour = pygor.utilities.multicolour_reshape(self.get_time_amps(), self.numcolour)
+                tuning_functions = largest_by_colour
+            if dimstr == "space":
+                largest_by_colour = pygor.utilities.multicolour_reshape(self.get_space_amps(), self.numcolour)
+                tuning_functions = largest_by_colour
+            else:
+                raise ValueError("dimstr must be 'time' or 'space'")
             # Returns wavelengths according to order in self.strfs, invert order for UV - R by wavelength (increasing)
             return tuning_functions.T #transpose for simplicity
         else:
@@ -763,7 +787,7 @@ class STRF(Core):
             # Step 1: Pull contour areas (note, the size is in A.U. for now)
             # Step 2: Split by positive and negative areas
             if size == None:
-                warnings.warn("size stimates in arbitrary cartesian units")
+                warnings.warn("size stimates in arbitrary Cartesian units")
                 neg_contour_areas = [i[0] for i in self.get_contours_area()]
                 pos_contour_areas = [i[1] for i in self.get_contours_area()]
             else:
@@ -823,12 +847,12 @@ class STRF(Core):
         else:
             raise AttributeError("Operation cannot be done since object contains no property '.multicolour.")
 
-    def calc_spectral_centroids(self) -> (np.ndarray, np.ndarray):
+    def calc_spectral_centroids(self) -> tuple[np.ndarray, np.ndarray]:
         spectroids_neg = np.apply_along_axis(pygor.strf.temporal.only_centroid, 1, self.get_timecourses()[:, 0])
         spectroids_pos = np.apply_along_axis(pygor.strf.temporal.only_centroid, 1, self.get_timecourses()[:, 1])
         return spectroids_neg, spectroids_pos
 
-    def calc_spectrums(self, roibyroi = False) -> (np.ndarray, np.ndarray):
+    def calc_spectrums(self, roibyroi = False) -> tuple[np.ndarray, np.ndarray]:
         spectrum_neg = np.array([pygor.strf.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 0]])
         spectrum_pos = np.array([pygor.strf.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 1]])
         return spectrum_neg, spectrum_pos
@@ -859,7 +883,7 @@ class STRF(Core):
     def plot_chromatic_overview(self, roi = None, contours = False, **kwargs):
         with warnings.catch_warnings(record=True) as w:
             # Cause all warnings to always be triggered.
-            warnings.simplefilter("always")
+            w.simplefilter("always")
             return pygor.strf.plot.chroma_overview(self, roi, contours=contours, **kwargs)
 
     def play_strf(self, roi, **kwargs):

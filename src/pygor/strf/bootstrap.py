@@ -17,7 +17,7 @@ def block_shuffle(arr_1d, block_size = None):
     output = np.array(np.split(arr_1d, block_size))
     # Generate a random order for the blocks
     order = np.random.randint(-1, block_size-1, block_size)
-     # Shuffle the blocks based on the random order and flatten the result
+    # Shuffle the blocks based on the random order and flatten the result
     output = output[order].ravel()
     return output
     
@@ -268,7 +268,7 @@ def bootstrap_time(arr_3d, bootstrap_n=2500, mode_param=2, mode="sd",
     return p_value
     
     
-def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metric = np.var, plot = False, parallel = True, seed = 111,**kwargs): # these metrics work so leave them
+def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metric = np.max, plot = False, parallel = True, seed = 111,**kwargs): # these metrics work so leave them
     """
     Perform a spatial permutation test to compute p-value for a given metric on the spatial data.
 
@@ -317,13 +317,35 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
     #org_arr = org_arr[:, 0:8, 0:8]
     org_stat = metric(collapse_time(org_arr, axis=0))
     
-    def _single_permute_compute(inp_arr, rng):
+    def _single_permute_compute(inp_arr, rng, array_return = False):
         # Get space stat
-        # /permuted_arr =rng.shuffle(inp_arr)
-        permuted_arr = rng.permuted(rng.permuted(org_arr, axis=1), axis=2) #permute space, leave time alone
-        permuted_stat = metric(collapse_time(permuted_arr, axis=0))
-        return permuted_stat
-    
+        permuted_arr = rng.permuted(rng.permuted(inp_arr, axis=1), axis=2) #permute space, leave time alone
+        if array_return == False:
+            permuted_stat = metric(collapse_time(permuted_arr, axis=0))
+            return permuted_stat
+        if array_return == True:
+            return permuted_arr
+        
+    # def _single_permute_compute(inp_arr, rng, x_parts=2, y_parts=2, array_return=False):
+    #     permuted_arr = np.copy(inp_arr)  # Avoid in-place modification
+    #     for i in range(permuted_arr.shape[0]):
+    #         # Permuting along the last axis (x direction)
+    #         if x_parts > 1:
+    #             x_splits = np.array_split(permuted_arr[i], x_parts, axis=-1)
+    #             rng.shuffle(x_splits)
+    #             permuted_arr[i] = np.concatenate(x_splits, axis=-1)
+    #         # Permuting along the second last axis (y direction)
+    #         if y_parts > 1:
+    #             y_splits = np.array_split(permuted_arr[i], y_parts, axis=-2)
+    #             rng.shuffle(y_splits)
+    #             permuted_arr[i] = np.concatenate(y_splits, axis=-2)
+    #     # Compute the metric after collapsing along the first axis
+    #     permuted_stat = metric(collapse_time(permuted_arr, axis=0))
+    #     if array_return:
+    #         return permuted_arr
+    #     else:
+    #         return permuted_stat
+        
     rng = np.random.default_rng(seed)
     
     if not parallel:
@@ -346,7 +368,7 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
         original_plot = ax[0].imshow(collapse_time(org_arr, axis = 0), origin = "lower")
         fig.colorbar(original_plot)
         ax[0].set_title(f"Input data (collapsed)")
-        permuted_plot = ax[1].imshow(collapse_time(rng.permuted(rng.permuted(org_arr, axis = 2), axis = 1), axis = 0), origin = "lower")
+        permuted_plot = ax[1].imshow(collapse_time(_single_permute_compute(org_arr, array_return = True, rng = rng), axis = 0), origin = "lower")
         fig.colorbar(permuted_plot)
         ax[1].set_title(f"Example permutation (collapsed)")
         if "binsize" not in kwargs:
@@ -356,6 +378,7 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
         ax[2].axvline(org_stat, c = 'black', ls ="--", label = f"Percentile {np.round(p_value, 5)} at value {np.round(org_stat, 3)}")
         ax[2].legend()
         ax[2].set_title("Boostrap distribution")
+        plt.show()
     return p_value
 
 # def bootstrap_spacetime(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metric = np.max, plot = False, parallel = True, seed = None,**kwargs):    
