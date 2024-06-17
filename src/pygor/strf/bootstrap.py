@@ -2,11 +2,12 @@ import numpy as np#
 import matplotlib.pyplot as plt
 import warnings
 import scipy
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, dump, load
 import warnings
 import pygor.data_helpers 
 import pygor.utilities
 import copy
+import os
 rng = np.random.default_rng(1312)
 
 def block_shuffle(arr_1d, block_size = None):
@@ -317,43 +318,52 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
     #org_arr = org_arr[:, 0:8, 0:8]
     org_stat = metric(collapse_time(org_arr, axis=0))
     
-    def _single_permute_compute(inp_arr, rng, array_return = False):
-        # Get space stat
-        permuted_arr = rng.permuted(rng.permuted(inp_arr, axis=1), axis=2) #permute space, leave time alone
-        if array_return == False:
-            permuted_stat = metric(collapse_time(permuted_arr, axis=0))
-            return permuted_stat
-        if array_return == True:
-            return permuted_arr
-        
+    # def _single_permute_compute(inp_arr, rng, array_return = False):
+    #     # Get space stat
+    #     permuted_arr = rng.permuted(rng.permuted(inp_arr, axis=1), axis=2) #permute space, leave time alone
+    #     if array_return == False:
+    #         permuted_stat = metric(collapse_time(permuted_arr, axis=0))
+    #         return permuted_stat
+    #     if array_return == True:
+    #         return permuted_arr
+
     def _single_permute_compute(inp_arr, rng, x_parts=3, y_parts=3, array_return=False):
-        permuted_arr = np.copy(inp_arr)  # Avoid in-place modification
-        for i in range(permuted_arr.shape[0]):
+        for i in range(inp_arr.shape[0]):
             # Permuting along the last axis (x direction)
             if x_parts > 1:
-                x_splits = np.array_split(permuted_arr[i], x_parts, axis=-1)
+                x_splits = np.array_split(inp_arr[i], x_parts, axis=-1)
                 rng.shuffle(x_splits)
-                # x_splits = rng.permutation(x_splits)
-                permuted_arr[i] = np.concatenate(x_splits, axis=-1)
+                inp_arr[i] = np.concatenate(x_splits, axis=-1)
             # Permuting along the second last axis (y direction)
             if y_parts > 1:
-                y_splits = np.array_split(permuted_arr[i], y_parts, axis=-2)
+                y_splits = np.array_split(inp_arr[i], y_parts, axis=-2)
                 rng.shuffle(y_splits)
-                # y_splits = rng.permutation(y_splits)
-                permuted_arr[i] = np.concatenate(y_splits, axis=-2)
+                inp_arr[i] = np.concatenate(y_splits, axis=-2)
         # Compute the metric after collapsing along the first axis
-        permuted_stat = metric(collapse_time(permuted_arr, axis=0))
+        permuted_stat = metric(collapse_time(inp_arr, axis=0))
         if array_return:
-            return permuted_arr
+            return inp_arr
         else:
             return permuted_stat
-        
+    
     rng = np.random.default_rng(seed)
     
     if not parallel:
-        warnings.warn("Non-parallel processing not recommended, you may be waiting a good while...")
+        with warnings.catch_warnings():
+            warnings.simplefilter("once")
+            warnings.warn("Non-parallel processing not recommended, you may be waiting a good while...")
         permuted_stat_list = [_single_permute_compute(org_arr, rng) for _ in range(bootstrap_n)]
     else:
+
+        # folder = '.\joblib_memmap'
+        # try:
+        #     os.mkdir(folder)
+        # except FileExistsError:
+        #     pass
+        # data_filename_memmap = os.path.join(folder, 'data_memmap')
+        # dump(org_arr, data_filename_memmap)
+        # data = load(data_filename_memmap, mmap_mode='r+')
+
         seed_sequence = np.random.SeedSequence(seed)
         child_seeds = seed_sequence.spawn(bootstrap_n)
         streams = [np.random.default_rng(s) for s in child_seeds]
