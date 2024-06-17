@@ -326,29 +326,32 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
         if array_return == True:
             return permuted_arr
         
-    # def _single_permute_compute(inp_arr, rng, x_parts=2, y_parts=2, array_return=False):
-    #     permuted_arr = np.copy(inp_arr)  # Avoid in-place modification
-    #     for i in range(permuted_arr.shape[0]):
-    #         # Permuting along the last axis (x direction)
-    #         if x_parts > 1:
-    #             x_splits = np.array_split(permuted_arr[i], x_parts, axis=-1)
-    #             rng.shuffle(x_splits)
-    #             permuted_arr[i] = np.concatenate(x_splits, axis=-1)
-    #         # Permuting along the second last axis (y direction)
-    #         if y_parts > 1:
-    #             y_splits = np.array_split(permuted_arr[i], y_parts, axis=-2)
-    #             rng.shuffle(y_splits)
-    #             permuted_arr[i] = np.concatenate(y_splits, axis=-2)
-    #     # Compute the metric after collapsing along the first axis
-    #     permuted_stat = metric(collapse_time(permuted_arr, axis=0))
-    #     if array_return:
-    #         return permuted_arr
-    #     else:
-    #         return permuted_stat
+    def _single_permute_compute(inp_arr, rng, x_parts=3, y_parts=3, array_return=False):
+        permuted_arr = np.copy(inp_arr)  # Avoid in-place modification
+        for i in range(permuted_arr.shape[0]):
+            # Permuting along the last axis (x direction)
+            if x_parts > 1:
+                x_splits = np.array_split(permuted_arr[i], x_parts, axis=-1)
+                rng.shuffle(x_splits)
+                # x_splits = rng.permutation(x_splits)
+                permuted_arr[i] = np.concatenate(x_splits, axis=-1)
+            # Permuting along the second last axis (y direction)
+            if y_parts > 1:
+                y_splits = np.array_split(permuted_arr[i], y_parts, axis=-2)
+                rng.shuffle(y_splits)
+                # y_splits = rng.permutation(y_splits)
+                permuted_arr[i] = np.concatenate(y_splits, axis=-2)
+        # Compute the metric after collapsing along the first axis
+        permuted_stat = metric(collapse_time(permuted_arr, axis=0))
+        if array_return:
+            return permuted_arr
+        else:
+            return permuted_stat
         
     rng = np.random.default_rng(seed)
     
     if not parallel:
+        warnings.warn("Non-parallel processing not recommended, you may be waiting a good while...")
         permuted_stat_list = [_single_permute_compute(org_arr, rng) for _ in range(bootstrap_n)]
     else:
         seed_sequence = np.random.SeedSequence(seed)
@@ -368,7 +371,7 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
         original_plot = ax[0].imshow(collapse_time(org_arr, axis = 0), origin = "lower")
         fig.colorbar(original_plot)
         ax[0].set_title(f"Input data (collapsed)")
-        permuted_plot = ax[1].imshow(collapse_time(_single_permute_compute(org_arr, array_return = True, rng = rng), axis = 0), origin = "lower")
+        permuted_plot = ax[1].imshow(collapse_time(_single_permute_compute(org_arr, array_return = True, rng = np.random.default_rng()), axis = 0), origin = "lower")
         fig.colorbar(permuted_plot)
         ax[1].set_title(f"Example permutation (collapsed)")
         if "binsize" not in kwargs:
