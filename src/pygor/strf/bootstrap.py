@@ -392,7 +392,7 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
         original_plot = ax[0].imshow(collapse_time(org_arr, axis = 0), origin = "lower")
         fig.colorbar(original_plot)
         ax[0].set_title(f"Input data (collapsed)")
-        permuted_plot = ax[1].imshow(collapse_time(_single_permute_compute(org_arr, array_return = True, rng = rng), axis = 0), origin = "lower")
+        permuted_plot = ax[1].imshow(collapse_time(_single_permute_compute(org_arr, array_return = True, rng = np.random.default_rng()), axis = 0), origin = "lower")
         fig.colorbar(permuted_plot)
         ax[1].set_title(f"Example permutation (collapsed)")
         if "binsize" not in kwargs:
