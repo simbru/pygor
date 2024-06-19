@@ -6,11 +6,14 @@ try:
     from collections.abc import Iterable
 except ImportError:
     from collections import Iterable
+from IPython.core import display
 import joblib
 # from tqdm.autonotebook import tqdm
 from tqdm.auto import tqdm
 from ipywidgets import Output
 import shutil
+import contextlib
+import joblib
 
 def find_files_in(filetype_ext_str, dir_path, recursive=False, **kwargs) -> list:
     """
@@ -130,6 +133,23 @@ def load(file_path, as_class = None, **kwargs):
     """
     return _load_parser(file_path, as_class = as_class, **kwargs)
 
+@contextlib.contextmanager
+def tqdm_joblib(tqdm_object):
+    """Context manager to patch joblib to report into tqdm progress bar given as argument
+    from: https://stackoverflow.com/questions/24983493/tracking-progress-of-joblib-parallel-execution/58936697#58936697
+    """
+    class TqdmBatchCompletionCallback(joblib.parallel.BatchCompletionCallBack):
+        def __call__(self, *args, **kwargs):
+            tqdm_object.update(n=self.batch_size)
+            return super().__call__(*args, **kwargs)
+    old_batch_callback = joblib.parallel.BatchCompletionCallBack
+    joblib.parallel.BatchCompletionCallBack = TqdmBatchCompletionCallback
+    try:
+        yield tqdm_object
+    finally:
+        joblib.parallel.BatchCompletionCallBack = old_batch_callback
+        tqdm_object.close()
+
 def load_list(paths_list, as_class = None, parallel = True, **kwargs) -> list[pathlib.WindowsPath]:
     """
     Converts a list of paths to a list of objects, optionally using a specified class for instantiation
@@ -154,9 +174,11 @@ def load_list(paths_list, as_class = None, parallel = True, **kwargs) -> list[pa
         reminding you to specify `as_class` for accurate initialisation.
     """
 
+
     if parallel is True:
         print("Launching parallel loading...")
-        objects_list = joblib.Parallel(n_jobs = -1)(joblib.delayed(_load_parser)(i, as_class=as_class, **kwargs) for i in paths_list)
+        with tqdm_joblib(tqdm(paths_list, desc = "Loading and instantiating listed files", position = 0, leave = True, total = len(paths_list))) as progress_bar:
+            objects_list = joblib.Parallel(n_jobs = -1)(joblib.delayed(_load_parser)(i, as_class=as_class, **kwargs) for i in paths_list)
     else:
         print("Iterating through and loading listed files...")
         progress_bar = tqdm(paths_list, desc = "Iterating through and loading listed files", position = 0,

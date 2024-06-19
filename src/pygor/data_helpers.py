@@ -11,7 +11,7 @@ import pygor.utilities
 """Helper functions for Data classes:_________________________________________"""
 
 def create_bs_dict(do_bootstrap = True, time_sig_thresh = 0.1,
-    space_sig_thresh = 0.1, space_bs_n = 1000, time_bs_n = 2500):
+    space_sig_thresh = 0.1, space_bs_n = 2500, time_bs_n = 2500):
     #now_time = datetime.datetime.now()
     bs_dict = {
         "do_bootstrap"      : do_bootstrap,
