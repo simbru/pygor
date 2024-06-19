@@ -8,7 +8,10 @@ import pygor.data_helpers
 import pygor.utilities
 import copy
 import os
+<<<<<<< HEAD
 import shutil
+=======
+>>>>>>> 5aab782e4d02a4adcc9e9aeae913c8851ae80189
 rng = np.random.default_rng(1312)
 
 def block_shuffle(arr_1d, block_size = None):
@@ -362,6 +365,11 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
         # data_memmap_filename = os.path.join(folder, 'data_memmap')
         # dump(org_arr, data_memmap_filename)
         # org_arr = load(data_memmap_filename, mmap_mode='r')
+=======
+        # data_filename_memmap = os.path.join(folder, 'data_memmap')
+        # dump(org_arr, data_filename_memmap)
+        # data = load(data_filename_memmap, mmap_mode='r+')
+>>>>>>> 5aab782e4d02a4adcc9e9aeae913c8851ae80189
 
         seed_sequence = np.random.SeedSequence(seed)
         child_seeds = seed_sequence.spawn(bootstrap_n)

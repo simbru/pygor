@@ -123,7 +123,7 @@ class STRF(Core):
         Returns:
             np.ndarray: An array of p-values for each time point.
         """
-        if parallel is None:
+        if parallel == None:
             parallel = self.bs_settings["time_parallel"]
         # Generate bar for beuty
         bar = tqdm(self.strfs, leave = False, position = 1, disable = None, 
@@ -143,7 +143,7 @@ class STRF(Core):
             np.ndarray: The p-value space array.
 
         """
-        if parallel is None:
+        if parallel == None:
             parallel = self.bs_settings["space_parallel"]
         # Again, bar for niceness
         bar = tqdm(self.strfs, leave = False, position = 1, disable = None,
@@ -262,7 +262,7 @@ class STRF(Core):
                 if none_default_key:
                     print(f"Keys set to default values: {[(i, default_dict[i]) for i in none_default_key]}")
 
-    def run_bootstrap(self, force = False, parallel = False, plot_example = False) -> None:
+    def run_bootstrap(self, force = False, parallel = None, plot_example = False) -> None:
         """run_bootstrap Runs bootstrapping according to self.bs_settings
 
         Returns
@@ -281,8 +281,8 @@ class STRF(Core):
                     user_verify = 'y'
                 if user_verify == 'y' or user_verify == "yes":
                     before_time = datetime.datetime.now()
-                    self.__calc_pval_time()
-                    self.__calc_pval_space()
+                    self.__calc_pval_time(parallel=parallel)
+                    self.__calc_pval_space(parallel=parallel)
                     after_time = datetime.datetime.now()
                 elif user_verify == 'n' or user_verify == "no":
                     print(f"Skipping recomputing bootstrap due to user input:'{user_verify}'")
@@ -292,8 +292,8 @@ class STRF(Core):
                     return self
             else:
                 before_time = datetime.datetime.now()
-                self.__calc_pval_time()
-                self.__calc_pval_space()
+                self.__calc_pval_time(parallel=parallel)
+                self.__calc_pval_space(parallel=parallel)
                 after_time = datetime.datetime.now()
                 self.bs_settings["bs_already_ran"] = True
             # Write time metadata
@@ -830,20 +830,12 @@ class STRF(Core):
 
     def calc_tunings_peaktime(self, dur_s = 1.3) -> np.ndarray:
         if self.multicolour == True:
-            # First get timecourses
-            # Split by polarity 
-            neg_times, pos_times = self.get_timecourses()[:, 0], self.get_timecourses()[:, 1]
-            # Find max position in pos times and neg position in neg times 
-            argmins = np.ma.argmin(neg_times, axis = 1)
-            argmaxs = np.ma.argmax(pos_times, axis = 1)
-            # Reshape result to multichroma 
-            argmins  = pygor.utilities.multicolour_reshape(argmins, self.numcolour).T
-            argmaxs  = pygor.utilities.multicolour_reshape(argmaxs, self.numcolour).T
-            if dur_s != None:
-                return  (dur_s / neg_times.shape[1]) * np.array([argmins, argmaxs])
-            else:
-                warnings.warn("Time values are in arbitary numbers (frames)")
-                return np.array([argmins, argmaxs])
+            peaktimes = self.get_time_to_peak()
+            peakneg = peaktimes[0]
+            peakpos = peaktimes[1]
+            peakneg  = pygor.utilities.multicolour_reshape(peakneg, self.numcolour).T
+            peakpos  = pygor.utilities.multicolour_reshape(peakpos, self.numcolour).T
+            return np.array([peakneg, peakpos])
         else:
             raise AttributeError("Operation cannot be done since object contains no property '.multicolour.")
 
