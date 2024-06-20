@@ -875,7 +875,7 @@ class STRF(Core):
     def plot_chromatic_overview(self, roi = None, contours = False, **kwargs):
         with warnings.catch_warnings(record=True) as w:
             # Cause all warnings to always be triggered.
-            w.simplefilter("always")
+            warnings.simplefilter("always")
             return pygor.strf.plot.chroma_overview(self, roi, contours=contours, **kwargs)
 
     def play_strf(self, roi, **kwargs):
