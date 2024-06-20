@@ -118,7 +118,7 @@ def load_strf(HDF5_file, post_process = True, fix_oversize = True):
     # Correct numerical sorting of strings 
     strf_list_natsort = natsort.natsorted(strf_list)
     # Return those as tranposed arrays, in a list
-    strf_arr = np.array([np.array(HDF5_file[v]).transpose(2,1,0) for v in strf_list_natsort])
+    strf_arr = np.array([np.array(HDF5_file[v]).transpose(2,1,0) for v in strf_list_natsort if HDF5_file[v].ndim == 3])
     # 1. Check which axis is the "longest", as Igor frequently rotates arrays 
     ## and correct this accordingly 
     input_shape = strf_arr.shape
