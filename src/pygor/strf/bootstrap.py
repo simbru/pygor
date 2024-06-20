@@ -6,8 +6,10 @@ from joblib import Parallel, delayed, dump, load
 import warnings
 import pygor.data_helpers 
 import pygor.utilities
-import copy
+import pathlib
 import os
+import shutil
+import tempfile
 rng = np.random.default_rng(1312)
 
 def block_shuffle(arr_1d, block_size = None):
@@ -353,26 +355,10 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
         rng = np.random.default_rng(seed)
         permuted_stat_list = [_single_permute_compute(org_arr, rng) for _ in range(bootstrap_n)]
     else:
-        # folder = './joblib_memmap'
-        # try:
-        #     os.mkdir(folder)
-        # except FileExistsError:
-        #     pass
-        # data_memmap_filename = os.path.join(folder, 'data_memmap')
-        # dump(org_arr, data_memmap_filename)
-        # org_arr = load(data_memmap_filename, mmap_mode='r')
-        # data_filename_memmap = os.path.join(folder, 'data_memmap')
-        # dump(org_arr, data_filename_memmap)
-        # data = load(data_filename_memmap, mmap_mode='r+')
-
-        seed_sequence = np.random.SeedSequence(seed)
-        child_seeds = seed_sequence.spawn(bootstrap_n)
-        streams = [np.random.default_rng(s) for s in child_seeds]
-        permuted_stat_list = Parallel(n_jobs=-1)(delayed(_single_permute_compute)(org_arr, streams[i]) for i in range(bootstrap_n))
-        # try:
-        #     shutil.rmtree(folder)
-        # except:  # noqa
-        #     print('Could not clean-up automatically.')
+            seed_sequence = np.random.SeedSequence(seed)
+            child_seeds = seed_sequence.spawn(bootstrap_n)
+            streams = [np.random.default_rng(s) for s in child_seeds]
+            permuted_stat_list = Parallel(n_jobs=-1, max_nbytes='1M')(delayed(_single_permute_compute)(org_arr, streams[i]) for i in range(bootstrap_n))
 
     permuted_stat_list = np.array(permuted_stat_list)
     epsilon = 1e-10
