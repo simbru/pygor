@@ -373,7 +373,7 @@ class STRF(Core):
     def num_rois_sig(self) -> int:
         return self.get_pvals_table()["sig_any"].sum()
 
-    def fit_contours(self) -> np.ndarray[list[list[list[float, float]]]]:
+    def fit_contours(self, force = True) -> np.ndarray[list[list[list[float, float]]]]:
         """
         Returns the contours of the collapse times.
 
@@ -393,23 +393,6 @@ class STRF(Core):
             contours = data.fit_contours()
         """        
 
-        
-        # if self.bs_settings["do_bootstrap"] == True:
-        #     time_pvals = self.pval_time
-        #     space_pvals = self.pval_space
-        #     __contours = [pygor.strf.contouring.contour(arr) # ensures no contour is drawn if pval not sig enough
-        #                     if time_pvals[count] < self.bs_settings["time_sig_thresh"] and space_pvals[count] < self.bs_settings["space_sig_thresh"]
-        #                     else  ([], [])
-        #                     for count, arr in enumerate(self.collapse_times())]
-        # if self.bs_settings["do_bootstrap"] == False:
-        #     __contours = [pygor.strf.contouring.contour(arr) for count, arr in enumerate(self.collapse_times())]
-        # __contours = np.array(__contours, dtype = "object")
-        # return __contours
-
-        # try:
-        #     return self.__contours
-        # except AttributeError:
-            #self.__contours = [spatial.contour(x) for x in self.collapse_times()]
         if self.bs_settings["do_bootstrap"] == True:
             time_pvals = self.pval_time
             space_pvals = self.pval_space
@@ -875,7 +858,7 @@ class STRF(Core):
     def plot_chromatic_overview(self, roi = None, contours = False, **kwargs):
         with warnings.catch_warnings(record=True) as w:
             # Cause all warnings to always be triggered.
-            w.simplefilter("always")
+            warnings.simplefilter("always")
             return pygor.strf.plot.chroma_overview(self, roi, contours=contours, **kwargs)
 
     def play_strf(self, roi, **kwargs):
