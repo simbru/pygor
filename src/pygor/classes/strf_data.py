@@ -302,7 +302,7 @@ class STRF(Core):
             self.bs_settings["bs_dur_timedelta"] = after_time - before_time
             return self
     @property
-    def pval_time(self) -> np.ndarray:
+    def pval_time(self, parallel = None) -> np.ndarray:
         """
         Returns an array of p-values for time calculation.
 
@@ -321,11 +321,11 @@ class STRF(Core):
                 return self._pval_time
             except AttributeError:
                 print("p value for time bootstrap did not exist, just making that now")
-                self.__calc_pval_time() # Executes calculation and writes to self._pval_time
+                self.__calc_pval_time(parallel = parallel) # Executes calculation and writes to self._pval_time
             return self._pval_time
     
     @property
-    def pval_space(self) -> np.ndarray:
+    def pval_space(self, parallel = None) -> np.ndarray:
         """
         Returns an array of p-values for space calculation.
 
@@ -344,7 +344,7 @@ class STRF(Core):
                 return self._pval_space
             except AttributeError:
                 print("p value for space bootstrap did not exist, just making that now")
-                self.__calc_pval_space() # Executes calculation and writes to self._pval_space
+                self.__calc_pval_space(parallel = parallel) # Executes calculation and writes to self._pval_space
             return self._pval_space
 
     def get_pvals_table(self) -> pd.DataFrame:
