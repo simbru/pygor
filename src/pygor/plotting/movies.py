@@ -20,7 +20,7 @@ import pygor.strf.temporal
 import pygor.strf.contouring
 from . import custom
 
-def play_movie(d3_arr, figaxim_return = False, rgb_repr=False,**kwargs):
+def play_movie(d3_arr, dur_s = 1.3, figaxim_return = False, rgb_repr=False,**kwargs):
     # This is way more efficient than the legacy version and does not rely on ipywidgets
     # https://stackoverflow.com/questions/39472017/how-to-animate-the-colorbar-in-matplotlib
 
@@ -63,7 +63,7 @@ def play_movie(d3_arr, figaxim_return = False, rgb_repr=False,**kwargs):
         def video(frame):
             im.set_data(d3_arr[frame])
         # Create the animation based on the above function
-        animation = matplotlib.animation.FuncAnimation(fig, video, frames=len(d3_arr), interval = 100, repeat_delay = 500)
+        animation = matplotlib.animation.FuncAnimation(fig, video, frames=len(d3_arr), interval = dur_s / len(d3_arr) * 1000, repeat_delay = 500)
         # Close the animation 
         plt.close()
         # Decide what to return based on input
@@ -73,7 +73,7 @@ def play_movie(d3_arr, figaxim_return = False, rgb_repr=False,**kwargs):
         else:
             return animation
 
-def play_movie_4d_simple(d4_arr, figaxim_return = False, show_cbar = True, **kwargs):
+def play_movie_4d_simple(d4_arr,  dur_s = 1.3, figaxim_return = False, show_cbar = True, **kwargs):
     # This is way more efficient than the legacy version and does not rely on ipywidgets
     # https://stackoverflow.com/questions/39472017/how-to-animate-the-colorbar-in-matplotlib
     if d4_arr.ndim != 4:
@@ -124,7 +124,7 @@ def play_movie_4d_simple(d4_arr, figaxim_return = False, show_cbar = True, **kwa
                 # Fill the animation with data
                 im.set_array(d4_arr[n][frame])
         # Create the animation based on the above function
-        animation = matplotlib.animation.FuncAnimation(fig, video, frames=frames_time, interval = 80*1.5, repeat_delay = 500)    
+        animation = matplotlib.animation.FuncAnimation(fig, video, interval = dur_s / frames_time * 1000, frames=frames_time, repeat_delay = 500)    
         plt.close()
         return animation
 
@@ -149,7 +149,7 @@ def play_movie_4d_simple(d4_arr, figaxim_return = False, show_cbar = True, **kwa
 #             cax = div.append_axes('right', '5%', pad = '2%')
 #             fig.colorbar(im, cax = cax)
 
-def play_movie_4d(input_arr, figaxim_return = False, show_cbar = False, 
+def play_movie_4d(input_arr, dur_s = 1.3, figaxim_return = False, show_cbar = False, 
     axes = None, axis = None, frameon = False, norm_by = 'input', **kwargs):
     # This is way more efficient than the legacy version and does not rely on ipywidgets
     # https://stackoverflow.com/questions/39472017/how-to-animate-the-colorbar-in-matplotlib
@@ -225,7 +225,7 @@ def play_movie_4d(input_arr, figaxim_return = False, show_cbar = False,
                 # Fill the animation with data
                 im.set_array(input_arr[n][frame])
         # Create the animation based on the above function
-        animation = matplotlib.animation.FuncAnimation(fig, video, frames=frames, interval = 80*1.5, repeat_delay = 500)    
+        animation = matplotlib.animation.FuncAnimation(fig, video, frames=frames, interval = dur_s / frames * 1000, repeat_delay = 500)    
         plt.close()
         return animation
 
