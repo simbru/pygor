@@ -130,7 +130,7 @@ def _contours_plotter(data_strf_object, roi, index =  None, xy_offset = (0, 0), 
                 else:
                     ax.plot(contour_p[:, 1] + xy_offset[1], contour_p[:, 0] + xy_offset[0], lw = 1, ls = "-", c = fish_palette[colour], alpha = 1)
 
-def rgb_representation(data_strf_object, colours_dims = [0, 1, 2, 3], specify_rois=None, ipl_sort = False, y_crop = (0, 0), x_crop = (0 ,0),
+def rgb_representation(data_strf_object, specify_rois=None, colours_dims = [0, 1, 2, 3], ipl_sort = False, y_crop = (0, 0), x_crop = (0 ,0),
     ax = None, contours = False, remove_border = True):
 
     strfs_chroma = pygor.utilities.multicolour_reshape(data_strf_object.collapse_times(), data_strf_object.numcolour)

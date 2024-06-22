@@ -170,7 +170,7 @@ def auto_remove_border(array):
     numpy array
         original array without estimated borders
     """
-    warnings.warn("Destructive method. You lose data, with no way of recovering original shape!") 
+    warnings.warn("Cropping border is a destructive method. You lose data, with no way of recovering original shape! If this warning comes from a plotting script, you can likley ignore it.") 
     #crop_mask = (auto_border_mask(array)  * -1).astype(bool)
     # Remove border based on crop_mask (True means keep, False means remove)
     ## The logic is: find geometrical centre, find extreme points in 4 directions, and count 0s between extreme and center
