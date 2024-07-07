@@ -1,3 +1,4 @@
+from typing import final
 import numpy as np#
 import matplotlib.pyplot as plt
 import warnings
@@ -308,7 +309,10 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
     - If 'plot' is set to True, a histogram of the permuted test statistics is plotted, with the original test statistic indicated by a vertical black line.
     """
     org_arr = np.copy(arr_3d)
-        
+    org_arr_collapsed = collapse_time(org_arr, axis = 0)
+    if arr_3d.ndim != 3:
+        raise ValueError(f"Input array must be 3D, got {arr_3d.ndim} instead.")
+
     if np.ma.is_masked(arr_3d):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -320,14 +324,14 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
     #org_arr = org_arr[:, 0:8, 0:8]
     org_stat = metric(collapse_time(org_arr, axis=0))
     
-    # def _single_permute_compute(inp_arr, rng, array_return = False):
-    #     # Get space stat
-    #     permuted_arr = rng.permuted(rng.permuted(inp_arr, axis=1), axis=2) #permute space, leave time alone
-    #     if array_return == False:
-    #         permuted_stat = metric(collapse_time(permuted_arr, axis=0))
-    #         return permuted_stat
-    #     if array_return == True:
-    #         return permuted_arr
+    def _single_permute_compute(inp_arr, rng, array_return = False):
+        # Get space stat
+        permuted_arr = rng.permuted(rng.permuted(inp_arr, axis=1), axis=2) #permute space, leave time alone
+        if array_return == False:
+            permuted_stat = metric(collapse_time(permuted_arr, axis=0))
+            return permuted_stat
+        if array_return == True:
+            return permuted_arr
         
     def _single_permute_compute(inp_arr, rng, x_parts=2, y_parts=2, array_return=False, 
                                 metric = metric, collapse_time = collapse_time):
@@ -345,20 +349,38 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
                 permuted_arr[i] = np.concatenate(y_splits, axis=-2)
         # Compute the metric after collapsing along the first axis
         permuted_stat = metric(collapse_time(permuted_arr, axis=0))
-        if array_return:
+        if array_return: 
             return permuted_arr
         else:
             return permuted_stat
         
-    
+    # def _single_resample_compute_new(inp_arr, rng, x_parts=2, y_parts=2, array_return = False):
+    #     """
+    #     Vectorize operation instead of using for loop along inp_arr.shape[0]
+
+    #     TODO Implement optional x_parts and y_parts block parameters
+    #     """
+    #     if x_parts is None and y_parts is None:
+    #         indices = rng.choice(inp_arr.size, size=(inp_arr.shape[0], inp_arr.shape[1], inp_arr.shape[2]), replace=True, shuffle=False)
+    #         new_arr = inp_arr.ravel()[indices].reshape(inp_arr.shape)
+    #     else:
+
+
+    #     if array_return:
+    #         return new_arr
+    #     else:
+    #         return metric(collapse_time(new_arr, axis=0))
+
+    function_choice = _single_permute_compute
+
     if not parallel:
         rng = np.random.default_rng(seed)
-        permuted_stat_list = [_single_permute_compute(org_arr, rng) for _ in range(bootstrap_n)]
+        permuted_stat_list = [function_choice(org_arr, rng) for _ in range(bootstrap_n)]
     else:
             seed_sequence = np.random.SeedSequence(seed)
             child_seeds = seed_sequence.spawn(bootstrap_n)
             streams = [np.random.default_rng(s) for s in child_seeds]
-            permuted_stat_list = Parallel(n_jobs=-1, max_nbytes='1M')(delayed(_single_permute_compute)(org_arr, streams[i]) for i in range(bootstrap_n))
+            permuted_stat_list = Parallel(n_jobs=-1, max_nbytes='1M')(delayed(function_choice)(org_arr, streams[i]) for i in range(bootstrap_n))
 
     permuted_stat_list = np.array(permuted_stat_list)
     epsilon = 1e-10
@@ -372,7 +394,7 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
         original_plot = ax[0].imshow(collapse_time(org_arr, axis = 0), origin = "lower")
         fig.colorbar(original_plot)
         ax[0].set_title(f"Input data (collapsed)")
-        permuted_plot = ax[1].imshow(collapse_time(_single_permute_compute(org_arr, array_return = True, rng = np.random.default_rng()), axis = 0), origin = "lower")
+        permuted_plot = ax[1].imshow(collapse_time(function_choice(org_arr, array_return = True, rng = np.random.default_rng()), axis = 0), origin = "lower")
         fig.colorbar(permuted_plot)
         ax[1].set_title(f"Example permutation (collapsed)")
         if "binsize" not in kwargs:
