@@ -271,8 +271,11 @@ def bootstrap_time(arr_3d, bootstrap_n=2500, mode_param=2, mode="sd",
         ax[4].legend()
     return p_value
     
-    
-def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metric = np.max, plot = False, parallel = True, seed = 111,**kwargs): # these metrics work so leave them
+def abs_max(arr, axis):
+    return np.max(np.abs(arr), axis = axis)
+
+def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = abs_max, metric = np.std,
+                    x_parts=2, y_parts=2, plot = False, parallel = True, seed = 111,**kwargs): # these metrics work so leave them
     """
     Perform a spatial permutation test to compute p-value for a given metric on the spatial data.
 
@@ -333,7 +336,7 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
         if array_return == True:
             return permuted_arr
         
-    def _single_permute_compute(inp_arr, rng, x_parts=2, y_parts=2, array_return=False, 
+    def _single_permute_compute(inp_arr, rng, x_parts=x_parts, y_parts=y_parts, array_return=False, 
                                 metric = metric, collapse_time = collapse_time):
         permuted_arr = np.copy(inp_arr)  # Avoid in-place modification
         for i in range(permuted_arr.shape[0]):
@@ -354,24 +357,40 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
         else:
             return permuted_stat
         
-    # def _single_resample_compute_new(inp_arr, rng, x_parts=2, y_parts=2, array_return = False):
-    #     """
-    #     Vectorize operation instead of using for loop along inp_arr.shape[0]
+    def _single_resample_compute_new(inp_arr, rng, x_parts=x_parts, y_parts=y_parts, array_return = False):
+        """
+        Vectorize operation instead of using for loop along inp_arr.shape[0]
 
-    #     TODO Implement optional x_parts and y_parts block parameters
-    #     """
-    #     if x_parts is None and y_parts is None:
-    #         indices = rng.choice(inp_arr.size, size=(inp_arr.shape[0], inp_arr.shape[1], inp_arr.shape[2]), replace=True, shuffle=False)
-    #         new_arr = inp_arr.ravel()[indices].reshape(inp_arr.shape)
-    #     else:
+        TODO Implement optional x_parts and y_parts block parameters
+        """
+        if x_parts is None and y_parts is None:
+            indices = rng.choice(inp_arr.size, size=(inp_arr.shape[0], inp_arr.shape[1], inp_arr.shape[2]), replace=True, shuffle=False)
+            new_arr = inp_arr.ravel()[indices].reshape(inp_arr.shape)
+        else:
+            # Split along the temporal axis (0-axis)
+            t_splits = np.array_split(inp_arr, inp_arr.shape[0], axis=0)
+            # Function to resample blocks along x and y axes
+            def resample_blocks(arr, rng, x_parts, y_parts):
+                # Split along the y-axis
+                y_splits = np.array_split(arr, y_parts, axis=1)
+                y_resampled_blocks = rng.choice(y_splits, size=len(y_splits), replace=True, axis=0)
+                y_resampled = np.concatenate(y_resampled_blocks, axis=1)
+                # Split along the x-axis
+                x_splits = np.array_split(y_resampled, x_parts, axis=2)
+                x_resampled_blocks = rng.choice(x_splits, size=len(x_splits), replace=True, axis=0)
+                resampled_arr = np.concatenate(x_resampled_blocks, axis=2)
+                return resampled_arr
+            # Apply block resampling independently to each temporal slice
+            resampled_slices = [resample_blocks(slice, rng, x_parts, y_parts) for slice in t_splits]
+            # Concatenate the resampled slices along the temporal axis
+            new_arr = np.concatenate(resampled_slices, axis=0)
+        if array_return:
+            return new_arr
+        else:
+            return metric(collapse_time(new_arr, axis=0))
 
-
-    #     if array_return:
-    #         return new_arr
-    #     else:
-    #         return metric(collapse_time(new_arr, axis=0))
-
-    function_choice = _single_permute_compute
+    function_choice = _single_resample_compute_new
+    #function_choice = _single_permute_compute
 
     if not parallel:
         rng = np.random.default_rng(seed)
@@ -384,7 +403,7 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.ma.var, metri
 
     permuted_stat_list = np.array(permuted_stat_list)
     epsilon = 1e-10
-    p_value = (np.sum(permuted_stat_list >= org_stat) + 1 + epsilon) / (bootstrap_n + 1 + epsilon)
+    p_value = 1 - (np.sum(permuted_stat_list >= org_stat) + 1 + epsilon) / (bootstrap_n + 1 + epsilon)
     
     if plot == True:
         if "figsize" not in kwargs:
