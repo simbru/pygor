@@ -274,7 +274,7 @@ def bootstrap_time(arr_3d, bootstrap_n=2500, mode_param=2, mode="sd",
 def abs_max(arr, axis):
     return np.max(np.abs(arr), axis = axis)
 
-def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = abs_max, metric = np.std,
+def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = np.var, metric = np.max,
                     x_parts=2, y_parts=2, plot = False, parallel = True, seed = 111,**kwargs): # these metrics work so leave them
     """
     Perform a spatial permutation test to compute p-value for a given metric on the spatial data.
@@ -403,7 +403,7 @@ def bootstrap_space(arr_3d, bootstrap_n = 2500, collapse_time = abs_max, metric 
 
     permuted_stat_list = np.array(permuted_stat_list)
     epsilon = 1e-10
-    p_value = 1 - (np.sum(permuted_stat_list >= org_stat) + 1 + epsilon) / (bootstrap_n + 1 + epsilon)
+    p_value = (np.sum(permuted_stat_list >= org_stat) + 1 + epsilon) / (bootstrap_n + 1 + epsilon)
     
     if plot == True:
         if "figsize" not in kwargs:
