@@ -351,7 +351,7 @@ def ipl_summary_polarity_roi(roi_df, numcolours = 4, figsize = (8, 4), polaritie
     plt.show()
     return fig, ax
 
-def plot_roi_hist(roi_df, stat = "contour_area_total", conditional = 'default', 
+def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'default', 
                     category = "colour", bins = "auto", binwidth = None, colour_list = None,
                     kde = False, scalebar = True, avg_line = False, ax = None, **kwargs):
     '''This function `plot_roi_hist` creates histograms of a specified statistic within regions of interest
@@ -384,55 +384,53 @@ def plot_roi_hist(roi_df, stat = "contour_area_total", conditional = 'default',
     
     '''
     try:
-        title = stat_mappings[stat]
+        title = stat_mappings[statistic]
     except KeyError:
-        title = stat
+        title = statistic
     if conditional == 'default':
         roi_df = roi_df.query(f"contour_area_total > 0")
     elif conditional != None or conditional != 'default':
-        roi_df = roi_df.query(f"{conditional} > 0")
-    if category == "colour":
-        if colour_list == None:
-            colour_list = pygor.plotting.custom.fish_palette
-        if ax is None:
-            fig, ax = plt.subplots(4,1, figsize = (2.5, 2.35* 2), sharex=True, sharey=True, gridspec_kw={'hspace': 0})
-        else:
-            fig = plt.gcf()
-        colours = np.unique(roi_df["colour"])
-        for n, c in enumerate(colours):
-            cax = sns.histplot(data = roi_df.query(f"colour == '{c}'"), x = stat, color=colour_list[n], ax = ax.flat[n], element="bars", kde = kde, bins = bins, binwidth = binwidth, legend = False, **kwargs)
-        for a, c in zip(ax.flat, colours):
-            a.set_ylabel("")
-            if avg_line is True:
-                a.axvline(np.median(roi_df.query(f"colour == '{c}'")[stat]), c = "k", ls = "--")
-            a.set_yticks([])
-        plt.tight_layout()
-    if category == "polarity":
-        fig, ax = plt.subplots(2,1, figsize = (2.2, 2.85), sharex=True, sharey=True, gridspec_kw={'hspace': 0})
-        if conditional != None:
-            roi_df = roi_df.query(f"{conditional} > 0")
-        if colour_list == None:
+        roi_df = roi_df.query(f"{conditional}")
+    # if category == "colour":
+    categories_specified = np.unique(roi_df[category])
+    n_categories = len(categories_specified)
+    if colour_list == None:
+        if category == "polarity":
             colour_list = pygor.plotting.custom.polarity_palette
-        polarities = [-1, 1]
-        for n, polarity in enumerate(polarities):
-            sns.histplot(data = roi_df.query(f"polarity == {polarity}"), x = stat, 
-                        color=pygor.plotting.custom.colur_list[n], ax = ax.flat[n], element="bars", 
-                        kde = kde, line_kws = {"color": "k"}, bins = bins, binwidth = binwidth, **kwargs)
-            ax[n].lines[0].set_color('k')
-        for a, c in zip(ax.flat, polarities):
-            a.set_ylabel("")
-            if avg_line is True:
-                a.axvline(np.median(roi_df.query(f"polarity == {c}")[stat]), c = "k", ls = "--")
-            a.set_yticks([])
-            a.set_ylim(bottom = 0)
+        else:
+            colour_list = pygor.plotting.custom.fish_palette
+    if ax is None:
+        fig, ax = plt.subplots(n_categories,1, figsize = (2.5, 2*n_categories), sharex=True, sharey=True, gridspec_kw={'hspace': 0})
+    else:
+        fig = plt.gcf()
+    for n, c in enumerate(categories_specified):
+        if isinstance(c, str):
+            df = roi_df.query(f"{category} == '{c}'")
+        else:
+            df = roi_df.query(f"{category} == {c}")
+        # Populate each histogram subplot
+        sns.histplot(data = df, x = statistic, color=colour_list[n], ax = ax.flat[n],
+            element="bars", kde = kde, bins = bins, binwidth = binwidth, legend = False, **kwargs)
+    for a, c in zip(ax.flat, categories_specified):
+        a.set_ylabel("")
+        if avg_line is True:
+            a.axvline(np.median(roi_df.query(f"{category} == '{c}'")[statistic]), c = "k", ls = "--")
+        a.set_yticks([])
+    a.set_xlabel(title)
     if "hue" in kwargs:
-        for n, i in enumerate(ax.flat):
-            i.scatter(0, i.get_ylim()[1]/2, marker = 'o', c = colour_list[n], s = i.get_ylim()[1]*2)
         # Handle residual legend nonesense
-        fig.legend(labels = ["R", "G", "B", "UV"], loc = 'upper center', bbox_to_anchor = (0.5, 1.1), ncol = 4)
-        print(fig.get_label())
+        fig.legend(title = kwargs["hue"],labels = np.unique(roi_df[kwargs["hue"]]), loc = 'center right', bbox_to_anchor = (1.3, .5), ncols = 1)
+        positionX = ax[-1].get_xlim()[0]
+        positionY = ax[-1].get_ylim()[1]
+        if positionX >= 0:
+            positionX = positionX * 1.1
+        if positionX < 0:
+            positionX = positionX / 1.2
+        for n, i in enumerate(ax.flat):
+            i.scatter(positionX, positionY*.9, marker = 'o', c = colour_list[n], s = 200)
     if scalebar is True:
-        pygor.plotting.add_scalebar(25, string = "25 ROIs", ax = ax[-1], orientation = 'v', x = 1.1, rotation = 180)
+        auto_num = int(np.round(ax[-1].get_ylim()[1]/3/10)*10)
+        pygor.plotting.add_scalebar(auto_num, string = f"{auto_num}", ax = ax[-1], orientation = 'v', x = 1.1, rotation = 180)
     a.set_xlabel(title)
 
 def ipl_summary_polarity_chroma(chroma_df, numcolours = 4, figsize = (8, 4), cat_pol = ['off', 'on']):
@@ -566,7 +564,7 @@ def _multi_vs_single_horz(df, metric, subset_list, colour = None, labels = None)
                 c = color_mappings[subset]
             else:
                 c = "lightgrey"
-                # Dynamically handle labels
+        # Dynamically handle labels
         if labels is not None and isinstance(labels, Iterable) is False: 
             raise ValueError("Labels must be a tuple or list-like of strings")
         if labels is None:
