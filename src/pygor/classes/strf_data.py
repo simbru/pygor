@@ -755,7 +755,7 @@ class STRF(Core):
             if dimstr == "time":
                 largest_by_colour = pygor.utilities.multicolour_reshape(self.get_time_amps(), self.numcolour)
                 tuning_functions = largest_by_colour
-            if dimstr == "space":
+            elif dimstr == "space":
                 largest_by_colour = pygor.utilities.multicolour_reshape(self.get_space_amps(), self.numcolour)
                 tuning_functions = largest_by_colour
             else:
