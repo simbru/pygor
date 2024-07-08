@@ -72,9 +72,11 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None,
     line_width : float, optional
         The width of the scalebar line. Default is None.
     """
+    # If axes object is not provided, use the current axes
     if ax is None:
         ax = plt.gca()
 
+    # If text size is not provided, set it to a default value
     if text_size is None:
         try:
             text_size = ax.get_figure().get_axes()[0].xaxis.label.get_size()
@@ -84,27 +86,34 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None,
             except:
                 text_size = 15
 
+    # Get the size of the figure and the aspect ratio
     fig_width, fig_height = ax.get_figure().get_size_inches()
     fig_aspect = fig_width / fig_height
+
+    # Set the line width to the maximum of the figure width and height
     if line_width is None:
         line_width = 1 * np.max([fig_width, fig_height])
 
+    # Set the offset of the scalebar based on the orientation and aspect ratio
     if orientation == 'v':
         offset = 0.025 / fig_aspect
     else:  # 'h'
         offset = 0.025 / np.reciprocal(fig_aspect)
 
+    # Get the limits of the axes
     ax_width = ax.get_xlim()[1] - ax.get_xlim()[0]
     ax_height = ax.get_ylim()[1] - ax.get_ylim()[0]
     ax_aspect = ax_width / ax_height
     ax_ylowerlim, ax_yupperlim = ax.get_ybound()
     ax_xlowerlim, ax_xupperlim = ax.get_xbound()
 
+    # Set the x and y coordinates of the scalebar if not provided
     if x is None:
         x = -.1 if orientation == 'v' else 0
     if y is None:
         y = 0 if orientation == 'v' else -.1
 
+    # Calculate the start and stop points of the scalebar
     if orientation == 'v':
         x_ = x * ax_xupperlim + (1 - x) * ax_xlowerlim
         start = np.array([x_, y * ax_yupperlim + ax_ylowerlim])
@@ -113,13 +122,15 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None,
     else:  # 'h'
         y_ = y * ax_yupperlim + (1 - y) * ax_ylowerlim
         start = np.array([x * ax_xupperlim + ax_xlowerlim, y_])
-        stop = np.array([x * ax_xupperlim + ax_xupperlim + length, y_])
+        stop = np.array([start[0] + length, y_])
         rotation_angle = rotation
 
+    # Rotate the points of the scalebar
     points = np.array([start, stop])
     midpoint = np.mean(points, axis=0)
     points = rotate(points, origin=midpoint, degrees=rotation)
 
+    # Calculate the text position based on the orientation and alignment
     if orientation == 'v':
         text_x = points[0, 0] - offset * (ax.get_xlim()[1] - ax.get_xlim()[0])
         text_y = {'close': points[0, 1], 'mid': midpoint[1], 'far': points[1, 1]}[text_align]
@@ -131,6 +142,7 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None,
         if rotation == 180:
             text_y = points[0, 1] + offset * (ax.get_ylim()[1] - ax.get_ylim()[0])
 
+    # Add the scalebar line and text to the axes
     line = plt.Line2D(points[:, 0], points[:, 1], color='k', linewidth=line_width,
                     clip_on=False, clip_box=True, mew=1, solid_capstyle="butt")
     ax.add_line(line)
