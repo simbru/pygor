@@ -51,7 +51,7 @@ pval_mappings = {
     "centpos" : "pval_time",
 }
 
-def plot_areas_vs(df, rowX : str, rowY : str, colour = None, ax : plt.axes = None, legend : bool = True, 
+def plot_metric_vs(df, rowX : str, rowY : str, colour = None, ax : plt.axes = None, legend : bool = True, 
         labels : tuple = None,  strategy : str = 'singles', pval_map = True,
         axlim = None) -> (plt.figure, plt.axis):
     '''The function `plot_areas_vs` generates a plot comparing two variables from a
@@ -168,7 +168,7 @@ def plot_areas_vs(df, rowX : str, rowY : str, colour = None, ax : plt.axes = Non
                 scatter_colour = combined_pvals
             scatter = ax.scatter(both_df[rowX], both_df[rowY], s = 20, c = scatter_colour, 
                                 cmap = "Greys_r", label = f"{labels[0]} and {labels[1]}",
-                                alpha = .33, edgecolors = "k")
+                                alpha = .33, edgecolors = None)
     else:
         scatter = ax.scatter(both_df[rowX], both_df[rowY], s = 20, c = 'k', 
                             label = f"{labels[0]} and {labels[1]}",
@@ -463,7 +463,7 @@ def ipl_summary_polarity_chroma(chroma_df, numcolours = 4, figsize = (8, 4), cat
     plt.show()
     return fig, ax
 
-def _multi_vs_single_vert(df, metric, subset_list, colour = None, labels = None) -> (plt.figure, plt.axis):
+def _multi_vs_single_vert(df, metric, subset_list, colour = None, labels = None, **kwargs) -> (plt.figure, plt.axis):
     # Generate filtered dataframe by metric
     metric_df = df.filter(like = metric)
     # Generate figures according to subset list
@@ -473,7 +473,7 @@ def _multi_vs_single_vert(df, metric, subset_list, colour = None, labels = None)
     # Loop through subsets and plot data
     labels_used = []
     for n, subset in enumerate(subset_list):
-        existing_rows = metric_df.columns
+        existing_rows = [i for i in metric_df.columns if "bool" not in i]
         current_subset = '_'.join([metric, subset])
         query_str =  f'{metric}_{subset} > 0 & ' + ' == 0 & '.join([i for i in existing_rows if i != current_subset]) + " == 0"
         print(query_str)
@@ -508,6 +508,8 @@ def _multi_vs_single_vert(df, metric, subset_list, colour = None, labels = None)
         sns.stripplot(y = pooled, x = n, color = c, ax = ax[3], jitter=True,
                     alpha = alpha_val/3, orient = 'v', edgecolor = 'k', linewidth = .5,
                     marker = 'o', label = label)
+        if "lim" in kwargs.keys():
+            ax[1].set_ylim(kwargs["lim"])
     if metric in title_mappings.keys():
         ax[0].set_ylabel(title_mappings[metric])
     else:
@@ -531,14 +533,14 @@ def _multi_vs_single_vert(df, metric, subset_list, colour = None, labels = None)
     ax[3].set_title("Multi-colour RF RFs", loc = 'right')
     handles1, labels1 = ax[0].get_legend_handles_labels()
     handles2, labels2 = ax[-1].get_legend_handles_labels()
-    hand_labl = np.array([[handles1, labels1], [handles2, labels2]])
+    # hand_labl = np.array([[handles1, labels1], [handles2, labels2]])
     handles = [(i, j) for i, j in zip(handles1, handles2)]
     ax[0].legend(handles, labels_used, handler_map={tuple: HandlerTuple(ndivide=None)})
-    l = ax[-1].legend()
-    l.remove()
+    legd = ax[-1].legend()
+    legd.remove()
     plt.show()
 
-def _multi_vs_single_horz(df, metric, subset_list, colour = None, labels = None) -> (plt.figure, plt.axis):
+def _multi_vs_single_horz(df, metric, subset_list, colour = None, labels = None, **kwargs) -> (plt.figure, plt.axis):
     # Generate filtered dataframe by metric
     metric_df = df.filter(like = metric)
     # Generate figures according to subset list
@@ -547,7 +549,7 @@ def _multi_vs_single_horz(df, metric, subset_list, colour = None, labels = None)
     # Loop through subsets and plot data
     labels_used = []
     for n, subset in enumerate(subset_list):
-        existing_rows = metric_df.columns
+        existing_rows = [i for i in metric_df.columns if "bool" not in i]
         current_subset = '_'.join([metric, subset])
         query_str =  f'{metric}_{subset} > 0 & ' + ' == 0 & '.join([i for i in existing_rows if i != current_subset]) + " == 0"
         print(query_str)
@@ -578,10 +580,12 @@ def _multi_vs_single_horz(df, metric, subset_list, colour = None, labels = None)
         sns.kdeplot(x = singles, ax = ax[1], color = c, alpha = alpha_val, lw = 2)
         sns.stripplot(x = singles, y = n, color = c, ax = ax[0], jitter=True, size = 4,
                     alpha = alpha_val/3, orient = 'h', edgecolor = 'k', linewidth = .5,
-                    marker = 'D', label = label)
+                    marker = 'D', label = label, **kwargs)
         sns.stripplot(x = pooled, y = n, color = c, ax = ax[3], jitter=True, size = 4,
                     alpha = alpha_val/3, orient = 'h', edgecolor = 'k', linewidth = .5,
-                    label = label)
+                    label = label, **kwargs)
+        if "lim" in kwargs.keys():
+            ax[1].set_ylim(kwargs["lim"])
     if metric in title_mappings.keys():
         ax[-1].set_xlabel(title_mappings[metric])
     else:
@@ -609,13 +613,12 @@ def _multi_vs_single_horz(df, metric, subset_list, colour = None, labels = None)
 #    hand_labl = np.array([[handles1, labels1], [handles2, labels2]])
     handles = [(i, j) for i, j in zip(handles1, handles2)]
     ax[0].legend(handles, labels_used, handler_map={tuple: HandlerTuple(ndivide=None)})
-    l = ax[-1].legend()
-    l.remove()
+    legd = ax[-1].legend()
+    legd.remove()
     plt.show()
     
-def plot_multi_vs_single(df, metric, subset_list, orientation = 'v', labels = None):
+def plot_multi_vs_single(df, metric, subset_list, orientation = 'v', labels = None, **kwargs):
     if orientation == 'v' or orientation == 'vertical':
-        _multi_vs_single_vert(df, metric, subset_list)
+        _multi_vs_single_vert(df, metric, subset_list, **kwargs)
     if orientation == 'h' or orientation == 'horizontal':
-        _multi_vs_single_horz(df, metric, subset_list)
-        
+        _multi_vs_single_horz(df, metric, subset_list, **kwargs)
