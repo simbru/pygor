@@ -24,7 +24,7 @@ dependencies = [
   "matplotlib",
   "h5py",
   "pandas",
-  "seaborn",
+  "seaborn <= 12.2",
   "seaborn-image",
   "scikit-learn",
   "scikit-image",
@@ -39,6 +39,8 @@ dependencies = [
   "ipykernel",
   "ipympl",
   "notebook",
+  "statannotations",
+  "pingouin"
 ]
 
 [project.urls]

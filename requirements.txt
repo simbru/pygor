@@ -3,7 +3,7 @@ pandas
 matplotlib
 h5py
 pandas
-seaborn
+seaborn <= 12.2
 seaborn-image
 scikit-learn
 scikit-image
@@ -20,3 +20,5 @@ ipywidgets
 ipykernel
 ipympl
 notebook
+statannotations
+pingouin
