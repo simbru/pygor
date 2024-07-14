@@ -399,3 +399,17 @@ def spatial_colors(d3_srf_arr):
     plt.close()
     return fig
 
+def spacetime_plot(strf_arr, slice_along = "y", cmap = None):
+    centred_strf = strf_arr
+    prune = pygor.utilities.auto_remove_border(centred_strf)
+    collapsed = np.var(prune, axis = 0)
+    maxindex = np.unravel_index(np.argmax(np.abs(collapsed)), collapsed.shape)
+    fig, ax = plt.subplots(1, 1)
+    if slice_along == "y":
+        arr = prune[:, :, maxindex[1]].T
+    if slice_along == "x":
+        arr = prune[:, maxindex[0], :].T
+    if cmap == None:
+        cmap = plt.get_cmap()
+    ax.imshow(arr, cmap = cmap, clim = (-np.max(np.abs(one)), np.max(np.abs(one))))
+    return fig, ax
