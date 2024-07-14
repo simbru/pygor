@@ -84,7 +84,7 @@ class Experiment:
                 self.__exp_setter__(i)
         print(f"Attached data: {objects}")
 
-    def detach_data(self, indices:int or list(int)):
+    def detach_data(self, indices:int or list(int) or str):
         to_print = self.recording_id.iloc[indices]["name"]
         if isinstance(to_print, str):
             to_print = to_print
