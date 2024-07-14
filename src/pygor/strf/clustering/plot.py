@@ -134,7 +134,7 @@ def plot_df_tuning(post_cluster_df, cluster_ids, group_by = "cluster_id", plot_c
                             warnings.simplefilter("ignore")
                             percentages = percentage_hist_vals_condition / population_hist_vals_population * 100
                         i.barh(np.arange(0, 100, 10), width= percentages, height=10, color = 'b', edgecolor="black", alpha = .75)
-                        i.set_label("skip_this")
+                        i.set_label("skip_this") #trust me, this works (see later lines)
                         i.set_xlim(0,40)
                     else:
                         hist = np.histogram(analyse_df.query(f"{group_by} == '{clust_id}'")["ipl_depths"], bins = 10, range=(0, 100))[0]
@@ -144,11 +144,11 @@ def plot_df_tuning(post_cluster_df, cluster_ids, group_by = "cluster_id", plot_c
                     df = analyse_df.query(f"{group_by} == '{clust_id}'").filter(like=f"{param}")
                     colour_scheme = reversed(pygor.plotting.fish_palette)
                     if boxplot == True:
-                        sns.boxplot(df, palette = colour_scheme, ax = i)
+                        sns.boxplot(data = df, palette = colour_scheme, ax = i)
                     if boxplot == False and scatter == True:
-                        sns.stripplot(df, palette = colour_scheme, ax = i, alpha = .2)
+                        sns.stripplot(data = df, palette = colour_scheme, ax = i, alpha = .2)
                     elif scatter == True:
-                        sns.stripplot(df, palette = 'dark:k', ax = i, alpha = .5)
+                        sns.stripplot(data = df, palette = 'dark:k', ax = i, alpha = .5)
                     i.set_xticks([])
                     i.invert_xaxis()
         for ax in _ax.flat:
@@ -158,7 +158,7 @@ def plot_df_tuning(post_cluster_df, cluster_ids, group_by = "cluster_id", plot_c
         ## First let's find where we need to make changes 
         where_no_area = np.all(post_cluster_df.query(f"{group_by} == '{clust_id}'").filter(regex = "area_\d+$") == 0, axis = 0)
         index_true = np.where(where_no_area == True)[0]
-        index_mapping = {"375" : 0, "422" : 1, "478" : 2, "588" : 3}
+        index_mapping = {"375" : 0, "422" : 1, "478" : 2, "588" : 3} # TODO make this more robust and handle nm labels automatically
         wavelength_only = [i.split('_')[-1] for i in where_no_area[index_true].index]
         change_index = [index_mapping[i] for i in wavelength_only]
         alpha_val = 0.1
@@ -271,9 +271,11 @@ def _plot_temporal_reconstruct(df, cluster_id_str, axs=None, parallel=None, **kw
         plot = axs.flat[n].plot(times_recons[n, 0].T, c = "grey")
         plot = axs.flat[n].plot(times_recons[n, 1].T, c = pygor.plotting.fish_palette[n])#, cmap=pygor.plotting.custom.maps_concat[n])
         axs.flat[n].axis('off')
-    pygor.plotting.add_scalebar(2.5, ax = axs.flat[-1], rotation = 180, x = 1.1, line_width = 5)
+    pygor.plotting.add_scalebar(2.5, ax = axs.flat[-1], rotation = 180, x = 1, line_width = 5)
 
-def plot_spatial_reconstruct(clust_df, cluster_id_strings, parallel=True):
+def plot_spatial_reconstruct(clust_df, cluster_id_strings = None, parallel=True):
+    if cluster_id_strings is None:
+        cluster_id_strings = natsort.natsorted(pd.unique(org_stats_df_ctrl["cluster_id"]).dropna())
     # Figure out how many columns we need 
     chromatic_cols = clust_df.filter(regex=r"_\d").columns
     unique_wavelengths = list(set([i.split('_')[-1] for i in chromatic_cols]))
@@ -302,7 +304,8 @@ def plot_spatial_reconstruct(clust_df, cluster_id_strings, parallel=True):
 
     plt.show()
 
-def plot_spacetime_reconstruct(clust_df, cluster_id_strings, parallel=True):
+def plot_spacetime_reconstruct(clust_df, cluster_id_strings, time_dur = 1.3, scalebar_time = 0.3, 
+                        ipl_percentage = True,parallel=True):
     # Figure out how many columns we need 
     chromatic_cols = clust_df.filter(regex=r"_\d").columns
     unique_wavelengths = list(set([i.split('_')[-1] for i in chromatic_cols]))
@@ -310,6 +313,8 @@ def plot_spacetime_reconstruct(clust_df, cluster_id_strings, parallel=True):
         cluster_id_strings = [cluster_id_strings]
     # Determine how many rows and columns
     rows, columns = len(cluster_id_strings), len(unique_wavelengths) * 2
+    if ipl_percentage:
+        columns += 1
     # Create final plot (and wrap ax in array)
     fig, ax = plt.subplots(rows, columns, figsize = (columns*1.9, rows),
     gridspec_kw = {'wspace' : 0.1, 'hspace' : 0.0, 'bottom': 0.01, 'top': .99})
@@ -331,10 +336,81 @@ def plot_spacetime_reconstruct(clust_df, cluster_id_strings, parallel=True):
             _imshow_spatial_reconstruct(clust_df, c_id, axs=ax[n, 0:4], parallel=None)
         for n, c_id in enumerate(cluster_id_strings):
             _plot_temporal_reconstruct(clust_df, c_id, axs=ax[n, 4:8], parallel=None)
+    if ipl_percentage == True:
+        population_hist_vals_population = np.histogram(clust_df["ipl_depths"], bins = 10, range=(0, 100))[0]
+        for i, clust in zip(ax[:, -1], cluster_id_strings):
+            i.axhspan(-5, 55, color = "lightgrey", lw = 0)
+            i.axhspan(60, 95, color = "lightgrey", lw = 0)
+            percentage_hist_vals_condition = np.histogram(clust_df.query(f"cluster_id == '{clust}'")["ipl_depths"], bins = 10, range=(0, 100))[0]
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                percentages = percentage_hist_vals_condition / population_hist_vals_population * 100
+            i.barh(np.arange(0, 100, 10), width= percentages, height=10, color = 'b', edgecolor="black", alpha = .75)
+            i.set_label("skip_this")
+            i.set_xlim(0,40)
+            i.set_axis_off()
     # Now post-process plot however you'd like:
-    pygor.plotting.add_scalebar(4.6153, string = "300 ms", ax = ax[-1, -4], x = 0, y = .1, orientation = 'h', line_width = 5, text_size = 8)
+    pygor.plotting.add_scalebar(4.6153, string = "300 ms", ax = ax[-1, -5], x = 0, y = .1, orientation = 'h', line_width = 5, text_size = 8)
     pygor.plotting.add_scalebar(10, string = f"35.3 °", ax = ax[-1, 0], x = 0, orientation = 'h', line_width = 5, text_size = 8)
     
     plt.show()
     return fig, ax
 # def strf_summary():
+
+def compare_clusters_conditions(df_0, df_1, metric = "area_"):
+    # Mangle, reshape, and coerce the data into the right shape (ew I hate this)
+    colour_categories = pd.unique(df_0.filter(like = f"{metric}").columns)
+    df_0_reshaped = pd.melt(df_0[colour_categories.tolist() + ["cluster_id"]], id_vars = ["cluster_id"])
+    df_0_reshaped = df_0_reshaped.mask(df_0_reshaped == 0, np.nan, inplace = False)
+    df_0_reshaped = df_0_reshaped.rename(columns = {"variable":"colour", "value":"area"})
+    df_1_reshaped = pd.melt(df_1[colour_categories.tolist() + ["cluster_id"]], id_vars = ["cluster_id"])
+    df_1_reshaped = df_1_reshaped.mask(df_1_reshaped == 0, np.nan, inplace = False)
+    df_1_reshaped = df_1_reshaped.rename(columns = {"variable":"colour", "value":"area"})
+    df0 = df_0_reshaped
+    df1 = df_1_reshaped
+    df0 = df0.query("cluster_id != 'nan'")[~df0["cluster_id"].str.startswith("mix")]
+    df1 = df1.query("cluster_id != 'nan'")[~df1["cluster_id"].str.startswith("mix")]
+    df0["cluster_id"] = df0["cluster_id"].cat.remove_unused_categories()
+    df1["cluster_id"] = df1["cluster_id"].cat.remove_unused_categories()
+    # Generate the figure
+    fig_scale = 15
+    fig, ax = plt.subplots(4, 2, figsize = (fig_scale/1.5, fig_scale), sharex = False, sharey = True, gridspec_kw={'hspace': 0, 'wspace': .1})
+    # Do the plotting
+    for index, df in enumerate([df0, df1]):
+        order = natsort.natsorted(df["cluster_id"].unique())
+        for n, i in enumerate(reversed(pd.unique(df0["colour"]))):
+            # Sort the order of the clusters
+            # Standardise (but not share, semi-confusing) the x axis
+            ax[n ,index].set_xticks(range(len(order)))
+            ax[n, index].set_xticklabels(order, rotation = 90, fontsize = 8)
+            # Plot the actual data
+            sns.stripplot(data = df.query("colour == @i"), y = "area", x="cluster_id", orient="v", ax = ax[n, index], dodge = False, 
+                    color=pygor.plotting.compare_conditions[2][index], alpha = 1, order = order, linewidth=.5, size = 3, zorder = 2)
+            sns.boxplot(data = df.query("colour == @i"), y = "area", x="cluster_id", ax = ax[n, index], showfliers = False,
+                    boxprops=dict(alpha=1), color = pygor.plotting.compare_conditions[2][index], order = order, zorder = 3)
+            # Clean up the axes
+            if n != 3:
+                ax[n, index].set_xticks([])
+                ax[n, index].set_xlabel("")
+                ax[n, index].set_yticklabels([])
+        # Shade background according to cluster categories
+        for n, cax in enumerate(ax[:, index]):
+            cax.axvspan(-1, len(order), color = pygor.plotting.fish_palette[n], alpha = .33, zorder = 0)
+            cax.set_xlim(-.5, len(order)-.5)
+            #cax.set_ylim(bottom = 0)
+            on_locs = np.where(df["cluster_id"].cat.categories.str.contains("on") == True)[0]
+            cax.axvspan(on_locs[0]-.5, on_locs[-1]+.5, color = 'white', alpha = .3, zorder = 0)
+            off_locs = np.where(df["cluster_id"].cat.categories.str.contains("off") == True)[0]
+            cax.axvspan(off_locs[0]-.5, off_locs[-1]+.5, color = 'k', alpha = .3, zorder = 0)
+            opp_locs = np.where(df["cluster_id"].cat.categories.str.contains("opp") == True)[0]
+            cax.axvspan(opp_locs[0]-.5, opp_locs[-1]+.5, color = 'grey', alpha = .07, zorder = 0)
+            # Do other axis things
+            cax.set_ylabel("")
+    # Set the axis labels 
+    ax[-1, 0].tick_params(axis='x', labelrotation=45)
+    ax[-1, 1].tick_params(axis='x', labelrotation=45)
+    ax[-1, 0].set_ylabel("Area (° vis. ang.$^2$)")
+    ax[-1, 0].set_xlabel("Clusters (control)")
+    ax[-1, 1].set_xlabel("Clusters (AC block)")
+    pygor.plotting.scalebar.add_scalebar(100, ax = ax[-1, 0], rotation = 0, x = -.05, line_width = 5, string = "100")
+    return fig, ax 

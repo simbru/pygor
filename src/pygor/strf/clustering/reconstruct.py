@@ -23,10 +23,6 @@ import pygor.strf.analyse.analyse
 from joblib import Parallel, delayed
 import joblib
 
-"""
-TODO 
-The reconstruct functions are neither efficient nor scalable. Rewrite needed.
-"""
 # def reconstruct_cluster_spatial(clust_df, cluster_id_str):
 #     r_avg, g_avg, b_avg, uv_avg = [], [], [], []
 #     for roi, obj in clust_df.query(f"cluster_id == '{cluster_id_str}'")[["roi", "strf_obj"]].to_numpy():

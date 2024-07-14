@@ -13,6 +13,11 @@ rguv_hues = ["R", "G", "UV"]
 nanometers = ["588", "478", "422", "375"]
 fish_palette = ["#ef8e00", "teal","#5600fe", "fuchsia"]
 polarity_palette = ["black", "gainsboro", "grey"]
+compare_conditions = {2 : ["gainsboro", "tomato"],
+                    3 : ["gainsboro", "tomato", "darkblue"],
+                    4 : ["gainsboro", "tomato", "darkblue", "purple"],
+                    5 : ["gainsboro", "tomato", "darkblue", "purple", "darkgreen"]}
+
 # red_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["dimgrey", "grey", "white","#ef8e00","darkred"])
 # green_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["dimgrey", "grey","white","mediumaquamarine","teal"])
 # blue_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["dimgrey", "grey","white","#5600fe","#4400cb"])

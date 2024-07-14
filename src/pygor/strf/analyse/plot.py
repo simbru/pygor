@@ -12,14 +12,17 @@ import copy
 import scipy.stats
 import warnings
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from mpl_toolkits.axes_grid1.anchored_artists import AnchoredDrawingArea
 from matplotlib.legend_handler import HandlerTuple
 import natsort
+import pandas as pd
+from statannotations.Annotator import Annotator
 
 label_mappings = {
-    "588"  : "LWS",
-    "478"  : "RH2",
-    "422"  : "SWS2",
-    "375"  : "SWS1",
+    "588"  : "588 nm",
+    "478"  : "478 nm",
+    "422"  : "422 nm",
+    "375"  : "375 nm",
 }
 
 color_mappings = {
@@ -131,7 +134,10 @@ def plot_metric_vs(df, rowX : str, rowY : str, colour = None, ax : plt.axes = No
     if strategy == 'pooled':
         rowX_df = filtered_df.query(f"{rowX} > 0 & {rowY} == 0")[rowX] # if you want all other combined cases
         rowY_df = filtered_df.query(f"{rowX} == 0 & {rowY} > 0")[rowY]
-    if strategy != 'singles' and strategy != 'pooled':
+    if strategy == "skip":
+        rowX_df = None
+        rowY_df = None
+    elif strategy != 'singles' and strategy != 'pooled':
         raise AttributeError("Strategy not recognised. Please use 'single' or 'pooled'.")
     both_df = df[[rowX, rowY]].query(f"{rowX} > 0 & {rowY} > 0").replace(0, np.nan) # contains all vals but nan empties
     # Get max value for axis limit
@@ -179,8 +185,8 @@ def plot_metric_vs(df, rowX : str, rowY : str, colour = None, ax : plt.axes = No
     ax.plot(np.arange(0, max_val_leeway * 1.5, 1), np.arange(0, max_val_leeway * 1.5, 1), color = "grey", ls = "--", alpha = .5)
     # Plot X KDE and stripplot
     ax_histx = fig.add_subplot(gs[1, 0], sharex=ax)
-    sns.kdeplot(both_df[rowX], color =  "k", ax = ax_histx)
-    sns.kdeplot(rowX_df, color = cX, ax = ax_histx)
+    sns.kdeplot(x = both_df[rowX], color =  "k", ax = ax_histx)
+    sns.kdeplot(x = rowX_df, color = cX, ax = ax_histx)
     ax_stackx = fig.add_subplot(gs[0, 0], sharex=ax)
     sns.stripplot(x = rowX_df, s = 5, c = cX, label = f"{labels[0]} {strategy}", ax = ax_stackx, alpha = .33, edgecolor='gray', linewidth=.6)
     try:
@@ -241,9 +247,9 @@ def plot_distribution(chroma_df, columns_like = "area", animate = True):
         if current_statistic in title_mappings.keys():
             ax.set_ylabel(title_mappings[current_statistic])
         #ax.set_ylim(bottom = 6, top = max_val)
-        sns.boxplot(data, 
+        sns.boxplot(data = data, 
             palette=reversed(pygor.plotting.custom.fish_palette))
-        sns.stripplot(data, 
+        sns.stripplot(data = data, 
             palette=r"dark:k", 
             alpha = .5, ax = ax, zorder = 1, linewidth=.5, edgecolors = 'k',size = 3, jitter =.2)
         ax.set_title("Cone input", y = -.15)
@@ -353,7 +359,8 @@ def ipl_summary_polarity_roi(roi_df, numcolours = 4, figsize = (8, 4), polaritie
 
 def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'default', 
                     category = "colour", bins = "auto", binwidth = None, colour_list = None,
-                    kde = False, scalebar = True, avg_line = False, ax = None, **kwargs):
+                    kde = False, scalebar = True, avg_line = False, ax = None,
+                    legend = True, **kwargs):
     '''This function `plot_roi_hist` creates histograms of a specified statistic within regions of interest
     (ROIs) based on different categories such as color or polarity.
     
@@ -383,6 +390,9 @@ def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'defau
     specific `binwidth`, the histogram will be divided into bins of that width.
     
     '''
+    if "hue" in kwargs and "palette" not in kwargs:
+        if len(roi_df[kwargs["hue"]].unique()) == 2:
+            kwargs["palette"] = pygor.plotting.custom.compare_conditions[2]
     try:
         title = stat_mappings[statistic]
     except KeyError:
@@ -403,14 +413,24 @@ def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'defau
         fig, ax = plt.subplots(n_categories,1, figsize = (2.5, 2*n_categories), sharex=True, sharey=True, gridspec_kw={'hspace': 0})
     else:
         fig = plt.gcf()
+    # Loop through each category and plot the histogram to axes
     for n, c in enumerate(categories_specified):
         if isinstance(c, str):
             df = roi_df.query(f"{category} == '{c}'")
         else:
             df = roi_df.query(f"{category} == {c}")
         # Populate each histogram subplot
-        sns.histplot(data = df, x = statistic, color=colour_list[n], ax = ax.flat[n],
-            element="bars", kde = kde, bins = bins, binwidth = binwidth, legend = False, **kwargs)
+        currplot = sns.histplot(data = df, x = statistic, color=colour_list[n], ax = ax.flat[n],
+            kde = kde, bins = bins, binwidth = binwidth, legend = legend,**kwargs)
+        if legend is True:
+            # Fetch legend contents
+            currlegend = currplot.get_legend()
+            if legend is not None:
+                # Get the handles and text out of the legend
+                handles, labels = currlegend.legendHandles, [text.get_text() for text in currlegend.get_texts()]
+                # Remove the legend again, we will plot it later if hue is used
+                currplot.get_legend().remove()
+    # Set up axes
     for a, c in zip(ax.flat, categories_specified):
         a.set_ylabel("")
         if avg_line is True:
@@ -418,20 +438,33 @@ def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'defau
         a.set_yticks([])
     a.set_xlabel(title)
     if "hue" in kwargs:
-        # Handle residual legend nonesense
-        fig.legend(title = kwargs["hue"],labels = np.unique(roi_df[kwargs["hue"]]), loc = 'center right', bbox_to_anchor = (1.3, .5), ncols = 1)
-        positionX = ax[-1].get_xlim()[0]
-        positionY = ax[-1].get_ylim()[1]
-        if positionX >= 0:
-            positionX = positionX * 1.1
-        if positionX < 0:
-            positionX = positionX / 1.2
+        if legend is True:
+            # Handle residual legend nonesense
+            fig.legend(title = kwargs["hue"], handles = handles, labels = labels, loc = 'lower center', bbox_to_anchor = (.5, -.05), ncols = 2)
         for n, i in enumerate(ax.flat):
-            i.scatter(positionX, positionY*.9, marker = 'o', c = colour_list[n], s = 200)
+            bbox = i.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+            width, height = bbox.width, bbox.height
+            width *= fig.dpi
+            height *= fig.dpi
+            plotarea = width * height
+            i.scatter(.08, .9, marker = 'o', c = colour_list[n], s = plotarea/100, transform = i.transAxes)
     if scalebar is True:
-        auto_num = int(np.round(ax[-1].get_ylim()[1]/3/10)*10)
+        if "stat" in kwargs:
+            if kwargs["stat"] != "count" or kwargs["stat"] != "auto":
+                # Just round here, because often we value will not be above 10, forcing it to 0
+                auto_num = int(np.round(ax[-1].get_ylim()[1]/3))
+            if kwargs["stat"] == "count":
+                # Nearest 10
+                auto_num = int(np.round(ax[-1].get_ylim()[1]/3/10)*10)
+        else:
+            # Nearest 10
+            auto_num = int(np.round(ax[-1].get_ylim()[1]/3/10)*10)
+        if auto_num < 10: # Make sure a bar is plotted if there is less than 10
+            auto_num = int(np.round(ax[-1].get_ylim()[1]/3))
         pygor.plotting.add_scalebar(auto_num, string = f"{auto_num}", ax = ax[-1], orientation = 'v', x = 1.1, rotation = 180)
     a.set_xlabel(title)
+
+    return fig, ax 
 
 def ipl_summary_polarity_chroma(chroma_df, numcolours = 4, figsize = (8, 4), cat_pol = ['off', 'on']):
     polarities = ['off', 'on']#, 'opp']
@@ -580,12 +613,12 @@ def _multi_vs_single_horz(df, metric, subset_list, colour = None, labels = None,
         sns.kdeplot(x = singles, ax = ax[1], color = c, alpha = alpha_val, lw = 2)
         sns.stripplot(x = singles, y = n, color = c, ax = ax[0], jitter=True, size = 4,
                     alpha = alpha_val/3, orient = 'h', edgecolor = 'k', linewidth = .5,
-                    marker = 'D', label = label, **kwargs)
+                    marker = 'D', label = label)
         sns.stripplot(x = pooled, y = n, color = c, ax = ax[3], jitter=True, size = 4,
                     alpha = alpha_val/3, orient = 'h', edgecolor = 'k', linewidth = .5,
-                    label = label, **kwargs)
+                    label = label)
         if "lim" in kwargs.keys():
-            ax[1].set_ylim(kwargs["lim"])
+            ax[1].set_xlim(kwargs["lim"])
     if metric in title_mappings.keys():
         ax[-1].set_xlabel(title_mappings[metric])
     else:
@@ -622,3 +655,39 @@ def plot_multi_vs_single(df, metric, subset_list, orientation = 'v', labels = No
         _multi_vs_single_vert(df, metric, subset_list, **kwargs)
     if orientation == 'h' or orientation == 'horizontal':
         _multi_vs_single_horz(df, metric, subset_list, **kwargs)
+
+# def metric_boxplot(df, metric, sigbar = True, sigtest = 'Kruskal', 
+#     ):
+#     # Formatting, reshaping, renaming
+#     colour_categories = pd.unique(df.filter(like = "area_").columns)
+#     colour_categories = np.append(colour_categories, "Group")
+#     df = df[colour_categories.tolist()]
+#     df_reshaped = pd.melt(df, id_vars = ["Group"])
+#     df_reshaped = df_reshaped.mask(df_reshaped == 0, np.nan, inplace = False)
+#     df_reshaped = df_reshaped.rename(columns = {"variable":"colour", "value":"area"})
+#     df_reshaped.replace({"area_375":"375 nm", "area_422":"422 nm", "area_478":"478 nm", "area_588":"588 nm"}, inplace = True)
+#     df_reshaped
+#     x = "colour"
+#     y = metric
+#     hue = None
+#     hue_order = None
+
+#     # Plot
+#     cax = sns.boxplot(data = df_reshaped, y = y, x = x, hue = hue, hue_order=hue_order, 
+#                 showfliers = False, palette=reversed(pygor.plotting.fish_palette), boxprops=dict(alpha=0.5))
+#     sns.stripplot(df_reshaped, y = "area", x = "colour", hue = hue, hue_order=hue_order, dodge=False, linewidth=.5, 
+#                 color = 'k', legend = False, alpha = 0.33, size = 2)
+#     if sigbar == True:
+#         pairs = [
+#             ("588 nm", "478 nm"),
+#             ("588 nm", "422 nm"),
+#             ("588 nm", "375 nm"),
+#         ]
+#         ax = plt.gca()
+#         try:
+#             ax.set_ylabel(pygor.strf.analyse.plot.title_mappings[y])
+#         except KeyError:
+#             ax.set_ylabel(y)
+#         annotator = Annotator(cax, pairs, data=df_reshaped, x=x, y=y, hue = hue, hue_order=hue_order)
+#         annotator.configure(test=sigtest, text_format='star', loc='inside')
+#         annotator.apply_and_annotate()  
