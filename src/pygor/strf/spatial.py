@@ -450,3 +450,15 @@ def concat_masks(ma_list):
     # Now, take the product of all the masks (since each mask should be boolean) along first axis
     concat_mask = np.prod(masks_list, axis = 0)
     return np.ma.array(data = data, mask = concat_mask)
+
+def centre_on_max(arr_3d):
+    """
+    Simpler, faster centring on max pixel in RF (approximating centre)
+    """
+    arr_2d = np.var(arr_3d, axis = 0)
+    arr_2d_max = np.unravel_index(np.argmax(np.abs(arr_2d)), arr_2d.shape)
+    target_pos = np.array(arr_3d.shape[1:]) / 2 # middle
+    shift_by = target_pos - arr_2d_max
+    shift_by = np.nan_to_num(shift_by).astype(int)
+    strf_shifted = np.roll(arr_3d, shift_by, axis = (1,2))
+    return strf_shifted
