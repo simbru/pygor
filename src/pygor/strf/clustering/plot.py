@@ -8,6 +8,7 @@ import natsort
 import pandas as pd
 import pygor.plotting
 import pygor.strf.clustering
+import pygor.utilities
 try:
     from collections import Iterable
 except ImportError:
@@ -15,7 +16,7 @@ except ImportError:
 import warnings
 from joblib import Parallel, delayed
 import joblib
-
+import pygor.strf.pixconverter as pix
 param_map = {
     "ampl" : "Max abs. amplitude (SD)",
     "area" : "Area (° vis. ang.$^2$)",
@@ -253,7 +254,7 @@ def _imshow_spatial_reconstruct(df, cluster_id_str, axs=None, parallel=None, **k
         axs.flat[n].set_yticks([])
         im.set_clim(-max_abs, max_abs)
         
-def _plot_temporal_reconstruct(df, cluster_id_str, axs=None, parallel=None, **kwargs):
+def _plot_temporal_reconstruct(df, cluster_id_str, axs=None, parallel=None, scalebar = False,**kwargs):
     # Figure out how many columns we need 
     chromatic_cols = df.filter(regex=r"_\d").columns
     unique_wavelengths = list(np.unique([i.split('_')[-1] for i in chromatic_cols]))
@@ -271,11 +272,58 @@ def _plot_temporal_reconstruct(df, cluster_id_str, axs=None, parallel=None, **kw
         plot = axs.flat[n].plot(times_recons[n, 0].T, c = "grey")
         plot = axs.flat[n].plot(times_recons[n, 1].T, c = pygor.plotting.fish_palette[n])#, cmap=pygor.plotting.custom.maps_concat[n])
         axs.flat[n].axis('off')
-    pygor.plotting.add_scalebar(2.5, ax = axs.flat[-1], rotation = 180, x = 1, line_width = 5)
+    if scalebar is True:
+        pygor.plotting.add_scalebar(2.5, ax = axs.flat[-1], rotation = 180, x = 1, line_width = 5)
+
+def _plot_temporal_reconstruct_stack(df, cluster_id_str, axs=None, parallel=True, drop_surround = True, scalebar = False,**kwargs):
+    # Figure out how many columns we need 
+    chromatic_cols = df.filter(regex=r"_\d").columns
+    unique_wavelengths = list(np.unique([i.split('_')[-1] for i in chromatic_cols]))
+    # Deal with passing axes    
+    if axs is None:
+        fig, axs = plt.subplots(1, 1)
+    else:
+        fig = plt.gcf()
+    # Reconstruct the RFs (here optionally passing parallel workers)
+    times_recons = pygor.strf.clustering.reconstruct.reconstruct_cluster_temporal(df, cluster_id_str, parallel=parallel)
+    if drop_surround == True:
+        # Get only the largest (we dont care about the surround component in these plots)
+        times_recons = pygor.utilities.select_absmax(times_recons, axis = 1)
+    # Loop over axes and plot, etc:
+    for i in range(times_recons.shape[0]):
+        axs.plot(times_recons[i].T,  color = pygor.plotting.fish_palette[i])
+    axs.axis('off')    
+    if scalebar is True:
+        pygor.plotting.add_scalebar(2.5, ax = axs, rotation = 180, x = 1, line_width = 5)
+
+def _imshow_temporal_reconstruct(df, cluster_id_str, axs=None, parallel=None, **kwargs):
+    # Figure out how many columns we need
+    chromatic_cols = df.filter(regex=r"_\d").columns
+    unique_wavelengths = list(np.unique([i.split('_')[-1] for i in chromatic_cols]))
+    # Deal with passing axes
+    if axs is None:
+        fig, axs = plt.subplots(1, len(unique_wavelengths))
+    else:
+        fig = plt.gcf()
+    # Reconstruct the RFs (here optionally passing parallel workers)
+    strf_recons = pygor.strf.clustering.reconstruct.fetch_cluster_strfs(df, cluster_id_str, parallel=parallel)
+    strf_recons_avgd = np.average(strf_recons, axis = 1)
+    # Loop over axes and plot, etc:
+    for (n, ax) in enumerate(strf_recons_avgd):
+        if n == 0:
+            axs.flat[n].set_ylabel(cluster_id_str, rotation = 0,  labelpad = 20)
+        pygor.strf.plot.spacetime_plot(ax = axs.flat[n], strf_arr = strf_recons_avgd[n], 
+                cmap = pygor.plotting.custom.maps_concat[n], **kwargs)
+        axs.flat[n].axis('off')
+        # axs.flat[n].spines["top"].set_visible(False)
+        # axs.flat[n].spines["bottom"].set_visible(False)
+    #pygor.plotting.add_scalebar(10, ax = axs.flat[-1], rotation = 180, x = 1, line_width = 5)
+
+
 
 def plot_spatial_reconstruct(clust_df, cluster_id_strings = None, parallel=True):
     if cluster_id_strings is None:
-        cluster_id_strings = natsort.natsorted(pd.unique(org_stats_df_ctrl["cluster_id"]).dropna())
+        cluster_id_strings = natsort.natsorted(pd.unique(clust_df["cluster_id"]).dropna())
     # Figure out how many columns we need 
     chromatic_cols = clust_df.filter(regex=r"_\d").columns
     unique_wavelengths = list(set([i.split('_')[-1] for i in chromatic_cols]))
@@ -304,15 +352,19 @@ def plot_spatial_reconstruct(clust_df, cluster_id_strings = None, parallel=True)
 
     plt.show()
 
-def plot_spacetime_reconstruct(clust_df, cluster_id_strings, time_dur = 1.3, scalebar_time = 0.3, 
-                        ipl_percentage = True,parallel=True):
+def plot_spacetime_reconstruct(clust_df, cluster_id_strings, block_size = 200, jitter_div = 4,
+                            time_durS = 1.3, scalebar_S = 0.3, scalebar_deg = 10, ipl_percentage = True,parallel=True, 
+                            time = "1d",screen_size_deg = pix.screen_width_height_visang, norm_time_ylim = True):
     # Figure out how many columns we need 
     chromatic_cols = clust_df.filter(regex=r"_\d").columns
     unique_wavelengths = list(set([i.split('_')[-1] for i in chromatic_cols]))
     if isinstance(cluster_id_strings, str):
         cluster_id_strings = [cluster_id_strings]
     # Determine how many rows and columns
-    rows, columns = len(cluster_id_strings), len(unique_wavelengths) * 2
+    if time == "1dstack":
+        rows, columns = len(cluster_id_strings), len(unique_wavelengths) + 1
+    else:
+        rows, columns = len(cluster_id_strings), len(unique_wavelengths) * 2
     if ipl_percentage:
         columns += 1
     # Create final plot (and wrap ax in array)
@@ -328,15 +380,27 @@ def plot_spacetime_reconstruct(clust_df, cluster_id_strings, time_dur = 1.3, sca
         with Parallel(n_jobs=4) as worker:
             for n, c_id in enumerate(cluster_id_strings):
                 _imshow_spatial_reconstruct(clust_df, c_id, axs=ax[n, 0:4], parallel=worker)
-            for n, c_id in enumerate(cluster_id_strings):
-                _plot_temporal_reconstruct(clust_df, c_id, axs=ax[n, 4:8], parallel=worker)
+            if time == "1d":
+                for n, c_id in enumerate(cluster_id_strings):
+                    _plot_temporal_reconstruct(clust_df, c_id, axs=ax[n, 4:8], parallel=worker)
+            if time =="1dstack":
+                for n, c_id in enumerate(cluster_id_strings):
+                    _plot_temporal_reconstruct_stack(clust_df, c_id, axs=ax[n, 4], parallel=worker)
+            elif time == "2d":
+                for n, c_id in enumerate(cluster_id_strings):
+                    _imshow_temporal_reconstruct(clust_df, c_id, axs=ax[n, 4:8], parallel=worker, aspect = "equal")
     # Otherwise pass None, which gets processed serially
     else:
-        for n, c_id in enumerate(cluster_id_strings):
-            _imshow_spatial_reconstruct(clust_df, c_id, axs=ax[n, 0:4], parallel=None)
-        for n, c_id in enumerate(cluster_id_strings):
-            _plot_temporal_reconstruct(clust_df, c_id, axs=ax[n, 4:8], parallel=None)
-    if ipl_percentage == True:
+        if time == "1d":
+            for n, c_id in enumerate(cluster_id_strings):
+                _plot_temporal_reconstruct(clust_df, c_id, axs=ax[n, 4:8], parallel=None)
+        if time =="1dstack":
+            for n, c_id in enumerate(cluster_id_strings):
+                _plot_temporal_reconstruct_stack(clust_df, c_id, axs=ax[n, 4], parallel=None)
+        elif time == "2d":
+            for n, c_id in enumerate(cluster_id_strings):
+                _imshow_temporal_reconstruct(clust_df, c_id, axs=ax[n, 4:8], parallel=None, aspect = "equal")
+    if ipl_percentage is True:
         population_hist_vals_population = np.histogram(clust_df["ipl_depths"], bins = 10, range=(0, 100))[0]
         for i, clust in zip(ax[:, -1], cluster_id_strings):
             i.axhspan(-5, 55, color = "lightgrey", lw = 0)
@@ -350,9 +414,37 @@ def plot_spacetime_reconstruct(clust_df, cluster_id_strings, time_dur = 1.3, sca
             i.set_xlim(0,40)
             i.set_axis_off()
     # Now post-process plot however you'd like:
-    pygor.plotting.add_scalebar(4.6153, string = "300 ms", ax = ax[-1, -5], x = 0, y = .1, orientation = 'h', line_width = 5, text_size = 8)
-    pygor.plotting.add_scalebar(10, string = f"35.3 °", ax = ax[-1, 0], x = 0, orientation = 'h', line_width = 5, text_size = 8)
-    
+    # Time scalebar
+    time_plot_index = len(unique_wavelengths)
+    time_len_xaxis =  np.abs(ax[0, time_plot_index].get_xlim()[0]) + ax[0, time_plot_index].get_xlim()[1] #xaxis has a -0.5 offset that this summation takes care of
+    frame_s = time_durS / time_len_xaxis
+    scalebar_time_len = scalebar_S / frame_s 
+    pygor.plotting.add_scalebar(scalebar_time_len, string = f"{np.rint(scalebar_S * 1000).astype(int)} ms", ax = ax[-1, time_plot_index], x = 0, orientation = 'h', line_width = 3, text_size = 8, offset_modifier=.6)
+    # Space scalebar 
+    if isinstance(screen_size_deg, np.ndarray) is False:
+        screen_size_deg = np.array(screen_size_deg)
+    else:
+        screen_size_deg = screen_size_deg
+    space_len_xaxis =  np.abs(ax[0, 0].get_xlim()[0]) + ax[0, 0].get_xlim()[1] #xaxis has a -0.5 offset that this summation takes care of
+    one_pix_visang = pix.visang_to_pix(space_len_xaxis, block_size=block_size)
+    scalebar_space_len = scalebar_deg / one_pix_visang
+    pygor.plotting.add_scalebar(scalebar_space_len, string = f"{np.rint(scalebar_deg).astype(int)}°", ax = ax[-1, 0], x = 0, orientation = 'h', line_width = 3, text_size = 8, offset_modifier=.6)
+    if time == "2d":
+        pygor.plotting.add_scalebar(scalebar_space_len, string = f"{np.rint(scalebar_deg).astype(int)}°", ax = ax[-1, time_plot_index], x = -.1, orientation = 'v', line_width = 3, text_size = 8, offset_modifier=.4)
+
+    # Conditionally normalise axes
+    if time == "1dstack":
+        time_plot_index_last = time_plot_index + 1
+    else:
+        time_plot_index_last = time_plot_index + len(unique_wavelengths) - 1
+    if norm_time_ylim is True and time != "2d":
+        # Get all the limits for time axes, and find the max
+        ylims = np.squeeze([i.get_ylim() for i in ax[:, time_plot_index:time_plot_index_last].flat])
+        # Apply that to all of those axes
+        for i in ax[:, time_plot_index:time_plot_index_last].flat:
+            i.set_ylim(-np.abs(ylims.max()), np.abs(ylims.max()))
+        pygor.plotting.add_scalebar(5, string = f"5 SD", ax = ax[-1, time_plot_index], x = 1, orientation = 'v', line_width = 3, text_size = 8, offset_modifier=.6)
+    # Plot
     plt.show()
     return fig, ax
 # def strf_summary():

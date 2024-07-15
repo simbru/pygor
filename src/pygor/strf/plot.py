@@ -399,22 +399,38 @@ def spatial_colors(d3_srf_arr):
     plt.close()
     return fig
 
-def spacetime_plot(strf_arr, slice_along = "y", cmap = None):
-    centred_strf = strf_arr
+def spacetime_plot(strf_arr, slice_along = "y", avg_sides = 3, ax = None, cmap = None, clim = None, **kwargs):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        prune = pygor.utilities.auto_remove_border(centred_strf)
-    collapsed = np.var(prune, axis = 0)
+        prune = pygor.utilities.auto_remove_border(strf_arr)
+    prune = pygor.strf.spatial.centre_on_max(prune)
+    collapsed = np.ma.var(prune, axis = 0)
     maxindex = np.unravel_index(np.argmax(np.abs(collapsed)), collapsed.shape)
-    fig, ax = plt.subplots(1, 1)
+    if ax == None:
+        fig, ax = plt.subplots(1, 1)
+    else: 
+        fig = plt.gcf()
     if slice_along == "y":
-        arr = prune[:, :, maxindex[1]].T
+        if avg_sides == None:
+            arr = prune[:, :, maxindex[1]].T
+        else:
+            avg_from = maxindex[1] - avg_sides
+            avg_to = maxindex[1] + avg_sides
+            arr = prune[:, :, avg_from:avg_to].T
+            arr  = np.average(arr, axis = 0)
     if slice_along == "x":
-        arr = prune[:, maxindex[0], :].T
+        if avg_sides == None:
+            arr = prune[:, maxindex[0]].T
+        else:
+            avg_from = maxindex[0] - avg_sides
+            avg_to = maxindex[0] + avg_sides
+            arr = prune[:, avg_from:avg_to, :].T
+            arr = np.average(arr, axis = 1)
     if cmap == None:
         cmap = plt.get_cmap()
-    clim = (-np.max(np.abs(arr)), np.max(np.abs(arr)))
-    if clim[1] < 5:
-        clim = (-5, 5)
-    ax.imshow(arr, cmap = cmap, clim = clim)
+    if clim == None:
+        clim = (-np.max(np.abs(arr)), np.max(np.abs(arr)))
+        if clim[1] < 5:
+            clim = (-5, 5)
+    ax.imshow(arr, cmap = cmap, clim = clim, origin = "lower", **kwargs)
     return fig, ax

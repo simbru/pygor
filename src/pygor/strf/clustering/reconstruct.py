@@ -107,7 +107,7 @@ def reconstruct_cluster_strf(clust_df, cluster_id_str):
     strf_avgs = np.array([r_strf, g_strf, b_strf, uv_strf])
     return strf_avgs
 
-def fetch_cluster_strfs(clust_df, cluster_id_str):
+def fetch_cluster_strfs(clust_df, cluster_id_str, parallel=None):
     cluster_df = clust_df.query(f"cluster_id == '{cluster_id_str}'")
     strfs = []
     for series in cluster_df.iloc:
@@ -115,6 +115,10 @@ def fetch_cluster_strfs(clust_df, cluster_id_str):
         obj = series["strf_obj"]
         strfs.append(obj.strfs_chroma[:, roi])
     strfs = np.ma.array(strfs).swapaxes(0, 1)
+
+    def _loop(obj, roi):
+        return obj.strfs_chroma[:, roi]
+    
     return strfs
 # import build_strf_from_cluster(clust_df):
 # 
