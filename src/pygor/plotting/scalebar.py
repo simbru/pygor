@@ -2,6 +2,7 @@ from logging import exception
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.transforms as transforms
 
 def rotate(p, origin=(0, 0), degrees=0):
     """
@@ -41,7 +42,7 @@ def rotate(p, origin=(0, 0), degrees=0):
 
 
 def add_scalebar(length, x=None, y=None, ax=None, string=None,
-                text_align="mid", orientation='v', rotation=0,
+                orientation='v', flip_text=False, offset_modifier = 1, 
                 text_size=None, line_width=None):
     """
     Adds a scalebar to a plot.
@@ -75,6 +76,7 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None,
     # If axes object is not provided, use the current axes
     if ax is None:
         ax = plt.gca()
+    fig = plt.gcf()
 
     # If text size is not provided, set it to a default value
     if text_size is None:
@@ -89,16 +91,11 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None,
     # Get the size of the figure and the aspect ratio
     fig_width, fig_height = ax.get_figure().get_size_inches()
     fig_aspect = fig_width / fig_height
+    ax_dpi = ax.get_figure().dpi
 
     # Set the line width to the maximum of the figure width and height
     if line_width is None:
         line_width = 1 * np.max([fig_width, fig_height])
-
-    # Set the offset of the scalebar based on the orientation and aspect ratio
-    if orientation == 'v':
-        offset = 0.025 / fig_aspect
-    else:  # 'h'
-        offset = 0.025 / np.reciprocal(fig_aspect)
 
     # Get the limits of the axes
     ax_width = ax.get_xlim()[1] - ax.get_xlim()[0]
@@ -118,32 +115,44 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None,
         x_ = x * ax_xupperlim + (1 - x) * ax_xlowerlim
         start = np.array([x_, y * ax_yupperlim + ax_ylowerlim])
         stop = np.array([x_, y * ax_yupperlim + ax_ylowerlim + length])
-        rotation_angle = 90 + rotation
+        rotation_angle = 180
+        text_rotation = -90
     else:  # 'h'
         y_ = y * ax_yupperlim + (1 - y) * ax_ylowerlim
         start = np.array([x * ax_xupperlim + ax_xlowerlim, y_])
         stop = np.array([start[0] + length, y_])
-        rotation_angle = rotation
+        rotation_angle = 0
+        text_rotation = 0
+
+    if flip_text is True:
+        offset_flip = -1
+        if orientation == 'v':
+            text_rotation += 180
+    else:
+        text_rotation += 0
+        offset_flip = 1
 
     # Rotate the points of the scalebar
     points = np.array([start, stop])
     midpoint = np.mean(points, axis=0)
-    points = rotate(points, origin=midpoint, degrees=rotation)
-
-    # Calculate the text position based on the orientation and alignment
-    if orientation == 'v':
-        text_x = points[0, 0] - offset * (ax.get_xlim()[1] - ax.get_xlim()[0])
-        text_y = {'close': points[0, 1], 'mid': midpoint[1], 'far': points[1, 1]}[text_align]
-        if rotation == 180:
-            text_x = points[0, 0] + offset * (ax.get_xlim()[1] - ax.get_xlim()[0])
-    else:  # 'h'
-        text_x = {'close': points[0, 0], 'mid': midpoint[0], 'far': points[1, 0]}[text_align]
-        text_y = points[0, 1] - offset * (ax.get_ylim()[1] - ax.get_ylim()[0])
-        if rotation == 180:
-            text_y = points[0, 1] + offset * (ax.get_ylim()[1] - ax.get_ylim()[0])
+    points = rotate(points, origin=midpoint, degrees=rotation_angle)
 
     # Add the scalebar line and text to the axes
     line = plt.Line2D(points[:, 0], points[:, 1], color='k', linewidth=line_width,
                     clip_on=False, clip_box=True, mew=1, solid_capstyle="butt")
     ax.add_line(line)
-    ax.text(text_x, text_y, string, ha='center', va='center', fontsize=text_size, rotation=rotation_angle)
+    # Calculate the text position based on the orientation and alignment
+    if orientation == 'v':
+        # text_x = points[0, 0] - text_offset * (ax.get_xlim()[1] - ax.get_xlim()[0])
+        text_y =  midpoint[1]
+        text_x =  points[0, 0]
+        dx, dy =  - (text_size + line_width) * offset_modifier / 72 * offset_flip, 1 / 72 # ensures clipping cannot happen
+    else:  # 'h'
+        text_x = midpoint[0]
+        text_y = points[0, 1]
+        dy, dx =  - (text_size + line_width) * offset_modifier / 72 * offset_flip, 1 / 72 # ensures clipping cannot happen
+    offset = transforms.ScaledTranslation(dx, dy, fig.dpi_scale_trans)
+    text_offset = ax.transData + (offset)
+
+    ax.text(text_x, text_y, string, ha='center', va='center', 
+            fontsize=text_size, rotation=text_rotation + rotation_angle, transform = text_offset)
