@@ -385,3 +385,35 @@ def load_from_hdf5(path):
     # Dacite is a package that allows you to create DataClass objects from dictionaries
     object = dacite.from_dict(Data_hdf5, final_dict)
     return object
+
+def select_absmax(data, axis = 1):
+    """
+    Selects the column with the largest amplitude (absolute maximum) from each pair of columns
+    in the specified axis of the input array.
+
+    Parameters:
+    data (numpy.ndarray): Input array.
+    axis (int): Axis to operate on, must be one of the axes with size 2.
+
+    Returns:
+    numpy.ndarray: Output array with the columns of largest amplitude along the specified axis.
+    """
+    if data.shape[axis] != 2:
+        raise ValueError("The specified axis must have size 2")
+
+    # Move the specified axis to the second dimension
+    data = np.swapaxes(data, axis, 1)
+    
+    # Compute the absolute maximum value for each pair of columns
+    absmax_col1 = np.abs(data[:, 0, :]).max(axis=1)
+    absmax_col2 = np.abs(data[:, 1, :]).max(axis=1)
+
+    # Create a mask to select the column with the larger absolute maximum value
+    mask = absmax_col2 > absmax_col1
+
+    # Select the appropriate columns based on the mask
+    result = np.where(mask[:, np.newaxis], data[:, 1, :], data[:, 0, :])
+
+    # Move the second dimension back to the specified axis
+    result = np.swapaxes(result, 1, axis)
+    return result
