@@ -133,7 +133,8 @@ class Core:
         meths = pygor.utils.helpinfo.meths_help(method_list, hints = hints)
         pygor.utils.helpinfo.print_help([welcome, attrs, meths, pygor.utils.helpinfo.text_exit()])
 
-    def view_stack_projection(self, func = np.mean, axis = 0, cbar = False, ax = None) -> None:
+    def view_stack_projection(self, func = np.mean, axis = 0, cbar = False, ax = None,
+        zcrop : tuple = None, xcrop : tuple = None, ycrop : tuple = None, **kwargs) -> None:
         """
         Display a projection of the image stack using the specified function.
 
@@ -151,15 +152,37 @@ class Core:
         None
         """
         if ax is None:
-            ax = plt.gca()
-        scanv = ax.imshow(func(self.images, axis = axis), cmap = "Greys_r", origin = "lower")
+            fig, ax = plt.subplots(1,1)
+        else:
+            fig = plt.gcf()
+        if zcrop is None:
+            zstart = None
+            zstop = None
+        else:
+            zstart = zcrop[0]
+            zstop = zcrop[1]
+        if xcrop is None:
+            xstart = None
+            xstop = None
+        else:
+            xstart = xcrop[0]
+            xstop = xcrop[1]
+        if ycrop is None:
+            ystart = None
+            ystop = None
+        else:
+            ystart = ycrop[0]
+            ystop = ycrop[1]
+        scanv = ax.imshow(func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis = axis), cmap = "Greys_r", origin = "lower", **kwargs)
         if cbar == True:
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
             plt.colorbar(scanv, ax=ax, cax = cax)
+        return fig, ax
     
     def view_stack_rois(self, labels = True, func = np.mean, axis = 0, cbar = False,
-        ax = None, figsize = (None, None), figsize_scale = None, **kwargs) -> None:
+        ax = None, figsize = (None, None), figsize_scale = None, 
+        zcrop : tuple = None, xcrop : tuple = None, ycrop : tuple = None, **kwargs) -> None:
         """
         Display a projection of the image stack using the specified function.
 
@@ -190,11 +213,29 @@ class Core:
             txt_scl = kwargs["text_scale"]
         else:
             txt_scl = 1
+        if zcrop is None:
+            zstart = None
+            zstop = None
+        else:
+            zstart = zcrop[0]
+            zstop = zcrop[1]
+        if xcrop is None:
+            xstart = None
+            xstop = None
+        else:
+            xstart = xcrop[0]
+            xstop = xcrop[1]
+        if ycrop is None:
+            ystart = None
+            ystop = None
+        else:
+            ystart = ycrop[0]
+            ystop = ycrop[1]
         num_rois = int(np.abs(np.min(self.rois)))
         # color = cm.get_cmap('jet_r', num_rois)
         color = matplotlib.colormaps["jet_r"]
-        scanv = ax.imshow(func(self.images, axis = axis), cmap ="Greys_r", origin = "lower")
-        rois_masked = np.ma.masked_where(self.rois == 1, self.rois)
+        scanv = ax.imshow(func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis = axis), cmap ="Greys_r", origin = "lower")
+        rois_masked = np.ma.masked_where(self.rois == 1, self.rois)[ystart:ystop, xstart:xstop]
         rois = ax.imshow(rois_masked, cmap = color, alpha = 0.5, origin = "lower")
         ax.grid(False)
         ax.axis('off')
