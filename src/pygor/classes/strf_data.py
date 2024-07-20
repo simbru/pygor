@@ -1,4 +1,6 @@
 from dataclasses import dataclass, field
+
+from numpy.ma import masked
 try:
     from collections import Iterable
 except ImportError:
@@ -12,6 +14,7 @@ import pygor.strf.spatial
 import pygor.strf.contouring
 import pygor.strf.temporal
 import pygor.strf.plot
+import pygor.strf.guesstimate
 import pygor.utils
 from pygor.classes.core_data import Core
 # Dependencies
@@ -25,7 +28,7 @@ import natsort
 import warnings
 import pandas as pd
 import matplotlib.pyplot as plt
-
+import copy
 @dataclass(repr = False)
 class STRF(Core):
     #type         : str = "STRF"
@@ -481,18 +484,35 @@ class STRF(Core):
     TODO Add lazy processing back into contouring (maybe skip timecourses, should be fast enough)
     """
     
-    def get_timecourses(self, centre_on_zero = True, mask_empty = False) -> np.ndarray:
+    def get_timecourses(self, centre_on_zero = True, mask_empty = False, spoof_masks = False) -> np.ndarray:
         # try:
         #     return self.__timecourses 
         # except AttributeError:
-        timecourses = np.ma.average(self.get_strf_masks(), axis = (3,4))
-        if mask_empty is False:
+        # Get masks that we will apply (and make a copy in memory, because we are about to ammend these)
+        masked_strfs = copy.deepcopy(self.get_strf_masks())
+        # masked_strfs = self.get_strf_masks() # <- this one overrides data, only for testing!
+        timecourses = np.ma.average(masked_strfs, axis = (3,4))            
+        # Figure out where we have empty masks
+        empty_mask_indices = np.argwhere(timecourses.mask.any(axis = (1,2)))
+        # To get comparable averages, we may want to average over the same number of pixels as the fitted masks.
+        # # One strategy is to take the pre-existing fitted masks and apply them to the STRFs with no signal.
+        if spoof_masks is True:
+            # Generate spoofs for each ROI 
+            spoofed_masks = pygor.strf.guesstimate.gen_spoof_masks(self)
+            # Apply our spoofed masks to the initial extracted masks where we have no data
+            masked_strfs.mask[empty_mask_indices] = spoofed_masks[empty_mask_indices]
+            timecourses = np.ma.average(masked_strfs, axis = (3,4))            
+        elif mask_empty is False:
             # Sometimes we may/may not want to keep data where space has no correlations (all masked)
             # Fill timecourses with noise array where space is masked
             empty_mask_indices = np.argwhere(timecourses.mask.any(axis = (1,2)))
+            # print(empty_mask_indices)
             noise_times = np.expand_dims(np.average(self.strfs[empty_mask_indices], axis = (3, 4)), axis = 1)
             noise_times = np.repeat(noise_times, 2, axis = 2)
             timecourses[empty_mask_indices] = noise_times
+        # print(timecourses.shape)
+        # plt.imshow(masked_strfs[1, 0, 0])
+        # plt.plot(timecourses[2].T)
         # Most of the time it makes sense to centre on zero
         if centre_on_zero:
             first_indexes = np.expand_dims(timecourses[:, :, 0], -1)
@@ -515,9 +535,9 @@ class STRF(Core):
     def get_chroma_strf(self):
         return pygor.utilities.multicolour_reshape(self.strfs, self.numcolour)
 
-    def get_timecourses_dominant(self):
+    def get_timecourses_dominant(self, **kwargs):
         dominant_times = []
-        for arr in self.get_timecourses().data:
+        for arr in self.get_timecourses(**kwargs).data:
             if np.max(np.abs(arr[0]) > np.max(np.abs(arr[1]))):
                 dominant_times.append(arr[0])
             else:
@@ -533,22 +553,29 @@ class STRF(Core):
     # def plot_roi(self, roi):
     #     fig, ax = plt.subplots(1, 3)
 
-    def get_strf_masks(self, level = None) -> tuple[np.ndarray, np.ndarray]:
+    def get_strf_masks(self, level = None, force_recompute = False) -> tuple[np.ndarray, np.ndarray]:
         """
         Return masked array of spatial.rf_mask3d applied to all arrays, with masks based on pval_time and pval_space,
         with polarity intact.
         """
-        if self.strfs is np.nan:
-            return np.nan
-        else:
-            # raise NotImplementedError("Implementation error, does not work yet")
-            # get 2d masks
-            all_masks = np.array([pygor.strf.contouring.bipolar_mask(i) for i in self.collapse_times()])
-            all_masks = np.repeat(np.expand_dims(all_masks, 2), self.strfs.shape[1], axis = 2)
-            # Apply mask to expanded and repeated strfs (to get negative and positive)
-            strfs_expanded = np.repeat(np.expand_dims(self.strfs, axis = 1), 2, axis = 1)
-            all_strfs_masked = np.ma.array(strfs_expanded, mask = all_masks, keep_mask=True)
-            return all_strfs_masked
+        def set_strf_masks():
+                if self.strfs is np.nan:
+                    self.__strf_masks = np.nan
+                # raise NotImplementedError("Implementation error, does not work yet")
+                # get 2d masks
+                all_masks = np.array([pygor.strf.contouring.bipolar_mask(i) for i in self.collapse_times()])
+                all_masks = np.repeat(np.expand_dims(all_masks, 2), self.strfs.shape[1], axis = 2)
+                # Apply mask to expanded and repeated strfs (to get negative and positive)
+                strfs_expanded = np.repeat(np.expand_dims(self.strfs, axis = 1), 2, axis = 1)
+                all_strfs_masked = np.ma.array(strfs_expanded, mask = all_masks, keep_mask=True)
+                self.__strf_masks = all_strfs_masked
+        if force_recompute:
+            set_strf_masks()
+        try:
+            return self.__strf_masks
+        except AttributeError:
+            set_strf_masks()
+            return self.__strf_masks
 
     ## Methods 
     def calc_LED_offset(self, reference_LED_index = [0,1,2], compare_LED_index = [3]) -> np.ndarray:
@@ -611,7 +638,8 @@ class STRF(Core):
             raise AttributeError("Not a multicoloured STRF, self.multicolour != True.")
 
     def get_spatial_masks(self) -> tuple[np.ndarray, np.ndarray]:
-        neg_mask2d, pos_mask2d = self.get_strf_masks().mask[:, :, 0][:, 0], self.get_strf_masks().mask[:, :, 0][:, 1]
+        masks = self.get_strf_masks().mask[:, :, 0]
+        neg_mask2d, pos_mask2d = masks[:, 0], masks[:, 1]
         #return np.array([neg_mask2d, pos_mask2d])
         return (neg_mask2d, pos_mask2d)
 
@@ -718,9 +746,9 @@ class STRF(Core):
                 result.append("other")
         return result
 
-    def get_time_amps(self) -> np.ndarray:
-        maxes = np.max(self.get_timecourses_dominant().data, axis = (1))
-        mins = np.min(self.get_timecourses_dominant().data, axis = (1))
+    def get_time_amps(self, **kwargs) -> np.ndarray:
+        maxes = np.max(self.get_timecourses_dominant(**kwargs).data, axis = (1))
+        mins = np.min(self.get_timecourses_dominant(**kwargs).data, axis = (1))
         largest_mag = np.where(maxes > np.abs(mins), maxes, mins) # search and insert values to retain sign
         return largest_mag
 
@@ -750,13 +778,13 @@ class STRF(Core):
     # def get_time_to_peak(self):
 
 
-    def calc_tunings_amplitude(self, dimstr = "time") -> np.ndarray:
+    def calc_tunings_amplitude(self,dimstr = "time", **kwargs) -> np.ndarray:
         if self.multicolour == True:
             if dimstr == "time":
-                largest_by_colour = pygor.utilities.multicolour_reshape(self.get_time_amps(), self.numcolour)
+                largest_by_colour = pygor.utilities.multicolour_reshape(self.get_time_amps(**kwargs), self.numcolour)
                 tuning_functions = largest_by_colour
             elif dimstr == "space":
-                largest_by_colour = pygor.utilities.multicolour_reshape(self.get_space_amps(), self.numcolour)
+                largest_by_colour = pygor.utilities.multicolour_reshape(self.get_space_amps(**kwargs), self.numcolour)
                 tuning_functions = largest_by_colour
             else:
                 raise ValueError("dimstr must be 'time' or 'space'")
@@ -855,11 +883,14 @@ class STRF(Core):
     def plot_timecourse(self, roi):
         plt.plot(self.get_timecourses()[roi].T)
     
-    def plot_chromatic_overview(self, roi = None, contours = False, **kwargs):
+    def plot_chromatic_overview(self, roi = None, contours = False, with_times = True, **kwargs):
         with warnings.catch_warnings(record=True) as w:
             # Cause all warnings to always be triggered.
             warnings.simplefilter("always")
-            return pygor.strf.plot.chroma_overview(self, roi, contours=contours, **kwargs)
+            if with_times == False:
+                return pygor.strf.plot.chroma_overview(self, roi, contours=contours, **kwargs)
+            if with_times == True:
+                return pygor.strf.plot.chroma_overview(self, roi, contours=contours, with_times=with_times, **kwargs)
 
     def play_strf(self, roi, **kwargs):
         if isinstance(roi, tuple):
