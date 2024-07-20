@@ -129,6 +129,7 @@ def _roi_by_roi_dict(data_strf_obj, df_return=False): #
         check_largest = np.vstack((neg_largest, pos_largest))
         total_area_largest = np.max(check_largest, axis = 0)
         dict["total_contour_area_largest"] = total_area_largest
+        dict["diameter"] = 2 * np.sqrt(total_area_largest.astype(float)/np.pi)
         dict["contour_complexity"] = np.nanmean(data_strf_obj.calc_contours_complexities(), axis = 1)
 
         # Time
@@ -287,7 +288,7 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], 
             complexities = pygor.utilities.multicolour_reshape(np.nanmean(pygor.strf.contouring.complexity_weighted(data_strf_obj.fit_contours(), data_strf_obj.get_contours_area()), axis = 1), num_wavelengths)
             area_t = data_strf_obj.calc_tunings_area(size).T
             diam_t = 2 * np.sqrt(area_t / np.pi)
-            ampl_t = data_strf_obj.calc_tunings_amplitude().T
+            ampl_t = data_strf_obj.calc_tunings_amplitude(spoof_masks = True).T
             neg_peak_t, pos_peak_t = data_strf_obj.calc_tunings_peaktime()
             neg_peak_t, pos_peak_t =  neg_peak_t.T, pos_peak_t.T
             neg_cent_t, pos_cent_t = data_strf_obj.calc_tunings_centroids(dominant_only=False)
@@ -365,8 +366,8 @@ def chromatic_stats(exp_obj : pygor.classes.experiment.Experiment, store_exp = T
         with joblib.Parallel(n_jobs=-1) as parallel:
             chromatic_df_list = parallel(joblib.delayed(_chromatic_dict)(object, store_exp=store_exp, df_return=True) for object in exp_obj.recording)                                                    
     final_df = pd.concat(chromatic_df_list, ignore_index=True)
-    final_df["bool_area"] = np.any(np.abs(final_df.filter(like = "ampl")) > 1 , axis = 1)
-    final_df["bool_ampl"] = np.any(np.abs(final_df.filter(like = "area")) > 0 , axis = 1)
+    final_df["bool_area"] = np.any(np.abs(final_df.filter(like = "area")) > 0 , axis = 1)
+    final_df["bool_ampl"] = np.any(np.abs(final_df.filter(like = "ampl")) > 0 , axis = 1)
     final_df["bool_pass"]  = np.all([final_df["bool_ampl"], final_df["bool_area"]], axis = 0)
     return final_df
 
