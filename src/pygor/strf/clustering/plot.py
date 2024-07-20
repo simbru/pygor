@@ -273,7 +273,7 @@ def _plot_temporal_reconstruct(df, cluster_id_str, axs=None, parallel=None, scal
         plot = axs.flat[n].plot(times_recons[n, 1].T, c = pygor.plotting.fish_palette[n])#, cmap=pygor.plotting.custom.maps_concat[n])
         axs.flat[n].axis('off')
     if scalebar is True:
-        pygor.plotting.add_scalebar(2.5, ax = axs.flat[-1], rotation = 180, x = 1, line_width = 5)
+        pygor.plotting.add_scalebar(2.5, ax = axs.flat[-1], flip_text = True, x = 1, line_width = 5)
 
 def _plot_temporal_reconstruct_stack(df, cluster_id_str, axs=None, parallel=True, drop_surround = True, scalebar = False,**kwargs):
     # Figure out how many columns we need 
@@ -294,7 +294,7 @@ def _plot_temporal_reconstruct_stack(df, cluster_id_str, axs=None, parallel=True
         axs.plot(times_recons[i].T,  color = pygor.plotting.fish_palette[i])
     axs.axis('off')    
     if scalebar is True:
-        pygor.plotting.add_scalebar(2.5, ax = axs, rotation = 180, x = 1, line_width = 5)
+        pygor.plotting.add_scalebar(2.5, ax = axs, flip_text = True, x = 1, line_width = 5)
 
 def _imshow_temporal_reconstruct(df, cluster_id_str, axs=None, parallel=None, **kwargs):
     # Figure out how many columns we need
@@ -317,7 +317,7 @@ def _imshow_temporal_reconstruct(df, cluster_id_str, axs=None, parallel=None, **
         axs.flat[n].axis('off')
         # axs.flat[n].spines["top"].set_visible(False)
         # axs.flat[n].spines["bottom"].set_visible(False)
-    #pygor.plotting.add_scalebar(10, ax = axs.flat[-1], rotation = 180, x = 1, line_width = 5)
+    #pygor.plotting.add_scalebar(10, ax = axs.flat[-1], flip_text = True, x = 1, line_width = 5)
 
 
 

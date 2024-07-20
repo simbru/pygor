@@ -12,11 +12,13 @@ all_hues = ["R", "G", "B", "UV", "BW", "BWnoUV"]
 rguv_hues = ["R", "G", "UV"]
 nanometers = ["588", "478", "422", "375"]
 fish_palette = ["#ef8e00", "teal","#5600fe", "fuchsia"]
-polarity_palette = ["black", "gainsboro", "grey"]
+polarity_palette = ["k", "lightslategray", "lightpink"]
+# polarity_palette = ["lightsteelblue", "lightcoral", "lightpink"]
+
 compare_conditions = {2 : ["gainsboro", "tomato"],
                     3 : ["gainsboro", "tomato", "darkblue"],
                     4 : ["gainsboro", "tomato", "darkblue", "purple"],
-                    5 : ["gainsboro", "tomato", "darkblue", "purple", "darkgreen"]}
+                    5 : ["grgainsboroay", "tomato", "darkblue", "purple", "darkgreen"]}
 
 # red_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["dimgrey", "grey", "white","#ef8e00","darkred"])
 # green_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["dimgrey", "grey","white","mediumaquamarine","teal"])
@@ -37,3 +39,13 @@ violet_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "
 
 
 maps_concat = [red_map, green_map, blue_map, violet_map]
+
+def label_ax_colour(ax, x = 0.1, y = .9, marker = 'o', 
+            colour = fish_palette[0]):
+    fig = ax.get_figure()
+    bbox = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+    width, height = bbox.width, bbox.height
+    width *= fig.dpi
+    height *= fig.dpi
+    plotarea = width * height
+    ax.scatter(x, y, marker = marker, c = colour, s = plotarea/100, transform = ax.transAxes)

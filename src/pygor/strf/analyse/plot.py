@@ -17,6 +17,10 @@ from matplotlib.legend_handler import HandlerTuple
 import natsort
 import pandas as pd
 from statannotations.Annotator import Annotator
+from collections import defaultdict
+
+sns.set_context('notebook')
+sns.set_style('white')
 
 label_mappings = {
     "588"  : "588 nm",
@@ -25,24 +29,41 @@ label_mappings = {
     "375"  : "375 nm",
 }
 
-color_mappings = {
-    "588"  : pygor.plotting.fish_palette[0],
-    "478"  : pygor.plotting.fish_palette[1],
-    "422"  : pygor.plotting.fish_palette[2],
-    "375"  : pygor.plotting.fish_palette[3],
-}
+def no_chroma_value():
+    return "grey"
+color_mappings = defaultdict(no_chroma_value)
+color_mappings["588"] = pygor.plotting.custom.fish_palette[0]
+color_mappings["478"] = pygor.plotting.custom.fish_palette[1]
+color_mappings["422"] = pygor.plotting.custom.fish_palette[2]
+color_mappings["375"] = pygor.plotting.custom.fish_palette[3]
+
+# color_mappings = {
+#     "588"  : pygor.plotting.fish_palette[0],
+#     "478"  : pygor.plotting.fish_palette[1],
+#     "422"  : pygor.plotting.fish_palette[2],
+#     "375"  : pygor.plotting.fish_palette[3],
+# }
 
 title_mappings = {
-    "area" : "Area (° vis. ang.$^2$)",
-    "diam" : "Diameter (° vis. ang.)",
+    "area" : "Area (°)",
+    "diameter" : "Diameter (°)",
     "centdom" : "Spectral centroid (Hz)",
+    "ampl"  : "Amplitude (SD)" 
+}
+
+title_mappings_simple = {
+    "area" : "° vis. ang.$^2$",
+    "diam" : "° vis. ang.",
+    "centdom" : "Hz",
+    "ampl"  : "SD" 
 }
 
 stat_mappings = {
-    "neg_contour_area" : "Area for negative contours (° vis. ang.$^2$)",
-    "pos_contour_area" : "Area for positive contours (° vis. ang.$^2$)",
-    "contour_area_total" : "Total area (° vis. ang.$^2$)",
-    "total_contour_area_largest" : "Largest contour area(° vis. ang.$^2$)",
+    "neg_contour_area" : "Area for negative contours (°$)",
+    "pos_contour_area" : "Area for positive contours (°)",
+    "contour_area_total" : "Total area (°)",
+    "total_contour_area_largest" : "Largest contour area(°)",
+    "diameter" : "Diameter (°)",
     "dom_centroids" : "Spectral centroid (Hz)",
 }
 
@@ -53,6 +74,11 @@ pval_mappings = {
     "centneg" : "pval_time",
     "centpos" : "pval_time",
 }
+
+sns_stat_map = defaultdict(lambda: "")
+sns_stat_map["percent"] = "%"
+sns_stat_map["count"] = "ROIs"
+sns_stat_map["count"] = "ROIs"
 
 def plot_metric_vs(df, rowX : str, rowY : str, colour = None, ax : plt.axes = None, legend : bool = True, 
         labels : tuple = None,  strategy : str = 'singles', pval_map = True,
@@ -276,64 +302,106 @@ def plot_distribution(chroma_df, columns_like = "area", animate = True):
             plt.close()
             return animation
         
-def ipl_summary_chroma(roi_df, numcolours = 4, figsize = (12, 7), legend = True):
+def ipl_summary_chroma(roi_df, numcolours = 4, figsize = (12, 7), legend = True, ipl_border = 55, 
+    ax = None, split_polarity = False):
+
+    if split_polarity is True:
+        if ax is None:
+            fig, ax = plt.subplots(1, 4, figsize = (figsize[0], figsize[1]/2), sharex = True, sharey=True)
+        else:
+            fig = plt.gcf()
+        ax = np.repeat(np.expand_dims(ax, 0), 2, axis = 0)
+        for n, i in enumerate(ax[0, :].flat):
+            bbox = i.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+            width, height = bbox.width, bbox.height
+            width *= fig.dpi
+            height *= fig.dpi
+            plotarea = width * height
+            i.scatter(.9, .9, marker = 'o', c = pygor.plotting.custom.fish_palette[n], s = plotarea/100, transform = i.transAxes)
+        colormap = pygor.plotting.custom.polarity_palette
+    if split_polarity is False:
+        if ax is None:
+            fig, ax = plt.subplots(2, 4, figsize = figsize, sharex = True, sharey=True)
+        else:
+            fig = plt.gcf()
+        colormap = pygor.plotting.custom.fish_palette
+    else:
+        AttributeError("split_polarity must be bool")
     polarities = [-1, 1]
     colours = ["R", "G", "B", "UV"]
     colours_map = {
-        "R"  : "LWS",
-        "G"  : "RH2",
-        "B"  : "SWS2",
-        "UV" : "SWS1",
+        "R"  : "Red",
+        "G"  : "Green",
+        "B"  : "Blue",
+        "UV" : "UV",
     }
-    fig, ax = plt.subplots(2, 4, figsize = figsize, sharex = True, sharey=True)
+    polarity_map = {
+        -1 : "Negative",
+        1  : "Positive",
+        2  : "Mix"}
     bins = 10
     # sns.set_style("whitegrid")
     for n, i in enumerate(polarities):
         for m, j in enumerate(colours):
-            hist_vals_per_condition = np.histogram(roi_df.query(f"polarity ==  {i} & colour == '{j}'")["ipl_depths"], bins = bins, range = (0, 100))[0]
-            hist_vals_population = np.histogram(roi_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins, range = (0, 100))[0]
-            # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
+            if split_polarity is True:
+                curr_colour = colormap[n]
+                label = polarity_map[i]
+            if split_polarity is False:
+                curr_colour = colormap[m]
+                label = colours_map[j]
+            hist_vals_per_condition = np.histogram(roi_df.query(f"polarity ==  {i} & colour == '{j}' & total_contour_area_largest > 0")["ipl_depths"], bins = bins, range = (0, 100))[0]
+            hist_vals_population = np.histogram(roi_df.query(f"colour == '{j}' & total_contour_area_largest > 0")["ipl_depths"], bins = bins, range = (0, 100))[0]
             percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
-            # percentages = hist_vals_per_condition
             ax[n, m].barh(np.arange(0, 100, 10), width= percentages, height=10, 
-                color = pygor.plotting.custom.fish_palette[m], edgecolor="black", 
-                alpha = 0.75, label  = colours_map[j])
+                color = curr_colour, edgecolor="white", 
+                alpha = 0.65, label  = label)
             ax[n, m].grid(False)
-            ipl_border = 55
             ax[n, m].axhline(ipl_border, c = "k", ls = "--")
-            # ax[n, m].get_xaxis().set_visible(False)
-            # ax[n, m].spines["bottom"].set_visible(False)
-            if m == 0:
-                ax[n, m].set_ylabel("IPL depth (%)")
-                ax[n, m].text(x = ax[n, m].get_xlim()[1] - ax[n, m].get_xlim()[1] * 0.175, y = ipl_border + 10, va = 'center', s = "OFF", size = 10)
-                ax[n, m].text(x = ax[n, m].get_xlim()[1] - ax[n, m].get_xlim()[1] * 0.175, y = ipl_border - 10, va = 'center', s = "ON", size = 10)
+            if m == 0 and split_polarity is False:
                 if i == -1:
-                    ax[n, m].set_title("OFF", weight = "bold", loc = "left")
+                    ax[n, m].set_title("OFF", weight = "bold", loc = "left", c = pygor.plotting.polarity_palette[0])
                 if i == 1:
-                    ax[n, m].set_title("ON", weight = "bold", c = "grey", loc = "left")
-            #ax[0, m].set_title(custom.nanometers[m] + "nm", size = 12)
+                    ax[n, m].set_title("ON", weight = "bold", loc = "left", c = pygor.plotting.polarity_palette[1])
             num_cells = int(len(np.unique(roi_df.index)) / numcolours)
-            ax[1, 0].set_xlabel(f"Percentage by colour (n = {num_cells})", size = 10)
+            num_strfs = int(len(np.unique(roi_df.query("total_contour_area_largest > 0").index))/numcolours)
+            percent = np.round(num_strfs / num_cells * 100, 2)
+            # ax[1, 0].set_xlabel(f"Percentage by colour (n = {num_cells})", size = 10)
+            ax[1, 0].set_xlabel(f"% STRFs", size = 12)
+    for cax in ax[:, 0].flat:
+        cax.set_ylabel("IPL depth (%)")
+        cax.text(x = .9, y = (ipl_border/100) + .1, va = 'baseline', ha = "center", s = "OFF", size = 10, transform = cax.transAxes)
+        cax.text(x = .9, y = (ipl_border/100) - .1, va = 'bottom',ha = "center",  s = "ON", size = 10, transform = cax.transAxes)
     if legend is True:
-        handles, labels = [], []
-        for i in ax.flat:
-            handle, label = i.get_legend_handles_labels()
-            handles.append(handle)
-            labels.append(label)
-            # ax[0, 3].legend(handles, labels)
-        labels_ = natsort.natsorted(list(set([i[0] for i in labels])))
-        handles_ = [i[0] for i in handles[:len(labels_)]]
-        ax.flat[-1].legend(handles_, labels_, handler_map={tuple: HandlerTuple(ndivide=None)}, bbox_to_anchor=(1.04, 1.4), loc="upper left")
+        if split_polarity is True:
+            handles, labels = [], []
+            handles, labels = ax[0,0].get_legend_handles_labels()
+            labels_ = ["OFF", "ON"]
+            handles_ = [i for i in handles[:len(labels_)]]
+            ax.flat[-1].legend(handles_, labels_, handler_map={tuple: HandlerTuple(ndivide=None)}, bbox_to_anchor=(1.04, 1.4), loc="upper left")
+        if split_polarity is False:
+            handles, labels = [], []
+            for i in ax.flat:
+                handle, label = i.get_legend_handles_labels()
+                handles.append(handle)
+                labels.append(label)
+            labels_ = ["Red", "Green", "Blue", "UV"]
+            handles_ = [i[0] for i in handles[:len(labels_)]]
+            ax.flat[-1].legend(handles_, labels_, handler_map={tuple: HandlerTuple(ndivide=None)}, bbox_to_anchor=(1.04, 1.4), loc="upper left")
+        sns.move_legend(ax.flat[-1], "lower center", bbox_to_anchor=(-1.5, -.5), ncol=4, title=None, frameon=False)
+    sns.despine()
     return fig, ax 
 
-def ipl_summary_polarity_roi(roi_df, numcolours = 4, figsize = (8, 4), polarities = [-1, 1]):
-    skip_df = roi_df
+def ipl_summary_polarity_roi(roi_df, numcolours = 4, figsize = (8, 4), polarities = [-1, 1], legend = True, ipl_border = 55, ax = None):
+    if ax is None:
+        fig, axs = plt.subplots(len(polarities), 1, sharex = True, sharey=True, figsize = figsize)
+    else:
+        axs = ax
+        fig = plt.gcf()
+    skip_df = roi_df.query("total_contour_area_largest > 0")
     # roi_df.iloc[roi_df["ipl_depths"].dropna().index]
-    fig, axs = plt.subplots(1, len(polarities), sharex = True, sharey=True, figsize = figsize)
     bins = 10
     titles = ["OFF", "ON", "Mixed polarity", "other"]
     palette = pygor.plotting.custom.polarity_palette
-    palette.append('r')
     # sns.set_style("whitegrid")
     tot_sum = 0
     for n, ax in enumerate(axs.flatten()):
@@ -345,22 +413,41 @@ def ipl_summary_polarity_roi(roi_df, numcolours = 4, figsize = (8, 4), polaritie
         # hist_vals_population = np.histogram(chroma_df.query(f"colour == '{j}'")["ipl_depths"], bins = bins)[0]
         percentages = hist_vals_per_condition  / np.sum(hist_vals_population) * 100
         #percentages = hist_vals_per_condition
-        ax.barh(np.arange(0, 100, 10), width= percentages, height=10, color = palette[n], edgecolor="black", alpha = 0.75)        
-        ax.set_title(titles[n], size = 12)
-        ipl_border = 55
+        ax.barh(np.arange(0, 100, 10), width= percentages, height=10, color = palette[n], 
+            edgecolor="white", alpha = 0.65, label = titles[n],)
+        # ax.set_title(titles[n], size = 12)
         ax.axhline(ipl_border, c = "k", ls = "--")
-    axs[0].text(x = axs[0].get_xlim()[1] - axs[0].get_xlim()[1] * 0.175, y = ipl_border + 5, va = 'center', s = "OFF", size = 10)
-    axs[0].text(x = axs[0].get_xlim()[1] - axs[0].get_xlim()[1] * 0.175, y = ipl_border - 5, va = 'center', s = "ON", size = 10)
+    # axs[0].text(x = axs[0].get_xlim()[1] - axs[0].get_xlim()[1] * 0.175, y = ipl_border + 5, va = 'center', s = "OFF", size = 10)
+    # axs[0].text(x = axs[0].get_xlim()[1] - axs[0].get_xlim()[1] * 0.175, y = ipl_border - 5, va = 'center', s = "ON", size = 10)
     num_cells = len(skip_df.index)
     print(num_cells, tot_sum)
-    axs[0].set_xlabel(f"Percentage by polarity (n = {num_cells})", size = 10)
-    plt.show()
+    # axs[0].set_xlabel(f"Percentage by polarity (n = {num_cells})", size = 10)
+    if legend is True:
+        handles, labels = [], []
+        for i in axs:
+            handle, label = i.get_legend_handles_labels()
+            handles.append(handle)
+            labels.append(label)
+            # ax[0, 3].legend(handles, labels)
+        # labels_ = natsort.natsorted(list(set([i[0] for i in labels])))
+        # labels_ = list(set([i[0] for i in labels]))
+        labels_ = ["OFF", "ON"]
+        handles_ = [i[0] for i in handles[:len(labels_)]]
+        axs[-1].legend(handles_, labels_, handler_map={tuple: HandlerTuple(ndivide=None)}, bbox_to_anchor=(1.04, 1.4), loc="upper left")
+        sns.move_legend(axs[-1], "lower center", bbox_to_anchor=(.5, -.5), ncol=4, title=None, frameon=False)
+    sns.despine()
+    return fig, ax
+
+def ipl_summary(df):
+    fig, ax = plt.subplots(2, 5, sharex=True, sharey=True, figsize = (12, 6))
+    pygor.strf.analyse.plot.ipl_summary_chroma(df, ax = ax[:, 0:4])
+    pygor.strf.analyse.plot.ipl_summary_polarity_roi(df, ax = ax[:, -1])
     return fig, ax
 
 def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'default', 
                     category = "colour", bins = "auto", binwidth = None, colour_list = None,
                     kde = False, scalebar = True, avg_line = False, ax = None,
-                    legend = True, **kwargs):
+                    legend = True,  main_ax = 'x', **kwargs):
     '''This function `plot_roi_hist` creates histograms of a specified statistic within regions of interest
     (ROIs) based on different categories such as color or polarity.
     
@@ -391,8 +478,11 @@ def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'defau
     
     '''
     if "hue" in kwargs and "palette" not in kwargs:
-        if len(roi_df[kwargs["hue"]].unique()) == 2:
+        if kwargs["hue"] == "polarity":
+            kwargs["palette"] = pygor.plotting.custom.polarity_palette
+        elif kwargs["hue"] == "Group" and len(roi_df[kwargs["hue"]].unique()) == 2:
             kwargs["palette"] = pygor.plotting.custom.compare_conditions[2]
+        print(kwargs["palette"])
     try:
         title = stat_mappings[statistic]
     except KeyError:
@@ -401,8 +491,11 @@ def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'defau
         roi_df = roi_df.query(f"contour_area_total > 0")
     elif conditional != None or conditional != 'default':
         roi_df = roi_df.query(f"{conditional}")
-    # if category == "colour":
+    # if category == "colour":fi
     categories_specified = np.unique(roi_df[category])
+    if "R" in categories_specified and "G" in categories_specified and "B" in categories_specified and "UV" in categories_specified:
+        categories_specified = ["R", "G", "B", "UV"]
+    print(categories_specified)
     n_categories = len(categories_specified)
     if colour_list == None:
         if category == "polarity":
@@ -410,7 +503,7 @@ def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'defau
         else:
             colour_list = pygor.plotting.custom.fish_palette
     if ax is None:
-        fig, ax = plt.subplots(n_categories,1, figsize = (2.5, 2*n_categories), sharex=True, sharey=True, gridspec_kw={'hspace': 0})
+        fig, ax = plt.subplots(n_categories,1, figsize = (4, 6), sharex=True, sharey=True, gridspec_kw={'hspace': 0})
     else:
         fig = plt.gcf()
     # Loop through each category and plot the histogram to axes
@@ -420,16 +513,25 @@ def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'defau
         else:
             df = roi_df.query(f"{category} == {c}")
         # Populate each histogram subplot
-        currplot = sns.histplot(data = df, x = statistic, color=colour_list[n], ax = ax.flat[n],
-            kde = kde, bins = bins, binwidth = binwidth, legend = legend,**kwargs)
+        if main_ax == 'y':
+            currplot = sns.histplot(data = df, y = statistic, color=colour_list[n], ax = ax.flat[n],
+                kde = kde, bins = bins, binwidth = binwidth, legend = legend,**kwargs)
+        if main_ax == 'x':
+            currplot = sns.histplot(data = df, x = statistic, color=colour_list[n], ax = ax.flat[n],
+                kde = kde, bins = bins, binwidth = binwidth, legend = legend,**kwargs)
+        else:
+            AttributeError("main_ax must be either 'x' or 'y'")
         if legend is True:
             # Fetch legend contents
             currlegend = currplot.get_legend()
             if legend is not None:
-                # Get the handles and text out of the legend
-                handles, labels = currlegend.legendHandles, [text.get_text() for text in currlegend.get_texts()]
-                # Remove the legend again, we will plot it later if hue is used
-                currplot.get_legend().remove()
+                try:
+                    # Get the handles and text out of the legend
+                    handles, labels = currlegend.legendHandles, [text.get_text() for text in currlegend.get_texts()]
+                    # Remove the legend again, we will plot it later if hue is used
+                    currplot.get_legend().remove()
+                except AttributeError:
+                    pass
     # Set up axes
     for a, c in zip(ax.flat, categories_specified):
         a.set_ylabel("")
@@ -447,7 +549,7 @@ def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'defau
             width *= fig.dpi
             height *= fig.dpi
             plotarea = width * height
-            i.scatter(.08, .9, marker = 'o', c = colour_list[n], s = plotarea/100, transform = i.transAxes)
+            i.scatter(.08, .8, marker = 'o', c = colour_list[n], s = plotarea/100, transform = i.transAxes)
     if scalebar is True:
         if "stat" in kwargs:
             if kwargs["stat"] != "count" or kwargs["stat"] != "auto":
@@ -461,9 +563,16 @@ def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'defau
             auto_num = int(np.round(ax[-1].get_ylim()[1]/3/10)*10)
         if auto_num < 10: # Make sure a bar is plotted if there is less than 10
             auto_num = int(np.round(ax[-1].get_ylim()[1]/3))
-        pygor.plotting.add_scalebar(auto_num, string = f"{auto_num}", ax = ax[-1], orientation = 'v', x = 1.1, rotation = 180)
+        if auto_num == 0:
+            auto_num = np.round(ax[-1].get_ylim(), 3)[1]
+        if "stat" in kwargs:
+            auto_str = sns_stat_map[kwargs["stat"]]
+            scalebar_str = str(auto_num)+' ' + auto_str
+        else:
+            scalebar_str = str(auto_num)
+        pygor.plotting.add_scalebar(auto_num, string = f"{scalebar_str}", ax = ax[-1], orientation = 'v', x = 1.1, flip_text=True)
     a.set_xlabel(title)
-
+    sns.despine()
     return fig, ax 
 
 def ipl_summary_polarity_chroma(chroma_df, numcolours = 4, figsize = (8, 4), cat_pol = ['off', 'on']):

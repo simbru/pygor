@@ -92,10 +92,12 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None,
     fig_width, fig_height = ax.get_figure().get_size_inches()
     fig_aspect = fig_width / fig_height
     ax_dpi = ax.get_figure().dpi
-
+    
+    bbox = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+    axwidth, axheight = bbox.width, bbox.height
     # Set the line width to the maximum of the figure width and height
     if line_width is None:
-        line_width = 1 * np.max([fig_width, fig_height])
+        line_width = 1 * np.max([axwidth, axheight])
 
     # Get the limits of the axes
     ax_width = ax.get_xlim()[1] - ax.get_xlim()[0]
