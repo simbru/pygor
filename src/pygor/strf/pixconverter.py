@@ -90,9 +90,10 @@ def pix_to_visang(*pix_nums, block_size, jitter_upsale = 4, screen_width_pix = 1
         output = np.array(output)
     return output
 
-def visang_to_pix(*visang, block_size, jitter_upsale = 4, screen_width_pix = 1820, screen_width_visang = 86.306):
-    output = [pix_to_visang(num, block_size = 200) / num for num in visang]
-    if len(visang) == 1:
+def visang_to_pix(*pix, pixwidth ,block_size, jitter_upsale = 4, screen_width_pix = 1820, screen_width_visang = 86.306):
+    # output = [pix_to_visang(1, block_size = block_size) * num for num in visang]
+    output = [num/(screen_width_visang/pixwidth) for num in pix]
+    if len(pix) == 1:
         output = output[0]
     else:
         output = np.array(output)
