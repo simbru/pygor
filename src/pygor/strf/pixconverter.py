@@ -91,6 +91,39 @@ def pix_to_visang(*pix_nums, block_size, jitter_upsale = 4, screen_width_pix = 1
     return output
 
 def visang_to_pix(*pix, pixwidth ,block_size, jitter_upsale = 4, screen_width_pix = 1820, screen_width_visang = 86.306):
+    '''The function `visang_to_pix` converts visual angle measurements to pixel measurements based on
+    specified parameters.
+    
+    Parameters
+    ----------
+    pixwidth
+        The `pixwidth` parameter in the `visang_to_pix` function represents the width of a single pixel in
+    visual angle units. This parameter is used in the calculation to convert visual angle units to
+    pixels.
+    block_size
+        The `block_size` parameter in the `visang_to_pix` function represents the size of a block in the
+    visualization in some unit of measurement (e.g., inches, centimeters, etc.). This parameter is used
+    in the calculation to convert visual angles (visang) to pixels.
+    jitter_upsale, optional
+        The `jitter_upsale` parameter in the `visang_to_pix` function is set to a default value of 4. This
+    parameter is used in the calculation within the function to determine the output based on the input
+    parameters provided. If a specific value for `jitter_upsale` is
+    screen_width_pix, optional
+        The `screen_width_pix` parameter represents the width of the screen in pixels. In the provided
+    function `visang_to_pix`, this parameter is used to calculate the output based on the input pixel
+    values and other parameters such as `pixwidth`, `block_size`, `jitter_upsale`, and
+    screen_width_visang
+        The `screen_width_visang` parameter represents the width of the screen in visual angle units. This
+    value is set to 86.306 in the function `visang_to_pix`.
+    
+    Returns
+    -------
+        The function `visang_to_pix` returns the conversion of visual angles to pixels based on the input
+    parameters provided. The output will be a list of pixel values corresponding to the visual angles
+    passed as input arguments. If only one visual angle is provided, a single pixel value will be
+    returned.
+    
+    '''
     # output = [pix_to_visang(1, block_size = block_size) * num for num in visang]
     output = [num/(screen_width_visang/pixwidth) for num in pix]
     if len(pix) == 1:

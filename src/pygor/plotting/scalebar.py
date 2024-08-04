@@ -43,7 +43,7 @@ def rotate(p, origin=(0, 0), degrees=0):
 
 def add_scalebar(length, x=None, y=None, ax=None, string=None,
                 orientation='v', flip_text=False, offset_modifier = 1, 
-                text_size=None, line_width=None):
+                text_size=None, line_width=None, transform = None):
     """
     Adds a scalebar to a plot.
 
@@ -76,7 +76,7 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None,
     # If axes object is not provided, use the current axes
     if ax is None:
         ax = plt.gca()
-    fig = plt.gcf()
+    fig = ax.get_figure()
 
     # If text size is not provided, set it to a default value
     if text_size is None:
@@ -153,8 +153,22 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None,
         text_x = midpoint[0]
         text_y = points[0, 1]
         dy, dx =  - (text_size + line_width) * offset_modifier / 72 * offset_flip, 1 / 72 # ensures clipping cannot happen
-    offset = transforms.ScaledTranslation(dx, dy, fig.dpi_scale_trans)
-    text_offset = ax.transData + (offset)
-
+    
+    """
+    TODO:
+    - Various ways of adjusting the text position
+    """
+    if transform is None:
+        offset = transforms.ScaledTranslation(dx, dy, fig.dpi_scale_trans)
+        transform = ax.transData + (offset)
+    if transform == 'axis':
+        raise NotImplementedError("Not implemented yet")
+        transform = ax.transAxes
+    if transform == 'figure':
+        raise NotImplementedError("Not implemented yet")
+        transform = fig.transFigure
+    if transform == 'data':
+        raise NotImplementedError("Not implemented yet")
+        transform = ax.transData
     ax.text(text_x, text_y, string, ha='center', va='center', 
-            fontsize=text_size, rotation=text_rotation + rotation_angle, transform = text_offset)
+            fontsize=text_size, rotation=text_rotation + rotation_angle, transform = transform)
