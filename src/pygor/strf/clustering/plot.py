@@ -3,7 +3,6 @@ import matplotlib as mlp
 import seaborn as sns
 import matplotlib
 import numpy as np
-import seaborn
 import natsort
 import pandas as pd
 import pygor.plotting
@@ -17,6 +16,13 @@ import warnings
 from joblib import Parallel, delayed
 import joblib
 import pygor.strf.pixconverter as pix
+
+try:
+    from collections.abc import Iterable
+except ImportError:
+    from collections import Iterable
+from pygor.strf.analyse.plot import title_mappings, color_mappings, label_mappings, title_mappings_simple
+
 param_map = {
     "ampl" : "Max abs. amplitude (SD)",
     "area" : "Area (° vis. ang.$^2$)",
@@ -228,7 +234,7 @@ def stats_summary(clust_df, cat = "on", boxplot = True, scatter = True, figsize 
             a.set_ylim(min_val, max_val)
     return fig, ax
 
-def _imshow_spatial_reconstruct(df, cluster_id_str, axs=None, parallel=None, **kwargs):
+def _imshow_spatial_reconstruct(df, cluster_id_str, axs=None, parallel=None,x_crop = (None, None), y_crop = (None, None), **kwargs):
     # Figure out how many columns we need 
     chromatic_cols = df.filter(regex=r"_\d").columns
     unique_wavelengths = list(np.unique([i.split('_')[-1] for i in chromatic_cols]))
@@ -244,7 +250,7 @@ def _imshow_spatial_reconstruct(df, cluster_id_str, axs=None, parallel=None, **k
     for (n, ax) in enumerate(rf_recons):
         if n == 0:
             axs.flat[n].set_ylabel(cluster_id_str, rotation = 0,  labelpad = 20)
-        im = axs.flat[n].imshow(rf_recons[n], cmap=pygor.plotting.custom.maps_concat[n], origin = "lower")
+        im = axs.flat[n].imshow(rf_recons[n][y_crop[0]:y_crop[1], x_crop[0]:x_crop[1]], cmap=pygor.plotting.custom.maps_concat[n], origin = "lower")
         #axs.flat[n].axis('off')
         axs.flat[n].spines["top"].set_visible(False)
         axs.flat[n].spines["bottom"].set_visible(False)
@@ -321,7 +327,7 @@ def _imshow_temporal_reconstruct(df, cluster_id_str, axs=None, parallel=None, **
 
 
 
-def plot_spatial_reconstruct(clust_df, cluster_id_strings = None, parallel=True):
+def plot_spatial_reconstruct(clust_df, cluster_id_strings = None, parallel=True, x_crop = (None, None), y_crop = (None, None), **kwargs):
     if cluster_id_strings is None:
         cluster_id_strings = natsort.natsorted(pd.unique(clust_df["cluster_id"]).dropna())
     # Figure out how many columns we need 
@@ -343,18 +349,19 @@ def plot_spatial_reconstruct(clust_df, cluster_id_strings = None, parallel=True)
         # done serially after the calculations are done. So it's fine. I think. Lord have mercy.
         with Parallel(n_jobs=4) as worker:
             for n, c_id in enumerate(cluster_id_strings):
-                _imshow_spatial_reconstruct(clust_df, c_id, axs=ax[n, 0:4], parallel=worker)
+                _imshow_spatial_reconstruct(clust_df, c_id, axs=ax[n, 0:4], parallel=worker, x_crop = (None, None), y_crop = (None, None),)
     # Otherwise pass None, which gets processed serially
     else:
         for n, c_id in enumerate(cluster_id_strings):
-            _imshow_spatial_reconstruct(clust_df, c_id, axs=ax[n, 0:4], parallel=None)
+            _imshow_spatial_reconstruct(clust_df, c_id, axs=ax[n, 0:4], parallel=None, x_crop = (None, None), y_crop = (None, None),)
     # Now post-process plot however you'd like:
 
     plt.show()
 
 def plot_spacetime_reconstruct(clust_df, cluster_id_strings, block_size = 200, jitter_div = 4,
                             time_durS = 1.3, scalebar_S = 0.3, scalebar_deg = 10, ipl_percentage = True,parallel=True, 
-                            time = "1d",screen_size_deg = pix.screen_width_height_visang, norm_time_ylim = True):
+                            time = "1d",screen_size_deg = pix.screen_width_height_visang, norm_time_ylim = True,
+                            figsize = None, x_crop = (None, None), y_crop = (None, None)):
     # Figure out how many columns we need 
     chromatic_cols = clust_df.filter(regex=r"_\d").columns
     unique_wavelengths = list(set([i.split('_')[-1] for i in chromatic_cols]))
@@ -368,8 +375,13 @@ def plot_spacetime_reconstruct(clust_df, cluster_id_strings, block_size = 200, j
     if ipl_percentage:
         columns += 1
     # Create final plot (and wrap ax in array)
-    fig, ax = plt.subplots(rows, columns, figsize = (columns*1.9, rows),
-    gridspec_kw = {'wspace' : 0.1, 'hspace' : 0.0, 'bottom': 0.01, 'top': .99})
+    if figsize is None:
+        figsize = (columns*1.9, rows)
+        layout = None
+    else:
+        layout = "constrained"
+    fig, ax = plt.subplots(rows, columns, figsize = figsize, layout = layout)
+    #gridspec_kw = {'wspace' : 0.1, 'hspace' : 0.0, 'bottom': 0.01, 'top': .99})
     if len(cluster_id_strings) == 1:
         ax = np.array([ax])
     # If parallel, initialise the worker
@@ -377,9 +389,9 @@ def plot_spacetime_reconstruct(clust_df, cluster_id_strings, block_size = 200, j
         # Granted, this LOOKS like its thread un-safe! However, the worker only gets used for 
         # calculations within the _imshow_spatial_reconstruct. And, in fact, the plotting is 
         # done serially after the calculations are done. So it's fine. I think. Lord have mercy.
-        with Parallel(n_jobs=4) as worker:
+        with Parallel(n_jobs=-1) as worker:
             for n, c_id in enumerate(cluster_id_strings):
-                _imshow_spatial_reconstruct(clust_df, c_id, axs=ax[n, 0:4], parallel=worker)
+                _imshow_spatial_reconstruct(clust_df, c_id, axs=ax[n, 0:4], parallel=worker, x_crop = x_crop, y_crop = y_crop)
             if time == "1d":
                 for n, c_id in enumerate(cluster_id_strings):
                     _plot_temporal_reconstruct(clust_df, c_id, axs=ax[n, 4:8], parallel=worker)
@@ -403,16 +415,25 @@ def plot_spacetime_reconstruct(clust_df, cluster_id_strings, block_size = 200, j
     if ipl_percentage is True:
         population_hist_vals_population = np.histogram(clust_df["ipl_depths"], bins = 10, range=(0, 100))[0]
         for i, clust in zip(ax[:, -1], cluster_id_strings):
-            i.axhspan(-5, 55, color = "lightgrey", lw = 0)
-            i.axhspan(60, 95, color = "lightgrey", lw = 0)
+            # i.axhspan(-5, 55, color = "lightgrey", lw = 0)
+            # i.axhspan(60, 95, color = "lightgrey", lw = 0)
+            i.axhline(57.5, color = "black", lw = 1, ls = "--")
             percentage_hist_vals_condition = np.histogram(clust_df.query(f"cluster_id == '{clust}'")["ipl_depths"], bins = 10, range=(0, 100))[0]
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 percentages = percentage_hist_vals_condition / population_hist_vals_population * 100
-            i.barh(np.arange(0, 100, 10), width= percentages, height=10, color = 'b', edgecolor="black", alpha = .75)
+            i.barh(np.arange(0, 100, 10), width= percentages, height=10, color = 'k', edgecolor="white", alpha = .4)
             i.set_label("skip_this")
-            i.set_xlim(0,40)
-            i.set_axis_off()
+            axlim = 50
+            i.set_xlim(0,axlim)
+            # i.set_axis_off()
+            sns.despine(ax = i, bottom = False)
+            i.axes.xaxis.set_ticklabels([])
+            i.axes.yaxis.set_ticklabels([])
+        # Histogram scalebar
+        percentage = 10
+        pygor.plotting.add_scalebar(percentage, ax = ax[-1, -1], string = f"{percentage}%", orientation = 'h', line_width = 3)
+
     # Now post-process plot however you'd like:
     # Time scalebar
     time_plot_index = len(unique_wavelengths)
@@ -425,12 +446,18 @@ def plot_spacetime_reconstruct(clust_df, cluster_id_strings, block_size = 200, j
         screen_size_deg = np.array(screen_size_deg)
     else:
         screen_size_deg = screen_size_deg
-    space_len_xaxis =  np.abs(ax[0, 0].get_xlim()[0]) + ax[0, 0].get_xlim()[1] #xaxis has a -0.5 offset that this summation takes care of
-    one_pix_visang = pix.visang_to_pix(space_len_xaxis, block_size=block_size)
-    scalebar_space_len = scalebar_deg / one_pix_visang
-    pygor.plotting.add_scalebar(scalebar_space_len, string = f"{np.rint(scalebar_deg).astype(int)}°", ax = ax[-1, 0], x = 0, orientation = 'h', line_width = 3, text_size = 8, offset_modifier=.6)
+    #
+    # space_len_xaxis =  np.abs(ax[0, 0].get_xlim()[0]) + ax[0, 0].get_xlim()[1] #xaxis has a -0.5 offset that this summation takes care of
+    # one_pix_visang = pix.visang_to_pix(space_len_xaxis, block_size=block_size, pixwidth = space_len_xaxis)
+    # scalebar_space_len = scalebar_deg / one_pix_visang
+    # print(space_len_xaxis, one_pix_visang, scalebar_space_len)
+    # pygor.plotting.add_scalebar(scalebar_space_len, string = f"{np.rint(scalebar_deg).astype(int)}°", ax = ax[-1, 0], x = 0, orientation = 'h', line_width = 3, text_size = 8, offset_modifier=.6)
+    visang_to_space = pygor.strf.pixconverter.visang_to_pix(scalebar_deg, pixwidth = 40, block_size = block_size)
+    pygor.plotting.add_scalebar(visang_to_space, ax = ax[-1, 0], string = f"{scalebar_deg}°", orientation = 'h', line_width = 3)
+
     if time == "2d":
-        pygor.plotting.add_scalebar(scalebar_space_len, string = f"{np.rint(scalebar_deg).astype(int)}°", ax = ax[-1, time_plot_index], x = -.1, orientation = 'v', line_width = 3, text_size = 8, offset_modifier=.4)
+        # pygor.plotting.add_scalebar(scalebar_space_len, string = f"{np.rint(scalebar_deg).astype(int)}°", ax = ax[-1, time_plot_index], x = -.1, orientation = 'v', line_width = 3, text_size = 8, offset_modifier=.4)
+        pygor.plotting.add_scalebar(visang_to_space, string = f"{np.rint(scalebar_deg).astype(int)}°", ax = ax[-1, time_plot_index], x = -.1, orientation = 'v', line_width = 3, text_size = 8, offset_modifier=.4)
 
     # Conditionally normalise axes
     if time == "1dstack":
@@ -440,10 +467,13 @@ def plot_spacetime_reconstruct(clust_df, cluster_id_strings, block_size = 200, j
     if norm_time_ylim is True and time != "2d":
         # Get all the limits for time axes, and find the max
         ylims = np.squeeze([i.get_ylim() for i in ax[:, time_plot_index:time_plot_index_last].flat])
+        absmax_val = np.max(np.abs(ylims))
+        new_lim = (-absmax_val, absmax_val)
         # Apply that to all of those axes
         for i in ax[:, time_plot_index:time_plot_index_last].flat:
-            i.set_ylim(-np.abs(ylims.max()), np.abs(ylims.max()))
-        pygor.plotting.add_scalebar(5, string = f"5 SD", ax = ax[-1, time_plot_index], x = 1, orientation = 'v', line_width = 3, text_size = 8, offset_modifier=.6)
+            i.set_ylim(new_lim)
+        pygor.plotting.add_scalebar(5, string = f"5 SD", ax = ax[-1, time_plot_index], x = 0, y = .5,
+                orientation = 'v', line_width = 3, text_size = 8, offset_modifier=.6)
     # Plot
     plt.show()
     return fig, ax
@@ -506,3 +536,116 @@ def compare_clusters_conditions(df_0, df_1, metric = "area_"):
     ax[-1, 1].set_xlabel("Clusters (AC block)")
     pygor.plotting.scalebar.add_scalebar(100, ax = ax[-1, 0], rotation = 0, x = -.05, line_width = 5, string = "100")
     return fig, ax 
+
+def cluster_bubbles(target_df : pd.DataFrame, compare : list[tuple[str, str]], 
+    axlims = "equal", ax = None, simple_titles = True, legend = True, **kwargs):
+    #Generate plot
+    # if col_wrap is not None:
+    #     if row is not None:
+    #         err = "Cannot use `row` and `col_wrap` together."
+    #         raise ValueError(err)
+    #     ncol = col_wrap
+    #     nrow = int(np.ceil(len(col_names) / col_wrap))
+    # Generate little lookup tables for chromatic content
+
+    if ax is None:
+        fig, ax = plt.subplots(1, len(compare),figsize = (5 * len(compare), 5))
+    else:
+        fig = plt.gcf()
+    if len(compare) == 1:
+        ax = np.array([ax])
+    print(len(compare), ax.size)
+    # if len(compare) != ax.size:
+    #     raise ValueError(f"Expected {len(compare)} axes, got {ax.size}.")
+    # Loop through subplots and populate them
+    for n, (pair, cax) in enumerate(zip(compare, ax.flat)):
+        if isinstance(pair, tuple):
+            pair = list(pair)
+        if simple_titles is True:
+            title_map = title_mappings
+        else:
+            title_map = title_mappings
+        # Manipulate the DataFrame into the desired format
+        liststrs = list(set([i.split('_', 1)[0]+"_\\d" for i in pair]))
+        filter_str = '|'.join(liststrs)
+        df = target_df.filter(regex = filter_str).join(target_df[["cluster_id", "cat_pol"]])
+        mean_cols = df.groupby("cluster_id").mean(numeric_only = True)
+        mean_cols = mean_cols.reset_index()
+        mean_cols["counts"] = df.groupby("cluster_id").count().reset_index().iloc[:, 1]
+        mean_cols["category"] = [i.split('_')[0] for i in mean_cols["cluster_id"]]
+        # Seaborn scatterplot
+        print("Y, X:", pair)
+        scatter = sns.scatterplot(mean_cols, y = pair[0], x = pair[1], hue = "category", size = "counts", 
+                    #{"on": "tab:brown", "off": "dimgrey", "opp": "tab:olive", "mix": "k"}
+                    legend = legend, edgecolor='darkgrey', ax = cax, 
+                    style = "category",**kwargs)
+        if legend is True: # only deal with legend if we have to
+            if n != len(compare) -1:
+                scatter.legend_.remove()
+            else:
+                sns.move_legend(cax, "upper left", bbox_to_anchor=(1, 1))
+        else:
+            pass
+        cax.set_aspect(1)
+        # Set labels
+        title_typeX = title_mappings_simple[pair[1].split('_')[0]]
+        title_typeY = title_mappings_simple[pair[0].split('_')[0]]
+        labelY = label_mappings[pair[0].split('_')[-1]] #+ ' ' + f"({title_typeY})"
+        labelX = label_mappings[pair[1].split('_')[-1]] #+ ' ' + f"({title_typeX})"
+        cax.set_ylabel(labelY)
+        cax.set_xlabel(labelX)
+        cax.yaxis.set_label_coords(.075, .75, transform = cax.transAxes)
+        cax.xaxis.set_label_coords(.75, .075, transform = cax.transAxes)
+        # cax.yaxis.set_label_coords(0, 0, transform = cax.transAxes)
+    # Loop over axes and clean things up
+    axs_ranges = [(nax.get_xlim(), nax.get_ylim()) for nax in ax.flat]     ## Get axes abs max range
+    axs_absmax = np.max(np.abs(axs_ranges))
+    for n, nax in enumerate(ax.flat):
+        axes_offset = 0
+        if axlims == "equal":
+            plot_leftdiag, plot_rightdiag = False, False
+            draw_primary = True
+            nax.set_xlim(-axs_absmax, axs_absmax)
+            nax.set_ylim(-axs_absmax, axs_absmax)
+        elif axlims == "auto":
+            plot_leftdiag, plot_rightdiag = False, False
+            draw_primary = True
+            nax.relim()
+        elif axlims == "zerod":
+            draw_primary = False
+            plot_leftdiag, plot_rightdiag = True, False
+            nax.set_xlim(0, axs_absmax)
+            nax.set_ylim(0, axs_absmax)
+            colourY = color_mappings[compare[n][0].split('_')[-1]]
+            colourX = color_mappings[compare[n][1].split('_')[-1]]
+            nax.spines["left"].set_color(colourY)
+            nax.spines["bottom"].set_color(colourX)
+        elif axlims == None:
+            draw_primary = True
+            # Let matplotlib solve it
+            nax.axis("equal")
+            nax.set_aspect('equal', adjustable='box')
+            plot_leftdiag, plot_rightdiag = False, False
+        else:
+            plot_leftdiag, plot_rightdiag = False, False
+    # Draw diagonals
+    width = (cax.bbox.width/100 + cax.bbox.height/100) / 2#just avg
+    width /= 2
+    for n, lax in enumerate(ax.flat):
+        # Determine what colour and label to use
+        try:
+            colourY = color_mappings[compare[n][0].split('_')[-1]]
+            colourX = color_mappings[compare[n][1].split('_')[-1]]
+            # Draw primary axes
+            if draw_primary is True:
+                lax.axvline(axes_offset, linestyle='--', linewidth = width, zorder = -1, color = colourY)
+                lax.axhline(axes_offset, linestyle='--', linewidth = width, zorder = -1, color = colourX)
+            if plot_leftdiag is True:
+                lax.plot([0, 1], [0, 1], linestyle='--', transform=lax.transAxes,
+                    linewidth = width, color = 'k', zorder = -1, alpha = .3)
+            if plot_rightdiag is True:
+                lax.plot([1, 0], [0, 1], linestyle='--',transform=lax.transAxes,
+                    linewidth = width, color = 'k', zorder = -1, alpha = .3)
+        except IndexError:
+            pass # No more comparisons to plot
+    sns.despine(offset = 5, trim = False)

@@ -23,10 +23,14 @@ sns.set_context('notebook')
 sns.set_style('white')
 
 label_mappings = {
-    "588"  : "588 nm",
-    "478"  : "478 nm",
-    "422"  : "422 nm",
-    "375"  : "375 nm",
+    # "588"  : "588 nm",
+    # "478"  : "478 nm",
+    # "422"  : "422 nm",
+    # "375"  : "375 nm",
+    "588"  : "Red",
+    "478"  : "Green",
+    "422"  : "Blue",
+    "375"  : "UV",
 }
 
 def no_chroma_value():
@@ -47,13 +51,16 @@ color_mappings["375"] = pygor.plotting.custom.fish_palette[3]
 title_mappings = {
     "area" : "Area (°)",
     "diameter" : "Diameter (°)",
+    "diam" : "Diameter (°)",
     "centdom" : "Spectral centroid (Hz)",
-    "ampl"  : "Amplitude (SD)" 
+    "ampl"  : "Amplitude (SD)" ,
+    "absampl" : "Absolute amplitude (SD)"
 }
 
 title_mappings_simple = {
-    "area" : "° vis. ang.$^2$",
-    "diam" : "° vis. ang.",
+    "area" : "°$^2$",
+    "diam" : "°",
+    "diameter" : "° vis. ang.",
     "centdom" : "Hz",
     "ampl"  : "SD" 
 }
@@ -307,7 +314,7 @@ def ipl_summary_chroma(roi_df, numcolours = 4, figsize = (12, 7), legend = True,
 
     if split_polarity is True:
         if ax is None:
-            fig, ax = plt.subplots(1, 4, figsize = (figsize[0], figsize[1]/2), sharex = True, sharey=True)
+            fig, ax = plt.subplots(1, 4, figsize = (figsize[0], figsize[1]), sharex = True, sharey=True)
         else:
             fig = plt.gcf()
         ax = np.repeat(np.expand_dims(ax, 0), 2, axis = 0)
@@ -377,6 +384,7 @@ def ipl_summary_chroma(roi_df, numcolours = 4, figsize = (12, 7), legend = True,
             handles, labels = ax[0,0].get_legend_handles_labels()
             labels_ = ["OFF", "ON"]
             handles_ = [i for i in handles[:len(labels_)]]
+            # exact location does not matter as we will move axis later
             ax.flat[-1].legend(handles_, labels_, handler_map={tuple: HandlerTuple(ndivide=None)}, bbox_to_anchor=(1.04, 1.4), loc="upper left")
         if split_polarity is False:
             handles, labels = [], []
@@ -387,7 +395,7 @@ def ipl_summary_chroma(roi_df, numcolours = 4, figsize = (12, 7), legend = True,
             labels_ = ["Red", "Green", "Blue", "UV"]
             handles_ = [i[0] for i in handles[:len(labels_)]]
             ax.flat[-1].legend(handles_, labels_, handler_map={tuple: HandlerTuple(ndivide=None)}, bbox_to_anchor=(1.04, 1.4), loc="upper left")
-        sns.move_legend(ax.flat[-1], "lower center", bbox_to_anchor=(-1.5, -.5), ncol=4, title=None, frameon=False)
+        sns.move_legend(ax.flat[-1], "lower center", bbox_to_anchor=(-1.3, -.4), ncol=4, title=None, frameon=False)
     sns.despine()
     return fig, ax 
 
@@ -482,7 +490,6 @@ def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'defau
             kwargs["palette"] = pygor.plotting.custom.polarity_palette
         elif kwargs["hue"] == "Group" and len(roi_df[kwargs["hue"]].unique()) == 2:
             kwargs["palette"] = pygor.plotting.custom.compare_conditions[2]
-        print(kwargs["palette"])
     try:
         title = stat_mappings[statistic]
     except KeyError:
@@ -495,7 +502,6 @@ def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'defau
     categories_specified = np.unique(roi_df[category])
     if "R" in categories_specified and "G" in categories_specified and "B" in categories_specified and "UV" in categories_specified:
         categories_specified = ["R", "G", "B", "UV"]
-    print(categories_specified)
     n_categories = len(categories_specified)
     if colour_list == None:
         if category == "polarity":
@@ -505,7 +511,7 @@ def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'defau
     if ax is None:
         fig, ax = plt.subplots(n_categories,1, figsize = (4, 6), sharex=True, sharey=True, gridspec_kw={'hspace': 0})
     else:
-        fig = plt.gcf()
+        fig = ax.flat[0].get_figure()
     # Loop through each category and plot the histogram to axes
     for n, c in enumerate(categories_specified):
         if isinstance(c, str):
@@ -573,6 +579,11 @@ def plot_roi_hist(roi_df, statistic = "contour_area_total", conditional = 'defau
         pygor.plotting.add_scalebar(auto_num, string = f"{scalebar_str}", ax = ax[-1], orientation = 'v', x = 1.1, flip_text=True)
     a.set_xlabel(title)
     sns.despine()
+    try:
+        sns.move_legend(fig, "lower center", bbox_to_anchor=(.5, -.1), ncol=2, title=None, frameon=False)
+    except ValueError:
+        # warnings.warn("Could not move legend")
+        pass
     return fig, ax 
 
 def ipl_summary_polarity_chroma(chroma_df, numcolours = 4, figsize = (8, 4), cat_pol = ['off', 'on']):
@@ -764,6 +775,83 @@ def plot_multi_vs_single(df, metric, subset_list, orientation = 'v', labels = No
         _multi_vs_single_vert(df, metric, subset_list, **kwargs)
     if orientation == 'h' or orientation == 'horizontal':
         _multi_vs_single_horz(df, metric, subset_list, **kwargs)
+
+
+def compare_groups_violin(df, pairs, metric = "area", hue = "Group", group_by = "colour",
+        compare = "Group", orient = 'v', test = "Kruskal"):
+    # Reshape and coax into the right format for simpler seaborn handling 
+    colour_categories = pd.unique(df.filter(like = metric+"_").columns)
+    colour_categories = np.append(colour_categories, "Group")
+    df = df[colour_categories.tolist()]
+    df_reshaped = pd.melt(df, id_vars = ["Group"])
+    df_reshaped = df_reshaped.mask(df_reshaped == 0, np.nan, inplace = False)
+    df_reshaped = df_reshaped.rename(columns = {"variable":f"{group_by}", "value":f"{metric}"})
+    if group_by == "colour":
+        df_reshaped.replace({f"{metric}_375":"375 nm", f"{metric}_422":"422 nm", f"{metric}_478":"478 nm", f"{metric}_588":"588 nm"}, inplace = True)
+    # Generate plot 
+
+    figsize = [12, 5]
+    if orient == 'h' or orient == 'horizontal':
+        figsize = list(reversed(figsize))
+    fig, ax = plt.subplots(1, 1, figsize = figsize)
+    # Now define our parameters and handle axis orientations
+    if orient == 'v' or orient == 'vertical':
+        x = group_by
+        y = metric
+        ax.set_xticklabels([])
+        try:
+            ax.set_ylabel(pygor.strf.analyse.plot.title_mappings[metric])
+        except KeyError:
+            ax.set_ylabel(y)
+    if orient == 'h' or orient == 'horizontal':
+        x = metric
+        y = group_by
+        ax.set_yticklabels([])
+        try:
+            ax.set_xlabel(pygor.strf.analyse.plot.title_mappings[metric])
+        except KeyError:
+            ax.set_xlabel(x)
+    if orient not in ['v', 'vertical', 'h', 'horizontal']:
+        raise ValueError("Orientation must be 'v', 'vertical', 'h', or 'horizontal'")
+    hue = hue
+    hue_order = ["AC block", "Control"]
+    order = list(reversed(["375 nm", "422 nm", "478 nm", "588 nm"]))
+    palmap = list(reversed(pygor.plotting.compare_conditions[2]))
+    # Populate plot
+    sns.stripplot(df_reshaped, x=x, y=y, hue = hue, hue_order=hue_order, order = order, dodge=True, linewidth=.5, 
+                palette='dark:k', legend = False, alpha = .33, size = 2, ax = ax) # ,palette = compare_conditions[2]
+    cax = sns.violinplot(df_reshaped, x = x, y = y, hue = hue, hue_order=hue_order,  order = order,linewidth=1, 
+                palette = palmap, legend = True, split = True, density_norm = "area",
+                common_norm=False, saturation = .8, gap = .2, ax = ax, bw_adjust=1, inner_kws = dict(box_width = 8,
+                whis_width=2))
+    if group_by == "colour":
+        for n, i in enumerate(pairs):
+            if orient == 'v' or orient == 'vertical':
+                rel_ax = 'y'
+                cx = n
+                cy = 0
+            if orient == 'h' or orient == 'horizontal':
+                rel_ax = 'x'
+                cx = 0
+                cy = n
+            pygor.plotting.custom.label_ax_colour(cax, x = cx, y = cy, marker = '.', 
+                colour = (pygor.plotting.fish_palette)[n], clip_on = False, relative_axis = rel_ax, zorder = 4)
+    # Override seaborn axis labelling 
+    if orient == 'v' or orient == 'vertical':
+        ax.set_xlabel("")
+        ax.set_xticklabels([])
+        sns.despine(bottom=True)
+    if orient == 'h' or orient == 'horizontal':
+        ax.set_ylabel("")
+        ax.set_yticklabels([])
+        sns.despine(left=True)
+    if test is not None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            annotator = Annotator(cax, pairs, data=df_reshaped, x=x, y=y, hue = hue, hue_order=hue_order, order = order, orient = orient)
+            annotator.configure(test=test, text_format='star', loc='outside', show_test_name = False)
+            annotator.apply_and_annotate()
+    return fig, ax
 
 # def metric_boxplot(df, metric, sigbar = True, sigtest = 'Kruskal', 
 #     ):

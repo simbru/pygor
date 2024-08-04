@@ -18,6 +18,7 @@ import natsort
 import pandas as pd
 import warnings
 import joblib 
+from sklearn import preprocessing
 
 def _roi_by_roi_dict(data_strf_obj, df_return=False): #
     """
@@ -157,6 +158,9 @@ def _roi_by_roi_dict(data_strf_obj, df_return=False): #
         dict["dom_centroids"] = dom_centroid
         dict["time_amplitude"] = data_strf_obj.get_time_amps()
         dict["space_amplitude"] = data_strf_obj.get_space_amps()
+        dict["weight_space"] = preprocessing.normalize(pygor.utilities.multicolour_reshape(data_strf_obj.get_space_amps(), data_strf_obj.numcolour), axis = 0).flatten(order = 'F')
+        dict["weight_time"]  = preprocessing.normalize(pygor.utilities.multicolour_reshape(data_strf_obj.get_time_amps(), data_strf_obj.numcolour), axis = 0).flatten(order = 'F')
+
         # Proof of concept for assigning entire arrays 
         #dict["-timecourse"] = data_strf_obj.get_timecourses()[:, 0].tolist()
         #dict["+timecourse"] = data_strf_obj.get_timecourses()[:, 1].tolist()
@@ -306,6 +310,7 @@ def _chromatic_dict(data_strf_obj, wavelengths =  ["588", "478", "422", "375"], 
                 dict[f"area_{i}"] = area_t[n]
                 dict[f"diam_{i}"] = diam_t[n]
                 dict[f"ampl_{i}"] = ampl_t[n]
+                #dict[f"absampl_{i}"] = np.abs(ampl_t[n])
                 dict[f"centneg_{i}"] = neg_cent_t[n]
                 dict[f"centpos_{i}"] = pos_cent_t[n]
                 dict[f"centdom_{i}"] = cent_dom_t[n]
