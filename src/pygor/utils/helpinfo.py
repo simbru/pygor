@@ -135,7 +135,7 @@ def welcome_help(data_type_list, metadata_dict, hints = False) -> str:
     print_block = f"""
 Welcome to your data object! 
 Below are attributes and methods, as well as some metadata.
-Pass 'hint = True' for more tips and hints on using the data class.
+Pass 'hints = True' for more tips and hints on using the data class.
     ## Class info:
         Current data type: 
 {textwrap.indent(pp.pformat(data_type_list), '        ')}
