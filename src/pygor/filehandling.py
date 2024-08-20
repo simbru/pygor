@@ -15,6 +15,7 @@ import shutil
 import contextlib
 import joblib
 
+
 def find_files_in(filetype_ext_str, dir_path, recursive=False, **kwargs) -> list:
     """
     Searches the specified directory for files with the specified file extension.
