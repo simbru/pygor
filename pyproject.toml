@@ -19,28 +19,24 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-  "numpy",
-  "pandas",
+  "numpy > 2",
   "matplotlib",
   "h5py",
-  "pandas",
-  "seaborn <= 12.2",
-  "seaborn-image",
+  "pandas > 2.2.0",
+  "seaborn",
   "scikit-learn",
   "scikit-image",
-  "scipy >= 1.13.1",
-  "napari[all]",
+  "scipy",
   "dacite",
-  "ipywidgets",
   "tifffile",
-  "ipykernel ",
   "natsort",
-  "ipyfilechooser",
-  "ipykernel",
-  "ipympl",
-  "notebook",
-  "statannotations",
-  "pingouin"
+  "tqdm",
+  "ipywidgets",
+#  "ipykernel ",
+#  "ipympl",
+#  "notebook",]
+#  "statannotations",
+#  "pingouin"
 ]
 
 [project.urls]

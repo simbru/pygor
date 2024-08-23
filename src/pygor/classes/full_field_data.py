@@ -7,7 +7,6 @@ class FullField(Core):
     # key-word only, so phase_num must be specified when initialising Data_FFF
     phase_num : int
     ipl_depths : np.ndarray = np.nan
-    type : str = "FFF"
     # Post init attrs
     name : str = field(init=False)
     averages : np.array = field(init=False)

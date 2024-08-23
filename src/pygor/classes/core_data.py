@@ -295,7 +295,7 @@ class Core:
         base1 = _prep_img(np.average(self.images[mid_split:mid_split+frame_num], axis = 0))
         base2 = _prep_img(np.average(self.images[-frame_num-1:-1], axis = 0))
         # 
-        d3 = pygor.plotting.plots.stack_to_rgb(base)
+        d3 = pygor.plotting.basic.stack_to_rgb(base)
         d3[:, :, 0] = base
         d3[:, :, 1] = base1
         d3[:, :, 2] = base2
