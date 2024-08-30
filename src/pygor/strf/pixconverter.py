@@ -8,7 +8,7 @@ screen_width_mm = 300 # total width
 screen_half_width_mm = screen_width_mm/2 # right-angle
 # According to pythagorean theorem 
 hypoth_mm = np.sqrt(fish_screen_dist_mm**2 + screen_half_width_mm**2)
-# Compute angle between fish and one side of screen (such that we get a right angel) 
+# Compute angle between fish and one side of screen (such that we get a right angle) 
 sin = screen_half_width_mm / hypoth_mm # oppose/hypth
 cos = fish_screen_dist_mm / hypoth_mm # adjecent/hypth
 tan =  screen_half_width_mm /fish_screen_dist_mm # opposite/adjecent 

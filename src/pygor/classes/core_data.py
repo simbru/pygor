@@ -69,7 +69,7 @@ class Core:
             # Timing parameters
             self.triggertimes = try_fetch(HDF5_file, "Triggertimes")
             self.triggertimes = self.triggertimes[~np.isnan(self.triggertimes)].astype(int)
-            self.triggerstimes_frame = try_fetch(HDF5_file, "Triggertimes_Frame")
+            self.triggerstime_frame = try_fetch(HDF5_file, "Triggertimes_Frame")
             self.__skip_first_frames = int(try_fetch(HDF5_file, "OS_Parameters")[22]) # Note name mangling to prevent accidents if 
             self.__skip_last_frames = -int(HDF5_file["OS_Parameters"][23]) # private class attrs share names 
             self.ipl_depths = try_fetch(HDF5_file, "Positions")
@@ -85,9 +85,9 @@ class Core:
             self.ms_dur = self.averages.shape[-1]
         else:
             self.ms_dur = None
-        # Ensure triggerstimes_frame does not include uneccessary nans
-        if self.triggerstimes_frame is not None:
-            self.triggerstimes_frame = self.triggerstimes_frame[~np.isnan(self.triggerstimes_frame)].astype(int)
+        # Ensure triggerstime_frame does not include uneccessary nans
+        if self.triggerstime_frame is not None:
+            self.triggerstime_frame = self.triggerstime_frame[~np.isnan(self.triggerstime_frame)].astype(int)
         # Set name
         self.name = self.filename.stem
         # Set keyword lables
@@ -406,7 +406,7 @@ class Core:
             # Ignore skipping parameters
             first_trig_frame = 0
             last_trig_frame = 0
-            #triggers_frames = self.triggerstimes_frame
+            #triggers_frames = self.triggerstime_frame
         else:
             # Othrwise, account for skipping parameters
             first_trig_frame = self.__skip_first_frames
@@ -414,7 +414,7 @@ class Core:
             print(f"Skipping first {first_trig_frame} and last {last_trig_frame} frames")
         if last_trig_frame == 0:
             last_trig_frame = None
-        triggers_frames = self.triggerstimes_frame[first_trig_frame:last_trig_frame]
+        triggers_frames = self.triggerstime_frame[first_trig_frame:last_trig_frame]
         # Get the frame interval over which to average the images
         rep_start_frames = triggers_frames[::self.phase_num]
         rep_delta_frames = np.diff(triggers_frames[::self.phase_num]) # time between repetitions, by frame number
