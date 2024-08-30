@@ -76,6 +76,9 @@ class Core:
             self.averages = try_fetch(HDF5_file, "Averages0")
             self.snippets = try_fetch(HDF5_file, "Snippets0")
             self.frame_hz = float(try_fetch(HDF5_file, "OS_Parameters")[58])
+            ## TODO:
+            #self.linedur_s = float(try_fetch(HDF5_file, "OS_Parameters")[56])
+            #self.samp_period_s = float(try_fetch(HDF5_file, "OS_Parameters")[57]) #is just inverse of frame_hz?
             self.trigger_mode = int(try_fetch(HDF5_file, "OS_Parameters")[28])
         # Check that trigger mode matches phase number
         if self.trigger_mode != self.phase_num:
