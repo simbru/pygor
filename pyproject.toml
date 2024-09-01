@@ -32,6 +32,7 @@ dependencies = [
   "natsort",
   "tqdm",
   "ipywidgets",
+  "napari[all]",
 #  "ipykernel ",
 #  "ipympl",
 #  "notebook",]
