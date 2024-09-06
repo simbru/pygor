@@ -80,6 +80,7 @@ class Core:
             self.linedur_s = float(try_fetch(HDF5_file, "OS_Parameters")[56])
             self.samp_period_s = float(try_fetch(HDF5_file, "OS_Parameters")[57]) #is just inverse of frame_hz?
             self.trigger_mode = int(try_fetch(HDF5_file, "OS_Parameters")[28])
+            self.average_stack = try_fetch(HDF5_file, "Stack_Ave")
         # Check that trigger mode matches phase number
         if self.trigger_mode != self.phase_num:
             warnings.warn(f"{self.filename.stem}: Trigger mode {self.trigger_mode} does not match phase number {self.phase_num}", stacklevel=3)
@@ -185,7 +186,7 @@ class Core:
     
     def view_stack_rois(self, labels = True, func = np.mean, axis = 0, cbar = False,
         ax = None, figsize = (None, None), figsize_scale = None, 
-        zcrop : tuple = None, xcrop : tuple = None, ycrop : tuple = None, **kwargs) -> None:
+        zcrop : tuple = None, xcrop : tuple = None, ycrop : tuple = None, alpha = 0.5, **kwargs) -> None:
         """
         Display a projection of the image stack using the specified function.
 
@@ -234,12 +235,16 @@ class Core:
         else:
             ystart = ycrop[0]
             ystop = ycrop[1]
+
         num_rois = int(np.abs(np.min(self.rois)))
         # color = cm.get_cmap('jet_r', num_rois)
         color = matplotlib.colormaps["jet_r"]
-        scanv = ax.imshow(func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis = axis), cmap ="Greys_r", origin = "lower")
+        if func == "average_stack":
+            scanv = ax.imshow(self.average_stack, cmap = "Greys_r", origin = "lower")
+        else:
+            scanv = ax.imshow(func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis = axis), cmap ="Greys_r", origin = "lower")
         rois_masked = np.ma.masked_where(self.rois == 1, self.rois)[ystart:ystop, xstart:xstop]
-        rois = ax.imshow(rois_masked, cmap = color, alpha = 0.5, origin = "lower")
+        rois = ax.imshow(rois_masked, cmap = color, alpha = alpha, origin = "lower")
         ax.grid(False)
         ax.axis('off')
         if cbar == True:
