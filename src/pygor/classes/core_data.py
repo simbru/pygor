@@ -36,6 +36,15 @@ def try_fetch(file, key):
         error
     return result
 
+def try_fetch_os_params(file, params_key):
+    """
+    Will always default to fetching given key from file["OS_Parameters"]
+    """
+    keys = np.squeeze(list(file["OS_Parameters"].attrs.items())[0][1])[1:] # this worked :')
+    key_indices = np.arange(len(keys))
+    key_dict = {keys[i]: i for i in key_indices}
+    return file["OS_Parameters"][key_dict[params_key]]
+
 @dataclass
 class Core:
 
@@ -70,17 +79,18 @@ class Core:
             self.triggertimes = try_fetch(HDF5_file, "Triggertimes")
             self.triggertimes = self.triggertimes[~np.isnan(self.triggertimes)].astype(int)
             self.triggerstimes_frame = try_fetch(HDF5_file, "Triggertimes_Frame")
-            self.__skip_first_frames = int(try_fetch(HDF5_file, "OS_Parameters")[22]) # Note name mangling to prevent accidents if 
-            self.__skip_last_frames = -int(HDF5_file["OS_Parameters"][23]) # private class attrs share names 
+            self.__skip_first_frames = int(try_fetch_os_params(HDF5_file, "Skip_First_Triggers")) # Note name mangling to prevent accidents if 
+            self.__skip_last_frames = -int(try_fetch_os_params(HDF5_file,"Skip_Last_Triggers")) # private class attrs share names 
             self.ipl_depths = try_fetch(HDF5_file, "Positions")
             self.averages = try_fetch(HDF5_file, "Averages0")
             self.snippets = try_fetch(HDF5_file, "Snippets0")
-            self.frame_hz = float(try_fetch(HDF5_file, "OS_Parameters")[58])
+            self.frame_hz = float(try_fetch_os_params(HDF5_file, "samp_rate_Hz"))
             ## TODO:
-            self.linedur_s = float(try_fetch(HDF5_file, "OS_Parameters")[56])
-            self.samp_period_s = float(try_fetch(HDF5_file, "OS_Parameters")[57]) #is just inverse of frame_hz?
-            self.trigger_mode = int(try_fetch(HDF5_file, "OS_Parameters")[28])
+            self.linedur_s = float(try_fetch_os_params(HDF5_file, "LineDuration"))
+            self.samp_period_s = float(try_fetch_os_params(HDF5_file, "samp_period")) #is just inverse of frame_hz?
+            self.trigger_mode = int(try_fetch_os_params(HDF5_file, "Trigger_Mode"))
             self.average_stack = try_fetch(HDF5_file, "Stack_Ave")
+            self.n_planes = int(try_fetch_os_params(HDF5_file, "nPlanes"))
         # Check that trigger mode matches phase number
         if self.trigger_mode != self.phase_num:
             warnings.warn(f"{self.filename.stem}: Trigger mode {self.trigger_mode} does not match phase number {self.phase_num}", stacklevel=3)
