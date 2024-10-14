@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import warnings
 import scipy
-global_thresh_val = 3
+global_thresh_val = 2
 min_targets =     5
-min_hole_size =   2
+min_hole_size =   3
 min_object_size = min_targets
 
 def _detect_targets(spatial_filter, thresh_value = global_thresh_val, min_targets = min_targets, result_plot = False, **kwargs):
@@ -96,7 +96,7 @@ def _gen_filter_mask(spatial_filter, thresh_value = global_thresh_val, min_hole_
     mask = skimage.morphology.remove_small_objects(mask, min_size = min_object_size)
     mask = skimage.morphology.remove_small_holes(mask, area_threshold = min_hole_size)
     # Double dialation is intentional
-    mask = skimage.morphology.binary_dilation(mask, footprint=skimage.morphology.disk(1))
+    mask = skimage.morphology.binary_dilation(np.squeeze(mask), footprint=skimage.morphology.disk(radius = 1))
     # mask = skimage.morphology.binary_dilation(mask)
     if result_plot:
         if kwargs.get("color") is not None: 
@@ -145,7 +145,8 @@ def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1, result_plot = Fals
     """
     spatial_filter_mask = skimage.filters.gaussian(spatial_filter_mask, sigma = gauss_sigma, mode = "nearest")
     spatial_filter_mask = skimage.filters.unsharp_mask(spatial_filter_mask, radius = gauss_sigma, amount = 5)
-    contour = skimage.measure.find_contours(spatial_filter_mask)
+
+    contour = skimage.measure.find_contours(np.squeeze(spatial_filter_mask))
     if result_plot:
         if kwargs.get("color") is not None: 
             kwargs["c"] = kwargs["color"]
@@ -164,7 +165,8 @@ def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1, result_plot = Fals
                     a.plot(contour_n[:, 1], contour_n[:, 0], lw = 3, ls = '-',alpha = .8, c = kwargs["c"])
     return contour    
 
-def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val, plot_results = False, surround_disksize = 4, ax = None):
+def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val, result_plot = False, surround_disksize = 4, ax = None):
+    spatial_filter = np.squeeze(spatial_filter)
     if np.ma.isMaskedArray(spatial_filter):
         spatial_filter = spatial_filter.data
     neg_filter = np.clip(spatial_filter, None, 0)
@@ -223,8 +225,8 @@ def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val, plot_result
         # old: pos_mask = np.invert(neg_mask.astype(bool))
 
     # # Throw error if overlap exists
-    # if np.any(neg_mask > 1) or np.any(pos_mask > 1):
-    #     raise ValueError("Masking logic insufficient, leading to overlapping masks. Manual fix required.")
+    if np.any(neg_mask > 1) or np.any(pos_mask > 1):
+        raise ValueError("Masking logic insufficient, leading to overlapping masks. Manual fix required.")
     # Prune overlapping masks: Check if masks conflict (prioritise bigger mask)
     neg_mask_indices = np.argwhere(neg_mask == 0)
     pos_mask_indices = np.argwhere(pos_mask == 0)
@@ -236,18 +238,18 @@ def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val, plot_result
         matching_indices = np.array((neg_mask_indices[:,None] == pos_mask_indices).all(2).any(1))
         prune_indices = neg_mask_indices[matching_indices]
         neg_mask[prune_indices[:, 0], prune_indices[:, 1]] = 1
-    if plot_results:
+    if result_plot:
         ax[0].imshow(neg_mask, origin = "lower")
         ax[1].imshow(pos_mask, origin = "lower")
     return neg_mask, pos_mask
 
-def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_results = False, ax = None, **kwargs):
+def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, result_plot = False, ax = None, **kwargs):
     """
     Processes a spatial filter mask to segment and contour areas based on polarity.
 
     This function takes a spatial filter mask, segments it into its constituent parts,
     and identifies contours of areas with positive and negative average values within
-    the labeled regions. If `plot_results` is set to True, it also plots the segmentation
+    the labeled regions. If `result_plot` is set to True, it also plots the segmentation
     and contouring results. The function returns separate contours for positive and negative
     regions.
 
@@ -255,7 +257,7 @@ def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_res
     ----------
     spatial_filter : array_like
         The spatial filter mask to be processed.
-    plot_results : bool, optional
+    result_plot : bool, optional
         Flag to indicate whether to plot the segmentation and contour results.
     **kwargs : dict
         Additional keyword arguments passed to contour fitting function.
@@ -283,22 +285,22 @@ def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_res
     if len(_pos_targets) <= min_targets:
         _pos_targets = np.array([])
     # Plot that process, conditionally
-    if plot_results is True:
+    if result_plot is True:
         neg_filter = np.clip(spatial_filter, None, 0)
         pos_filter = np.clip(spatial_filter, 0, None)
         if ax is None:
             fig, ax = plt.subplots(2, 4, figsize = (10*1.5, 3*1.5))
-            offset = 1
+            #offset = 1
         else:
             fig = plt.gcf()
-            offset = 0
-        _neg_targets = _detect_targets(neg_filter, thresh_value = abs_thresh_val, result_plot=1, ax = ax[0, 1 - offset])
-        _pos_targets = _detect_targets(pos_filter, thresh_value = abs_thresh_val, result_plot=1, ax = ax[1, 1 - offset])
-        neg_mask = _gen_filter_mask(neg_filter, thresh_value=abs_thresh_val, result_plot=1, ax = ax[0, 2 - offset:].flatten(), c = "yellow")
-        pos_mask = _gen_filter_mask(pos_filter, thresh_value=abs_thresh_val, result_plot=1, ax = ax[1, 2 - offset:].flatten(), c = "yellow")
-        neg_mask, pos_mask = bipolar_mask(spatial_filter, plot_results=plot_results, ax = ax[:,  4 - offset])
-        ax[0, 2 - offset].scatter(_neg_targets, neg_filter.flatten()[_neg_targets], c = 'cyan', label = 'final', marker = 5)
-        ax[1, 2 - offset].scatter(_pos_targets, pos_filter.flatten()[_pos_targets], c = 'cyan', label = 'final', marker = 5)
+            #offset = 1
+        _neg_targets = _detect_targets(neg_filter, thresh_value = abs_thresh_val, result_plot=1, ax = ax[0, 0])
+        _pos_targets = _detect_targets(pos_filter, thresh_value = abs_thresh_val, result_plot=1, ax = ax[1, 0])
+        neg_mask = _gen_filter_mask(np.squeeze(neg_filter), thresh_value=abs_thresh_val, result_plot=1, ax = ax[0, 1:].flatten(), c = "yellow")
+        pos_mask = _gen_filter_mask(np.squeeze(pos_filter), thresh_value=abs_thresh_val, result_plot=1, ax = ax[1, 1:].flatten(), c = "yellow")
+        ax[0, 1].scatter(_neg_targets, neg_filter.flatten()[_neg_targets], c = 'cyan', label = 'final', marker = 5)
+        ax[1, 1].scatter(_pos_targets, pos_filter.flatten()[_pos_targets], c = 'cyan', label = 'final', marker = 5)
+        neg_mask, pos_mask = bipolar_mask(spatial_filter, result_plot=result_plot, ax = ax[:,  3])
         # Combine all legends
         lines_labels = [ax.get_legend_handles_labels() for ax in fig.axes[:4]]
         lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]
@@ -312,14 +314,14 @@ def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_res
         neg_contours = np.array([])
     else:
         # Check that mask is not inverse RF surround
-        neg_mask_flood = skimage.morphology.flood_fill(neg_mask, (0, 0), 0)
+        neg_mask_flood = skimage.morphology.flood_fill(np.squeeze(neg_mask), (0, 0), 0)
         neg_mask_sum = neg_mask_flood + pos_mask
         if np.all(neg_mask_sum == 1):
             neg_contours = np.array([])
         # Otherwise, go ahead and get contour
         else:
-            if plot_results is True:
-                neg_contours = _fit_filter_contour(neg_mask, result_plot = 1, ax = ax[0, 3 - offset:], c = "blue", **kwargs)
+            if result_plot is True:
+                neg_contours = _fit_filter_contour(neg_mask, result_plot = 1, ax = ax[0, 2:], c = "blue", **kwargs)
             else:
                 neg_contours = _fit_filter_contour(neg_mask)
         
@@ -328,17 +330,17 @@ def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, plot_res
         pos_contours = np.array([])
     else:
         # Check that mask is not inverse RF surround 
-        pos_mask_flood = skimage.morphology.flood_fill(pos_mask, (0, 0), 0) 
+        pos_mask_flood = skimage.morphology.flood_fill(np.squeeze(pos_mask), (0, 0), 0) 
         pos_mask_sum = pos_mask_flood + neg_mask
         if np.all(pos_mask_sum == 1):
             pos_contours = np.array([])
         # Otherwise, go ahead and get contour
         else:
-            if plot_results is True:
-                pos_contours = _fit_filter_contour(pos_mask, result_plot = 1, ax = ax[1, 3 - offset:], c = "red", **kwargs)
+            if result_plot is True:
+                pos_contours = _fit_filter_contour(pos_mask, result_plot = 1, ax = ax[1, 2:], c = "red", **kwargs)
             else:
                 pos_contours = _fit_filter_contour(pos_mask)
-    if plot_results is True:
+    if result_plot is True:
         plt.tight_layout()
     return (neg_contours, pos_contours)
 

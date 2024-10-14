@@ -92,10 +92,10 @@ def pixel_polarity(arr_3d, exclude_PrePost = (2, 2)):
     max_locs = np.argmax(arr_3d[exclude_PrePost[0]:len(arr_3d)-exclude_PrePost[1]], axis = 0)
     min_locs = np.argmin(arr_3d[exclude_PrePost[0]:len(arr_3d)-exclude_PrePost[1]], axis = 0)
     bool_arr = max_locs > min_locs
-     # Needs to retain mask if input array contained mask 
+    # Needs to retain mask if input array contained mask 
     if isinstance(arr_3d, np.ma.MaskedArray) == True:
-       bool_arr = np.ma.array(data = bool_arr, mask = arr_3d[0].mask) # take mask from first frame
-       return np.ma.where(bool_arr == 0, -1, 1)
+        bool_arr = np.ma.array(data = bool_arr, mask = arr_3d[0].mask) # take mask from first frame
+        return np.ma.where(bool_arr == 0, -1, 1)
     # Otherwise
     else:
         return np.where(bool_arr == 0, -1, 1)
@@ -162,8 +162,8 @@ def _legacy_corr_spacetime(array_3d, border = 0):
                 correlation_map[x, y] = np.average(curr_corr_coeff)
     return correlation_map / np.max(correlation_map) # Normalize correlation map by its own max, to get scale between -1 or 1 and some number on the other end of polarity
 
-def corr_spacetime(arr_3d, convolve = False, kernel_width = 1, kernel_depth = 2, 
-    pix_subsample = 1, time_subsample = 1, mode = "var", corr_mode = 'constant'):
+def corr_spacetime(arr_3d, convolve = True, kernel_width = 8, kernel_depth = 5, 
+    pix_subsample = 1, time_subsample = 2, mode = "var", corr_mode = 'constant'):
     """
     Calculate the spatial-temporal correlations of a 3D array (with time on the first axis). 
     
@@ -200,16 +200,27 @@ def corr_spacetime(arr_3d, convolve = False, kernel_width = 1, kernel_depth = 2,
     # ^ potential here to define your own kernel. Didn't seem worthwhile implementing just yet. 
     if isinstance(arr_3d, np.ma.MaskedArray):
         arr_3d = np.where(arr_3d.mask, 0, arr_3d.data)
-    if mode == "var" or mode == 'variance' or mode == None:
-        prod_funct = np.ma.var
-    if mode == "std" or mode == 'stdev':
-        prod_funct = np.ma.std
-    if mode == "sum":
-        prod_funct = np.ma.sum
-    if mode == "avg" or mode == 'average':
-        prod_funct = np.ma.average
+    # Define a function to get prod_funct based on the mode
+    def get_prod_funct(mode):
+        if mode in ["var", "variance", None]:
+            return lambda x, axis: np.ma.var(x, axis=axis)
+        elif mode in ["std", "stdev", "sd"]:
+            return lambda x, axis: np.ma.std(x, axis=axis)
+        elif mode == "sum":
+            return lambda x, axis: np.ma.sum(x, axis=axis)
+        elif mode in ["avg", "average"]:
+            return lambda x, axis: np.ma.average(x, axis=axis)
+        elif mode in ["max", "maximum"]:
+            return lambda x, axis: np.ma.max(x, axis=axis)
+        elif mode == "absmax":
+            return lambda x, axis: np.ma.max(np.abs(x), axis=axis)
+        elif mode == "corr":
+            return lambda x, axis: _legacy_corr_spacetime(x)
+        else:
+            raise ValueError("Invalid mode specified")
+    prod_funct = get_prod_funct(mode)
     # Convolves input according to kernel and returns sum of products at each location as corrs
-    if convolve == True:
+    if convolve is True:
         convolved_corr = scipy.ndimage.correlate(arr_3d[::time_subsample, ::pix_subsample, ::pix_subsample], weights=kernel, mode = corr_mode)
         if pix_subsample > 1: 
             convolved_corr = np.kron(convolved_corr, np.ones((time_subsample, pix_subsample, pix_subsample)))
@@ -222,7 +233,7 @@ def corr_spacetime(arr_3d, convolve = False, kernel_width = 1, kernel_depth = 2,
         corr_arr = prod_funct(arr_3d, axis = 0)
     return corr_arr
 
-def collapse_3d(arr_3d, zscore = True, mode = "var"):
+def collapse_3d(arr_3d, zscore = True, **kwargs):
     """Collapses a 3D array by applying spatial-temporal correlation and polarity.
     
     This function takes in a 3D array and collapses it by multiplying the result
@@ -259,7 +270,7 @@ def collapse_3d(arr_3d, zscore = True, mode = "var"):
     # Get the polarity for each pixel in STRF
     polarity_array = pixel_polarity(arr_3d)
     # Collapse space via temporal correlation 
-    corr_map = corr_spacetime(arr_3d, mode = mode)
+    corr_map = corr_spacetime(arr_3d, **kwargs)
     # Put polarity back into the correlation map, 
     return corr_map * polarity_array
 
