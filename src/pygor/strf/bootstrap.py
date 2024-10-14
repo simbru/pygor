@@ -24,33 +24,6 @@ def block_shuffle(arr_1d, block_size = None):
     # Shuffle the blocks based on the random order and flatten the result
     output = output[order].ravel()
     return output
-    
-# def stationary_shuffle(arr_1d, max_sample_length = None, output_length = None):
-#     """
-#     Shuffle 1D array by a random block size in random order, with resampling,.
-#     Inspired by Politis, D.N. and Romano, J.P., 1994. The stationary bootstrap. Journal of the American Statistical association, 89(428), pp.1303-1313.
-#     """
-#     if output_length == None:
-#         output_length = len(arr_1d)
-#     if max_sample_length == None:
-#         max_sample_length = output_length
-#     # Create  array to insert values into. This will be our bootstrapped time series
-#     output = np.array([])
-#     while len(output) < output_length:
-#         # randomly pick an index to start sample
-#         start_index = int(rng.choice(output_length-1, 1))
-#         # randomly pick index to end sample (duration) Note: we don't care if it picks a value far away from the max value
-#         # as it will only be able to index up to max anyways. 
-#         end_index = int(rng.integers(start_index+1, max_sample_length))
-#         # take that data (sample)
-#         taken_sample = arr_1d[start_index:end_index]
-#         # insert that into the output array and resetart loop
-#         output = np.append(output, taken_sample)
-#     # deal with output being longer than input
-#     if len(output) > len(arr_1d):
-#         output = output[:output_length]
-#     # output = output.ravel()
-#     return output
 
 def circular_shuffle(arr_1d, max_sample_length=None, output_length=None, rng=None):
     """
@@ -100,84 +73,6 @@ def stationary_shuffle(arr_1d, max_sample_length = None, output_length = None, r
         index += length
     
     return output
-# def bootstrap_time(arr_3d, bootstrap_n = 2500, mode_param = 3, mode = "sd", 
-#     collapse_space = np.ma.std, metric = np.max, plot = False, parallel = False, 
-#     seed = None, **kwargs): # these metrics work so leave them
-#     if np.ma.is_masked(arr_3d) == True:
-#         with warnings.catch_warnings():
-#             warnings.simplefilter("ignore")
-#             arr_3d = pygor.utilities.auto_remove_border(arr_3d)
-#     spatial_domain = np.abs(collapse_space(arr_3d, axis = 0))
-#     collapse_flat_compressed = spatial_domain.flatten()
-#     if mode == "pixel" or mode == "pixels":
-#         n_top_pix = mode_param
-#     if mode == "sd" or mode == "SD":
-#         spatial_domain = scipy.stats.zscore(spatial_domain, axis = None)
-#         n_top_pix = (np.abs(spatial_domain) > mode_param).sum()
-#     # the following finds, extracs, and concatenates the timecourses of the n most weighted pixels (ignores masked values)
-#     with warnings.catch_warnings():
-#         warnings.simplefilter("ignore")
-#         # masked values ignored by argpartition, becomes important because if we remove border the 
-#         # pixel value extraction will be wrong along the time axis in arr_3d because shapes dont align
-#         # this saves doing that work! :) 
-#         flat_indeces = np.argpartition(np.abs(collapse_flat_compressed), -n_top_pix)[-n_top_pix:]
-#     indices_2d = np.unravel_index(flat_indeces, spatial_domain.shape)
-#     # Take abs of 3d array for fft, so that bipolar strfs are treated "fairly"
-#     combined_timecourses = np.abs(arr_3d)[:, indices_2d[0], indices_2d[1]].ravel(order = "f")
-#     org_time = combined_timecourses - combined_timecourses[0] # centre data
-#     # Compute base stat
-#     fft_org = np.abs(np.fft.rfft(org_time))[1:]
-#     org_stat = metric(fft_org)
-#     def _permute_iteration(arr_3d, rng):
-#         # Permute
-#         permuted_time = stationary_shuffle(org_time, max_sample_length = len(org_time)/2, rng = rng)
-#         # Compute test statistic
-#         fft_perm = np.abs(np.fft.rfft(permuted_time))[1:]
-#         perm_stat = metric(fft_perm)
-#         return perm_stat
-#     # Permute spatial data within each time-step
-#     if parallel == False:
-#         perm_stat_list = []    
-#         for i in range(bootstrap_n):
-#             perm_stat = _permute_iteration(org_time, rng)
-#             perm_stat_list.append(perm_stat)
-#     if parallel == True:
-#         """
-#         Borked, dont know wy
-#         """
-#         seed_sequence = np.random.SeedSequence(seed)
-#         child_seeds = seed_sequence.spawn(bootstrap_n)
-#         streams = [np.random.default_rng(s) for s in child_seeds]
-#         perm_stat_list = Parallel(n_jobs = -1, prefer ="processes")(delayed(_permute_iteration)(org_time, streams[i]) for i in range(bootstrap_n))
-#     sig = 1 - scipy.stats.percentileofscore(perm_stat_list, org_stat, kind = "rank") / 100
-#     if plot == True:
-#         permuted_time = stationary_shuffle(org_time)
-#         perm_fft = np.abs(np.fft.rfft(permuted_time))[1:]
-#         if "figsize" in kwargs:
-#             fig, ax = plt.subplots(1,5, figsize = kwargs["figsize"])
-#         else:
-#             fig, ax = plt.subplots(1,5, figsize = (24, 3))
-#         plot = ax[0].imshow(spatial_domain, origin = "lower")
-#         ax[0].set_title("Spatial filter")
-#         fig.colorbar(plot)
-#         max_index = np.unravel_index(np.argmax(np.max(np.abs(arr_3d), axis = 0)), arr_3d[0].shape)
-#         ax[1].plot(arr_3d[:, max_index[0], max_index[1]])
-#         ax[1].set_title("Temporal filter")
-#         ax[2].plot(org_time, label = "Avg. XY along Z")
-#         ax[2].plot(permuted_time, label = "Permutation")
-#         ax[2].set_title(f"Joined timecourses from {n_top_pix} brightest pixels")
-#         ax[2].legend()
-#         ax[3].plot(np.fft.rfftfreq(org_time.size, 1/15.625)[1:], fft_org, label = "Joined timecourses")#
-#         ax[3].plot(np.fft.rfftfreq(org_time.size, 1/15.625)[1:], perm_fft, label = "Permutation")#
-#         ax[3].set_title("FFTs")
-#         ax[3].legend()
-#         if "binsize" not in kwargs:
-#             ax[4].hist((perm_stat_list), 10)
-#         else:
-#             ax[4].hist((perm_stat_list), kwargs["binsize"])
-#         ax[4].axvline(org_stat, c = 'black', ls = "--", label = f"Percentile {np.round(sig, 5)}")
-#         ax[4].legend()
-#     return sig
 
 def spectral_entropy(fft_values):
     psd = np.square(fft_values)  # Power Spectral Density
