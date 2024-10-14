@@ -1,15 +1,16 @@
 import pprint
 import textwrap
+
 try:
     from collections import Iterable
 except ImportError:
     from collections.abc import Iterable
-import types
 
-pp = pprint.PrettyPrinter(width = 110, indent = 2, compact = True)
-md = pprint.PrettyPrinter(width = 110, indent = 2, compact = True)
+pp = pprint.PrettyPrinter(width=110, indent=2, compact=True)
+md = pprint.PrettyPrinter(width=110, indent=2, compact=True)
 
-def get_methods_list(obj, with_returns = True) -> list:
+
+def get_methods_list(obj, with_returns=True) -> list:
     """
     Get a list of methods of a given object.
 
@@ -28,20 +29,34 @@ def get_methods_list(obj, with_returns = True) -> list:
         each method is followed by its return type in parenthesis.
 
     """
-    method_list = [func for func in dir(obj) if callable(getattr(obj, func)) is True and "__" not in func]
+    method_list = [
+        func
+        for func in dir(obj)
+        if callable(getattr(obj, func)) is True and "__" not in func
+    ]
     """
     TODO Sort the methods list alphabetically by the 
     letter in the second part of the funciton name, after '_'
     """
     if with_returns is True:
-        method_list = [func_str + f" ({get_return_type(getattr(obj, func_str))})" for func_str in method_list]
+        method_list = [
+            func_str + f" ({get_return_type(getattr(obj, func_str))})"
+            for func_str in method_list
+        ]
     # Sort method list
-    ignore_list = ['plot']
-    method_list = sorted(method_list, key=lambda x: ('_'.join(x.split('_')[1].lower()) 
-        if len(x.split('_')) > 1 and x.split('_')[0] not in ignore_list else x.lower()))
+    ignore_list = ["plot"]
+    method_list = sorted(
+        method_list,
+        key=lambda x: (
+            "_".join(x.split("_")[1].lower())
+            if len(x.split("_")) > 1 and x.split("_")[0] not in ignore_list
+            else x.lower()
+        ),
+    )
     return method_list
 
-def get_attribute_list(obj, with_types = True) -> list:
+
+def get_attribute_list(obj, with_types=True) -> list:
     """
     Get a list of attributes of a given object.
 
@@ -60,46 +75,67 @@ def get_attribute_list(obj, with_types = True) -> list:
         each attribute is followed by its type in parenthesis.
 
     """
-    attribute_list = [attr for attr in dir(obj) if callable(getattr(obj, attr)) is False and "__" not in attr and attr[0] != '_']
+    attribute_list = [
+        attr
+        for attr in dir(obj)
+        if callable(getattr(obj, attr)) is False and "__" not in attr and attr[0] != "_"
+    ]
     if with_types is True:
-        attribute_list = [attr_str + f" ({type(getattr(obj, attr_str)).__name__})" for attr_str in attribute_list]
+        attribute_list = [
+            attr_str + f" ({type(getattr(obj, attr_str)).__name__})"
+            for attr_str in attribute_list
+        ]
     return attribute_list
 
+
 def get_return_type(func):
-    function_annotation = func.__annotations__.get('return', '?')
+    function_annotation = func.__annotations__.get("return", "?")
     if function_annotation is None:
-        return 'None'
-    if function_annotation == '?':
-        return '?'
-    if isinstance(function_annotation, str) is False and isinstance(function_annotation, Iterable) is True:
+        return "None"
+    if function_annotation == "?":
+        return "?"
+    if (
+        isinstance(function_annotation, str) is False
+        and isinstance(function_annotation, Iterable) is True
+    ):
         org_type = type(function_annotation)
         try:
             return org_type([i.__name__ for i in function_annotation])
         except TypeError:
             return function_annotation
-    elif isinstance(function_annotation, str) is False and isinstance(function_annotation, Iterable) is False:
+    elif (
+        isinstance(function_annotation, str) is False
+        and isinstance(function_annotation, Iterable) is False
+    ):
         return function_annotation.__name__
     else:
         try:
-            raise AssertionError(f"Unaccounted for attribute type in function return annotation for {func.__name__}, manual fix required")
+            raise AssertionError(
+                f"Unaccounted for attribute type in function return annotation for {func.__name__}, manual fix required"
+            )
         except AttributeError:
-            raise AttributeError(f"Unaccounted for attribute type in function return annotation, manual fix required")
+            raise AttributeError(
+                "Unaccounted for attribute type in function return annotation, manual fix required"
+            )
+
 
 def text_attrs(attribute_list) -> str:
-    attrstr = textwrap.indent(pp.pformat(attribute_list), '    ')
+    attrstr = textwrap.indent(pp.pformat(attribute_list), "    ")
     return attrstr
 
+
 def text_meths(method_list) -> str:
-    methstr = textwrap.indent(pp.pformat(method_list), '    ')
+    methstr = textwrap.indent(pp.pformat(method_list), "    ")
     return methstr
 
-def attrs_help(attribute_list, hints = True) -> str:
+
+def attrs_help(attribute_list, hints=True) -> str:
     attrs_block = f"""
     ## Attributes
         Here's the data you have access to -> pass 'types = True' for type hints, attr (type):
 {text_attrs(attribute_list)}
     """
-    if hints ==True:
+    if hints == True:
         hint = """
         - You can change these by customising the corresponding attributes or
             @property-decorated functions inside data_objects.py
@@ -111,7 +147,8 @@ def attrs_help(attribute_list, hints = True) -> str:
     else:
         return attrs_block
 
-def meths_help(methods_list, hints = True) -> str:
+
+def meths_help(methods_list, hints=True) -> str:
     meths_block = f"""
     ## Methods
         Here's some actions you have -> pass 'types = True' for type hints, func (return type):
@@ -131,7 +168,8 @@ def meths_help(methods_list, hints = True) -> str:
     else:
         return meths_block
 
-def welcome_help(data_type_list, metadata_dict, hints = False) -> str:
+
+def welcome_help(data_type_list, metadata_dict, hints=False) -> str:
     print_block = f"""
 Welcome to your data object! 
 Below are attributes and methods, as well as some metadata.
@@ -152,6 +190,7 @@ Pass 'hints = True' for more tips and hints on using the data class.
     else:
         return print_block
 
+
 def text_exit() -> str:
     block = """
     NB: Feel free to write your own attributes (data) and methods (actions)!
@@ -159,7 +198,7 @@ def text_exit() -> str:
     """
     return block
 
+
 def print_help(to_print_list):
     for i in to_print_list:
         print(i, end="")
-

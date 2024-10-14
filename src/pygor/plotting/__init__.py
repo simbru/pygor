@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
-plt.rcParams['svg.fonttype'] = 'none'
+
+plt.rcParams["svg.fonttype"] = "none"
 
 from .basic import *
 from .custom import *
