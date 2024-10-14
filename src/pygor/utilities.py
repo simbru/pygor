@@ -153,47 +153,74 @@ def manual_border_mask(array_shape2d, unmasked_shape2d):
         math.ceil(array_shape2d[1]/2) - x_crop_from_centre : math.ceil(array_shape2d[1]/2) + x_crop_from_centre] = 0
     return mask
 
-def auto_remove_border(array):
-    """ Utility function for automatically removing borders from 2D or 3D array. 
-    Lots of dirty solutions in here so use carefully.
-    WARNING: Destructive method. You lose original data! 
+# def auto_remove_border(array):
+#     """ Utility function for automatically removing borders from 2D or 3D array. 
+#     Lots of dirty solutions in here so use carefully.
+#     WARNING: Destructive method. You lose original data! 
 
-    Note that this is intended for borders represented as 0s, and ma.masked_arrays are not considered. 
+#     Note that this is intended for borders represented as 0s, and ma.masked_arrays are not considered. 
 
-    Parameters
-    ----------
-    array : numpy array
-        input array
+#     Parameters
+#     ----------
+#     array : numpy array
+#         input array
 
-    Returns
-    -------
-    numpy array
-        original array without estimated borders
+#     Returns
+#     -------
+#     numpy array
+#         original array without estimated borders
+#     """
+#     warnings.warn("Cropping border is a destructive method. You lose data, with no way of recovering original shape! If this warning comes from a plotting script, you can likley ignore it.") 
+#     #crop_mask = (auto_border_mask(array)  * -1).astype(bool)
+#     # Remove border based on crop_mask (True means keep, False means remove)
+#     ## The logic is: find geometrical centre, find extreme points in 4 directions, and count 0s between extreme and center
+#     if array.ndim == 3: # sometimes we want to include time
+#         array_shape = array[0].shape # shape should be stable with time (no ragged arrays allowed)
+#         was_2d = False
+#     if array.ndim == 2: # sometimes we don't
+#         array_shape = array.shape
+#         was_2d = True
+#         array = np.expand_dims(array, axis = 0) # super lazy way of getting around dimensionality
+#     if np.ma.is_masked(array) is True:
+#         # Drop mask in this instance
+#         array = array.data
+#     centre_coordinate = (round(array_shape[0] / 2), round(array_shape[1] / 2))
+#     upper_border_width = np.count_nonzero(array[0][:centre_coordinate[0], centre_coordinate[1]:centre_coordinate[1]+1] == 0) 
+#     lower_border_wdith = np.count_nonzero(array[0][centre_coordinate[0]:, centre_coordinate[1]:centre_coordinate[1]+1] == 0) 
+#     left_border_width  = np.count_nonzero(array[0][centre_coordinate[0]:centre_coordinate[0]+1, centre_coordinate[1]:] == 0) 
+#     right_border_width = np.count_nonzero(array[0][centre_coordinate[0]:centre_coordinate[0]+1, :centre_coordinate[1]] == 0) 
+#     # Again lazy solution but it works so whatever
+#     if was_2d == True:
+#         return np.copy(np.squeeze(array[:, upper_border_width:-lower_border_wdith, right_border_width:-left_border_width], axis = 0))
+#     if was_2d == False:
+#         return np.copy(array[:, upper_border_width:-lower_border_wdith, right_border_width:-left_border_width])
+
+def auto_remove_border(array, border_width=3):
     """
-    warnings.warn("Cropping border is a destructive method. You lose data, with no way of recovering original shape! If this warning comes from a plotting script, you can likley ignore it.") 
-    #crop_mask = (auto_border_mask(array)  * -1).astype(bool)
-    # Remove border based on crop_mask (True means keep, False means remove)
-    ## The logic is: find geometrical centre, find extreme points in 4 directions, and count 0s between extreme and center
-    if array.ndim == 3: # sometimes we want to include time
-        array_shape = array[0].shape # shape should be stable with time (no ragged arrays allowed)
-        was_2d = False
-    if array.ndim == 2: # sometimes we don't
-        array_shape = array.shape
-        was_2d = True
-        array = np.expand_dims(array, axis = 0) # super lazy way of getting around dimensionality
-    if np.ma.is_masked(array) is True:
-        # Drop mask in this instance
+    Takes an n-dim, optionally with a border_width parameter, 
+    and removes the border from an n-dim array in the last two 
+    dimensions by slicing excluding the border_width. 
+
+    If border_width is not specified, this function will find the
+    geometrical centre of the array, count how many zeros there are
+    in each direction and use the zero indices as the border.
+    """
+    if np.ma.is_masked(array):
         array = array.data
-    centre_coordinate = (round(array_shape[0] / 2), round(array_shape[1] / 2))
-    upper_border_width = np.count_nonzero(array[0][:centre_coordinate[0], centre_coordinate[1]:centre_coordinate[1]+1] == 0) 
-    lower_border_wdith = np.count_nonzero(array[0][centre_coordinate[0]:, centre_coordinate[1]:centre_coordinate[1]+1] == 0) 
-    left_border_width  = np.count_nonzero(array[0][centre_coordinate[0]:centre_coordinate[0]+1, centre_coordinate[1]:] == 0) 
-    right_border_width = np.count_nonzero(array[0][centre_coordinate[0]:centre_coordinate[0]+1, :centre_coordinate[1]] == 0) 
-    # Again lazy solution but it works so whatever
-    if was_2d == True:
-        return np.copy(np.squeeze(array[:, upper_border_width:-lower_border_wdith, right_border_width:-left_border_width], axis = 0))
-    if was_2d == False:
-        return np.copy(array[:, upper_border_width:-lower_border_wdith, right_border_width:-left_border_width])
+    if border_width is None:
+        last_2d_slice = array[(0,) * (array.ndim - 2) + (slice(None), slice(None))]
+        shape_2d = last_2d_slice.shape
+        centre_coordinate = (round(shape_2d[0] / 2), round(shape_2d[1] / 2))
+        upper_border_width = np.count_nonzero(last_2d_slice[:centre_coordinate[0], centre_coordinate[1]:centre_coordinate[1]+1] == 0) 
+        lower_border_wdith = np.count_nonzero(last_2d_slice[centre_coordinate[0]:, centre_coordinate[1]:centre_coordinate[1]+1] == 0) 
+        left_border_width  = np.count_nonzero(last_2d_slice[centre_coordinate[0]:centre_coordinate[0]+1, centre_coordinate[1]:] == 0) 
+        right_border_width = np.count_nonzero(last_2d_slice[centre_coordinate[0]:centre_coordinate[0]+1, :centre_coordinate[1]] == 0)         
+        border_width = max(upper_border_width, lower_border_wdith, left_border_width, right_border_width)
+    else:
+        lower_border_wdith, upper_border_width, left_border_width, right_border_width = border_width, border_width, border_width, border_width
+    # Directly slice the array to remove borders without flattening
+    sliced_array = array[..., lower_border_wdith:-upper_border_width, left_border_width:-right_border_width]
+    return sliced_array
 
 def check_border(array, expect_symmetry = False):
     """
