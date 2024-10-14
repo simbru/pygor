@@ -141,7 +141,7 @@ def add_scalebar(length, x=None, y=None, ax=None, string=None,
 
     # Add the scalebar line and text to the axes
     line = plt.Line2D(points[:, 0], points[:, 1], color='k', linewidth=line_width,
-                    clip_on=False, clip_box=True, mew=1, solid_capstyle="butt")
+                    clip_on=False, clip_box=ax.bbox , mew=1, solid_capstyle="butt")
     ax.add_line(line)
     # Calculate the text position based on the orientation and alignment
     if orientation == 'v':
