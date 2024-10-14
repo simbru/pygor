@@ -5,7 +5,7 @@ import numpy as np
 import unittest
 import warnings
 from contextlib import redirect_stdout
-
+import atexit
 
 file_loc = pathlib.Path(__file__).parents[1]
 example_data = file_loc.joinpath("examples/strf_demo_data.h5")
@@ -49,6 +49,7 @@ class TestCore(unittest.TestCase):
             with redirect_stdout(f):
                 data.get_help(hints = True, types = True)
 
+atexit.register(lambda : os.remove(file_loc.joinpath("test/test_out.txt")))
+
 if __name__ == "__main__":
     unittest.main()
-    print(os.getcwd())

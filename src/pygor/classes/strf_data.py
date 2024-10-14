@@ -259,7 +259,7 @@ class STRF(Core):
                 warning_string = "Input anomalies found"
                 warnings.warn(warning_string, stacklevel=0)
                 if not_allowed_keys:
-                    print(f"Disallowed keys: {not_allowed_keys}")
+                    print("The following disallowed keys were passed:", *not_allowed_keys)
                 if not_found_keys:
                     print(f"Keys not found in self.bs_settings: {not_found_keys}")
                 if none_default_key:
