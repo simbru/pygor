@@ -12,18 +12,19 @@ description = """A package for interacting with Igor Pro,
 for internal use, for Baden-lab members
 """
 readme = "README.md"
-requires-python = ">=3.10.8"
+requires-python = ">3.10.8"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 dependencies = [
+  "statannotations @ git+https://github.com/getzze/statannotations@compat-seaborn-13",
   "numpy > 2",
   "matplotlib",
   "h5py",
   "pandas > 2.2.0",
-  "seaborn",
+  "seaborn > 0.13.2",
   "scikit-learn",
   "scikit-image",
   "scipy",
@@ -45,6 +46,9 @@ Issues = "https://github.com/simbru/pygor/issues"
 
 [tool.setuptools.packages]
 find = {}  # Scan the project directory with the default parameters
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 #packages = ["src"]
