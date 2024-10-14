@@ -1,5 +1,4 @@
-
-import pathlib 
+import pathlib
 import warnings
 
 try:
@@ -8,12 +7,13 @@ except ImportError:
     from collections import Iterable
 from IPython.core import display
 import joblib
+
 # from tqdm.autonotebook import tqdm
 from tqdm.auto import tqdm
 from ipywidgets import Output
 import shutil
 import contextlib
-import joblib
+
 
 def find_files_in(filetype_ext_str, dir_path, recursive=False, **kwargs) -> list:
     """
@@ -29,9 +29,9 @@ def find_files_in(filetype_ext_str, dir_path, recursive=False, **kwargs) -> list
         If set to True, the function will search recursively through all subdirectories. Default is False.
     **kwargs
         - match = str: If provided, the function will filter files based on this single search term.
-        - match_all = [str]: If provided as a list of strings, the function will filter files that contain 
+        - match_all = [str]: If provided as a list of strings, the function will filter files that contain
             all of the specified search terms.
-        - match_any = [str]: If provided as a list of strings, the function will filter files that contain 
+        - match_any = [str]: If provided as a list of strings, the function will filter files that contain
             any of the specified search terms.
 
     Returns
@@ -52,28 +52,43 @@ def find_files_in(filetype_ext_str, dir_path, recursive=False, **kwargs) -> list
     if isinstance(dir_path, pathlib.PurePath) is False:
         dir_path = pathlib.Path(dir_path)
     if recursive is False:
-        paths = [path for path in dir_path.glob('*' + filetype_ext_str)]
+        paths = [path for path in dir_path.glob("*" + filetype_ext_str)]
     if recursive is True:
-        paths = [path for path in dir_path.rglob('*' + filetype_ext_str)]
+        paths = [path for path in dir_path.rglob("*" + filetype_ext_str)]
     # If search terms are given
     if "match" in kwargs:
         if isinstance(kwargs["match"], str):
             paths = [file for file in paths if kwargs["match"] in file.name]
         else:
-            raise AttributeError("kwargs 'match' expected a single str. Consider kwargs 'match_all' or 'match_any' if you want to use a list of strings as search terms.")
+            raise AttributeError(
+                "kwargs 'match' expected a single str. Consider kwargs 'match_all' or 'match_any' if you want to use a list of strings as search terms."
+            )
     if "match_all" in kwargs:
         if isinstance(kwargs["match_all"], list):
-            paths = [file for file in paths if all(map(file.name.__contains__, kwargs["match_all"]))]
+            paths = [
+                file
+                for file in paths
+                if all(map(file.name.__contains__, kwargs["match_all"]))
+            ]
         else:
-            raise AttributeError("kwargs 'match_all' expected list of strings. Consider kwargs 'match' if you want to specify a single str as search term.")
+            raise AttributeError(
+                "kwargs 'match_all' expected list of strings. Consider kwargs 'match' if you want to specify a single str as search term."
+            )
     if "match_any" in kwargs:
         if isinstance(kwargs["match_any"], list):
-            paths = [file for file in paths if any(map(file.name.__contains__, kwargs["match_any"]))]
+            paths = [
+                file
+                for file in paths
+                if any(map(file.name.__contains__, kwargs["match_any"]))
+            ]
         else:
-            raise AttributeError("kwargs 'match_any' expected list of strings. Consider kwargs 'match' if you want to specify a single str as search term.")
+            raise AttributeError(
+                "kwargs 'match_any' expected list of strings. Consider kwargs 'match' if you want to specify a single str as search term."
+            )
     return paths
 
-def _load_parser(file_path, as_class = None, **kwargs):
+
+def _load_parser(file_path, as_class=None, **kwargs):
     """
     Parse and load data from a file based on its file type.
 
@@ -95,15 +110,17 @@ def _load_parser(file_path, as_class = None, **kwargs):
         The loaded data from the file. Type of the object depends
         on the file type and `as_class` parameter.
     """
-    #print("Current file:", i)
+    # print("Current file:", i)
     file_type = pathlib.Path(file_path).suffix
     if file_type == ".pkl":
         loaded = load_pkl(file_path)
     if file_type == ".h5":
         if as_class is None:
-            raise AttributeError("Must specify 'as_class = pygor.load.class' class to load .h5 files")
+            raise AttributeError(
+                "Must specify 'as_class = pygor.load.class' class to load .h5 files"
+            )
         if as_class is not None:
-            loaded = as_class(file_path,  **kwargs)            
+            loaded = as_class(file_path, **kwargs)
     # # # if isinstance(loaded.strfs, np.ndarray) is False and math.isnan(loaded.strfs) is True:
     # # #         print("No STRFs found for", file_path, ", skipping...")
     # #         return None
@@ -112,10 +129,11 @@ def _load_parser(file_path, as_class = None, **kwargs):
     #         return None
     return loaded
 
-def load(file_path, as_class = None, **kwargs):
+
+def load(file_path, as_class=None, **kwargs):
     """
     Loads data from a file specified by `file_path` using a given class or default parser.
-    
+
     Parameters
     ----------
     file_path : str
@@ -125,23 +143,26 @@ def load(file_path, as_class = None, **kwargs):
         when loading .h5 files.
     **kwargs
         Arbitrary keyword arguments passed to the loading function.
-    
+
     Returns
     -------
     object
         The loaded data from the file. Type of the object depends on the file type and `as_class` parameter.
     """
-    return _load_parser(file_path, as_class = as_class, **kwargs)
+    return _load_parser(file_path, as_class=as_class, **kwargs)
+
 
 @contextlib.contextmanager
 def tqdm_joblib(tqdm_object):
     """Context manager to patch joblib to report into tqdm progress bar given as argument
     from: https://stackoverflow.com/questions/24983493/tracking-progress-of-joblib-parallel-execution/58936697#58936697
     """
+
     class TqdmBatchCompletionCallback(joblib.parallel.BatchCompletionCallBack):
         def __call__(self, *args, **kwargs):
             tqdm_object.update(n=self.batch_size)
             return super().__call__(*args, **kwargs)
+
     old_batch_callback = joblib.parallel.BatchCompletionCallBack
     joblib.parallel.BatchCompletionCallBack = TqdmBatchCompletionCallback
     try:
@@ -150,7 +171,10 @@ def tqdm_joblib(tqdm_object):
         joblib.parallel.BatchCompletionCallBack = old_batch_callback
         tqdm_object.close()
 
-def load_list(paths_list, as_class = None, parallel = True, **kwargs) -> list[pathlib.WindowsPath]:
+
+def load_list(
+    paths_list, as_class=None, parallel=True, **kwargs
+) -> list[pathlib.WindowsPath]:
     """
     Converts a list of paths to a list of objects, optionally using a specified class for instantiation
     of .h5 files (otherwise will throw an error).
@@ -170,19 +194,33 @@ def load_list(paths_list, as_class = None, parallel = True, **kwargs) -> list[pa
     Errors
     ------
     AttributeError
-        If `as_class` is not specified when loading .h5 files, an AttributeError is raised 
+        If `as_class` is not specified when loading .h5 files, an AttributeError is raised
         reminding you to specify `as_class` for accurate initialisation.
     """
 
-
     if parallel is True:
         print("Launching parallel loading...")
-        with tqdm_joblib(tqdm(paths_list, desc = "Loading and instantiating listed files", position = 0, leave = True, total = len(paths_list))) as progress_bar:
-            objects_list = joblib.Parallel(n_jobs = -1)(joblib.delayed(_load_parser)(i, as_class=as_class, **kwargs) for i in paths_list)
+        with tqdm_joblib(
+            tqdm(
+                paths_list,
+                desc="Loading and instantiating listed files",
+                position=0,
+                leave=True,
+                total=len(paths_list),
+            )
+        ) as progress_bar:
+            objects_list = joblib.Parallel(n_jobs=-1)(
+                joblib.delayed(_load_parser)(i, as_class=as_class, **kwargs)
+                for i in paths_list
+            )
     else:
         print("Iterating through and loading listed files...")
-        progress_bar = tqdm(paths_list, desc = "Iterating through and loading listed files", position = 0,
-        leave = True)
+        progress_bar = tqdm(
+            paths_list,
+            desc="Iterating through and loading listed files",
+            position=0,
+            leave=True,
+        )
 
         objects_list = []
         out = Output()
@@ -195,6 +233,7 @@ def load_list(paths_list, as_class = None, parallel = True, **kwargs) -> list[pa
                     objects_list.append(_load_parser(i, as_class=as_class, **kwargs))
                     out.clear_output()
     return objects_list
+
 
 def _load_and_save(file_path, output_folder, as_class, **kwargs):
     """
@@ -239,10 +278,11 @@ def save_pkl(object, save_path, filename):
     None
     """
     final_path = pathlib.Path(save_path, filename).with_suffix(".pkl")
-    print("Storing as:", final_path, end = "\r")
-    with open(final_path, 'wb') as outp:
-        joblib.dump(object, outp, compress='zlib')
-        
+    print("Storing as:", final_path, end="\r")
+    with open(final_path, "wb") as outp:
+        joblib.dump(object, outp, compress="zlib")
+
+
 def load_pkl(full_path):
     """
     Load a pickled object from the given full path and update its metadata.
@@ -257,7 +297,7 @@ def load_pkl(full_path):
     object
         The loaded object with updated metadata.
     """
-    with open(full_path, 'rb') as inp:
+    with open(full_path, "rb") as inp:
         object = joblib.load(inp)
         try:
             object.metadata["curr_path"] = full_path
@@ -287,7 +327,10 @@ def picklestore_objects(file_paths, output_folder, **kwargs):
         file_paths = [file_paths]
     output_folder = pathlib.Path(output_folder)
     # progress_bar = alive_it(input_objects, spinner = "fishes", bar = 'blocks', calibrate = 50, force_tty=True)
-    progress_bar = tqdm(file_paths, desc = "Iterating through, loading, and storing listed files as objects")
+    progress_bar = tqdm(
+        file_paths,
+        desc="Iterating through, loading, and storing listed files as objects",
+    )
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=RuntimeWarning)
         warnings.filterwarnings("ignore", category=UserWarning)
@@ -297,6 +340,7 @@ def picklestore_objects(file_paths, output_folder, **kwargs):
             for i in progress_bar:
                 _load_and_save(i, output_folder, **kwargs)
                 out.clear_output()
+
 
 def pickleload_objects(file_paths, **kwargs):
     """
@@ -319,7 +363,9 @@ def pickleload_objects(file_paths, **kwargs):
         file_paths = [file_paths]
     output_list = []
     # progress_bar = alive_it(input_objects, spinner = "fishes", bar = 'blocks', calibrate = 50, force_tty=True)
-    progress_bar = tqdm(file_paths, desc = "Iterating through and loading listed .pkl files as objects")
+    progress_bar = tqdm(
+        file_paths, desc="Iterating through and loading listed .pkl files as objects"
+    )
     with warnings.catch_warnings():
         out = Output()
         display(out)  # noqa: F821
@@ -328,6 +374,7 @@ def pickleload_objects(file_paths, **kwargs):
                 output_list.append(load_pkl(i))
                 out.clear_output()
     return output_list
+
 
 def copy_files(sources_list, target_path):
     """

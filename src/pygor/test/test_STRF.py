@@ -1,8 +1,6 @@
 import pygor.load
 import pygor.data_helpers
 import pygor.utils.helpinfo
-import numpy.testing as nptest
-import numpy as np
 import unittest
 import warnings
 import os
@@ -45,11 +43,13 @@ class TestSTRF(unittest.TestCase):
         try:
             self.strfs.save_pkl(dir_path, filename)
         except FileNotFoundError as e:
-            raise FileNotFoundError("Error in storing .pkl file during test_saveload.") from e
-            
+            raise FileNotFoundError(
+                "Error in storing .pkl file during test_saveload."
+            ) from e
+
         finally:
             os.remove(pathlib.Path(dir_path, filename))
-    
+
     def test_bs(self):
         self.strfs.set_bootstrap_bool(True)
         self.strfs.get_bootstrap_settings()
@@ -86,5 +86,5 @@ class TestSTRF_plot(unittest.TestCase):
 
 atexit.register(lambda : os.remove(file_loc.joinpath("test/test_out_STRF.txt")))
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
