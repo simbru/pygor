@@ -9,6 +9,8 @@ import scipy
 #import skimage.measure
 #import skimage.segmentation
 import warnings
+from sklearn.preprocessing import MinMaxScaler
+import scipy.signal
 
 # Local imports
 import pygor.strf.contouring
@@ -221,14 +223,17 @@ def corr_spacetime(arr_3d, convolve = True, kernel_width = 8, kernel_depth = 5,
     prod_funct = get_prod_funct(mode)
     # Convolves input according to kernel and returns sum of products at each location as corrs
     if convolve is True:
-        convolved_corr = scipy.ndimage.correlate(arr_3d[::time_subsample, ::pix_subsample, ::pix_subsample], weights=kernel, mode = corr_mode)
+        # convolved_corr = scipy.ndimage.correlate(arr_3d[::time_subsample, ::pix_subsample, ::pix_subsample], weights=kernel, mode = corr_mode)
+        convolved_corr = scipy.signal.fftconvolve(arr_3d[::time_subsample, ::pix_subsample, ::pix_subsample], kernel, mode = "same")
         if pix_subsample > 1: 
             convolved_corr = np.kron(convolved_corr, np.ones((time_subsample, pix_subsample, pix_subsample)))
         # Then we collapse convolved_corr by a simple mathematical operation (variance-based ones work best)
         corr_arr = prod_funct(convolved_corr, axis = 0)
         # Finally we re-scale the data to apply the same range as we had before (makes life a bit easier)
         temp_arr = prod_funct(arr_3d, axis = 0)
-        corr_arr = pygor.utilities.min_max_norm(corr_arr, np.min(temp_arr), np.max(temp_arr))
+        min, max = np.min(temp_arr), np.max(temp_arr)
+        scaler = MinMaxScaler(feature_range=(min, max))
+        corr_arr = scaler.fit_transform(corr_arr.reshape(-1, 1)).reshape(corr_arr.shape)
     else:
         corr_arr = prod_funct(arr_3d, axis = 0)
     return corr_arr
