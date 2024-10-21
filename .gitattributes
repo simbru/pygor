@@ -1,3 +1,4 @@
 .h5 filter=lfs diff=lfs merge=lfs -text
 src/pygor/examples/strf_demo_data.h5 filter=lfs diff=lfs merge=lfs -text
 src/pygor/examples/* filter =lfs diff=lfs merge =lfs -text
+*.h5 filter=lfs diff=lfs merge=lfs -text
