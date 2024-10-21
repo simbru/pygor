@@ -1,12 +1,9 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
 
 [project]
 name = "pygor"
 version = "0.0.2"
 authors = [
-  { name="Simen Bruøygard", email="simen.bruoy@gmail.com" },
+{ name="Simen Bruøygard", email="simen.bruoy@gmail.com" },
 ]
 description = """A package for interacting with Igor Pro, 
 for internal use, for Baden-lab members
@@ -46,16 +43,6 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/simbru/pygor"
 Issues = "https://github.com/simbru/pygor/issues"
-
-[tool.setuptools.packages]
-find = {}  # Scan the project directory with the default parameters
-
-[tool.hatch.metadata]
-allow-direct-references = true
-
-[tool.hatch.build.targets.wheel]
-#packages = ["src"]
-autodiscover = true
 
 [tool.uv]
 dev-dependencies = [
