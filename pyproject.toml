@@ -60,7 +60,7 @@ statannotations = { git = "https://github.com/getzze/statannotations/", branch =
 examples = { workspace = true }
 
 [tool.uv.workspace]
-exclude = ["examples/strf_demo_data.h5", "examples/*"]
+exclude = ["examples/strf_demo_data.h5", "examples/*", "*.h5"]
 members = ["examples/*", "src/pygor/examples"]
 
 [build-system]
