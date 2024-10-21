@@ -1679,6 +1679,7 @@ requires-dist = [
     { name = "natsort" },
     { name = "numpy", specifier = ">2" },
     { name = "pandas", specifier = ">2.2.0" },
+    { name = "pygor" },
     { name = "scikit-image" },
     { name = "scikit-learn" },
     { name = "scipy" },

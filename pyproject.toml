@@ -38,6 +38,7 @@ dependencies = [
     #  "statannotations",
     #  "pingouin"
     "statannotations>=0.4.4",
+    "pygor"
 ]
 
 [project.urls]
@@ -45,6 +46,7 @@ Homepage = "https://github.com/simbru/pygor"
 Issues = "https://github.com/simbru/pygor/issues"
 
 [tool.uv]
+package = true
 dev-dependencies = [
     # "ipykernel>=6.29.5",
     "uv>=0.4.24",
@@ -52,6 +54,9 @@ dev-dependencies = [
 
 [tool.uv.sources]
 statannotations = { git = "https://github.com/getzze/statannotations/", branch = "compat-seaborn-13" }
+
+[tool.uv.workspace]
+exclude = ["examples/*", "tests/*"]
 
 # [tool.setuptools]
 # package-dir = {"pygor" = "src"}
