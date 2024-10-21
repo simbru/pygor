@@ -12,32 +12,35 @@ description = """A package for interacting with Igor Pro,
 for internal use, for Baden-lab members
 """
 readme = "README.md"
-requires-python = ">3.10.8"
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-]
+requires-python = ">=3.10.8"
+# classifiers = [
+#     "Programming Language :: Python :: 3",
+#     "License :: OSI Approved  ]:: MIT License",
+#     "Operating System :: OS Independent",
+# ]
+
 dependencies = [
-  "statannotations @ git+https://github.com/getzze/statannotations@compat-seaborn-13",
-  "numpy > 2",
-  "matplotlib",
-  "h5py",
-  "pandas > 2.2.0",
-  "seaborn > 0.13.2",
-  "scikit-learn",
-  "scikit-image",
-  "scipy",
-  "dacite",
-  "tifffile",
-  "natsort",
-  "tqdm",
-  "ipywidgets",
-#  "ipykernel ",
-#  "ipympl",
-#  "notebook",]
-#  "statannotations",
-#  "pingouin"
+    "numpy > 2",
+    "matplotlib",
+    "h5py",
+    "pandas > 2.2.0",
+    "seaborn",
+    "scikit-learn",
+    "scikit-image",
+    "scipy",
+    "dacite",
+    "tifffile",
+    "natsort",
+    "tqdm",
+    "ipywidgets",
+    "napari[pyside2]",
+    "ipykernel>=6.29.5",
+    #  "ipykernel ",
+    #  "ipympl",
+    #  "notebook",]
+    #  "statannotations",
+    #  "pingouin"
+    "statannotations>=0.4.4",
 ]
 
 [project.urls]
@@ -53,6 +56,12 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 #packages = ["src"]
 autodiscover = true
+
+[tool.uv]
+dev-dependencies = [
+    # "ipykernel>=6.29.5",
+    "uv>=0.4.24",
+]
 
 # [tool.setuptools]
 # package-dir = {"pygor" = "src"}
