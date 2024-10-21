@@ -35,21 +35,36 @@ def chroma_overview(
     time_setting="1d",
     time_dur=1.3,
 ):
+    # Create iterators depneding on desired output
+    if isinstance(
+        specify_rois, int
+    ):  # user specifies number of rois from "start", although negative is also allowed
+        rois_specified = [specify_rois]
+        # who cares what ipl_sort does here, the input is an int. What's it supposed to do?!
+    elif isinstance(specify_rois, Iterable):  # user specifies specific rois
+        rois_specified = specify_rois  # lol
+        if ipl_sort == True:
+            rois_specified = data_strf_object.ipl_depths[specify_rois].argsort()
+    elif specify_rois == None:  # user wants all rois
+        rois_specified = range(data_strf_object.num_rois)
+        if ipl_sort == True:
+            rois_specified = data_strf_object.ipl_depths.argsort()
+    if specify_rois is None:
+        rois_specified = range(data_strf_object.num_rois)
+        specify_rois = range(data_strf_object.num_rois)
     if isinstance(colour_maps, Iterable) is False:
         colour_maps = [colour_maps] * len(column_titles)
     if isinstance(data_strf_object, pygor.classes.strf_data.STRF) is False:
-        warnings.warn(
-            "Input object is not a STRF object. Attempting to treat as nxm Numpy array. Use-case not intended, expect errors."
-        )
-        strfs_chroma = data_strf_object
-        numcolour = strfs_chroma.shape[0]
-        remove_border = False
-    else:
-        strfs_chroma = pygor.utilities.multicolour_reshape(
-            data_strf_object.collapse_times(), data_strf_object.numcolour
-        )
-        numcolour = data_strf_object.numcolour
-        num_cols = numcolour
+        raise AttributeError("Input object is not a STRF object.")
+        # warnings.warn(
+        #     "Input object is not a STRF object. Attempting to treat as nxm Numpy array. Use-case not intended, expect errors."
+        # )
+        # strfs_chroma = data_strf_object
+        # numcolour = strfs_chroma.shape[0]
+        # remove_border = False
+    # else:
+    numcolour = data_strf_object.numcolour
+    num_cols = numcolour
     # Handle colour limits
     if clim == "all":
         # Use the abs max of the entre input
@@ -58,45 +73,34 @@ def chroma_overview(
     else:
         # Otherwise use user input (two floats or ints)
         clim_vals = clim
-    # Create iterators depneding on desired output
-    if isinstance(
-        specify_rois, int
-    ):  # user specifies number of rois from "start", although negative is also allowed
-        specify_rois = range(specify_rois, specify_rois + 1)
-        # who cares what ipl_sort does here, the input is an int. What's it supposed to do?!
-    elif isinstance(specify_rois, Iterable):  # user specifies specific rois
-        specify_rois = specify_rois  # lol
-        if ipl_sort == True:
-            specify_rois = data_strf_object.ipl_depths[specify_rois].argsort()
-    elif specify_rois == None:  # user wants all rois
-        specify_rois = range(len(strfs_chroma[0, :]))
-        if ipl_sort == True:
-            specify_rois = data_strf_object.ipl_depths.argsort()
     if ax is None:
         if with_times == True:
             num_cols += 1
         if with_rgb == True:
             num_cols += 2
-        num_rows = len(specify_rois)
-        fig, ax = plt.subplots(
-            len(specify_rois),
-            num_cols,
-            figsize=(num_cols, num_rows * 1),
-            layout="constrained",
-        )
+        if isinstance(specify_rois, int):
+            num_rows = 1
+        else:
+            num_rows = len(specify_rois)
+        fig, ax = plt.subplots(num_rows,num_cols,figsize=(num_cols, num_rows * 1),layout="constrained",)
     else:
         fig = plt.gcf()
-    for n, roi in enumerate(specify_rois):
+    for n, roi in enumerate(rois_specified):
+        start_index = roi * data_strf_object.numcolour
+        end_index = start_index + data_strf_object.numcolour
+        fetch_indices = range(start_index, end_index)
+        strfs_chroma = np.squeeze(pygor.utilities.multicolour_reshape(
+            data_strf_object.collapse_times(fetch_indices), data_strf_object.numcolour
+        ))
         if remove_border is True:
-            spaces = np.copy(
-                pygor.utilities.auto_remove_border(strfs_chroma[:, roi])
+            border_tup = pygor.utilities.check_border(strfs_chroma)
+            strfs_chroma = np.copy(
+                pygor.utilities.auto_remove_border(strfs_chroma)
             )  # this works
-            border_tup = pygor.utilities.check_border(strfs_chroma[:, roi])
         else:
-            spaces = strfs_chroma[:, roi]
             border_tup = (0, 0, 0, 0)
         if clim == "roi" or clim == None:
-            clim_vals = (-np.max(np.abs(spaces)), np.max(np.abs(spaces)))
+            clim_vals = (-np.max(np.abs(strfs_chroma)), np.max(np.abs(strfs_chroma)))
         if y_crop != (0, 0):
             ycropper = y_crop
         else:
@@ -105,11 +109,11 @@ def chroma_overview(
             xcropper = x_crop
         else:
             xcropper = (None, None)
-        spaces = spaces[:, ycropper[0] : ycropper[1], xcropper[0] : xcropper[1]]
-        if len(specify_rois) == 1:
+        strfs_chroma = strfs_chroma[:, ycropper[0] : ycropper[1], xcropper[0] : xcropper[1]]
+        if num_rows == 1:
             ax = np.array([ax])
         for i in range(numcolour):
-            strf = ax[n, i].imshow(spaces[i], cmap=colour_maps[i], origin="lower")
+            strf = ax[n, i].imshow(strfs_chroma[i], cmap=colour_maps[i], origin="lower")
             strf.set_clim(clim_vals)
             if n == 0:
                 for j in range(numcolour):
@@ -128,11 +132,11 @@ def chroma_overview(
                     np.diff(ax[n, 0].get_ylim())[0] / np.diff(ax[0, 0].get_xlim())[0]
                 )
         if with_times == True:
-            times = pygor.utilities.multicolour_reshape(
-                data_strf_object.get_timecourses_dominant(), numcolour
-            )[:, roi]
+            times = np.squeeze(pygor.utilities.multicolour_reshape(
+                data_strf_object.get_timecourses(fetch_indices), numcolour
+            ))
             for enum, plotme in enumerate(times):
-                ax[n, -1].plot(plotme, color=pygor.plotting.fish_palette[enum])
+                ax[n, -1].plot(plotme.T, color=pygor.plotting.fish_palette[enum])
         if with_rgb == True:
             rgb_representation(
                 data_strf_object,
@@ -179,7 +183,7 @@ def chroma_overview(
             line_width=3,
         )
         # X scalebar
-        time_frames = times.shape[1]
+        time_frames = times.shape[-1]
         ms_per_frame = time_dur / time_frames
         scalebar_target = 0.3
         scalebar_target_ms = np.round(scalebar_target * 1000, 0).astype(int)
@@ -296,22 +300,18 @@ def rgb_representation(
     contours=False,
     remove_border=True,
 ):
-    strfs_chroma = pygor.utilities.multicolour_reshape(
-        data_strf_object.collapse_times(), data_strf_object.numcolour
-    )
     # Create iterators depneding on desired output
     if isinstance(specify_rois, int) or isinstance(
         specify_rois, np.int32
     ):  # user specifies number of rois from "start", although negative is also allowed
-        specify_rois = range(specify_rois, specify_rois + 1)
+        specify_rois = range(specify_rois, specify_rois + data_strf_object.numcolour)
     # who cares what ipl_sort does here, the input is an int. What's it supposed to do?!
     elif isinstance(specify_rois, Iterable):  # user specifies specific rois
         specify_rois = specify_rois  # lol
     elif specify_rois == None:  # user wants all rois
-        specify_rois = range(len(strfs_chroma[0, :]))
+        specify_rois = None
     if ipl_sort == True:
         specify_rois = data_strf_object.ipl_depths.argsort()
-
     n_cols = 1
     # If more than can be represnted as RGB, we need to spill over into another column
     if isinstance(colours_dims, Iterable) is False:
@@ -333,16 +333,10 @@ def rgb_representation(
         axs = ax
         fig = plt.gcf()
     rois = list(specify_rois) * 2
-    if len(specify_rois) == 1:
+    if len(specify_rois) == data_strf_object.numcolour:
         axs = [axs]
     for n, ax in enumerate(axs):
         roi = specify_rois[n]  # Because each row represents a roi
-        if remove_border is True:
-            spaces = np.copy(
-                pygor.utilities.auto_remove_border(strfs_chroma[:, roi])
-            )  # this works
-        else:
-            spaces = strfs_chroma[:, roi]
         if y_crop != (0, 0):
             ycropper = y_crop
         else:
@@ -351,26 +345,12 @@ def rgb_representation(
             xcropper = x_crop
         else:
             xcropper = (None, None)
-        spaces = np.abs(spaces[:, ycropper[0] : ycropper[1], xcropper[0] : xcropper[1]])
         # Summary of spatial components
-        # spaces = np.copy(pygor.utilities.auto_remove_border(strfs_chroma[:, roi])) # this works
-        # spaces = strfs_chroma[:, roi]
-        # Prepare for RGB representation (by intiger)
-        # led_offset = data_strf_object.calc_LED_offset()
-        # print(led_offset)
-        # spaces[3] = np.roll(spaces[3], np.round(led_offset, 0).astype("int"), axis =(0 ,1))
-        r, g, b, uv = spaces[0], spaces[1], spaces[2], spaces[3]
-        rgb = np.abs(np.array([r, g, b]))
-        rgu = np.abs(np.array([r, g, uv]))
-        processed_rgb = np.rollaxis(
-            pygor.utilities.min_max_norm(rgb, 0, 1), axis=0, start=3
-        )
-        processed_rgu = np.rollaxis(
-            pygor.utilities.min_max_norm(rgu, 0, 1), axis=0, start=3
-        )
+        processed_rgb = data_strf_object.to_rgb(roi, rgb_channels = [0, 1, 2], remove_borders = remove_border)[:, ycropper[0] : ycropper[1], xcropper[0] : xcropper[1]]
+        processed_rgu = data_strf_object.to_rgb(roi, rgb_channels = [0, 1, 3], remove_borders = remove_border)[:, ycropper[0] : ycropper[1], xcropper[0] : xcropper[1]]
         # for cax in roi_ax[0]:
-        rgb_plot = ax[0].imshow(processed_rgb, origin="lower", interpolation="none")
-        rgu_plot = ax[1].imshow(processed_rgu, origin="lower", interpolation="none")
+        ax[0].imshow(processed_rgb, origin="lower", interpolation="none")
+        ax[1].imshow(processed_rgu, origin="lower", interpolation="none")
         ax[0].axis(False)
         ax[1].axis(False)
         if contours is True:

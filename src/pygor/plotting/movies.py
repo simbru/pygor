@@ -25,7 +25,7 @@ def play_movie(d3_arr, dur_s=1.3, figaxim_return=False, rgb_repr=False, **kwargs
     if rgb_repr is False:
         if d3_arr.ndim != 3:
             raise AttributeError(
-                "Array passed to function is not three dimensional (3D). Shape should be: (time,y,x)"
+                "Array passed to function is not three dimensional (3D). Shape should be: (time,y,x). If intentional, pass rgb_repr = True"
             )
     if rgb_repr is True:
         if d3_arr.shape[-1] != 3:
@@ -52,7 +52,10 @@ def play_movie(d3_arr, dur_s=1.3, figaxim_return=False, rgb_repr=False, **kwargs
         #        max_val = np.max(d3_arr)
         max_abs_val = np.max(np.abs(d3_arr))
         # im.set_clim(min_val, max_val)
-        im.set_clim(-max_abs_val, max_abs_val)
+        if rgb_repr is False:
+            im.set_clim(-max_abs_val, max_abs_val)
+        else:
+            im.set_clim(0, max_abs_val)
         # Hide grid lines
         ax.grid(False)
 

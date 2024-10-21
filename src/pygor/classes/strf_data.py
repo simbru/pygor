@@ -1,34 +1,37 @@
+# Dependencies
 from dataclasses import dataclass, field
 
-from numpy.ma import masked
+import pygor.utilities
 try:
     from collections import Iterable
 except ImportError:
     from collections.abc import Iterable
-# Local imports
-import pygor.utils.unit_conversion as unit_conversion
-import pygor.strf.bootstrap
-import pygor.data_helpers
-import pygor.utils.helpinfo
-import pygor.strf.spatial
-import pygor.strf.contouring
-import pygor.strf.temporal
-import pygor.strf.plot
-import pygor.strf.guesstimate
-import pygor.utils
-from pygor.classes.core_data import Core
-# Dependencies
-from tqdm.auto import tqdm
-import joblib
-import numpy as np
+import copy
 import datetime
 import pathlib
-import h5py
-import natsort
 import warnings
-import pandas as pd
+import h5py
+import joblib
 import matplotlib.pyplot as plt
-import copy
+import natsort
+import numpy as np
+import pandas as pd
+import sklearn.preprocessing
+from tqdm.auto import tqdm
+# Local imports
+import pygor.data_helpers
+import pygor.strf.bootstrap
+import pygor.strf.contouring
+import pygor.strf.guesstimate
+import pygor.strf.plot
+import pygor.strf.spatial
+import pygor.strf.temporal
+import pygor.utils
+import pygor.utils.helpinfo
+import pygor.utils.unit_conversion as unit_conversion
+from pygor.classes.core_data import Core
+import scipy
+
 @dataclass(repr = False)
 class STRF(Core):
     #type         : str = "STRF"
@@ -289,10 +292,8 @@ class STRF(Core):
                     after_time = datetime.datetime.now()
                 elif user_verify == 'n' or user_verify == "no":
                     print(f"Skipping recomputing bootstrap due to user input:'{user_verify}'")
-                    return self
                 else:
                     print(f"Input '{user_verify}' is invalid, no action done. Please use 'y'/'n'.")
-                    return self
             else:
                 before_time = datetime.datetime.now()
                 self.__calc_pval_time(parallel=parallel)
@@ -303,7 +304,7 @@ class STRF(Core):
             self.bs_settings["bs_datetime"] = before_time
             self.bs_settings["bs_datetime_str"] = before_time.strftime("%d/%m/%y %H:%M:%S")
             self.bs_settings["bs_dur_timedelta"] = after_time - before_time
-            return self
+
     @property
     def pval_time(self, parallel = None) -> np.ndarray:
         """
@@ -375,6 +376,10 @@ class STRF(Core):
     @property
     def num_rois_sig(self) -> int:
         return self.get_pvals_table()["sig_any"].sum()
+
+    @property
+    def strfs_no_border(self) -> np.ndarray:
+        return pygor.utilities.auto_remove_border(self.strfs)
 
     def fit_contours(self, roi = None, force = True) -> np.ndarray[list[list[list[float, float]]]]:
         """
@@ -531,8 +536,19 @@ class STRF(Core):
         else:
             raise ValueError("filter must be 'all' or 'dominant'")
 
-    def get_chroma_strf(self):
-        return pygor.utilities.multicolour_reshape(self.strfs, self.numcolour)
+    def get_chroma_strf(self, roi = None):
+        if roi is None:
+            index = range(self.num_rois * self.numcolour)
+            return pygor.utilities.multicolour_reshape(self.strfs[index], self.numcolour)
+        else:
+            if isinstance(roi, Iterable) is False:
+                roi = [roi]
+            # start_index = np.linspace(0, self.num_rois * self.numcolour, self.num_rois + 1)[roi].astype(int)
+            # print(np.linspace(0, self.num_rois * self.numcolour, self.num_rois + 1))
+            start_index = np.arange(0, self.num_rois * self.numcolour)[::self.numcolour][roi]
+            end_index = start_index + self.numcolour
+            indices = np.arange(start_index, end_index)
+            return np.squeeze(pygor.utilities.multicolour_reshape(self.strfs[indices], self.numcolour))
 
     def get_timecourses_dominant(self, **kwargs):
         dominant_times = []
@@ -959,6 +975,70 @@ class STRF(Core):
         with open(final_path, 'wb') as outp:
             joblib.dump(self, outp, compress='zlib')
 
+    def to_rgb(self, roi = None, rgb_channels = [0, 1, 2], bgr = True, plot = False, method = "grey_centered",
+            remove_borders = True, **kwargs):
+        # input_arr = np.squeeze(pygor.utilities.multicolour_reshape(self.collapse_times(), self.numcolour))[:, roi]
+        def _fetch_data(roi):
+            # start_index = roi + (roi * self.numcolour)
+            start_index = roi * self.numcolour
+            end_index   = start_index + self.numcolour
+            return np.squeeze(pygor.utilities.multicolour_reshape(self.collapse_times(range(start_index, end_index)), self.numcolour))
+
+        def _run(self, roiinput, rgb_channels = rgb_channels):
+            arr = _fetch_data(roiinput)
+            norm_arr = pygor.utilities.scale_by(arr, method = method)
+            # Only extract channels after normalising
+            norm_arr = norm_arr[rgb_channels]
+            if remove_borders is True:
+                norm_arr = pygor.utilities.auto_remove_border(norm_arr)
+            if bgr is True:
+                norm_arr = np.rollaxis(norm_arr, axis=0, start=3)
+            return norm_arr
+        if plot is True:
+            if isinstance(roi, Iterable) is True:
+                raise AttributeError("roi must equal an int for plot to work")
+            input_arr = _fetch_data(roi)
+            rgb_arr = _run(self, roi, rgb_channels = [0, 1, 2])
+            rgu_arr = _run(self, roi, rgb_channels = [0, 1, 3])
+            fig, axs = plt.subplots(2, 2, figsize=(10, 6), dpi = 300)
+            axs.flat[0].plot(input_arr.reshape(-1, 1), label = "Input all channels")
+            axs.flat[0].legend()
+            axs.flat[1].plot(rgu_arr.reshape(-1, 1, order = "f"), alpha = 1, label = "RGU")
+            axs.flat[1].plot(rgb_arr.reshape(-1, 1, order = "f"), alpha = 0.5, label = "RGB")
+            axs.flat[1].legend()
+            axs.flat[2].imshow(rgb_arr)
+            axs.flat[3].imshow(rgu_arr)
+            plt.show()
+            return None
+        if roi is None:
+            return np.array([_run(self, i) for i in range(self.num_rois)])
+        else:
+            if isinstance(roi, Iterable) is False:
+                return _run(self, roi)
+            else:
+                return np.array([_run(self, i) for i in roi])
+    
+    def play_strf_rgb(self, roi, channel = "All", method = "grey_centered", plot = True,**kwargs):
+        ## Generate RGB movie
+        if channel == "All":
+            num_channels = self.numcolour
+            channel = np.array([[i for i in range(num_channels)]] * int(num_channels - 2))
+            channel = np.array([i[[0, 1, n+2]] for n, i in enumerate(channel)])
+            arr = np.array([np.moveaxis(self.get_chroma_strf(roi)[i], [0, 1], [-1, 0]) for i in channel])
+            # arr = np.hstack(arr)
+        if isinstance(channel, np.ndarray) is False:
+            channel = np.array(channel)
+        # print(channel.shape)
+        if len(channel.shape) == 1:
+            arr = np.expand_dims(np.array(np.moveaxis(self.get_chroma_strf(roi)[channel], [0, 1], [-1, 0])), 0)
+        else:
+            arr = np.array([np.moveaxis(self.get_chroma_strf(roi)[i], [0, 1], [-1, 0]) for i in channel])
+        arr = np.dstack(arr)
+        arr = pygor.utilities.scale_by(arr, method = method)
+        if plot is True:
+            return pygor.plotting.play_movie(arr, rgb_repr=True)
+        else:
+            return arr
 
 # class Clustering:
 #     def __init__(self):
