@@ -20,26 +20,27 @@ requires-python = ">=3.10.8"
 # ]
 
 dependencies = [
-"numpy > 2",
-"matplotlib",
-"h5py",
-"pandas > 2.2.0",
-"seaborn",
-"scikit-learn",
-"scikit-image",
-"scipy",
-"dacite",
-"tifffile",
-"natsort",
-"tqdm",
-"ipywidgets",
-"napari[pyside2]",
-"ipykernel>=6.29.5",
-#  "ipykernel ",
-#  "ipympl",
-#  "notebook",]
-#  "statannotations",
-#  "pingouin"
+    "numpy > 2",
+    "matplotlib",
+    "h5py",
+    "pandas > 2.2.0",
+    "seaborn",
+    "scikit-learn",
+    "scikit-image",
+    "scipy",
+    "dacite",
+    "tifffile",
+    "natsort",
+    "tqdm",
+    "ipywidgets",
+    "napari[pyside2]",
+    "ipykernel>=6.29.5",
+    #  "ipykernel ",
+    #  "ipympl",
+    #  "notebook",]
+    #  "statannotations",
+    #  "pingouin"
+    "statannotations>=0.4.4",
 ]
 
 [project.urls]

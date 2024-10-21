@@ -1658,6 +1658,7 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "seaborn" },
+    { name = "statannotations" },
     { name = "tifffile" },
     { name = "tqdm" },
 ]
@@ -1682,6 +1683,7 @@ requires-dist = [
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "seaborn" },
+    { name = "statannotations", specifier = ">=0.4.4" },
     { name = "tifffile" },
     { name = "tqdm" },
 ]
@@ -2292,6 +2294,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/28/e3/55dcc2cfbc3ca9c29519eb6884dd1415ecb53b0e934862d3559ddcb7e20b/stack_data-0.6.3.tar.gz", hash = "sha256:836a778de4fec4dcd1dcd89ed8abff8a221f58308462e1c4aa2a3cf30148f0b9", size = 44707 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/7b/ce1eafaf1a76852e2ec9b22edecf1daa58175c090266e9f6c64afcd81d91/stack_data-0.6.3-py3-none-any.whl", hash = "sha256:d5558e0c25a4cb0853cddad3d77da9891a08cb85dd9f9f91b9f8cd66e511e695", size = 24521 },
+]
+
+[[package]]
+name = "statannotations"
+version = "0.4.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "scipy" },
+    { name = "seaborn" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f3/82/30e1d3f6c54cb562c4145e71f891b5180b536cb756c2b46cfe4fbfa86d74/statannotations-0.4.4.tar.gz", hash = "sha256:38722684e08a8ffb38da196b70c5795c0cc7000aefbd3fb289b9f72f5391a0c7", size = 26539 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/69/6d/fac6e6c6898cedf6bd1e52ca2eecc48548b2eb48c3f96c2f3d22463ff142/statannotations-0.4.4-py3-none-any.whl", hash = "sha256:afbe20e6bd8361eae3d447693b8eba0b69c7a1788b1991db884e2505b6cd0013", size = 31754 },
 ]
 
 [[package]]
