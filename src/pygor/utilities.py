@@ -5,6 +5,8 @@ import warnings
 import itertools
 import h5py
 import dacite
+from sklearn.preprocessing import MinMaxScaler, MaxAbsScaler
+import scipy.stats
 from dataclasses import dataclass
 import pygor.data_helpers
 
@@ -58,34 +60,38 @@ def numpy_fillna(data):
     return out
 
 
+# def min_max_norm(arr, t_min, t_max):
+#     """Min-max scale a 1D or 2D array. >2D not tested.
+
+#     Parameters
+#     ----------
+#     arr : numpy array
+#         Array to min-max scale
+#     t_min : int
+#         lower value
+#     t_max : int
+#         upper value
+
+#     Returns
+#     -------
+#     numpy array
+#         Min-max normalised array
+#     """
+#     norm_arr = []
+#     diff = t_max - t_min
+#     diff_arr = np.ma.max(arr) - np.ma.min(arr)
+#     for i in arr:
+#         temp = (((i - np.ma.min(arr)) * diff) / diff_arr) + t_min
+#         norm_arr.append(temp)
+#     if isinstance(arr, np.ma.core.MaskedArray):
+#         return np.ma.array(norm_arr, mask=arr.mask)
+#     else:
+#         return np.array(norm_arr)
+
+
 def min_max_norm(arr, t_min, t_max):
-    """Min-max scale a 1D or 2D array. >2D not tested.
-
-    Parameters
-    ----------
-    arr : numpy array
-        Array to min-max scale
-    t_min : int
-        lower value
-    t_max : int
-        upper value
-
-    Returns
-    -------
-    numpy array
-        Min-max normalised array
-    """
-    norm_arr = []
-    diff = t_max - t_min
-    diff_arr = np.ma.max(arr) - np.ma.min(arr)
-    for i in arr:
-        temp = (((i - np.ma.min(arr)) * diff) / diff_arr) + t_min
-        norm_arr.append(temp)
-    if isinstance(arr, np.ma.core.MaskedArray):
-        return np.ma.array(norm_arr, mask=arr.mask)
-    else:
-        return np.array(norm_arr)
-
+    scaler = MinMaxScaler(feature_range=(t_min, t_max))
+    return scaler.fit_transform(arr.reshape(-1, 1)).reshape(arr.shape) 
 
 def auto_border_mask(array):
     # Mark where in array there are 0s (expected border value)
@@ -526,3 +532,30 @@ def select_absmax(data, axis=1):
     # Move the second dimension back to the specified axis
     result = np.swapaxes(result, 1, axis)
     return result
+
+def scale_by(arr, method):
+    minmax_scaler = MinMaxScaler()
+    maxabsscaler = MaxAbsScaler()
+    if method == "abs":
+        arr = np.abs(arr)
+        norm_arr = minmax_scaler.fit_transform(arr.reshape(-1, 1)).reshape(arr.shape)
+    elif method == "maxabs":
+        norm_arr = maxabsscaler.fit_transform(arr.reshape(-1, 1)).reshape(arr.shape)
+    elif method == "grey":
+        norm_arr = minmax_scaler.fit_transform(arr.reshape(-1, 1)).reshape(arr.shape)
+    elif method == "grey_centered":
+        scaled = minmax_scaler.fit_transform(arr.reshape(-1, 1)).reshape(arr.shape) / 2
+        # scaled = scaled - scaled[0] #+ 0.5
+        mode = scipy.stats.mode(scaled, axis = None)[0]
+        mode_diff = 0.5 - mode
+        # centre_val = np.average(scaled[:10])
+        # middle = np.ones(scaled.shape) * .5
+        norm_arr = scaled + mode_diff
+    elif method == "grey2":
+        norm_arr = minmax_scaler.fit_transform(arr.reshape(-1, 1)).reshape(arr.shape)
+        norm_arr = np.ones(norm_arr.shape) * 0.5
+        norm_arr[0, 0:10, 0:10] = 0
+        norm_arr[1, 0:10, 0:10] = 0
+    else:
+        raise ValueError(f"Method '{method}' not recognised, try:", *["abs", "maxabs", "grey", "grey_centered"])
+    return norm_arr
