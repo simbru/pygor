@@ -38,7 +38,8 @@ dependencies = [
     #  "statannotations",
     #  "pingouin"
     "statannotations>=0.4.4",
-    "pygor"
+    "pygor",
+    # "examples"
 ]
 
 [project.urls]
@@ -55,8 +56,16 @@ dev-dependencies = [
 [tool.uv.sources]
 statannotations = { git = "https://github.com/getzze/statannotations/", branch = "compat-seaborn-13" }
 
+
+examples = { workspace = true }
+
 [tool.uv.workspace]
-exclude = ["examples/*", "tests/*"]
+exclude = ["examples/strf_demo_data.h5", "examples/*"]
+members = ["examples/*", "src/pygor/examples"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 # [tool.setuptools]
 # package-dir = {"pygor" = "src"}
