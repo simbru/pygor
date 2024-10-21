@@ -63,6 +63,9 @@ dev-dependencies = [
     "uv>=0.4.24",
 ]
 
+[tool.uv.sources]
+statannotations = { git = "https://github.com/getzze/statannotations/", branch = "compat-seaborn-13" }
+
 # [tool.setuptools]
 # package-dir = {"pygor" = "src"}
     # directory containing all the packages (e.g.  src/mypkg1, src/mypkg2)
