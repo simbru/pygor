@@ -1,6 +1,7 @@
 # Dependencies
 from dataclasses import dataclass
 from dataclasses import field
+
 try:
     from collections import Iterable
 except ImportError:
@@ -8,11 +9,10 @@ except ImportError:
 from collections import defaultdict
 import pandas as pd
 import pathlib
-import warnings
 import numpy as np
 import joblib
 # Local imports
-import pygor.filehandling
+
 
 @dataclass
 class Experiment:
@@ -45,12 +45,11 @@ class Experiment:
 
     def __exp_dict_setter__(self, object):
         self.id_dict["id"].append(len(self.id_dict["name"]))
-        self.id_dict["date"].append(object.metadata["exp_date"].strftime('%d-%m-%Y'))        
+        self.id_dict["date"].append(object.metadata["exp_date"].strftime("%d-%m-%Y"))
         self.id_dict["name"].append(pathlib.Path(object.metadata["filename"]).stem)
         self.id_dict["num_rois"].append(object.num_rois)
         self.id_dict["type"].append(object.type)
         self.id_dict["path"].append(object.metadata["filename"])
-
 
     def __exp_list_setter__(self, object):
         self.recording.append(object)
@@ -59,14 +58,16 @@ class Experiment:
         # if object.metadata["filename"] in self.id_dict["path"]:
         #     raise ValueError("Object already in experiment")
         # else:
-            self.__exp_dict_setter__(object)
-            self.__exp_list_setter__(object)
+        self.__exp_dict_setter__(object)
+        self.__exp_list_setter__(object)
 
     def __exp_forgetter__(self, indices: int or list[int]):
         if isinstance(indices, Iterable) is False:
             indices = [indices]
         # Deal with recording list
-        for index in sorted(indices, reverse=True): # reverse because we want to remove from the end and back
+        for index in sorted(
+            indices, reverse=True
+        ):  # reverse because we want to remove from the end and back
             del self.recording[index]
             # Deal with id_dict
             for key in self.id_dict.keys():
@@ -84,7 +85,7 @@ class Experiment:
                 self.__exp_setter__(i)
         print(f"Attached data: {objects}")
 
-    def detach_data(self, indices:int or list(int) or str):
+    def detach_data(self, indices: int or list(int) or str):
         to_print = self.recording_id.iloc[indices]["name"]
         if isinstance(to_print, str):
             to_print = to_print
@@ -93,11 +94,11 @@ class Experiment:
         print(f"Detaching data: {to_print}")
         self.__exp_forgetter__(indices)
 
-    def fetch_all(self, key:str, **kwargs):
+    def fetch_all(self, key: str, **kwargs):
         all_collated = []
         for i in self.recording:
             requested_attr = getattr(i, key)
-            if hasattr(requested_attr, '__call__'):
+            if hasattr(requested_attr, "__call__"):
                 all_collated.append(requested_attr(**kwargs))
             else:
                 all_collated.append(requested_attr)
@@ -110,6 +111,6 @@ class Experiment:
 
     def pickle_store(self, save_path, filename):
         final_path = pathlib.Path(save_path, filename).with_suffix(".pklexp")
-        print("Storing as:", final_path, end = "\r")
-        with open(final_path, 'wb') as outp:
-            joblib.dump(self, outp, compress=('zlib', 1))
+        print("Storing as:", final_path, end="\r")
+        with open(final_path, "wb") as outp:
+            joblib.dump(self, outp, compress=("zlib", 1))

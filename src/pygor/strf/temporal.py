@@ -1,11 +1,11 @@
 import numpy as np
 import warnings
-import scipy
 
 # Local imports
 import pygor.strf.spatial
 
-def extract_timecourse(arr_3d, level = None, centred = True):
+
+def extract_timecourse(arr_3d, level=None, centred=True):
     """
     Extracts a time course from a 3D array, averaged along both spatial axes.
 
@@ -46,30 +46,31 @@ def extract_timecourse(arr_3d, level = None, centred = True):
     >>> extract_timecourse(arr_3d, centred=False).shape
     (2, 5)
     """
-    # Apply mask 
+    # Apply mask
     if level == None:
         masked_strf = pygor.strf.spatial.rf_mask3d(arr_3d)
     else:
-        masked_strf = pygor.strf.spatial.rf_mask3d(arr_3d, level = level)
-    # Average remaining values along boht axes of pygor.strf.spatial 
-    time_course_neg = np.ma.average(masked_strf[0], axis = (1,2))
-    time_course_pos = np.ma.average(masked_strf[1], axis = (1,2)) 
+        masked_strf = pygor.strf.spatial.rf_mask3d(arr_3d, level=level)
+    # Average remaining values along boht axes of pygor.strf.spatial
+    time_course_neg = np.ma.average(masked_strf[0], axis=(1, 2))
+    time_course_pos = np.ma.average(masked_strf[1], axis=(1, 2))
     if centred == True:
         time_course_neg = time_course_neg - time_course_neg[0]
         time_course_pos = time_course_pos - time_course_pos[0]
     return np.ma.array([time_course_neg, time_course_pos])
 
-def polarity(arr, exclude_FirstLast = (1, 1), axis = -1, force_pol = False):
+
+def polarity(arr, exclude_FirstLast=(1, 1), axis=-1, force_pol=False):
     """
     Compute the polarity of a given numpy array along a specified axis.
 
     Parameters
     ----------
     arr : numpy.ndarray or numpy.ma.MaskedArray
-        The input array for which to compute the polarity. If a masked array is passed, 
+        The input array for which to compute the polarity. If a masked array is passed,
         the polarity will be calculated only for the unmasked elements.
     exclude_FirstLast : tuple of int, optional
-        The number of samples to exclude from the beginning and end of the time axis. 
+        The number of samples to exclude from the beginning and end of the time axis.
         Defaults to (1, 1).
     axis : int, optional
         The axis along which to compute the polarity. Can be 0 or -1.
@@ -81,7 +82,7 @@ def polarity(arr, exclude_FirstLast = (1, 1), axis = -1, force_pol = False):
     Returns
     -------
     numpy.ndarray or numpy.ma.MaskedArray
-        An array of polarity values, where 1 represents positive polarity and -1 represents negative polarity. 
+        An array of polarity values, where 1 represents positive polarity and -1 represents negative polarity.
         If the input array contains masked values, the output will also be masked at the same locations.
 
     Raises
@@ -93,7 +94,10 @@ def polarity(arr, exclude_FirstLast = (1, 1), axis = -1, force_pol = False):
         If the input array is empty after excluding the first and last samples.
     """
     # Check that input makes sense
-    if isinstance(arr, np.ma.MaskedArray) is True or isinstance(arr, np.ndarray) is True:
+    if (
+        isinstance(arr, np.ma.MaskedArray) is True
+        or isinstance(arr, np.ndarray) is True
+    ):
         if isinstance(arr, np.ndarray) is True:
             # Force data (bug testing)
             arr = arr.data
@@ -107,27 +111,43 @@ def polarity(arr, exclude_FirstLast = (1, 1), axis = -1, force_pol = False):
             return pol_arr
         # Get the positions of maximum and minimum (cropped by time as specified in exlcude_PrePost)
         try:
-            max_locs = np.ma.argmax(arr[..., exclude_FirstLast[0]:arr.shape[-1]-exclude_FirstLast[1]], axis = -1)
-            min_locs = np.ma.argmin(arr[..., exclude_FirstLast[0]:arr.shape[-1]-exclude_FirstLast[1]], axis = -1)
+            max_locs = np.ma.argmax(
+                arr[..., exclude_FirstLast[0] : arr.shape[-1] - exclude_FirstLast[1]],
+                axis=-1,
+            )
+            min_locs = np.ma.argmin(
+                arr[..., exclude_FirstLast[0] : arr.shape[-1] - exclude_FirstLast[1]],
+                axis=-1,
+            )
         except ValueError:
-            raise ValueError("Input array is seemingly empty. Perhaps adjust exclude_FirstLast to avoid cropping all numbers.")
+            raise ValueError(
+                "Input array is seemingly empty. Perhaps adjust exclude_FirstLast to avoid cropping all numbers."
+            )
         # Get a boolean array of where maximum comes before minimum
         pol_arr = max_locs > min_locs
     else:
-        raise AttributeError(f"Funciton expected input as np.ndarray or np.ma.MaskedArray, not {type(arr)}")
+        raise AttributeError(
+            f"Funciton expected input as np.ndarray or np.ma.MaskedArray, not {type(arr)}"
+        )
     # We are assigining polarity, so boolean array needs to be converted to polarity array (e.g, 0 should be -1)
     pol_arr = np.where(pol_arr == True, 1, -1)
-    # In some rare cases we might need to force a polarity (for example an array multiplied by its polarties, 
-    # without loosing the underlying data (e.g., if 0 * n == 0, we lose n). The below allows overriding the 
-    # behaviour where if min and max locs are the same, 0 is put in place 
+    # In some rare cases we might need to force a polarity (for example an array multiplied by its polarties,
+    # without loosing the underlying data (e.g., if 0 * n == 0, we lose n). The below allows overriding the
+    # behaviour where if min and max locs are the same, 0 is put in place
     if force_pol is False and pol_arr.ndim > 0:
-            pol_arr[np.where(max_locs == min_locs)] = 0
+        pol_arr[np.where(max_locs == min_locs)] = 0
     # Retain mask if input array contained mask
-    if isinstance(arr, np.ma.MaskedArray) == True or isinstance(arr, np.ma.MaskedArray) is True: #and np.all(arr.mask != False):
-        pol_arr = np.ma.array(data = pol_arr, mask = arr[..., 0].mask) # take mask from first frame
+    if (
+        isinstance(arr, np.ma.MaskedArray) == True
+        or isinstance(arr, np.ma.MaskedArray) is True
+    ):  # and np.all(arr.mask != False):
+        pol_arr = np.ma.array(
+            data=pol_arr, mask=arr[..., 0].mask
+        )  # take mask from first frame
     return pol_arr
 
-def biphasic_index(timeseries, axis = -1):  
+
+def biphasic_index(timeseries, axis=-1):
     """
     Calculate the biphasic index of a given timeseries.
 
@@ -156,17 +176,19 @@ def biphasic_index(timeseries, axis = -1):
     biphasic index and values closer to 1 indicate a more positive biphasic index.
 
     """
+
     def index(timeseries):
         if timeseries[0] != 0:
             timeseries = timeseries - timeseries[0]
-        #Get area under curve for negative and positive components
+        # Get area under curve for negative and positive components
         a = np.trapz(np.clip(timeseries, np.min(timeseries) - 1, 0))
         b = np.trapz(np.clip(timeseries, 0, np.max(timeseries) + 1))
-        #Get the absolute values 
+        # Get the absolute values
         a = np.abs(a)
         b = np.abs(b)
         # Calculate
-        return (b - a) / (a + b) # Polarity index, zeros in divider will cause trouble
+        return (b - a) / (a + b)  # Polarity index, zeros in divider will cause trouble
+
     if timeseries.ndim == 1:
         return index(timeseries)
     if timeseries.ndim > 1:
@@ -175,7 +197,8 @@ def biphasic_index(timeseries, axis = -1):
             timeseries = np.moveaxis(timeseries, axis, -1)
         return np.apply_along_axis(index, axis, timeseries)
 
-def spectral_centroid(timecourse_1d, sampling_rate = None):
+
+def spectral_centroid(timecourse_1d, sampling_rate=None):
     """
     Calculates the spectral centroid of a 1-dimensional timecourse.
 
@@ -204,60 +227,66 @@ def spectral_centroid(timecourse_1d, sampling_rate = None):
     If `sampling_rate` is not given, a warning is issued and the frequency bins are arbitrary.
     """
     if np.all(timecourse_1d == 0):
-        spectrum =  np.empty(int(len(timecourse_1d)/2 + 1))
+        spectrum = np.empty(int(len(timecourse_1d) / 2 + 1))
         spectrum[:] = np.nan
-        weighted_spectrum = np.empty(int(len(timecourse_1d)/2 + 1))
+        weighted_spectrum = np.empty(int(len(timecourse_1d) / 2 + 1))
         weighted_spectrum[:] = np.nan
         centroid = np.nan
         return spectrum, weighted_spectrum, centroid
-    if isinstance(timecourse_1d, np.ma.MaskedArray) == True and np.all(timecourse_1d.mask == True):
-        spectrum = np.empty(int(len(timecourse_1d)/2 + 1))
+    if isinstance(timecourse_1d, np.ma.MaskedArray) == True and np.all(
+        timecourse_1d.mask == True
+    ):
+        spectrum = np.empty(int(len(timecourse_1d) / 2 + 1))
         spectrum[:] = np.nan
-        weighted_spectrum = np.empty(int(len(timecourse_1d)/2 + 1))
+        weighted_spectrum = np.empty(int(len(timecourse_1d) / 2 + 1))
         weighted_spectrum[:] = np.nan
         centroid = np.nan
         # Don't bother masking these, the nans will be sufficient (i think, look for bugs as consequence)
         return spectrum, weighted_spectrum, centroid
         # return (np.ma.array(spectrum, mask = True), np.ma.array(weighted_spectrum, mask = True),
         # np.ma.array(centroid, mask = True))
-    # ^ Just return array of nans if the above ifs are applicable 
+    # ^ Just return array of nans if the above ifs are applicable
     else:
         spectrum = np.abs(np.fft.rfft(timecourse_1d).real)
         # Sanity test
         auc = np.trapz(spectrum)
-        should_eqaul_1 = np.trapz(spectrum / auc) 
+        should_eqaul_1 = np.trapz(spectrum / auc)
         should_eqaul_1 = np.real_if_close(should_eqaul_1)
         assert np.isclose(should_eqaul_1, 1)
-        # Calculate as ratio 
+        # Calculate as ratio
         # norm_spectrum = spectrum / sum(spectrum) # probability mass function, are the weights
         if sampling_rate == None:
             norm_freq = np.linspace(0, len(spectrum), len(spectrum))
             weighted_spectrum = spectrum * norm_freq
-            warnings.warn("Param 'sampling_rate' not given, frequency bins are arbitrary." )
+            warnings.warn(
+                "Param 'sampling_rate' not given, frequency bins are arbitrary."
+            )
         else:
-            norm_freq = np.linspace(0, sampling_rate/2, len(spectrum))
+            norm_freq = np.linspace(0, sampling_rate / 2, len(spectrum))
             weighted_spectrum = spectrum * norm_freq
-        # Get spectral centroid 
+        # Get spectral centroid
         centroid = np.sum(weighted_spectrum) / np.sum(spectrum)
     return spectrum, norm_freq, centroid
 
-def only_centroid(timecourse_1d, sampling_rate = 15.625):
-    """Runs spectral_centroid() but returns only the centroid without spectrum array"""
-    return spectral_centroid(timecourse_1d, sampling_rate = sampling_rate)[2]
 
-def only_spectrum(timecourse_1d, sampling_rate = 15.625):
-    return spectral_centroid(timecourse_1d, sampling_rate = sampling_rate)[1]
+def only_centroid(timecourse_1d, sampling_rate=15.625):
+    """Runs spectral_centroid() but returns only the centroid without spectrum array"""
+    return spectral_centroid(timecourse_1d, sampling_rate=sampling_rate)[2]
+
+
+def only_spectrum(timecourse_1d, sampling_rate=15.625):
+    return spectral_centroid(timecourse_1d, sampling_rate=sampling_rate)[1]
     # return spectral_centroid(timecourse_1d, sampling_rate = 15.625)[1]
 
-# def 
+
+# def
 
 # def
 
 
-
 # OLD RUBBISH def spectral_centroid(timecourse_1d, sampling_rate = None):
-#     """the weighted mean of the frequencies present in the signal, determined 
-#     using a Fourier transform, with their magnitudes as the weights. Note that 
+#     """the weighted mean of the frequencies present in the signal, determined
+#     using a Fourier transform, with their magnitudes as the weights. Note that
 #     the output is relative, so to get corresponding frequency bins please multiply
 #     centroid by sample rate"""
 #     if np.all(timecourse_1d == 0):
@@ -275,21 +304,21 @@ def only_spectrum(timecourse_1d, sampling_rate = 15.625):
 #         centroid = np.nan
 #         return (np.ma.array(norm_spectrum, mask = True), np.ma.array(norm_freq, mask = True),
 #         np.ma.array(centroid, mask = True))
-#         # ^ Just return array of nans if the above elifs are applicable 
+#         # ^ Just return array of nans if the above elifs are applicable
 #     else:
 #         spectrum = np.abs(np.fft.rfft(timecourse_1d).real)
 #         # Sanity test
 #         auc = np.trapz(spectrum)
-#         should_eqaul_1 = np.trapz(spectrum / auc) 
+#         should_eqaul_1 = np.trapz(spectrum / auc)
 #         should_eqaul_1 = np.real_if_close(should_eqaul_1)
 #         assert np.isclose(should_eqaul_1, 1)
-#         # Calculate as ratio 
+#         # Calculate as ratio
 #         norm_spectrum = spectrum / sum(spectrum) # probability mass function, are the weights
 #         if sampling_rate == None:
 #             norm_freq = np.linspace(0, len(spectrum), len(spectrum))
 #             warnings.warn("Param 'sampling_rate' not given, frequency bins are arbitrary." )
 #         else:
 #             norm_freq = np.linspace(0, sampling_rate/2, len(spectrum))
-#         # Get spectral centroid 
+#         # Get spectral centroid
 #         centroid = np.sum(norm_spectrum * norm_freq)
 #     return norm_spectrum, norm_freq, centroid

@@ -49,6 +49,9 @@ Issues = "https://github.com/simbru/pygor/issues"
 [tool.setuptools.packages]
 find = {}  # Scan the project directory with the default parameters
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 #packages = ["src"]
 autodiscover = true
