@@ -2,9 +2,10 @@ import numpy as np  #
 import matplotlib.pyplot as plt
 import warnings
 import scipy
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, cpu_count
 import pygor.data_helpers
 import pygor.utilities
+import math 
 
 rng = np.random.default_rng(1312)
 
@@ -145,7 +146,7 @@ def bootstrap_time(
             return [_permute_iteration(org_time, local_rng) for _ in seed_batch]
 
         # Optimize batch size based on your system's capabilities
-        batch_size = 20  # Adjust batch size for optimal performance
+        batch_size = math.ceil(bootstrap_n / cpu_count() * 2)  # Adjust batch size for optimal performance
         seed_batches = [
             seeds[i : i + batch_size] for i in range(0, bootstrap_n, batch_size)
         ]
@@ -309,7 +310,7 @@ def bootstrap_space(
         else:
             return permuted_stat
 
-    def _single_resample_compute_new(
+    def _single_resample_compute_arrays(
         inp_arr, rng, x_parts=x_parts, y_parts=y_parts, array_return=False
     ):
         """
@@ -356,8 +357,8 @@ def bootstrap_space(
         else:
             return metric(collapse_time(new_arr, axis=0))
 
-    function_choice = _single_resample_compute_new
-    # function_choice = _single_permute_compute
+    # function_choice = _single_resample_compute_arrays
+    function_choice = _single_permute_compute
 
     if not parallel:
         rng = np.random.default_rng(seed)
@@ -366,6 +367,8 @@ def bootstrap_space(
         seed_sequence = np.random.SeedSequence(seed)
         child_seeds = seed_sequence.spawn(bootstrap_n)
         streams = [np.random.default_rng(s) for s in child_seeds]
+        
+        
         permuted_stat_list = Parallel(n_jobs=-1, max_nbytes="1M")(
             delayed(function_choice)(org_arr, streams[i]) for i in range(bootstrap_n)
         )
