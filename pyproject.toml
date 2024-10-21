@@ -67,6 +67,16 @@ members = ["examples/*", "src/pygor/examples"]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build]
+include = [
+    "src/**",
+    "README.md",
+]
+exclude = [
+    "src/pygor/examples/*.h5",
+    "examples/",
+]
+
 # [tool.setuptools]
 # package-dir = {"pygor" = "src"}
     # directory containing all the packages (e.g.  src/mypkg1, src/mypkg2)
