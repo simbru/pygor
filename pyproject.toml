@@ -61,7 +61,9 @@ examples = { workspace = true }
 
 [tool.uv.workspace]
 members = ["examples/*", "src/pygor/examples",]
-exclude = ["examples/strf_demo_data.h5", "examples/example_notebook.ipynb", "examples/*", "*.h5", "*.ipynb"]
+exclude = ["examples/strf_demo_data.h5", 
+        "examples/example_notebook.ipynb", "examples/*", 
+        "src/pygor/examples/", "*.h5", "*.ipynb"]
 
 [build-system]
 requires = ["hatchling"]
@@ -76,6 +78,7 @@ exclude = [
     "src/pygor/examples/*.h5",
     "src/pygor/examples/*.ipynb",
     "examples/",
+    "src/pygor/examples/.python-version"
 ]
 
 # [tool.setuptools]
