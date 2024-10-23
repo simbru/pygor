@@ -1,2 +1,3 @@
 exclude src/pygor/examples/strf_demo_data.h5
 exclude src/pygor/examples/example_notebook.ipynb
+prune src/pygor/examples
