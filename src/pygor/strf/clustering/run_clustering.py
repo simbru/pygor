@@ -22,6 +22,7 @@ clustering_params = [
     "ampl",
     "area",
     "centdom",
+    # "peak"
 ]  # "peak", "comp", "ipl"]#, "peak", "cent"]
 clust_params_regex = "|".join(clustering_params)
 
@@ -55,7 +56,9 @@ def run_clustering(clust_df):
     NB! Here the order is VERY IMPORTANT! --> Need to automate
     
     Issue is that depending on the clusterimg_params, the preprocessor column
-    transformer *should* update... At least for ease of use...
+    transformer *should* update... At least for ease of use... Right now it
+    doesn't, meaning to change transformers you need to update the clustering_params
+    AND the preprocessor. MESSY!
     """
     preprocessor = ColumnTransformer(
         remainder="drop",  # passthough features not listed
