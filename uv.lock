@@ -1695,7 +1695,7 @@ requires-dist = [
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "seaborn" },
-    { name = "statannotations", specifier = ">=0.4.4" },
+    { name = "statannotations", git = "https://github.com/getzze/statannotations/?branch=compat-seaborn-13" },
     { name = "tifffile" },
     { name = "tqdm" },
 ]
@@ -2310,18 +2310,14 @@ wheels = [
 
 [[package]]
 name = "statannotations"
-version = "0.4.4"
-source = { registry = "https://pypi.org/simple" }
+version = "0.6.0"
+source = { git = "https://github.com/getzze/statannotations/?branch=compat-seaborn-13#0a40136c1bfe32c9eb7b4b0a85d28f03e2cc88af" }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "scipy" },
     { name = "seaborn" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f3/82/30e1d3f6c54cb562c4145e71f891b5180b536cb756c2b46cfe4fbfa86d74/statannotations-0.4.4.tar.gz", hash = "sha256:38722684e08a8ffb38da196b70c5795c0cc7000aefbd3fb289b9f72f5391a0c7", size = 26539 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/69/6d/fac6e6c6898cedf6bd1e52ca2eecc48548b2eb48c3f96c2f3d22463ff142/statannotations-0.4.4-py3-none-any.whl", hash = "sha256:afbe20e6bd8361eae3d447693b8eba0b69c7a1788b1991db884e2505b6cd0013", size = 31754 },
 ]
 
 [[package]]
