@@ -1,0 +1,2 @@
+# Include source code
+include src/pygor/*

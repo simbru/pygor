@@ -323,7 +323,8 @@ def _chromatic_dict(
     data_strf_obj,
     wavelengths=["588", "478", "422", "375"],
     ampl_thresh=1,
-    store_exp=True,
+    store_obj=False,
+    store_arrs=False,
     df_return=False,
 ):
     """
@@ -439,10 +440,11 @@ def _chromatic_dict(
             dict[f"peakneg_{i}"] = neg_peak_t[n]
             dict[f"peakpos_{i}"] = pos_peak_t[n]
             dict[f"comp_{i}"] = complexities[n]
-            if store_exp == True:
+            if store_arrs:
                 dict[f"temporal_{i}"] = temporal_filter[n].tolist()
                 dict[f"spatial_{i}"] = spatial_filter[n].tolist()
-            dict["strf_obj"] = data_strf_obj
+            if store_obj:
+                dict["strf_obj"] = data_strf_obj
             dict[f"pval_time_{i}"] = pval_time_t[n].tolist()
             dict[f"pval_space_{i}"] = pval_space_t[n].tolist()
             dict[f"pval_combined_{i}"] = scipy.stats.combine_pvalues(
@@ -488,7 +490,7 @@ def _chromatic_dict(
 
 
 def chromatic_stats(
-    exp_obj: pygor.classes.experiment.Experiment, store_exp=True, parallel=False
+    exp_obj: pygor.classes.experiment.Experiment, store_obj=False, store_arrs=False, parallel=False
 ) -> pd.DataFrame:
     """
     Generate a DataFrame containing chromatic statistics from an Experiment object.
@@ -506,13 +508,13 @@ def chromatic_stats(
     if parallel is False:
         chromatic_df_list = []
         for object in exp_obj.recording:
-            curr_dict = _chromatic_dict(object, store_exp=store_exp)
+            curr_dict = _chromatic_dict(object, store_obj=store_obj, store_arrs=store_arrs)
             chromatic_df_list.append(pd.DataFrame(curr_dict))
     else:
         with joblib.Parallel(n_jobs=-1) as parallel:
             chromatic_df_list = parallel(
                 joblib.delayed(_chromatic_dict)(
-                    object, store_exp=store_exp, df_return=True
+                    object, store_obj=store_obj, store_arrs=store_arrs, df_return=True
                 )
                 for object in exp_obj.recording
             )

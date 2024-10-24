@@ -534,7 +534,7 @@ def df_GMM(
         n_components=n_components,
         random_state=random_state,
         max_iter=max_iter,
-        covariance_type="full",
+        covariance_type=covariance_type,
     ).fit(input_df)
     clusters = gm.predict(input_df)
     # output_df["cluster_id"] = clusters
@@ -544,6 +544,27 @@ def df_GMM(
     #     input_df["cluster_id"] = clusters
     return output_df
 
+def simple_df_GMM(
+    input_df,
+    n_components="auto",
+    random_state=200,
+    max_iter=25000,
+    max_comp=8,
+    covariance_type="full",
+    apply_cluster_id=True,
+):
+    np.random.seed(random_state)
+    input_df = input_df.copy()
+    gm = GaussianMixture(
+        n_components=n_components,
+        random_state=random_state,
+        max_iter=max_iter,
+        covariance_type=covariance_type,
+    ).fit(input_df)
+    clusters = gm.predict(input_df)
+    output_df = pd.DataFrame(input_df, index=input_df.index, columns=input_df.columns)
+    output_df["cluster_id"] = clusters
+    return output_df
 
 def df_AggHierarchy(
     input_df, n_components=None, dist_thresh=12.5, apply_cluster_id=True
