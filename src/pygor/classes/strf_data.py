@@ -376,6 +376,11 @@ class STRF(Core):
     def num_rois_sig(self) -> int:
         return self.get_pvals_table()["sig_any"].sum()
 
+    @property
+    def strfs_no_borders(self) -> np.ndarray:
+        return np.array([pygor.utilities.auto_remove_border(i) for i in self.strfs])
+
+
     def fit_contours(self, force = True) -> np.ndarray[list[list[list[float, float]]]]:
         """
         Returns the contours of the collapse times.
