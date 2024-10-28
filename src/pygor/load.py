@@ -10,9 +10,8 @@ import pathlib
 import importlib
 
 # Trying to determine where "unclosed socket" warning comes from
-import tracemalloc
-
-tracemalloc.start()
+# import tracemalloc
+# tracemalloc.start()
 
 # # Ensure all warnings are displayed
 # warnings.simplefilter('always')
