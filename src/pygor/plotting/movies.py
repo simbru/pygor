@@ -12,7 +12,7 @@ except ImportError:
 # Local imports
 
 
-def play_movie(d3_arr, dur_s=1.3, figaxim_return=False, rgb_repr=False, **kwargs):
+def play_movie(d3_arr, dur_s=1.3, figaxim_return=False, clim = None, rgb_repr=False, **kwargs):
     # This is way more efficient than the legacy version and does not rely on ipywidgets
     # https://stackoverflow.com/questions/39472017/how-to-animate-the-colorbar-in-matplotlib
 
@@ -54,8 +54,11 @@ def play_movie(d3_arr, dur_s=1.3, figaxim_return=False, rgb_repr=False, **kwargs
         # im.set_clim(min_val, max_val)
         if rgb_repr is False:
             im.set_clim(-max_abs_val, max_abs_val)
-        else:
+        elif rgb_repr is True:
             im.set_clim(0, max_abs_val)
+        if clim is not None:
+            print("ding")
+            im.set_clim(clim)
         # Hide grid lines
         ax.grid(False)
 
