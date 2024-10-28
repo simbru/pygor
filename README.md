@@ -15,15 +15,27 @@ Your one-stop shop for fetching Baden-lab processed IGOR data via H5 files, and 
 
 ## How do I install Pygor
 
-Currently, the package will very likely require you to do your own development. This sounds scary, but its pretty easy
+### Build with hatch and install with pip
+Currently, the package will very likely require you to do your own development. This sounds scary, but its pretty easy. For that, we need
+to install the latest version of the pacakge in an "editable" state.
 
 1. Install [hatch](https://hatch.pypa.io/latest/) on your computer, either via executable or via pip in your environment.
 2. Download Pygor from the Github repo (I prefer using `git clone https://github.com/simbru/pygor` in my target directory).
 3. Open up your favorite command line (CMD for example) and change directory to your Pygor folder. You will know  you are in the right spot if you see a file called `pyproject.toml`
 4. Simply run `hatch build` from the command line inside the directroy. You should see some reference to "building wheels". This means you're on the rigth track.
-5. Once that is done, simply stay in the directroy, activate whatever Python envrionment you want to use, and type `pip install -e .` -> This will allow you to use Pygor, while changing the contents of Pygor's files.
+5. Once that is done, simply stay in the directroy, activate whatever Python envrionment you want to use, and type `pip install -e .` -> This will allow you to use Pygor, while changing the contents of Pygor's files (editable).
 
 That's it! Activate your environment in your favorite IDE and get going with Pygor! Please flag it if you run across any issues. 
+
+### Sync with uv
+An new package managment framework called uv simplifies install, but makes 
+a local virtual environment that you must use instead of making your own. 
+1. [Install uv](https://docs.astral.sh/uv/getting-started/installation/)
+2. git clone https://github.com/simbru/pygor` into target directory
+3. Change directory into the pygor folder, and run `uv sync`. This should build Pygor and install it into the local uv-managed .venv folder.
+4. Use `.venv/scripts/activate` to activate the environment.
+
+More information on [uv by Astral here](https://docs.astral.sh/uv/).
 
 *Alternatively, you should be able to simply download the Git repositroy, set your working directories correctly, and be on your merry way (but this is completely untested, and you might have to move your Jupyter notebooks around for imports to work properly).*
 
