@@ -1,34 +1,37 @@
+# Dependencies
 from dataclasses import dataclass, field
 
-from numpy.ma import masked
+import pygor.utilities
 try:
     from collections import Iterable
 except ImportError:
     from collections.abc import Iterable
-# Local imports
-import pygor.utils.unit_conversion as unit_conversion
-import pygor.strf.bootstrap
-import pygor.data_helpers
-import pygor.utils.helpinfo
-import pygor.strf.spatial
-import pygor.strf.contouring
-import pygor.strf.temporal
-import pygor.strf.plot
-import pygor.strf.guesstimate
-import pygor.utils
-from pygor.classes.core_data import Core
-# Dependencies
-from tqdm.auto import tqdm
-import joblib
-import numpy as np
+import copy
 import datetime
 import pathlib
-import h5py
-import natsort
 import warnings
-import pandas as pd
+import h5py
+import joblib
 import matplotlib.pyplot as plt
-import copy
+import natsort
+import numpy as np
+import pandas as pd
+import sklearn.preprocessing
+from tqdm.auto import tqdm
+# Local imports
+import pygor.data_helpers
+import pygor.strf.bootstrap
+import pygor.strf.contouring
+import pygor.strf.guesstimate
+import pygor.strf.plot
+import pygor.strf.spatial
+import pygor.strf.temporal
+import pygor.utils
+import pygor.utils.helpinfo
+import pygor.utils.unit_conversion as unit_conversion
+from pygor.classes.core_data import Core
+import scipy
+
 @dataclass(repr = False)
 class STRF(Core):
     #type         : str = "STRF"
@@ -259,7 +262,7 @@ class STRF(Core):
                 warning_string = "Input anomalies found"
                 warnings.warn(warning_string, stacklevel=0)
                 if not_allowed_keys:
-                    print(f"Disallowed keys: {not_allowed_keys}")
+                    print("The following disallowed keys were passed:", *not_allowed_keys)
                 if not_found_keys:
                     print(f"Keys not found in self.bs_settings: {not_found_keys}")
                 if none_default_key:
@@ -289,10 +292,8 @@ class STRF(Core):
                     after_time = datetime.datetime.now()
                 elif user_verify == 'n' or user_verify == "no":
                     print(f"Skipping recomputing bootstrap due to user input:'{user_verify}'")
-                    return self
                 else:
                     print(f"Input '{user_verify}' is invalid, no action done. Please use 'y'/'n'.")
-                    return self
             else:
                 before_time = datetime.datetime.now()
                 self.__calc_pval_time(parallel=parallel)
@@ -303,7 +304,7 @@ class STRF(Core):
             self.bs_settings["bs_datetime"] = before_time
             self.bs_settings["bs_datetime_str"] = before_time.strftime("%d/%m/%y %H:%M:%S")
             self.bs_settings["bs_dur_timedelta"] = after_time - before_time
-            return self
+
     @property
     def pval_time(self, parallel = None) -> np.ndarray:
         """
@@ -376,7 +377,11 @@ class STRF(Core):
     def num_rois_sig(self) -> int:
         return self.get_pvals_table()["sig_any"].sum()
 
-    def fit_contours(self, force = True) -> np.ndarray[list[list[list[float, float]]]]:
+    @property
+    def strfs_no_border(self) -> np.ndarray:
+        return pygor.utilities.auto_remove_border(self.strfs)
+
+    def fit_contours(self, roi = None, force = True) -> np.ndarray[list[list[list[float, float]]]]:
         """
         Returns the contours of the collapse times.
 
@@ -395,14 +400,13 @@ class STRF(Core):
             data = DataObject()
             contours = data.fit_contours()
         """        
-
         if self.bs_settings["do_bootstrap"] == True:
             time_pvals = self.pval_time
             space_pvals = self.pval_space
             __contours = [pygor.strf.contouring.bipolar_contour(arr) # ensures no contour is drawn if pval not sig enough
                             if time_pvals[count] < self.bs_settings["time_sig_thresh"] and space_pvals[count] < self.bs_settings["space_sig_thresh"]
                             else  (np.array([]), np.array([]))
-                            for count, arr in enumerate(self.collapse_times())]
+                            for count, arr in enumerate(self.collapse_times(roi))]
         if self.bs_settings["do_bootstrap"] == False:
             __contours = [pygor.strf.contouring.bipolar_contour(arr) for count, arr in enumerate(self.collapse_times())]
         __contours = np.array(__contours, dtype = "object")
@@ -484,16 +488,17 @@ class STRF(Core):
     TODO Add lazy processing back into contouring (maybe skip timecourses, should be fast enough)
     """
     
-    def get_timecourses(self, centre_on_zero = True, mask_empty = False, spoof_masks = False) -> np.ndarray:
+    def get_timecourses(self, roi = None, centre_on_zero = True, mask_empty = False, spoof_masks = False) -> np.ndarray:
         # try:
         #     return self.__timecourses 
         # except AttributeError:
         # Get masks that we will apply (and make a copy in memory, because we are about to ammend these)
-        masked_strfs = copy.deepcopy(self.get_strf_masks())
+        masked_strfs = copy.deepcopy(self.get_strf_masks(roi))
         # masked_strfs = self.get_strf_masks() # <- this one overrides data, only for testing!
-        timecourses = np.ma.average(masked_strfs, axis = (3,4))            
+        # if roi is None:
+        timecourses = np.ma.average(masked_strfs, axis = (-1,-2))
         # Figure out where we have empty masks
-        empty_mask_indices = np.argwhere(timecourses.mask.any(axis = (1,2)))
+        empty_mask_indices = np.argwhere(timecourses.mask.any(axis = (-1,-2)))
         # To get comparable averages, we may want to average over the same number of pixels as the fitted masks.
         # # One strategy is to take the pre-existing fitted masks and apply them to the STRFs with no signal.
         if spoof_masks is True:
@@ -501,16 +506,15 @@ class STRF(Core):
             spoofed_masks = pygor.strf.guesstimate.gen_spoof_masks(self)
             # Apply our spoofed masks to the initial extracted masks where we have no data
             masked_strfs.mask[empty_mask_indices] = spoofed_masks[empty_mask_indices]
-            timecourses = np.ma.average(masked_strfs, axis = (3,4))            
-        elif mask_empty is False:
-            # Sometimes we may/may not want to keep data where space has no correlations (all masked)
-            # Fill timecourses with noise array where space is masked
-            empty_mask_indices = np.argwhere(timecourses.mask.any(axis = (1,2)))
-            # print(empty_mask_indices)
-            noise_times = np.expand_dims(np.average(self.strfs[empty_mask_indices], axis = (3, 4)), axis = 1)
-            noise_times = np.repeat(noise_times, 2, axis = 2)
-            timecourses[empty_mask_indices] = noise_times
-        # print(timecourses.shape)
+            timecourses = np.ma.average(masked_strfs, axis = (2,3))            
+        # elif mask_empty is False:
+        #     # Sometimes we may/may not want to keep data where space has no correlations (all masked)
+        #     # Fill timecourses with noise array where space is masked
+        #     empty_mask_indices = np.argwhere(timecourses.mask.any(axis = (-1,-2)))
+        #     noise_times = np.expand_dims(np.average(self.strfs[empty_mask_indices], axis = (3, 4)), axis = 1)
+        #     noise_times = np.repeat(noise_times, 2, axis = 2)
+        #     timecourses[empty_mask_indices] = noise_times
+        # # print(timecourses.shape)
         # plt.imshow(masked_strfs[1, 0, 0])
         # plt.plot(timecourses[2].T)
         # Most of the time it makes sense to centre on zero
@@ -532,8 +536,19 @@ class STRF(Core):
         else:
             raise ValueError("filter must be 'all' or 'dominant'")
 
-    def get_chroma_strf(self):
-        return pygor.utilities.multicolour_reshape(self.strfs, self.numcolour)
+    def get_chroma_strf(self, roi = None):
+        if roi is None:
+            index = range(self.num_rois * self.numcolour)
+            return pygor.utilities.multicolour_reshape(self.strfs[index], self.numcolour)
+        else:
+            if isinstance(roi, Iterable) is False:
+                roi = [roi]
+            # start_index = np.linspace(0, self.num_rois * self.numcolour, self.num_rois + 1)[roi].astype(int)
+            # print(np.linspace(0, self.num_rois * self.numcolour, self.num_rois + 1))
+            start_index = np.arange(0, self.num_rois * self.numcolour)[::self.numcolour][roi]
+            end_index = start_index + self.numcolour
+            indices = np.arange(start_index, end_index)
+            return np.squeeze(pygor.utilities.multicolour_reshape(self.strfs[indices], self.numcolour))
 
     def get_timecourses_dominant(self, **kwargs):
         dominant_times = []
@@ -553,20 +568,30 @@ class STRF(Core):
     # def plot_roi(self, roi):
     #     fig, ax = plt.subplots(1, 3)
 
-    def get_strf_masks(self, level = None, force_recompute = False) -> tuple[np.ndarray, np.ndarray]:
+    def get_strf_masks(self, roi = None, level = None, force_recompute = False) -> tuple[np.ndarray, np.ndarray]:
         """
         Return masked array of spatial.rf_mask3d applied to all arrays, with masks based on pval_time and pval_space,
         with polarity intact.
         """
-        def set_strf_masks():
+        try:
+            if roi is not None or self.__strf_masks.shape[0] != self.num_rois * self.numcolour:
+                force_recompute = True
+        except AttributeError:
+            force_recompute = True
+        def set_strf_masks(roi = roi):     
                 if self.strfs is np.nan:
                     self.__strf_masks = np.nan
+                if roi is None:
+                    roi = range(0, self.num_rois * self.numcolour)
+                else:
+                    if isinstance(roi, Iterable) is False:
+                        roi = [roi]
                 # raise NotImplementedError("Implementation error, does not work yet")
                 # get 2d masks
-                all_masks = np.array([pygor.strf.contouring.bipolar_mask(i) for i in self.collapse_times()])
+                all_masks = np.array([pygor.strf.contouring.bipolar_mask(i) for i in self.collapse_times(roi)])
                 all_masks = np.repeat(np.expand_dims(all_masks, 2), self.strfs.shape[1], axis = 2)
                 # Apply mask to expanded and repeated strfs (to get negative and positive)
-                strfs_expanded = np.repeat(np.expand_dims(self.strfs, axis = 1), 2, axis = 1)
+                strfs_expanded = np.repeat(np.expand_dims(self.strfs[roi], axis = 1), 2, axis = 1)
                 all_strfs_masked = np.ma.array(strfs_expanded, mask = all_masks, keep_mask=True)
                 self.__strf_masks = all_strfs_masked
         if force_recompute:
@@ -637,8 +662,8 @@ class STRF(Core):
         else:
             raise AttributeError("Not a multicoloured STRF, self.multicolour != True.")
 
-    def get_spatial_masks(self) -> tuple[np.ndarray, np.ndarray]:
-        masks = self.get_strf_masks().mask[:, :, 0]
+    def get_spatial_masks(self, roi = None) -> tuple[np.ndarray, np.ndarray]:
+        masks = self.get_strf_masks(roi).mask[:, :, 0]
         neg_mask2d, pos_mask2d = masks[:, 0], masks[:, 1]
         #return np.array([neg_mask2d, pos_mask2d])
         return (neg_mask2d, pos_mask2d)
@@ -670,13 +695,27 @@ class STRF(Core):
         strf_shifted = np.ma.array([np.roll(arr, shift_by[i], axis = (1,2)) for i, arr in enumerate(self.strfs)])
         return strf_shifted
 
-    def collapse_times(self, zscore = False, mode = "var", spatial_centre = False) -> np.ma.masked_array:
-        target_shape = (self.strfs.shape[0], 
-                        self.strfs.shape[2], 
-                        self.strfs.shape[3])    
+    def collapse_times(self, roi = None, zscore = False, spatial_centre = False, **kwargs) -> np.ma.masked_array:
+        if roi is not None:
+            if isinstance(roi, int):
+                iterate_through = [roi]
+            elif isinstance(roi, Iterable):
+                iterate_through = roi
+            else:
+                raise ValueError("ROI must be None, int, or an iterable of ints")
+        else:
+            iterate_through = range(self.num_rois * self.numcolour)
+        if isinstance(iterate_through, Iterable):
+            target_shape = (len(iterate_through),
+                            self.strfs.shape[2], 
+                            self.strfs.shape[3])
+        else:
+            target_shape = (1,
+                            self.strfs.shape[2],
+                            self.strfs.shape[3])
         collapsed_strf_arr = np.ma.empty(target_shape)
-        for n, strf in enumerate(self.strfs):
-            collapsed_strf_arr[n] = pygor.strf.spatial.collapse_3d(self.strfs[n], zscore = zscore, mode = mode)
+        for n, roi in enumerate(iterate_through):
+            collapsed_strf_arr[n] = pygor.strf.spatial.collapse_3d(self.strfs[roi], zscore = zscore, **kwargs)
         if spatial_centre == True:
             try:
                 return self._spatial_centered_collapse
@@ -865,21 +904,26 @@ class STRF(Core):
 
     def demo_contouring(self, roi, chromatic_reshape = False):
         plt.close()
-        fig, ax = plt.subplots(2, 6, figsize = (16*1.5, 4*1.5))
-        neg_c, pos_c = pygor.strf.contouring.bipolar_contour(self.collapse_times()[roi], plot_results= True, ax = ax)
-        ax[0, -1].plot(self.get_timecourses()[roi].T, label = ["neg", "pos"])
+        fig, ax = plt.subplots(2, 6, figsize = (16*1, 4*1))
+        neg_c, pos_c = pygor.strf.contouring.bipolar_contour(self.collapse_times(roi), plot_results= True, ax = ax)
+        ax[0, -1].plot(np.squeeze(self.get_timecourses(roi)).T, label = ["neg", "pos"])
         ax[0, -1].legend()
-        ax[1, -1].imshow((self.get_spatial_masks()[0][roi] * -1) + self.get_spatial_masks()[1][roi], origin = "lower")
+        spatial_mask = np.squeeze(self.get_spatial_masks(roi))
+        ax[1, -1].imshow((spatial_mask[0] * -1) + spatial_mask[1], origin = "lower")
         gs = ax[1, 2].get_gridspec()
         for a in ax[0:, 0]:
             a.remove()
         axbig = fig.add_subplot(gs[:, 0])
-        axbig.imshow(self.collapse_times()[roi], origin = "lower")
+        axbig.imshow(np.squeeze(self.collapse_times(roi)), origin = "lower")
         for i in neg_c:
             axbig.plot(i[:, 1], i[:, 0], color = "blue")
         for i in pos_c:
             axbig.plot(i[:, 1], i[:, 0], color = "red")
+        pygor.strf.contouring.bipolar_contour(self.collapse_times(roi), result_plot=True, ax = ax[:, 1:5])
+        # for zax in ax[0:2, 1:5].flat:
+        #     zax.imshow(np.random.rand(10, 10), origin = "lower")
         plt.show()
+
     def plot_timecourse(self, roi):
         plt.plot(self.get_timecourses()[roi].T)
     
@@ -931,6 +975,70 @@ class STRF(Core):
         with open(final_path, 'wb') as outp:
             joblib.dump(self, outp, compress='zlib')
 
+    def to_rgb(self, roi = None, rgb_channels = [0, 1, 2], bgr = True, plot = False, method = "grey_centered",
+            remove_borders = True, **kwargs):
+        # input_arr = np.squeeze(pygor.utilities.multicolour_reshape(self.collapse_times(), self.numcolour))[:, roi]
+        def _fetch_data(roi):
+            # start_index = roi + (roi * self.numcolour)
+            start_index = roi * self.numcolour
+            end_index   = start_index + self.numcolour
+            return np.squeeze(pygor.utilities.multicolour_reshape(self.collapse_times(range(start_index, end_index)), self.numcolour))
+
+        def _run(self, roiinput, rgb_channels = rgb_channels):
+            arr = _fetch_data(roiinput)
+            norm_arr = pygor.utilities.scale_by(arr, method = method)
+            # Only extract channels after normalising
+            norm_arr = norm_arr[rgb_channels]
+            if remove_borders is True:
+                norm_arr = pygor.utilities.auto_remove_border(norm_arr)
+            if bgr is True:
+                norm_arr = np.rollaxis(norm_arr, axis=0, start=3)
+            return norm_arr
+        if plot is True:
+            if isinstance(roi, Iterable) is True:
+                raise AttributeError("roi must equal an int for plot to work")
+            input_arr = _fetch_data(roi)
+            rgb_arr = _run(self, roi, rgb_channels = [0, 1, 2])
+            rgu_arr = _run(self, roi, rgb_channels = [0, 1, 3])
+            fig, axs = plt.subplots(2, 2, figsize=(10, 6), dpi = 300)
+            axs.flat[0].plot(input_arr.reshape(-1, 1), label = "Input all channels")
+            axs.flat[0].legend()
+            axs.flat[1].plot(rgu_arr.reshape(-1, 1, order = "f"), alpha = 1, label = "RGU")
+            axs.flat[1].plot(rgb_arr.reshape(-1, 1, order = "f"), alpha = 0.5, label = "RGB")
+            axs.flat[1].legend()
+            axs.flat[2].imshow(rgb_arr)
+            axs.flat[3].imshow(rgu_arr)
+            plt.show()
+            return None
+        if roi is None:
+            return np.array([_run(self, i) for i in range(self.num_rois)])
+        else:
+            if isinstance(roi, Iterable) is False:
+                return _run(self, roi)
+            else:
+                return np.array([_run(self, i) for i in roi])
+    
+    def play_strf_rgb(self, roi, channel = "All", method = "grey_centered", plot = True,**kwargs):
+        ## Generate RGB movie
+        if channel == "All":
+            num_channels = self.numcolour
+            channel = np.array([[i for i in range(num_channels)]] * int(num_channels - 2))
+            channel = np.array([i[[0, 1, n+2]] for n, i in enumerate(channel)])
+            arr = np.array([np.moveaxis(self.get_chroma_strf(roi)[i], [0, 1], [-1, 0]) for i in channel])
+            # arr = np.hstack(arr)
+        if isinstance(channel, np.ndarray) is False:
+            channel = np.array(channel)
+        # print(channel.shape)
+        if len(channel.shape) == 1:
+            arr = np.expand_dims(np.array(np.moveaxis(self.get_chroma_strf(roi)[channel], [0, 1], [-1, 0])), 0)
+        else:
+            arr = np.array([np.moveaxis(self.get_chroma_strf(roi)[i], [0, 1], [-1, 0]) for i in channel])
+        arr = np.dstack(arr)
+        arr = pygor.utilities.scale_by(arr, method = method)
+        if plot is True:
+            return pygor.plotting.play_movie(arr, rgb_repr=True)
+        else:
+            return arr
 
 # class Clustering:
 #     def __init__(self):
