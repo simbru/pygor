@@ -236,12 +236,9 @@ class Core:
         zcrop: tuple = None,
         xcrop: tuple = None,
         ycrop: tuple = None,
+        alpha=0.5,
         **kwargs,
     ) -> None:
-    
-    def view_stack_rois(self, labels = True, func = np.mean, axis = 0, cbar = False,
-        ax = None, figsize = (None, None), figsize_scale = None, 
-        zcrop : tuple = None, xcrop : tuple = None, ycrop : tuple = None, alpha = 0.5, **kwargs) -> None:
         """
         Display a projection of the image stack using the specified function.
 
