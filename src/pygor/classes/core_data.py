@@ -93,12 +93,11 @@ class Core:
             self.ipl_depths = try_fetch(HDF5_file, "Positions")
             self.averages = try_fetch(HDF5_file, "Averages0")
             self.snippets = try_fetch(HDF5_file, "Snippets0")
-            self.frame_hz = float(try_fetch_os_params(HDF5_file, "samp_rate_Hz"))
-            self.linedur_s = float(try_fetch_os_params(HDF5_file, "LineDuration"))
-            self.samp_period_s = float(try_fetch_os_params(HDF5_file, "samp_period")) #is just inverse of frame_hz?
             self.trigger_mode = int(try_fetch_os_params(HDF5_file, "Trigger_Mode"))
-            self.average_stack = try_fetch(HDF5_file, "Stack_Ave")
             self.n_planes = int(try_fetch_os_params(HDF5_file, "nPlanes"))
+            self.linedur_s = float(try_fetch_os_params(HDF5_file, "LineDuration"))
+            self.average_stack = try_fetch(HDF5_file, "Stack_Ave")
+            self.frame_hz = float(1/(self.average_stack.shape[0]/self.n_planes*self.linedur_s))
         # Check that trigger mode matches phase number
         if self.trigger_mode != self.phase_num:
             warnings.warn(
