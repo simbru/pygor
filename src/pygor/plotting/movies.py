@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
+from pandas.core import frame
 import seaborn as sns
 
 try:
@@ -12,15 +13,15 @@ except ImportError:
 # Local imports
 
 
-def play_movie(d3_arr, dur_s=1.3, figaxim_return=False, rgb_repr=False, **kwargs):
+def play_movie(d3_arr, dur_s=1.3, figaxim_return=False, clim = None, rgb_repr=False, interval = None, dpi = 100, frameon = False, **kwargs):
     # This is way more efficient than the legacy version and does not rely on ipywidgets
     # https://stackoverflow.com/questions/39472017/how-to-animate-the-colorbar-in-matplotlib
 
     # Return default matplotlib plotting parameters to new dict and change those needed
     plot_settings = plt.rcParams
     plot_settings["animation.html"] = "jshtml"
-    plot_settings["figure.dpi"] = 100
-    plot_settings["savefig.facecolor"] = "white"
+    plot_settings["figure.dpi"] = dpi
+    plot_settings["savefig.facecolor"] = "none"
     # Check attributes and kwargs
     if rgb_repr is False:
         if d3_arr.ndim != 3:
@@ -40,12 +41,19 @@ def play_movie(d3_arr, dur_s=1.3, figaxim_return=False, rgb_repr=False, **kwargs
     with matplotlib.rc_context(rc=plot_settings):
         # Initiate the figure, change themeing to Seaborn, create axes to tie colorbar too (for scaling)
         sns.set_theme(context="notebook")
-        plt.ion()
+        # plt.ion()
         fig, ax = plt.subplots()
+        ax.set_aspect("equal")
         div = make_axes_locatable(ax)
         cax = div.append_axes("right", "2%", "2%")
+        # ax.spines['top'].set_visible(False)
+        # ax.spines['right'].set_visible(False)
+        # ax.spines['bottom'].set_visible(False)
+        # ax.spines['left'].set_visible(False)
+        # ax.set_frame_on(frameon)
+        # fig.set_frameon(frameon)
         # Plotting
-        im = ax.imshow(d3_arr[0], origin="lower", **kwargs)
+        im = ax.pcolormesh(d3_arr[0], **kwargs, rasterized=True, animated = True, aa = False, edgecolors = 'none')
         fig.colorbar(im, cax=cax)
         # Scale colormap
         #        min_val = np.min(d3_arr)
@@ -54,21 +62,25 @@ def play_movie(d3_arr, dur_s=1.3, figaxim_return=False, rgb_repr=False, **kwargs
         # im.set_clim(min_val, max_val)
         if rgb_repr is False:
             im.set_clim(-max_abs_val, max_abs_val)
-        else:
+        elif rgb_repr is True:
             im.set_clim(0, max_abs_val)
+        if clim is not None:
+            print("ding")
+            im.set_clim(clim)
         # Hide grid lines
         ax.grid(False)
 
         # Create a function that plot updates data in plt.imshow for each frame
         def video(frame):
-            im.set_data(d3_arr[frame])
-
+            im.set_array(d3_arr[frame])
+        if interval is None:
+            interval = dur_s / len(d3_arr) * 1000
         # Create the animation based on the above function
         animation = matplotlib.animation.FuncAnimation(
             fig,
             video,
             frames=len(d3_arr),
-            interval=dur_s / len(d3_arr) * 1000,
+            interval=interval,
             repeat_delay=500,
         )
         # Close the animation

@@ -4,6 +4,7 @@ analysis.ipynb
 old_data_strfs.h5
 meetingnotes.ipynb
 src/pygor/test/test_out.txt
+local/*
 .vscode/settings.json
 .vscode
 *.json

@@ -82,7 +82,8 @@ def chroma_overview(
             num_rows = 1
         else:
             num_rows = len(specify_rois)
-        fig, ax = plt.subplots(num_rows,num_cols,figsize=(num_cols, num_rows * 1),layout="constrained",)
+        figsize_scaler = 1
+        fig, ax = plt.subplots(num_rows,num_cols,figsize=(num_cols * 2 * figsize_scaler, num_rows * 1 * figsize_scaler),layout="constrained",)
     else:
         fig = plt.gcf()
     for n, roi in enumerate(rois_specified):
