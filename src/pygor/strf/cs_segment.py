@@ -11,12 +11,12 @@ import pygor.strf.spatial
 def custom_agglom(
     inputdata,
     n_clusters=3,
-    plot=False,
     smooth_times=True,
     kernel=None,
     centre_on_zero=True,
     upscale=True,
     island_size_min=5,
+    plot_demo=False,
     **kwargs,
 ):
     original_shape = inputdata.shape
@@ -44,7 +44,10 @@ def custom_agglom(
                 kernel_width_seconds = kwargs["kernel_width_seconds"]
             else:
                 kernel_width_seconds = 1
-            kernel_size_points = int(kernel_width_seconds * sample_rate)
+            if upscale is not None:
+                kernel_size_points = int(kernel_width_seconds * sample_rate) * upscale
+            else:
+                kernel_size_points = int(kernel_width_seconds * sample_rate)
             kernel = np.blackman(
                 kernel_size_points
             )  # bartlett, hanning, kaiser, hamming, blackman
@@ -107,11 +110,11 @@ def custom_agglom(
         ),
         axis=0,
     )
-    if plot is True:
-        prediction_times = extract_times(prediction_map, inputdata)
+    if plot_demo is True:
+        prediction_times = extract_times(prediction_map, inputdata, **kwargs)
         # Store cluster centers
-        # centres = clustering.cluster_centers_
         fig, ax = plt.subplots(1, 7, figsize = (20, 2))
+        num_clusts = len(np.unique(prediction_map)) # update num_clusts after potential merges
         colormap = plt.cm.tab10  # Use the entire Set1 colormap
         cmap = plt.cm.colors.ListedColormap([colormap(i) for i in range(num_clusts)])
         space_repr = pygor.strf.spatial.collapse_3d(inputdata)
@@ -119,15 +122,16 @@ def custom_agglom(
         ax[1].plot(inputdata_reshaped, alpha = 0.05, c = "black")
         ax[2].plot(fit_on.T, alpha = 0.05, c = "black")
         top_3 = np.argsort(np.std(prediction_times, axis = 1))[-2:]
+        if kernel is not None:
+            ax[3].plot(kernel[0])#first index because of repeat for vectorised operation
         ax[4].plot(prediction_times[top_3].T)
-        if smooth_times is not False:
-            ax[3].plot(kernel[0])
         ax[5].plot(prediction_times.T)
         ax[6].imshow(pygor.strf.spatial.collapse_3d(inputdata), cmap = "Greys_r")
         ax[6].imshow(prediction_map, cmap = cmap, alpha = 0.45)
         titles = ["Space_collapse", "Raw", "Convolved", "Kernel", "MaxVarClusts", "AllClusts", "ClustSpatial"]
         for n, i in enumerate(ax):
             i.set_title(titles[n])
+        plt.show()
     return prediction_map
 
 
@@ -146,7 +150,7 @@ def get_corrcoef_combinations_optimized_with_labels(
         list(zip(row_indices[exceed_indices], col_indices[exceed_indices]))
     )
     if not similar_pairs.any():
-        return times, None, None
+        return times, {}
     # Construct adjacency graph and find connected components
     n = traces_correlation.shape[0]
     adj_matrix = np.zeros((n, n), dtype=bool)
@@ -178,10 +182,10 @@ def get_corrcoef_combinations_optimized_with_labels(
     if debug_return is True:
         return merged_traces, labels, label_changes
     else:
-        return merged_traces
+        return merged_traces, label_changes
 
 
-def extract_times(prediction_map, inputdata):
+def extract_times(prediction_map, inputdata, similarity_merge = True, similarity_threhsold = .75):
     num_clusts = len(np.unique(prediction_map))
     if prediction_map.shape != inputdata.shape[1:]:
         raise ValueError(
@@ -203,8 +207,16 @@ def extract_times(prediction_map, inputdata):
             for i in range(num_clusts)
         ]
     )
+    if similarity_merge:
+        prediction_times, label_changes = get_corrcoef_combinations_optimized_with_labels(prediction_times, similarity_threhsold)
+        if label_changes is not None:
+            # Change prediction_map array directly, not on copy
+            for key, value in label_changes.items():
+                prediction_map[np.isin(prediction_map, value)] = key
     return prediction_times
 
+def cs_segment_demo(inputdata, **kwargs):
+    pygor.strf.cs_segment.custom_agglom(inputdata, plot_demo=True, **kwargs)
 
 def cs_segment(plot = False):
 
