@@ -5,18 +5,19 @@ import scipy.signal
 import sklearn.cluster
 import skimage.morphology
 import pygor.np_ext as np_ext
+import pygor.np_ext
 import pygor.strf.spatial
-
 
 def custom_agglom(
     inputdata,
     n_clusters=3,
-    smooth_times=True,
+    smooth_times=False,
     kernel=None,
     centre_on_zero=True,
     upscale=True,
-    island_size_min=5,
+    island_size_min=4,
     plot_demo=False,
+    crop_time=None,
     **kwargs,
 ):
     original_shape = inputdata.shape
@@ -33,6 +34,8 @@ def custom_agglom(
         fit_on = upscaled
 
     fit_on_shape = fit_on.shape
+    if crop_time is not None:
+        fit_on = fit_on[:, crop_time[0]:crop_time[1]]
     if smooth_times is True:
         if kernel is None:
             if "sample_rate" in kwargs:
@@ -78,38 +81,43 @@ def custom_agglom(
         )
         for i in range(num_clusts)
     ]
-    initial_prediction_times = np.array(
-        [
-            np.ma.average(
-                np.ma.masked_array(inputdata, mask=initial_masks[i]), axis=(1, 2)
-            )
-            for i in range(num_clusts)
-        ]
-    )
-    # ensure the results are soreted by maxabs
-    mapping = np.argsort(np_ext.maxabs(initial_prediction_times, axis=1))
-    prediction_map = mapping[
-        initial_prediction_map
-    ]  # .reshape(original_shape[1], original_shape[2])
+    # # Fetch those times so we can check polarity etc
+    # initial_prediction_times = np.array(
+    #     [
+    #         np.ma.average(
+    #             np.ma.masked_array(inputdata, mask=initial_masks[i]), axis=(1, 2)
+    #         )
+    #         for i in range(num_clusts)
+    #     ]
+    # )
+    # # ensure the results are soreted by maxabs
+    # mapping = np.argsort(np_ext.maxabs(np.abs(initial_prediction_times), axis=1))
+    # prediction_map = mapping[
+    #     initial_prediction_map
+    # ]  # .reshape(original_shape[1], original_shape[2])
+    
+    prediction_map = initial_prediction_map
     # cleans up prediction map
-    prediction_map = np.nansum(
-        np.array(
-            [
-                np.where(
-                    skimage.morphology.remove_small_objects(
-                        skimage.morphology.remove_small_holes(
-                            prediction_map == i, island_size_min
-                        ),
-                        island_size_min,
-                    ),
-                    i,
-                    np.nan,
-                )
-                for i in range(num_clusts)
-            ]
-        ),
-        axis=0,
-    )
+    # prediction_map = np.nansum(
+    #     np.array(
+    #         [
+    #             np.where(
+    #                 skimage.morphology.remove_small_objects(
+    #                     skimage.morphology.remove_small_holes(
+    #                         prediction_map == i, island_size_min
+    #                     ),
+    #                     island_size_min,
+    #                 ),
+    #                 i,
+    #                 np.nan,
+    #             )
+    #             for i in range(num_clusts)
+    #         ]
+    #     ),
+    #     axis=0,
+    # )
+    if len(np.unique(prediction_map)) > num_clusts:
+        raise ValueError(f"Some clusters have been merged incorrectly, causing num_clusts < {num_clusts}. Manual fix required. Consider lowering island_size_min for now.")
     if plot_demo is True:
         prediction_times = extract_times(prediction_map, inputdata, **kwargs)
         # Store cluster centers
@@ -128,12 +136,11 @@ def custom_agglom(
         ax[5].plot(prediction_times.T)
         ax[6].imshow(pygor.strf.spatial.collapse_3d(inputdata), cmap = "Greys_r")
         ax[6].imshow(prediction_map, cmap = cmap, alpha = 0.45)
-        titles = ["Space_collapse", "Raw", "Convolved", "Kernel", "MaxVarClusts", "AllClusts", "ClustSpatial"]
+        titles = ["Space_collapse", "Raw", "Processed", "Kernel", "MaxVarClusts", "AllClusts", "ClustSpatial"]
         for n, i in enumerate(ax):
             i.set_title(titles[n])
         plt.show()
     return prediction_map
-
 
 def get_corrcoef_combinations_optimized_with_labels(
     times, similarity_thresh=0.75, debug_return=False
@@ -157,7 +164,6 @@ def get_corrcoef_combinations_optimized_with_labels(
     adj_matrix[similar_pairs[:, 0], similar_pairs[:, 1]] = True
     adj_matrix |= adj_matrix.T  # Symmetric graph
     labels = np.zeros(n, dtype=int) - 1  # -1 indicates unvisited
-
     current_label = 0
     label_changes = {}  # Track how old labels map to new ones
     for node in range(n):
@@ -184,7 +190,6 @@ def get_corrcoef_combinations_optimized_with_labels(
     else:
         return merged_traces, label_changes
 
-
 def extract_times(prediction_map, inputdata, similarity_merge = True, similarity_threhsold = .75):
     num_clusts = len(np.unique(prediction_map))
     if prediction_map.shape != inputdata.shape[1:]:
@@ -207,6 +212,18 @@ def extract_times(prediction_map, inputdata, similarity_merge = True, similarity
             for i in range(num_clusts)
         ]
     )
+
+    # ensure the results are soreted by maxabs --> BUG This used to be in custom_agglom and seemed to work there 
+    mapping = np.argsort(np_ext.maxabs((prediction_times), axis=1))
+    prediction_map[:] = mapping[
+        prediction_map
+    ]  # .reshape(original_shape[1], original_shape[2])
+
+    # magnitude_absmax = pygor.np_ext.maxabs(prediction_times, axis=1)
+    # largest_magnitude_idx = np.argmax(np.abs(magnitude_absmax))
+    # prediction_times = prediction_times[np.argsort(magnitude_absmax)]
+    # print(magnitude_absmax, largest_magnitude_idx)
+
     if similarity_merge:
         prediction_times, label_changes = get_corrcoef_combinations_optimized_with_labels(prediction_times, similarity_threhsold)
         if label_changes is not None:
@@ -219,7 +236,20 @@ def cs_segment_demo(inputdata, **kwargs):
     pygor.strf.cs_segment.custom_agglom(inputdata, plot_demo=True, **kwargs)
 
 def cs_segment(plot = False):
-
-
-        # plt.show()
+    # plt.show()
     pass
+
+"""
+TODO
+- When merging clusters, especially time course, ensure that there are 3 arrays to end with
+- The arrays are: positive, negative, noise 
+- If no noise can be isolated, then set a array of np.zeros(len) and mask it --> np.ma.array
+- Polarity and determining noise from signal can be ambigious, so strategy is:
+    - 1. Get the max amplitude cluster (sign is arbitrary)
+    - 2. Determine the cluster that is most anti-correlated, designate this as the opposite cluster
+    - 3. Then merge clusters together based on correlation and cumulative distance (work in notebook)
+
+Bugs:
+- IF smooth_times = True, sometimes you get a phanthom cluster, no clue what it is --> due to overlap in new maps after removing holes 
+- Assigning argsort on line 217 doesnt work as expected, but used to work when in custom_agglom
+"""
