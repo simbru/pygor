@@ -8,6 +8,7 @@ import pygor.np_ext as np_ext
 import pygor.np_ext
 import pygor.strf.spatial
 
+
 def custom_agglom(
     inputdata,
     n_clusters=3,
@@ -35,7 +36,7 @@ def custom_agglom(
 
     fit_on_shape = fit_on.shape
     if crop_time is not None:
-        fit_on = fit_on[:, crop_time[0]:crop_time[1]]
+        fit_on = fit_on[:, crop_time[0] : crop_time[1]]
     if smooth_times is True:
         if kernel is None:
             if "sample_rate" in kwargs:
@@ -95,7 +96,7 @@ def custom_agglom(
     # prediction_map = mapping[
     #     initial_prediction_map
     # ]  # .reshape(original_shape[1], original_shape[2])
-    
+
     prediction_map = initial_prediction_map
     # cleans up prediction map
     # prediction_map = np.nansum(
@@ -117,33 +118,50 @@ def custom_agglom(
     #     axis=0,
     # )
     if len(np.unique(prediction_map)) > num_clusts:
-        raise ValueError(f"Some clusters have been merged incorrectly, causing num_clusts < {num_clusts}. Manual fix required. Consider lowering island_size_min for now.")
+        raise ValueError(
+            f"Some clusters have been merged incorrectly, causing num_clusts < {num_clusts}. Manual fix required. Consider lowering island_size_min for now."
+        )
     if plot_demo is True:
         prediction_times = extract_times(prediction_map, inputdata, **kwargs)
         # Store cluster centers
-        fig, ax = plt.subplots(1, 7, figsize = (20, 2))
-        num_clusts = len(np.unique(prediction_map)) # update num_clusts after potential merges
+        fig, ax = plt.subplots(1, 7, figsize=(20, 2))
+        num_clusts = len(
+            np.unique(prediction_map)
+        )  # update num_clusts after potential merges
         colormap = plt.cm.tab10  # Use the entire Set1 colormap
         cmap = plt.cm.colors.ListedColormap([colormap(i) for i in range(num_clusts)])
         space_repr = pygor.strf.spatial.collapse_3d(inputdata)
         ax[0].imshow(space_repr)
-        ax[1].plot(inputdata_reshaped, alpha = 0.05, c = "black")
-        ax[2].plot(fit_on.T, alpha = 0.05, c = "black")
-        top_3 = np.argsort(np.std(prediction_times, axis = 1))[-2:]
+        ax[1].plot(inputdata_reshaped, alpha=0.05, c="black")
+        ax[2].plot(fit_on.T, alpha=0.05, c="black")
+        top_3 = np.argsort(np.std(prediction_times, axis=1))[-2:]
         if kernel is not None:
-            ax[3].plot(kernel[0])#first index because of repeat for vectorised operation
+            ax[3].plot(
+                kernel[0]
+            )  # first index because of repeat for vectorised operation
         ax[4].plot(prediction_times[top_3].T)
         ax[5].plot(prediction_times.T)
-        ax[6].imshow(pygor.strf.spatial.collapse_3d(inputdata), cmap = "Greys_r")
-        ax[6].imshow(prediction_map, cmap = cmap, alpha = 0.45)
-        titles = ["Space_collapse", "Raw", "Processed", "Kernel", "MaxVarClusts", "AllClusts", "ClustSpatial"]
+        ax[6].imshow(pygor.strf.spatial.collapse_3d(inputdata), cmap="Greys_r")
+        ax[6].imshow(prediction_map, cmap=cmap, alpha=0.45)
+        titles = [
+            "Space_collapse",
+            "Raw",
+            "Processed",
+            "Kernel",
+            "MaxVarClusts",
+            "AllClusts",
+            "ClustSpatial",
+        ]
         for n, i in enumerate(ax):
             i.set_title(titles[n])
         plt.show()
     return prediction_map
 
-def get_corrcoef_combinations_optimized_with_labels(
-    times, similarity_thresh=0.75, debug_return=False
+
+def merge_cs_seg(
+    times,
+    similarity_thresh,
+    debug_return=False,
 ):
     traces_correlation = np.corrcoef(times)
     np.fill_diagonal(traces_correlation, np.nan)
@@ -190,7 +208,15 @@ def get_corrcoef_combinations_optimized_with_labels(
     else:
         return merged_traces, label_changes
 
-def extract_times(prediction_map, inputdata, similarity_merge = True, similarity_threhsold = .75):
+
+def extract_times(
+    prediction_map,
+    inputdata,
+    similarity_merge=True,
+    similarity_threhsold=0.95,
+    order_strategy="corrcoef",
+    inplace_prediction_remap=True,
+):
     num_clusts = len(np.unique(prediction_map))
     if prediction_map.shape != inputdata.shape[1:]:
         raise ValueError(
@@ -212,39 +238,66 @@ def extract_times(prediction_map, inputdata, similarity_merge = True, similarity
             for i in range(num_clusts)
         ]
     )
-
-    # ensure the results are soreted by maxabs --> BUG This used to be in custom_agglom and seemed to work there 
-    mapping = np.argsort(np_ext.maxabs((prediction_times), axis=1))
-    prediction_map[:] = mapping[
-        prediction_map
-    ]  # .reshape(original_shape[1], original_shape[2])
-
-    # magnitude_absmax = pygor.np_ext.maxabs(prediction_times, axis=1)
-    # largest_magnitude_idx = np.argmax(np.abs(magnitude_absmax))
-    # prediction_times = prediction_times[np.argsort(magnitude_absmax)]
-    # print(magnitude_absmax, largest_magnitude_idx)
-
     if similarity_merge:
-        prediction_times, label_changes = get_corrcoef_combinations_optimized_with_labels(prediction_times, similarity_threhsold)
+        prediction_times, label_changes = merge_cs_seg(
+            prediction_times, similarity_threhsold
+        )
         if label_changes is not None:
             # Change prediction_map array directly, not on copy
             for key, value in label_changes.items():
                 prediction_map[np.isin(prediction_map, value)] = key
-    return prediction_times
+    # if distance_merge:
+
+    if order_strategy == "sorted":
+        # Ensure the results are sorted by maxabs
+        maxabs = np_ext.maxabs(prediction_times, axis=1)
+        mapping = np.argsort(maxabs)
+        # Sort prediction_times
+        prediction_times = prediction_times[mapping]
+        if inplace_prediction_remap:
+            # Apply the inverse mapping to prediction_map to reflect the new order
+            prediction_map[:] = np.argsort(mapping)[prediction_map]
+        """TODO: Needs "ghost" trace if no noise can be found, such that you always get 3 traces"""
+        return prediction_times
+    if order_strategy == "corrcoef":
+        # Get the correlation matrix
+        corrcoef = np.corrcoef(prediction_times)
+        # find trace with max amplitude
+        maxabs_ampl_trace_idx = np.argmax(
+            np.abs(pygor.np_ext.maxabs(prediction_times, axis=1))
+        )
+        # based on that trace, which traces does it correlate with?
+        corrs_with = corrcoef[maxabs_ampl_trace_idx]
+        # Sort them by degree of correlation (backwards because we want to start with our most correlated as the center candidate)
+        sorted_corr_idxs = np.argsort(corrs_with)[::-1]
+        if inplace_prediction_remap:
+            mapping = sorted_corr_idxs
+            # Apply the inverse mapping to prediction_map to reflect the new order
+            prediction_map[:] = np.argsort(mapping)[prediction_map]
+        return prediction_times[sorted_corr_idxs]
+    if order_strategy == None:
+        return prediction_times
+    else:
+        raise ValueError(
+            "order_strategy must be one of 'polarity', 'corrcoef', or None"
+        )
+
 
 def cs_segment_demo(inputdata, **kwargs):
     pygor.strf.cs_segment.custom_agglom(inputdata, plot_demo=True, **kwargs)
 
-def cs_segment(plot = False):
+
+def cs_segment(plot=False):
     # plt.show()
     pass
 
+
 """
 TODO
-- When merging clusters, especially time course, ensure that there are 3 arrays to end with
-- The arrays are: positive, negative, noise 
-- If no noise can be isolated, then set a array of np.zeros(len) and mask it --> np.ma.array
-- Polarity and determining noise from signal can be ambigious, so strategy is:
+- [x] When merging clusters, especially time course, ensure that there are 3 arrays to end with
+- [X] The arrays are ordered: positive, negative, noise 
+- [ ] If no noise can be isolated, then set a array of np.zeros(len) and mask it --> np.ma.array
+- [ ] Polarity and determining noise from signal can in some cases be ambigious, so strategy is:
     - 1. Get the max amplitude cluster (sign is arbitrary)
     - 2. Determine the cluster that is most anti-correlated, designate this as the opposite cluster
     - 3. Then merge clusters together based on correlation and cumulative distance (work in notebook)
