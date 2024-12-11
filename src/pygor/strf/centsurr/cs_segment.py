@@ -3,14 +3,31 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import scipy.signal
 import sklearn.cluster
-import skimage.morphology
+# import skimage.morphology
 import pygor.np_ext as np_ext
 import pygor.np_ext
 import pygor.strf.spatial
 
+def gen_defualt_params():
+    segmentation_params = {
+        "n_clusters": 3,
+        "smooth_times": False,
+        "kernel": None,
+        "centre_on_zero": True,
+        "upscale": True,
+        "island_size_min": 4,
+        "crop_time": (8, -1)
+    }
+    extract_params = {
+        "similarity_merge" : True,
+        "similarity_threhsold" : 0.95,
+        "order_strategy"  : "corrcoef",
+        "inplace_prediction_remap" : True,
+    }
+    return segmentation_params, extract_params
 
-def custom_agglom(
-    inputdata,
+def segmentation_algorithm(
+    inputdata_3d,
     n_clusters=3,
     smooth_times=False,
     kernel=None,
@@ -21,8 +38,8 @@ def custom_agglom(
     crop_time=None,
     **kwargs,
 ):
-    original_shape = inputdata.shape
-    inputdata_reshaped = inputdata.reshape(original_shape[0], -1)
+    original_shape = inputdata_3d.shape
+    inputdata_reshaped = inputdata_3d.reshape(original_shape[0], -1)
     fit_on = inputdata_reshaped.T
     # predict_on = inputdata_reshaped.T
 
@@ -62,7 +79,7 @@ def custom_agglom(
         fit_on_shape = fit_on.shape
         # Scale to original time-course amplitude after convolution (only needed if fit AND predict instead of fit_predict)
         scaler = sklearn.preprocessing.MinMaxScaler(
-            feature_range=(np.min(inputdata), np.max(inputdata))
+            feature_range=(np.min(inputdata_3d), np.max(inputdata_3d))
         )
         fit_on = scaler.fit_transform(fit_on.reshape(-1, 1)).reshape(fit_on_shape)
     if centre_on_zero is True:
@@ -74,19 +91,19 @@ def custom_agglom(
     num_clusts = len(np.unique(initial_prediction_map))
 
     # Generate timecourses for each cluster
-    initial_masks = [
-        np.repeat(
-            np.expand_dims(np.where(initial_prediction_map == i, 0, 1), axis=0),
-            original_shape[0],
-            axis=0,
-        )
-        for i in range(num_clusts)
-    ]
+    # initial_masks = [
+    #     np.repeat(
+    #         np.expand_dims(np.where(initial_prediction_map == i, 0, 1), axis=0),
+    #         original_shape[0],
+    #         axis=0,
+    #     )
+    #     for i in range(num_clusts)
+    # ]
     # # Fetch those times so we can check polarity etc
     # initial_prediction_times = np.array(
     #     [
     #         np.ma.average(
-    #             np.ma.masked_array(inputdata, mask=initial_masks[i]), axis=(1, 2)
+    #             np.ma.masked_array(inputdata_3d, mask=initial_masks[i]), axis=(1, 2)
     #         )
     #         for i in range(num_clusts)
     #     ]
@@ -122,7 +139,7 @@ def custom_agglom(
             f"Some clusters have been merged incorrectly, causing num_clusts < {num_clusts}. Manual fix required. Consider lowering island_size_min for now."
         )
     if plot_demo is True:
-        prediction_times = extract_times(prediction_map, inputdata, **kwargs)
+        prediction_times = extract_times(prediction_map, inputdata_3d, **kwargs)
         # Store cluster centers
         fig, ax = plt.subplots(1, 7, figsize=(20, 2))
         num_clusts = len(
@@ -130,7 +147,7 @@ def custom_agglom(
         )  # update num_clusts after potential merges
         colormap = plt.cm.tab10  # Use the entire Set1 colormap
         cmap = plt.cm.colors.ListedColormap([colormap(i) for i in range(num_clusts)])
-        space_repr = pygor.strf.spatial.collapse_3d(inputdata)
+        space_repr = pygor.strf.spatial.collapse_3d(inputdata_3d)
         ax[0].imshow(space_repr)
         ax[1].plot(inputdata_reshaped, alpha=0.05, c="black")
         ax[2].plot(fit_on.T, alpha=0.05, c="black")
@@ -141,7 +158,7 @@ def custom_agglom(
             )  # first index because of repeat for vectorised operation
         ax[4].plot(prediction_times[top_3].T)
         ax[5].plot(prediction_times.T)
-        ax[6].imshow(pygor.strf.spatial.collapse_3d(inputdata), cmap="Greys_r")
+        ax[6].imshow(pygor.strf.spatial.collapse_3d(inputdata_3d), cmap="Greys_r")
         ax[6].imshow(prediction_map, cmap=cmap, alpha=0.45)
         titles = [
             "Space_collapse",
@@ -211,18 +228,18 @@ def merge_cs_seg(
 
 def extract_times(
     prediction_map,
-    inputdata,
+    inputdata_3d,
     similarity_merge=True,
     similarity_threhsold=0.95,
     order_strategy="corrcoef",
     inplace_prediction_remap=True,
 ):
     num_clusts = len(np.unique(prediction_map))
-    if prediction_map.shape != inputdata.shape[1:]:
+    if prediction_map.shape != inputdata_3d.shape[1:]:
         raise ValueError(
-            "prediction_map must be the same XY shape as inputdata (:,x,y,)"
+            "prediction_map must be the same XY shape as inputdata_3d (:,x,y,)"
         )
-    original_shape = inputdata.shape
+    original_shape = inputdata_3d.shape
     # Generate timecourses for each cluster again
     masks = [
         np.repeat(
@@ -234,7 +251,7 @@ def extract_times(
     ]
     prediction_times = np.array(
         [
-            np.ma.average(np.ma.masked_array(inputdata, mask=masks[i]), axis=(1, 2))
+            np.ma.average(np.ma.masked_array(inputdata_3d, mask=masks[i]), axis=(1, 2))
             for i in range(num_clusts)
         ]
     )
@@ -257,6 +274,7 @@ def extract_times(
         if inplace_prediction_remap:
             # Apply the inverse mapping to prediction_map to reflect the new order
             prediction_map[:] = np.argsort(mapping)[prediction_map]
+            # if 
         """TODO: Needs "ghost" trace if no noise can be found, such that you always get 3 traces"""
         return prediction_times
     if order_strategy == "corrcoef":
@@ -279,30 +297,38 @@ def extract_times(
         return prediction_times
     else:
         raise ValueError(
-            "order_strategy must be one of 'polarity', 'corrcoef', or None"
+            "order_strategy must be one of 'sorted', 'corrcoef', or None"
         )
 
 
-def cs_segment_demo(inputdata, **kwargs):
-    pygor.strf.cs_segment.custom_agglom(inputdata, plot_demo=True, **kwargs)
+def cs_segment_demo(inputdata_3d, **kwargs):
+    segmentation_algorithm(inputdata_3d, plot_demo=True, **kwargs)
 
-
-def cs_segment(plot=False):
-    # plt.show()
-    pass
+def run(d3_arr, plot=False, parameters = None, **kwargs):
+    if parameters is None:
+        segmentation_params, extract_params = gen_defualt_params()
+    for key, value in kwargs.items():
+        if key in segmentation_params.keys():
+            segmentation_params[key] = value
+    for key, value in kwargs.items():
+        if key in extract_params.keys():
+            extract_params[key] = value
+    segmented_map =segmentation_algorithm(d3_arr, **segmentation_params)
+    times_extracted =extract_times(segmented_map, d3_arr, **extract_params)
+    return segmented_map, times_extracted
 
 
 """
 TODO
-- [x] When merging clusters, especially time course, ensure that there are 3 arrays to end with
+- [X] When merging clusters, especially time course, ensure that there are 3 arrays to end with
 - [X] The arrays are ordered: positive, negative, noise 
 - [ ] If no noise can be isolated, then set a array of np.zeros(len) and mask it --> np.ma.array
-- [ ] Polarity and determining noise from signal can in some cases be ambigious, so strategy is:
+- [/] Polarity and determining noise from signal can in some cases be ambigious, so strategy is:
     - 1. Get the max amplitude cluster (sign is arbitrary)
     - 2. Determine the cluster that is most anti-correlated, designate this as the opposite cluster
     - 3. Then merge clusters together based on correlation and cumulative distance (work in notebook)
+- [ ] Distance merge
 
 Bugs:
 - IF smooth_times = True, sometimes you get a phanthom cluster, no clue what it is --> due to overlap in new maps after removing holes 
-- Assigning argsort on line 217 doesnt work as expected, but used to work when in custom_agglom
 """
