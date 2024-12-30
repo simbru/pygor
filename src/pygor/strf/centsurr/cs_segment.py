@@ -2,6 +2,7 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 import scipy.signal
+import scipy.ndimage
 import sklearn.cluster
 import skimage
 # import skimage.morphology
@@ -9,23 +10,57 @@ import pygor.np_ext as np_ext
 import pygor.np_ext
 import pygor.strf.spatial
 
+def fractional_subsample(video, factor):
+    """
+    Subsamples a 3D array (video) with fractional pixel averaging.
+    
+    Parameters:
+    - video: 3D numpy array of shape (t, h, w)
+    - factor: Fractional pixel size for averaging (e.g., 1.2)
+    
+    Returns:
+    - 3D numpy array of the same shape as the input
+    """
+    # Upsample by the inverse of the fractional factor (e.g., for 1.2, upsample by 1/1.2)
+    upsample_factor = 1 / factor
+    upsampled = scipy.ndimage.zoom(video, zoom=(1, upsample_factor, upsample_factor), order=1)
+
+    # Create a uniform kernel for averaging
+    kernel_size = int(np.ceil(factor))  # Kernel size that covers the fractional range
+    kernel = np.ones((1, kernel_size, kernel_size)) / (kernel_size**2)
+
+    # Apply convolution (spatial axes only)
+    smoothed = scipy.signal.fftconvolve(upsampled, kernel, axes=(1, 2), mode="same")
+
+    # Downsample back to original dimensions
+    downsampled = scipy.ndimage.zoom(smoothed, zoom=(1, factor, factor), order=1)
+
+    # Resize to ensure exact original shape
+    resized = scipy.ndimage.zoom(downsampled, zoom=(1, video.shape[1] / downsampled.shape[1], video.shape[2] / downsampled.shape[2]), order=1)
+
+    return resized
+
 def segmentation_algorithm(
     inputdata_3d,
-    n_clusters=3,
-    smooth_times=False,
+    smooth_times=None,
+    smooth_space=1.05,
     kernel=None,
     centre_on_zero=True,
-    upscale=True,
-    island_size_min=4,
+    upscale=None,
     plot_demo=False,
     crop_time=(8, -1),
     **kwargs,
 ):
+    n_clusters=3
     # Keep track of original shape
     original_shape = inputdata_3d.shape
+    if smooth_space is not None:
+        inputdata_3d = fractional_subsample(inputdata_3d, smooth_space)
     # Reshape to flat array
     inputdata_reshaped = inputdata_3d.reshape(original_shape[0], -1)
     fit_on = inputdata_reshaped.T
+    if crop_time is not None:
+        fit_on = fit_on[:, crop_time[0] : crop_time[1]]
     # Optionally upscale the flattened array by interpolating
     if upscale is not None:
         times_flat = fit_on.flatten()
@@ -34,27 +69,28 @@ def segmentation_algorithm(
             np.arange(0, new_len), np.linspace(0, new_len, len(times_flat)), times_flat
         ).reshape(fit_on.shape[0], -1)
         fit_on = upscaled
+        # fit_on = np.expand_dims(fit_on, 0)
     # Make a note of the new shape
     fit_on_shape = fit_on.shape
     # Optionally crop timeseries to emphasise differences over given time window
-    if crop_time is not None:
-        fit_on = fit_on[:, crop_time[0] : crop_time[1]]
+
     # Optionally smooth timeseries
-    if smooth_times is True:
+    if smooth_times is not None:
         if kernel is None:
-            if "sample_rate" in kwargs:
-                sample_rate = kwargs["sample_rate"]
-            else:
-                sample_rate = 10
-            # create a Hanning kernel 1/50th of a second wide --> math needs working out TODO
-            if "kernel_width_seconds" in kwargs:
-                kernel_width_seconds = kwargs["kernel_width_seconds"]
-            else:
-                kernel_width_seconds = 1
-            if upscale is not None:
-                kernel_size_points = int(kernel_width_seconds * sample_rate) * upscale
-            else:
-                kernel_size_points = int(kernel_width_seconds * sample_rate)
+            # if "sample_rate" in kwargs:
+            #     sample_rate = kwargs["sample_rate"]
+            # else:
+            #     sample_rate = 10
+            # # create a Hanning kernel 1/50th of a second wide --> math needs working out TODO
+            # if "kernel_width_seconds" in kwargs:
+            #     kernel_width_seconds = kwargs["kernel_width_seconds"]
+            # else:
+            #     kernel_width_seconds = 1
+            # if upscale is not None:
+            #     kernel_size_points = int(kernel_width_seconds * sample_rate) * upscale
+            # else:
+            #     kernel_size_points = int(kernel_width_seconds * sample_rate)
+            kernel_size_points = int(smooth_times)
             kernel = np.blackman(
                 kernel_size_points
             )  
@@ -215,19 +251,13 @@ def update_prediction_map(prediction_map, mapping, inplace = False):
     -------
     updated_prediction_map : array-like
         The updated prediction map with the new mapping applied.
-    """
-    
-    # mapping = mapping
-    print("inp", mapping)
-
+    """    
     if isinstance(mapping, np.ndarray) is False:
         mapping = np.array(mapping)
     if inplace is False:
         prediction_map = mapping[prediction_map]
     else:
-        prediction_map[:] = mapping[prediction_map]
-    
-    print("out", np.unique(prediction_map))
+        prediction_map[:] = mapping[prediction_map]    
     return prediction_map
 
 def extract_times(
@@ -283,13 +313,18 @@ def extract_times(
     if reorder_strategy == "sorted":
         if similarity_merge:
             do_merge()
-        # Ensure the results are sorted by maxabs
-        maxabs = np_ext.maxabs(prediction_times, axis=1)
-        mapping = np.ma.argsort(maxabs)
+        # Order by reverse absolute max
+        maxabs = np.abs(np_ext.maxabs(prediction_times, axis=1)) *-1
+        idx = np.argsort(maxabs)
         # Sort prediction_times
-        prediction_times = prediction_times[mapping]
-        """TODO: Needs "ghost" trace if no noise can be found, such that you always get 3 traces"""
-        new_prediction_times = prediction_times
+        new_prediction_times = prediction_times[idx]
+        # Map changes to reflect changes in prediction map
+        #if the last trace is masked, it means there are only 2 signals, 
+        #so don't account for the 3rd index
+        if np.ma.is_masked(new_prediction_times[-1]):
+            mapping = idx[:2]
+        else:
+            mapping = np.argsort(idx)
     # Order the timecourses by their correlation to the absolute max trace
     elif reorder_strategy == "corrcoef":
         if similarity_merge:
@@ -297,37 +332,39 @@ def extract_times(
         # Get the correlation matrix
         corrcoef = np.ma.corrcoef(prediction_times)
         # find trace with max amplitude
-        maxabs_ampl_trace_idx = np.ma.argmax(
-            np.abs(pygor.np_ext.maxabs(prediction_times, axis=1))
-        )
+        maxabs_ampl_trace_idx = np.ma.argmax(np.abs(
+            (pygor.np_ext.maxabs(prediction_times, axis=1))
+        ))
         # based on that trace, which traces does it correlate with?
-        corrs_with = corrcoef[maxabs_ampl_trace_idx]
+        corrs_with = corrcoef[maxabs_ampl_trace_idx]*-1
         # Sort them by degree of correlation (backwards because we want to start with our most correlated as the center candidate)
-        sorted_corr_idxs = np.argsort(corrs_with)
-        mapping = np.argsort(sorted_corr_idxs)
-        # mapping = np.roll(np.argsort(corrs_with), 1)
-        # if similarity_merge:
-        #     do_merge()
-        # mapping = np.argsort(np.max(np.abs(prediction_times), axis = 1))
-        new_prediction_times = prediction_times[sorted_corr_idxs]
+        if np.ma.is_masked(prediction_times[0]):
+            idx = np.argsort(corrs_with)
+            mapping = idx[:2]
+        else:
+            idx = np.argsort(np.abs(corrs_with))[::-1]
+            mapping = np.argsort(idx)
+
+        new_prediction_times = prediction_times[idx]
+
     elif reorder_strategy == "pixcount":
         if similarity_merge:
             do_merge()
-        # Sort first and second index by the number of pixels per cluster
+        # Get number of pixels in map for each cluster
         num_pix_per_cluster = np.bincount(prediction_map.flatten())
-        if np.ma.is_masked(prediction_times[0]): # add 1 onto indices to account for 0 pixels in background
+        # Check if first index in prediction_times is masked after merge
+        if np.ma.is_masked(prediction_times[0]):
+            #in this case, add 1 onto indices to account for 0 pixels in background
             idx = np.argsort(num_pix_per_cluster) + 1
-            # idx = np.insert(idx, 2, 0)
         else:
             idx = np.argsort(num_pix_per_cluster)
-        # Only merge after original idxs have been established
         # Order by number of pixels
         mapping = np.argsort(idx)
-        if np.ma.is_masked(prediction_times[0]): # make sure we fetch the last zero indices in this case
+        # Again, if first index is masked we need to account for this missing index
+        if np.ma.is_masked(prediction_times[0]): 
             idx = np.insert(idx, 2, 0)
-        # Sort by the number of pixels per cluster
+        # Fetch timecourses accordingly
         new_prediction_times = prediction_times[idx]
-        print("a", np.unique(prediction_map))
     elif reorder_strategy is None:
         if similarity_merge:
             do_merge()
@@ -340,7 +377,6 @@ def extract_times(
         )
     if reorder_strategy is not None and mapping is not None:
         update_prediction_map(prediction_map, mapping, inplace = True)
-    print("b", np.unique(prediction_map))
     return new_prediction_times
 
 def cs_segment_demo(inputdata_3d, **kwargs):
@@ -376,35 +412,56 @@ def run(d3_arr, plot=False, segmentation_params = {}, extract_params = {}):
             np.ma.unique(segmented_map)
         )  # update num_clusts after potential merges
         num_clusts = times_extracted.shape[0]
+        # Specify colormap
         colormap = plt.cm.tab10  # Use the entire Set1 colormap
         # Find which indices correspond to non-zero clusters
         idx = np.squeeze(np.arange(num_clusts)[np.count_nonzero(times_extracted, axis = 1).data != 0])
         # Genreate the colormap RGB values accordingly
-        cmap_vals = np.array([colormap(i) for i in range(num_clusts)])
+        if extract_params["reorder_strategy"] is None:
+            cmap_vals = np.array([colormap(i) for i in range(num_clusts)])
+        else:
+            cmap_vals = [[0, 1, 1,],
+                        [1, 0, 1,],
+                        [.75, .75, .75]]
+        cmap_vals = np.array(cmap_vals)
         cmap = plt.cm.colors.ListedColormap(cmap_vals[idx])
         space_repr = pygor.strf.spatial.collapse_3d(d3_arr)
         # Time components
+        counter = 0
         for i in range(len(times_extracted)):
             if np.all(np.ma.is_masked(times_extracted[i])) == True:
                 ax[1].plot(times_extracted[i].data, label = f"Cluster {i}", ls = "dashed", c = cmap_vals[i])
             else:
+                counter += 1
                 ax[1].plot(times_extracted[i], label = f"Cluster {i}", c = cmap_vals[i])
         ax[1].legend()
         # Space components
         ax[0].imshow(
             space_repr, cmap = "Greys_r", 
-            vmin = -np.max(np.abs(d3_arr)), 
-            vmax = np.max(np.abs(d3_arr)),
+            vmin = -np.max(np.abs(space_repr)), 
+            vmax = np.max(np.abs(space_repr)),
             origin = "lower",
         )
         seg = ax[0].imshow(
             segmented_map, cmap = cmap, 
             origin = "lower",
-            alpha = 0.7
+            alpha = 0.25
         )
-        for (j,i),label in np.ndenumerate(segmented_map):
-            ax[0].text(i,j,label,ha='center',va='center', size = 5)
-        plt.colorbar(seg, ax = ax[0])
+        # labels for debug
+        # for (j,i),label in np.ndenumerate(segmented_map):
+        #     ax[0].text(i,j,label,ha='center',va='center', size = 5)
+        cbar = plt.colorbar(seg, ax = ax[0])
+        tick_locs = np.flip(np.unique(segmented_map))
+        print(tick_locs)
+        cbar.set_ticks(tick_locs)
+        if extract_params["reorder_strategy"] is not None:
+            cbar.ax.invert_yaxis()
+            standard_labels = ["noise", "surr", "centre"]
+            
+
+            labels = [standard_labels[i] for i in range(counter)]
+            # print(labels, np.arange(counter, num_clusts))
+            cbar.set_ticklabels(labels)
         plt.show()
     return segmented_map, times_extracted
 
