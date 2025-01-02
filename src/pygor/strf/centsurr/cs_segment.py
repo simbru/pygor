@@ -10,7 +10,7 @@ import pygor.np_ext as np_ext
 import pygor.np_ext
 import pygor.strf.spatial
 
-def fractional_subsample(video, factor):
+def fractional_subsample(video, factor, kernel = "gaussian"):
     """
     Subsamples a 3D array (video) with fractional pixel averaging.
     
@@ -23,12 +23,20 @@ def fractional_subsample(video, factor):
     """
     # Upsample by the inverse of the fractional factor (e.g., for 1.2, upsample by 1/1.2)
     upsample_factor = 1 / factor
+    # upsample_factor = factor
     upsampled = scipy.ndimage.zoom(video, zoom=(1, upsample_factor, upsample_factor), order=1)
 
-    # Create a uniform kernel for averaging
-    kernel_size = int(np.ceil(factor))  # Kernel size that covers the fractional range
-    kernel = np.ones((1, kernel_size, kernel_size)) / (kernel_size**2)
-
+    if kernel == "uniform":
+        # Create a uniform kernel for averaging
+        kernel_size = int(np.ceil(factor))  # Kernel size that covers the fractional range
+        kernel = np.ones((1, kernel_size, kernel_size)) / (kernel_size**2)
+    elif kernel == "gaussian":
+        # Create a Gaussian kernel for averaging
+        kernel_size = int(np.ceil(factor))  # Kernel size that covers the fractional range
+        sigma = kernel_size
+        kernel = np.expand_dims(skimage.morphology.disk(sigma), 0)
+    else:
+        raise ValueError("Invalid kernel type. Must be 'uniform' or 'gaussian'.")
     # Apply convolution (spatial axes only)
     smoothed = scipy.signal.fftconvolve(upsampled, kernel, axes=(1, 2), mode="same")
 
@@ -42,72 +50,122 @@ def fractional_subsample(video, factor):
 
 def segmentation_algorithm(
     inputdata_3d,
-    smooth_times=None,
-    smooth_space=1.05,
-    kernel=None,
+    smooth_times=6, #6
+    smooth_space=2, #1
+    upscale_space = 2,
+    upscale_time = None,
     centre_on_zero=True,
-    upscale=None,
+    time_upscale=None,
+    space_upsacle=None,
     plot_demo=False,
-    crop_time=(8, -1),
+    crop_time=None,
     **kwargs,
 ):
+    
+    """
+    TODO:
+    Rewrite such that smooth times and smoot hspace define a 
+    z x n x n kernel that is fft convolved with inputdata instead of 
+    mutliple steps of filtering. That way, if for example smooth_space is 
+    None but smooth_times is 10 the kernel will be 1 x 1 x 10.
+
+    Upscale is expensive so should be optional, but as a seperate parameter such
+    that it can for example upscale by 1.5x or 2x (should be fine) and then apply 
+    the kernel, and then downscale back to original size. 
+
+    Only then flatten and do as before. Crop first, obviously. 
+    """
     n_clusters=3
     # Keep track of original shape
     original_shape = inputdata_3d.shape
-    if smooth_space is not None:
-        inputdata_3d = fractional_subsample(inputdata_3d, smooth_space)
+    if plot_demo is True:
+        original_input = np.copy(inputdata_3d)
+    if upscale_space is not None or upscale_time is not None:
+        require_scaleback = True
+        if upscale_space is None:
+            upscale_space = 1
+        if upscale_time is None:
+            upscale_time = 1
+        scale = np.array((upscale_time, upscale_space, upscale_space))
+        inputdata_3d = scipy.ndimage.zoom(inputdata_3d, zoom=scale, order=1)
+        # scipy.ndimage.zoom(inputdata_3d, zoom=(upscale_time, upscale_space, upscale_space), order=1)
+        new_shape = inputdata_3d.shape
+    else:
+        require_scaleback = False
+    if smooth_space is not None or smooth_times is not None:
+        if smooth_space is None:
+            smooth_space = 1
+        if smooth_times is None:
+            smooth_times = 1
+        # Generate a kernel
+        kernel = np.ones((smooth_times, smooth_space, smooth_space))
+        # Convolve the data with the kernel
+        inputdata_3d = scipy.signal.fftconvolve(
+            inputdata_3d, kernel, mode="same", axes=(0, 1, 2))
+    if require_scaleback is True:
+        # Downscale back to original shape
+        inputdata_3d = scipy.ndimage.zoom(inputdata_3d, zoom=1/scale, order=1)
+        # Adjust the downscaled array to match the original shape
+        if inputdata_3d.shape != tuple(original_shape):
+            # Crop or pad to match the shape
+            cropped = inputdata_3d[:original_shape[0], :original_shape[1], :original_shape[2]]
+            pad_width = [(0, max(0, o - c)) for o, c in zip(original_shape, cropped.shape)]
+            inputdata_3d = np.pad(cropped, pad_width, mode='constant')[:original_shape[0], :original_shape[1], :original_shape[2]]
     # Reshape to flat array
     inputdata_reshaped = inputdata_3d.reshape(original_shape[0], -1)
     fit_on = inputdata_reshaped.T
+    # Optionally crop timeseries to emphasise differences over given time window
     if crop_time is not None:
         fit_on = fit_on[:, crop_time[0] : crop_time[1]]
+    # Optionally centre prediction time on zero
+    if centre_on_zero is True:
+        fit_on = fit_on - fit_on[:, [0]] - np.mean(fit_on, axis=1, keepdims=True)
     # Optionally upscale the flattened array by interpolating
-    if upscale is not None:
+    if time_upscale is not None:
         times_flat = fit_on.flatten()
-        new_len = np.prod(fit_on.shape) * upscale
+        new_len = np.prod(fit_on.shape) * time_upscale
         upscaled = np.interp(
             np.arange(0, new_len), np.linspace(0, new_len, len(times_flat)), times_flat
         ).reshape(fit_on.shape[0], -1)
         fit_on = upscaled
+
         # fit_on = np.expand_dims(fit_on, 0)
     # Make a note of the new shape
-    fit_on_shape = fit_on.shape
-    # Optionally crop timeseries to emphasise differences over given time window
+    # fit_on_shape = fit_on.shape
+    # if smooth_space is not None:
+    #     inputdata_3d = fractional_subsample(inputdata_3d, smooth_space)
+    # # Optionally smooth timeseries
+    # if smooth_times is not None:
+    #     if kernel is None:
+    #         # if "sample_rate" in kwargs:
+    #         #     sample_rate = kwargs["sample_rate"]
+    #         # else:
+    #         #     sample_rate = 10
+    #         # # create a Hanning kernel 1/50th of a second wide --> math needs working out TODO
+    #         # if "kernel_width_seconds" in kwargs:
+    #         #     kernel_width_seconds = kwargs["kernel_width_seconds"]
+    #         # else:
+    #         #     kernel_width_seconds = 1
+    #         # if upscale is not None:
+    #         #     kernel_size_points = int(kernel_width_seconds * sample_rate) * upscale
+    #         # else:
+    #         #     kernel_size_points = int(kernel_width_seconds * sample_rate)
+    #         kernel_size_points = int(smooth_times)
+    #         kernel = np.blackman(
+    #             kernel_size_points
+    #         )  
+    #         # bartlett, hanning, kaiser, hamming, blackman
+    #         # normalize the kernel such that it sums to 1
+    #         kernel = kernel / kernel.sum()
+    #     kernel = np.repeat([kernel], fit_on.shape[0], axis=0)
+    #     fit_on = scipy.signal.fftconvolve(fit_on, kernel, axes=1)
+    #     fit_on_shape = fit_on.shape
+    #     # Scale to original time-course amplitude after convolution (only if smooth_times)
+    #     scaler = sklearn.preprocessing.MinMaxScaler(
+    #         feature_range=(np.min(inputdata_3d), np.max(inputdata_3d))
+    #     )
+    #     fit_on = scaler.fit_transform(fit_on.reshape(-1, 1)).reshape(fit_on_shape)
 
-    # Optionally smooth timeseries
-    if smooth_times is not None:
-        if kernel is None:
-            # if "sample_rate" in kwargs:
-            #     sample_rate = kwargs["sample_rate"]
-            # else:
-            #     sample_rate = 10
-            # # create a Hanning kernel 1/50th of a second wide --> math needs working out TODO
-            # if "kernel_width_seconds" in kwargs:
-            #     kernel_width_seconds = kwargs["kernel_width_seconds"]
-            # else:
-            #     kernel_width_seconds = 1
-            # if upscale is not None:
-            #     kernel_size_points = int(kernel_width_seconds * sample_rate) * upscale
-            # else:
-            #     kernel_size_points = int(kernel_width_seconds * sample_rate)
-            kernel_size_points = int(smooth_times)
-            kernel = np.blackman(
-                kernel_size_points
-            )  
-            # bartlett, hanning, kaiser, hamming, blackman
-            # normalize the kernel such that it sums to 1
-            kernel = kernel / kernel.sum()
-        kernel = np.repeat([kernel], fit_on.shape[0], axis=0)
-        fit_on = scipy.signal.fftconvolve(fit_on, kernel, axes=1)
-        fit_on_shape = fit_on.shape
-        # Scale to original time-course amplitude after convolution (only if smooth_times)
-        scaler = sklearn.preprocessing.MinMaxScaler(
-            feature_range=(np.min(inputdata_3d), np.max(inputdata_3d))
-        )
-        fit_on = scaler.fit_transform(fit_on.reshape(-1, 1)).reshape(fit_on_shape)
-    # Optionally centre prediction time on zero
-    if centre_on_zero is True:
-        fit_on = fit_on - fit_on[:, [0]]
     # Perform clustering on fit_on array
     clusterfunc = sklearn.cluster.AgglomerativeClustering(n_clusters=n_clusters)
     initial_prediction_map = clusterfunc.fit_predict(fit_on).reshape(
@@ -140,7 +198,7 @@ def segmentation_algorithm(
             f"Some clusters have been merged incorrectly, causing num_clusts < {num_clusts}. Manual fix required. Consider lowering island_size_min for now."
         )
     if plot_demo is True:
-        prediction_times = extract_times(prediction_map, inputdata_3d, **kwargs)
+        prediction_times = extract_times(prediction_map, original_input, **kwargs)
         # Store cluster centers
         fig, ax = plt.subplots(1, 7, figsize=(20, 2))
         num_clusts = len(
@@ -148,15 +206,11 @@ def segmentation_algorithm(
         )  # update num_clusts after potential merges
         colormap = plt.cm.tab10  # Use the entire Set1 colormap
         cmap = plt.cm.colors.ListedColormap([colormap(i) for i in range(num_clusts)])
-        space_repr = pygor.strf.spatial.collapse_3d(inputdata_3d)
+        space_repr = pygor.strf.spatial.collapse_3d(original_input)
         ax[0].imshow(space_repr)
-        ax[1].plot(inputdata_reshaped, alpha=0.05, c="black")
+        ax[1].plot(original_input.reshape(original_shape[0], -1), alpha=0.05, c="black")
         ax[2].plot(fit_on.T, alpha=0.05, c="black")
         top_3 = np.argsort(np.std(prediction_times, axis=1))[-2:]
-        if kernel is not None:
-            ax[3].plot(
-                kernel[0]
-            )  # first index because of repeat for vectorised operation
         ax[4].plot(prediction_times[top_3].T)
         ax[5].plot(prediction_times.T)
         ax[6].imshow(pygor.strf.spatial.collapse_3d(inputdata_3d), cmap="Greys_r")
