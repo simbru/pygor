@@ -23,7 +23,7 @@ dependencies = [
     "pandas > 2.2.0",
     "seaborn",
     "scikit-learn",
-    "scikit-image",
+    "scikit-image>=0.25",
     "scipy",
     "dacite",
     "tifffile",
@@ -32,7 +32,6 @@ dependencies = [
     "ipywidgets",
     "ipykernel>=6.29.5",
     "statannotations>=0.4.4",
-    # "pygor" should not be self-referenced here
     "pywavelets>=1.7.0",
     "ruff>=0.8.0",
 ]
@@ -48,7 +47,7 @@ dev-dependencies = [
 ]
 
 [tool.uv.sources]
-statannotations = { git = "https://github.com/getzze/statannotations/", branch = "compat-seaborn-13" }
+# statannotations = { git = "https://github.com/getzze/statannotations/", branch = "compat-seaborn-13" }
 
 [build-system]
 requires = ["hatchling"]
