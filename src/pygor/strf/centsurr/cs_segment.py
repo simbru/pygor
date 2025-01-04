@@ -50,13 +50,13 @@ def fractional_subsample(video, factor, kernel = "gaussian"):
 
 def segmentation_algorithm(
     inputdata_3d,
-    smooth_times=6, #6
-    smooth_space=2, #1
-    upscale_space = 2,
-    upscale_time = None,
+    smooth_times=5, #6
+    smooth_space=4, #1
+    upscale_space=2,
+    upscale_time=2,
     centre_on_zero=True,
-    time_upscale=None,
-    space_upsacle=None,
+    # time_upscale=None,
+    # space_upsacle=None,
     plot_demo=False,
     crop_time=None,
     **kwargs,
@@ -74,6 +74,11 @@ def segmentation_algorithm(
     the kernel, and then downscale back to original size. 
 
     Only then flatten and do as before. Crop first, obviously. 
+
+    NOTE:
+    The time axis is dialated with upscaling, but the spatial axes get cropped afterwards.
+    This is to ensure consistent mapping of spatial components, yet including the whole 
+    temporal siganl (crop is after before upsampling).
     """
     n_clusters=3
     # Keep track of original shape
@@ -88,8 +93,6 @@ def segmentation_algorithm(
             upscale_time = 1
         scale = np.array((upscale_time, upscale_space, upscale_space))
         inputdata_3d = scipy.ndimage.zoom(inputdata_3d, zoom=scale, order=1)
-        # scipy.ndimage.zoom(inputdata_3d, zoom=(upscale_time, upscale_space, upscale_space), order=1)
-        new_shape = inputdata_3d.shape
     else:
         require_scaleback = False
     if smooth_space is not None or smooth_times is not None:
@@ -108,11 +111,11 @@ def segmentation_algorithm(
         # Adjust the downscaled array to match the original shape
         if inputdata_3d.shape != tuple(original_shape):
             # Crop or pad to match the shape
-            cropped = inputdata_3d[:original_shape[0], :original_shape[1], :original_shape[2]]
+            cropped = inputdata_3d[:, :original_shape[1], :original_shape[2]]
             pad_width = [(0, max(0, o - c)) for o, c in zip(original_shape, cropped.shape)]
-            inputdata_3d = np.pad(cropped, pad_width, mode='constant')[:original_shape[0], :original_shape[1], :original_shape[2]]
+            inputdata_3d = np.pad(cropped, pad_width, mode='constant')[:, :original_shape[1], :original_shape[2]]
     # Reshape to flat array
-    inputdata_reshaped = inputdata_3d.reshape(original_shape[0], -1)
+    inputdata_reshaped = inputdata_3d.reshape(inputdata_3d.shape[0], -1)
     fit_on = inputdata_reshaped.T
     # Optionally crop timeseries to emphasise differences over given time window
     if crop_time is not None:
@@ -121,13 +124,13 @@ def segmentation_algorithm(
     if centre_on_zero is True:
         fit_on = fit_on - fit_on[:, [0]] - np.mean(fit_on, axis=1, keepdims=True)
     # Optionally upscale the flattened array by interpolating
-    if time_upscale is not None:
-        times_flat = fit_on.flatten()
-        new_len = np.prod(fit_on.shape) * time_upscale
-        upscaled = np.interp(
-            np.arange(0, new_len), np.linspace(0, new_len, len(times_flat)), times_flat
-        ).reshape(fit_on.shape[0], -1)
-        fit_on = upscaled
+    # if time_upscale is not None:
+    #     times_flat = fit_on.flatten()
+    #     new_len = np.prod(fit_on.shape) * time_upscale
+    #     upscaled = np.interp(
+    #         np.arange(0, new_len), np.linspace(0, new_len, len(times_flat)), times_flat
+    #     ).reshape(fit_on.shape[0], -1)
+    #     fit_on = upscaled
 
         # fit_on = np.expand_dims(fit_on, 0)
     # Make a note of the new shape
@@ -207,14 +210,15 @@ def segmentation_algorithm(
         colormap = plt.cm.tab10  # Use the entire Set1 colormap
         cmap = plt.cm.colors.ListedColormap([colormap(i) for i in range(num_clusts)])
         space_repr = pygor.strf.spatial.collapse_3d(original_input)
-        ax[0].imshow(space_repr)
-        ax[1].plot(original_input.reshape(original_shape[0], -1), alpha=0.05, c="black")
-        ax[2].plot(fit_on.T, alpha=0.05, c="black")
-        top_3 = np.argsort(np.std(prediction_times, axis=1))[-2:]
-        ax[4].plot(prediction_times[top_3].T)
+        ax[0].imshow(space_repr, cmap = "RdBu", clim = (-np.max(np.abs(space_repr)), np.max(np.abs(space_repr))))
+        ax[1].imshow(pygor.strf.spatial.collapse_3d(inputdata_3d), cmap="RdBu")
+        ax[2].plot(original_input.reshape(original_shape[0], -1), alpha=0.05, c="black")
+        ax[3].plot(fit_on.T, alpha=0.05, c="black")
+        # top_3 = np.argsort(np.std(prediction_times, axis=1))[-2:]
+        # ax[4].plot(prediction_times[top_3].T)
         ax[5].plot(prediction_times.T)
         ax[6].imshow(pygor.strf.spatial.collapse_3d(inputdata_3d), cmap="Greys_r")
-        ax[6].imshow(prediction_map, cmap=cmap, alpha=0.45)
+        ax[6].imshow(prediction_map, cmap=cmap, alpha=0.25)
         titles = [
             "Space_collapse",
             "Raw",
@@ -236,26 +240,31 @@ def merge_cs_seg(
     fill_empty = True,
     debug_return=False,
 ):
+
     # Keep track of original number of timeseries
     num_times = times.shape[0]
     # Calculate correlation matrix
+    # times = times[np.argsort(np.abs(pygor.np_ext.maxabs(times, axis = 1)))]
     traces_correlation = np.corrcoef(times)
-    np.fill_diagonal(traces_correlation, np.nan)
+
+    # Identify pairs to merge
+    np.fill_diagonal(traces_correlation, np.nan) #inplace
     # Get indices of pairs exceeding the threshold
-    upper_triangle_indices = np.triu_indices_from(traces_correlation, k=1)
+    upper_triangle_indices = np.triu_indices_from(traces_correlation, k=0)
     row_indices, col_indices = upper_triangle_indices[0], upper_triangle_indices[1]
     exceed_indices = np.where(
         traces_correlation[upper_triangle_indices] > similarity_thresh
     )
-    similar_pairs = np.array(
+    similar_pairs_index = np.array(
         list(zip(row_indices[exceed_indices], col_indices[exceed_indices]))
     )
-    if not similar_pairs.any():
+    if not similar_pairs_index.any():
         return times, {} # empty dictionary because subsequent function exepcts a dict is returned in 2nd index
     # Construct adjacency graph and find connected components
     n = traces_correlation.shape[0]
     adj_matrix = np.zeros((n, n), dtype=bool)
-    adj_matrix[similar_pairs[:, 0], similar_pairs[:, 1]] = True
+    adj_matrix[similar_pairs_index[:, 0], similar_pairs_index[:, 1]] = True
+
     adj_matrix |= adj_matrix.T  # Symmetric graph
     labels = np.zeros(n, dtype=int) - 1  # -1 indicates unvisited
     current_label = 0
@@ -276,9 +285,14 @@ def merge_cs_seg(
             current_label += 1
     # Vectorized (but per-label) averaging without sorting
     unique_labels = np.unique(labels)
+    # merged_traces = np.array(
+    #     [times[labels == label].mean(axis=0) for label in unique_labels]
+    # )
+
     merged_traces = np.array(
-        [times[labels == label].mean(axis=0) for label in unique_labels]
+        [np.average(times[label_changes[key]], axis = 0) for key in label_changes.keys()]
     )
+    
     if merged_traces.shape[0] != num_times:
         merged_traces = np.insert(merged_traces, 0, np.zeros((num_times - merged_traces.shape[0], merged_traces.shape[1])), axis=0)
         merged_traces = np.ma.masked_equal(merged_traces, 0)
@@ -398,9 +412,7 @@ def extract_times(
         else:
             idx = np.argsort(np.abs(corrs_with))[::-1]
             mapping = np.argsort(idx)
-
         new_prediction_times = prediction_times[idx]
-
     elif reorder_strategy == "pixcount":
         if similarity_merge:
             do_merge()
@@ -436,7 +448,8 @@ def extract_times(
 def cs_segment_demo(inputdata_3d, **kwargs):
     segmentation_algorithm(inputdata_3d, plot_demo=True, **kwargs)
 
-def run(d3_arr, plot=False, segmentation_params = {}, extract_params = {}):
+def run(d3_arr, plot=False, segmentation_params = {}, extract_params = {},
+        plot_params = {"ms_dur" : 1300, "degree_visang" : 20, "block_size ": 200}):
     """
     Parameters
     ----------
@@ -458,10 +471,18 @@ def run(d3_arr, plot=False, segmentation_params = {}, extract_params = {}):
     times_extracted : 2D array
         The timecourses of the extracted signals
     """
+    import seaborn as sns
+    custom_params = {"axes.spines.right": False, 
+                    "axes.spines.top": False, 
+                    'xtick.bottom': False,
+                    'xtick.top': False,
+                    'ytick.left': False,
+                    'ytick.right': False,}
+    sns.set_theme(style="ticks", rc=custom_params)
     segmented_map = segmentation_algorithm(d3_arr, **segmentation_params)
     times_extracted = extract_times(segmented_map, d3_arr, **extract_params)
     if plot is True:
-        fig, ax = plt.subplots(1, 2, figsize=(10, 3))
+        fig, ax = plt.subplots(1, 2, figsize=(10, 3), layout="tight")
         num_clusts = len(
             np.ma.unique(segmented_map)
         )  # update num_clusts after potential merges
@@ -480,39 +501,65 @@ def run(d3_arr, plot=False, segmentation_params = {}, extract_params = {}):
         cmap_vals = np.array(cmap_vals)
         cmap = plt.cm.colors.ListedColormap(cmap_vals[idx])
         space_repr = pygor.strf.spatial.collapse_3d(d3_arr)
+        # space_repr = np.var(d3_arr, axis = 0) * pygor.strf.spatial.pixel_polarity(d3_arr)
         # Time components
         counter = 0
+        if plot_params["ms_dur"] is not None:
+            x_vals = np.linspace(plot_params["ms_dur"], 0, times_extracted.shape[1]) * -1
+        else:
+            x_vals = np.linspace(0, times_extracted.shape[1], times_extracted.shape[1])
         for i in range(len(times_extracted)):
             if np.all(np.ma.is_masked(times_extracted[i])) == True:
-                ax[1].plot(times_extracted[i].data, label = f"Cluster {i}", ls = "dashed", c = cmap_vals[i])
+                ax[1].plot(x_vals, times_extracted[i].data, label = f"Cluster {i}", ls = "dashed", c = cmap_vals[i])
             else:
                 counter += 1
-                ax[1].plot(times_extracted[i], label = f"Cluster {i}", c = cmap_vals[i])
+                ax[1].plot(x_vals, times_extracted[i], label = f"Cluster {i}", c = cmap_vals[i])
         ax[1].legend()
+        ax[1].set_ylabel("Z-score (SD)")
+        # ax[1].grid()
+        # ax[1].axhline(0, ls = "-", c = "k", zorder = -2, lw = .75)
+
+        # ax[1].set_xticklabels(tick_labels)
+        ax[1].set_xlabel("Time (ms)")
+        if np.max(np.abs(times_extracted)) < 5:
+            ax[1].set_ylim(-5, 5)
+        if np.max(np.abs(space_repr)) < 5:
+            clim = (-5, 5)
+        else:
+            clim = (-np.max(np.abs(space_repr)), np.max(np.abs(space_repr)))
         # Space components
-        ax[0].imshow(
+        repr = ax[0].imshow(
             space_repr, cmap = "Greys_r", 
-            vmin = -np.max(np.abs(space_repr)), 
-            vmax = np.max(np.abs(space_repr)),
+            clim = clim,
             origin = "lower",
         )
+        ax[0].set_axis_off()
         seg = ax[0].imshow(
             segmented_map, cmap = cmap, 
             origin = "lower",
-            alpha = 0.25
+            alpha = 0.2
         )
-        # labels for debug
-        # for (j,i),label in np.ndenumerate(segmented_map):
-        #     ax[0].text(i,j,label,ha='center',va='center', size = 5)
-        cbar = plt.colorbar(seg, ax = ax[0])
+        degrees = plot_params["degree_visang"]
+        visang_to_space = pygor.strf.pixconverter.visang_to_pix(
+        degrees, pixwidth=40, block_size=200
+        )
+        pygor.plotting.add_scalebar(
+            visang_to_space,
+            ax=ax[0],
+            string=f"{degrees}°",
+            orientation="h",
+            line_width=5,
+            y = -0.05,
+            offset_modifier = .7
+        )
+        cbar = plt.colorbar(seg, ax = ax[0], )
+        repr_cbar = plt.colorbar(repr, ax = ax[0], orientation = "horizontal", 
+                                label = "Z-score (SD)")
         tick_locs = np.flip(np.unique(segmented_map))
-        print(tick_locs)
         cbar.set_ticks(tick_locs)
         if extract_params["reorder_strategy"] is not None:
             cbar.ax.invert_yaxis()
-            standard_labels = ["noise", "surr", "centre"]
-            
-
+            standard_labels = ["Noise", "Surround", "Centre"]
             labels = [standard_labels[i] for i in range(counter)]
             # print(labels, np.arange(counter, num_clusts))
             cbar.set_ticklabels(labels)
