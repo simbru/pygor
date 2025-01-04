@@ -164,7 +164,7 @@ def _legacy_corr_spacetime(array_3d, border = 0):
                 correlation_map[x, y] = np.average(curr_corr_coeff)
     return correlation_map / np.max(correlation_map) # Normalize correlation map by its own max, to get scale between -1 or 1 and some number on the other end of polarity
 
-def corr_spacetime(arr_3d, convolve = True, kernel_width = 8, kernel_depth = 5, 
+def corr_spacetime(arr_3d, convolve = True, kernel_width = 3, kernel_depth = 5, 
     pix_subsample = 1, time_subsample = 2, mode = "var", corr_mode = 'constant'):
     """
     Calculate the spatial-temporal correlations of a 3D array (with time on the first axis). 
