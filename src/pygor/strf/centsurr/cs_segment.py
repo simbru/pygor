@@ -50,11 +50,11 @@ def fractional_subsample(video, factor, kernel = "gaussian"):
 
 def segmentation_algorithm(
     inputdata_3d,
-    smooth_times=5, #6
-    smooth_space=5, #1
-    upscale_space=2,
-    upscale_time=2,
-    centre_on_zero=True,
+    smooth_times =5,   #4
+    smooth_space =5,   #4
+    upscale_space=None,  #1
+    upscale_time =None,#None
+    centre_on_zero=False,
     # time_upscale=None,
     # space_upsacle=None,
     plot_demo=False,
@@ -67,7 +67,7 @@ def segmentation_algorithm(
     Rewrite such that smooth times and smoot hspace define a 
     z x n x n kernel that is fft convolved with inputdata instead of 
     mutliple steps of filtering. That way, if for example smooth_space is 
-    None but smooth_times is 10 the kernel will be 1 x 1 x 10.
+    None but smooth_times is 10 the kernel will be 1 x 1 x 10. <-- Done?
 
     Upscale is expensive so should be optional, but as a seperate parameter such
     that it can for example upscale by 1.5x or 2x (should be fine) and then apply 
@@ -191,8 +191,8 @@ def segmentation_algorithm(
 
 def merge_cs_corr(
     times,
+    map,
     similarity_thresh,
-    fill_empty = True,
     debug_return=False,
 ):
 
@@ -215,7 +215,7 @@ def merge_cs_corr(
         list(zip(row_indices[exceed_indices], col_indices[exceed_indices]))
     )
     if not similar_pairs_index.any():
-        return times, {} # empty dictionary because subsequent function exepcts a dict is returned in 2nd index
+        return times # empty dictionary because subsequent function exepcts a dict is returned in 2nd index
     # Construct adjacency graph and find connected components
     n = traces_correlation.shape[0]
     adj_matrix = np.zeros((n, n), dtype=bool)
@@ -255,11 +255,30 @@ def merge_cs_corr(
     if debug_return is True:
         return merged_traces, labels, label_changes
     else:
-        return merged_traces, label_changes
+
+
+        # # Merge similar clusters depending on their timecourse
+        # def do_merge(time_input = times, prediction_map = map):
+        #     global prediction_times, label_changes
+        # time_input[:], label_changes = merge_cs_corr(
+        #     time_input, similarity_thresh
+        # )
+        # Optionally update prediction_map
+        if label_changes is not None:
+            # Change prediction_map array directly, not on copy
+            for key, value in label_changes.items():
+                map[np.isin(map, value)] = key
+        # if distance_merge: Not yet implemented
+        # Order the timecourses by their amplitudes
+        # if similarity_merge:
+        # do_merge()
+        return merged_traces#, map
+
+        # return merged_traces, label_changes
     
 def merge_cs_var(prediction_times,
     prediction_map,
-    var_threshold = 0.5):
+    var_threshold):
     variances = np.std(prediction_times, axis = 1)
     low_var_index = np.argwhere(variances < var_threshold).flatten()
     # low_var_index = np.array([1, 2])
@@ -321,15 +340,7 @@ def update_prediction_map(prediction_map, mapping, inplace = False):
 def extract_times(
     prediction_map,
     inputdata_3d,
-    similarity_merge=True,
-    similarity_threhsold=0.90,
-    reorder_strategy="pixcount",
-    **kwargs
 ):
-    """
-    reorder_strategy = None means conserve original order of (surround, background,
-    centre)
-    """
     # Work out how many clusters
     num_clusts = len(np.unique(prediction_map))
     # Check prediction_map shape
@@ -355,22 +366,12 @@ def extract_times(
             for i in range(num_clusts)
         ]
     )
-    # Merge similar clusters depending on their timecourse
-    def do_merge(time_input = prediction_times, prediction_map = prediction_map):
-        global prediction_times, label_changes
-        time_input[:], label_changes = merge_cs_corr(
-            time_input, similarity_threhsold
-        )
-        # Optionally update prediction_map
-        if label_changes is not None:
-            # Change prediction_map array directly, not on copy
-            for key, value in label_changes.items():
-                prediction_map[np.isin(prediction_map, value)] = key
-    # if distance_merge: Not yet implemented
-    # Order the timecourses by their amplitudes
+    return prediction_times
+
+def sort_extracted(prediction_times, map, reorder_strategy = "corrcoef"):
     if reorder_strategy == "sorted":
-        if similarity_merge:
-            do_merge()
+        # if similarity_merge:
+        #     do_merge()
         # Order by reverse absolute max
         maxabs = np.abs(np_ext.maxabs(prediction_times, axis=1)) *-1
         idx = np.argsort(maxabs)
@@ -385,8 +386,6 @@ def extract_times(
             mapping = np.argsort(idx)
     # Order the timecourses by their correlation to the absolute max trace
     elif reorder_strategy == "corrcoef":
-        if similarity_merge:
-            do_merge()
         # Get the correlation matrix
         corrcoef = np.ma.corrcoef(prediction_times)
         # find trace with max amplitude
@@ -404,10 +403,10 @@ def extract_times(
             mapping = np.argsort(idx)
         new_prediction_times = prediction_times[idx]
     elif reorder_strategy == "pixcount":
-        if similarity_merge:
-            do_merge()
+        # if similarity_merge:
+            # do_merge()
         # Get number of pixels in map for each cluster
-        num_pix_per_cluster = np.bincount(prediction_map.flatten())
+        num_pix_per_cluster = np.bincount(map.flatten())
         # Check if first index in prediction_times is masked after merge
         if np.ma.is_masked(prediction_times[0]):
             #in this case, add 1 onto indices to account for 0 pixels in background
@@ -422,8 +421,8 @@ def extract_times(
         # Fetch timecourses accordingly
         new_prediction_times = prediction_times[idx]
     elif reorder_strategy is None:
-        if similarity_merge:
-            do_merge()
+        # if similarity_merge:
+        #     do_merge()
         new_prediction_times = prediction_times#[::-1]
         num_masked = np.ma.count_masked(prediction_times[:, 0], axis=0)
         mapping = np.arange(num_masked, prediction_times.shape[0])
@@ -432,13 +431,17 @@ def extract_times(
             "reorder_strategy must be one of 'sorted', 'corrcoef', or None"
         )
     if reorder_strategy is not None and mapping is not None:
-        update_prediction_map(prediction_map, mapping, inplace = True)
-    return new_prediction_times
+        new_prediction_map = update_prediction_map(map, mapping, inplace = False)
+    return new_prediction_times, new_prediction_map
 
 def cs_segment_demo(inputdata_3d, **kwargs):
     segmentation_algorithm(inputdata_3d, plot_demo=True, **kwargs)
 
-def run(d3_arr, plot=False, segmentation_params = {}, extract_params = {},
+def run(d3_arr, plot=False, 
+        sort_strategy = "corrcoef",
+        segmentation_params = {}, 
+        extract_params = {},
+        merge_params = {"var_thresh" : 0.5, "corr_thresh" : .9},
         plot_params = {"ms_dur" : 1300, "degree_visang" : 20, "block_size ": 200}):
     """
     Parameters
@@ -461,17 +464,34 @@ def run(d3_arr, plot=False, segmentation_params = {}, extract_params = {},
     times_extracted : 2D array
         The timecourses of the extracted signals
     """
-    import seaborn as sns
-    custom_params = {"axes.spines.right": False, 
-                    "axes.spines.top": False, 
-                    'xtick.bottom': False,
-                    'xtick.top': False,
-                    'ytick.left': False,
-                    'ytick.right': False,}
-    sns.set_theme(style="ticks", rc=custom_params)
+    # 1. Apply segmentation clustering algorithm on times and fetch the 
+    # spatial locations of the resulting cluster labels (per pixel's timecourse)
     segmented_map = segmentation_algorithm(d3_arr, **segmentation_params)
+    # 2. Extract the times from the given cluster label's spatial positions,
+    # averaging them to get the temporal signal from the spatial positions
     times_extracted = extract_times(segmented_map, d3_arr, **extract_params)
+    # 3.1 Merge the clusters that share a particularily high degree of correlation.
+    # This is needed becasue we always ask for 3 labels, but if signal is really 
+    # strong and there is no opponency, it will place 2 labels within the centre.
+    if merge_params["corr_thresh"] is not None:
+        times_extracted = merge_cs_corr(times_extracted, segmented_map, merge_params["corr_thresh"]) 
+    # 3.2 Sort the times, as the clustering labels will be arbitrary and not structured
+    # in any meaningful order. Here, we ensure we get a predictable order (centre, surround, noise)
+    times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
+    # 3.3 Finally merge clusters label regions together if there is no detectable signal (low variance),
+    # generate an accurate background label. If so, fills the "noise" label with masked zeros 
+    if merge_params["var_thresh"] is not None:
+        times_extracted, segmented_map = merge_cs_var(times_extracted, segmented_map, merge_params["var_thresh"])
+    # Optionally plot the output (these are pretty plots!)
     if plot is True:
+        import seaborn as sns
+        custom_params = {"axes.spines.right": False, 
+                        "axes.spines.top": False, 
+                        'xtick.bottom': False,
+                        'xtick.top': False,
+                        'ytick.left': False,
+                        'ytick.right': False,}
+        sns.set_theme(style="ticks", rc=custom_params)
         fig, ax = plt.subplots(1, 2, figsize=(10, 3), layout="tight")
         num_clusts = len(
             np.ma.unique(segmented_map)
@@ -482,7 +502,7 @@ def run(d3_arr, plot=False, segmentation_params = {}, extract_params = {},
         # Find which indices correspond to non-zero clusters
         idx = np.squeeze(np.arange(num_clusts)[np.count_nonzero(times_extracted, axis = 1).data != 0])
         # Genreate the colormap RGB values accordingly
-        if extract_params["reorder_strategy"] is None:
+        if sort_strategy is None:
             cmap_vals = np.array([colormap(i) for i in range(num_clusts)])
         else:
             cmap_vals = [[0, 1, 1,],
@@ -547,7 +567,7 @@ def run(d3_arr, plot=False, segmentation_params = {}, extract_params = {},
                                 label = "Z-score (SD)")
         tick_locs = np.flip(np.unique(segmented_map))
         cbar.set_ticks(tick_locs)
-        if extract_params["reorder_strategy"] is not None:
+        if sort_strategy is not None:
             cbar.ax.invert_yaxis()
             standard_labels = ["Noise", "Surround", "Centre"]
             labels = [standard_labels[i] for i in range(counter)]
