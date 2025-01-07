@@ -51,7 +51,7 @@ def fractional_subsample(video, factor, kernel = "gaussian"):
 def segmentation_algorithm(
     inputdata_3d,
     smooth_times=5, #6
-    smooth_space=4, #1
+    smooth_space=5, #1
     upscale_space=2,
     upscale_time=2,
     centre_on_zero=True,
@@ -242,6 +242,7 @@ def merge_cs_seg(
 ):
 
     # Keep track of original number of timeseries
+    
     num_times = times.shape[0]
     # Calculate correlation matrix
     # times = times[np.argsort(np.abs(pygor.np_ext.maxabs(times, axis = 1)))]
