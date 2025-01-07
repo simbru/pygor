@@ -34,6 +34,7 @@ dependencies = [
     "statannotations>=0.4.4",
     "pywavelets>=1.7.0",
     "ruff>=0.8.0",
+    "notebook>=7.3.2",
 ]
 
 [project.urls]
