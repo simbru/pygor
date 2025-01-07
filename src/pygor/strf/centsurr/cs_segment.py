@@ -123,51 +123,6 @@ def segmentation_algorithm(
     # Optionally centre prediction time on zero
     if centre_on_zero is True:
         fit_on = fit_on - fit_on[:, [0]] - np.mean(fit_on, axis=1, keepdims=True)
-    # Optionally upscale the flattened array by interpolating
-    # if time_upscale is not None:
-    #     times_flat = fit_on.flatten()
-    #     new_len = np.prod(fit_on.shape) * time_upscale
-    #     upscaled = np.interp(
-    #         np.arange(0, new_len), np.linspace(0, new_len, len(times_flat)), times_flat
-    #     ).reshape(fit_on.shape[0], -1)
-    #     fit_on = upscaled
-
-        # fit_on = np.expand_dims(fit_on, 0)
-    # Make a note of the new shape
-    # fit_on_shape = fit_on.shape
-    # if smooth_space is not None:
-    #     inputdata_3d = fractional_subsample(inputdata_3d, smooth_space)
-    # # Optionally smooth timeseries
-    # if smooth_times is not None:
-    #     if kernel is None:
-    #         # if "sample_rate" in kwargs:
-    #         #     sample_rate = kwargs["sample_rate"]
-    #         # else:
-    #         #     sample_rate = 10
-    #         # # create a Hanning kernel 1/50th of a second wide --> math needs working out TODO
-    #         # if "kernel_width_seconds" in kwargs:
-    #         #     kernel_width_seconds = kwargs["kernel_width_seconds"]
-    #         # else:
-    #         #     kernel_width_seconds = 1
-    #         # if upscale is not None:
-    #         #     kernel_size_points = int(kernel_width_seconds * sample_rate) * upscale
-    #         # else:
-    #         #     kernel_size_points = int(kernel_width_seconds * sample_rate)
-    #         kernel_size_points = int(smooth_times)
-    #         kernel = np.blackman(
-    #             kernel_size_points
-    #         )  
-    #         # bartlett, hanning, kaiser, hamming, blackman
-    #         # normalize the kernel such that it sums to 1
-    #         kernel = kernel / kernel.sum()
-    #     kernel = np.repeat([kernel], fit_on.shape[0], axis=0)
-    #     fit_on = scipy.signal.fftconvolve(fit_on, kernel, axes=1)
-    #     fit_on_shape = fit_on.shape
-    #     # Scale to original time-course amplitude after convolution (only if smooth_times)
-    #     scaler = sklearn.preprocessing.MinMaxScaler(
-    #         feature_range=(np.min(inputdata_3d), np.max(inputdata_3d))
-    #     )
-    #     fit_on = scaler.fit_transform(fit_on.reshape(-1, 1)).reshape(fit_on_shape)
 
     # Perform clustering on fit_on array
     clusterfunc = sklearn.cluster.AgglomerativeClustering(n_clusters=n_clusters)
@@ -234,7 +189,7 @@ def segmentation_algorithm(
     return prediction_map
 
 
-def merge_cs_seg(
+def merge_cs_corr(
     times,
     similarity_thresh,
     fill_empty = True,
@@ -301,6 +256,40 @@ def merge_cs_seg(
         return merged_traces, labels, label_changes
     else:
         return merged_traces, label_changes
+    
+def merge_cs_var(prediction_times,
+    prediction_map,
+    var_threshold = 0.5):
+    variances = np.std(prediction_times, axis = 1)
+    low_var_index = np.argwhere(variances < var_threshold).flatten()
+    # low_var_index = np.array([1, 2])
+    if low_var_index.size > 0:
+        prediction_times[low_var_index[0]] = np.average(prediction_times[low_var_index], axis = 0)    
+        if low_var_index.tolist() == [0, 1, 2]:
+            prediction_times[0] = np.average(prediction_times[[0, 1, 2]], axis = 0)
+            prediction_times[[1,2]] = np.ma.array(np.zeros(prediction_times.shape[1]), mask = True)
+            # prediction_map = np.where(prediction_map == np.logical_and(1, 2), low_var_index[-1], prediction_map)
+            prediction_map = np.zeros(prediction_map.shape)
+        if low_var_index.tolist() == [1, 2]:
+            prediction_times[1] = np.average(prediction_times[[1, 2]], axis = 0)
+            prediction_times[2] = np.ma.array(np.zeros(prediction_times.shape[1]), mask = True)
+            prediction_map = np.where(prediction_map == np.logical_and(1, 2), low_var_index[-1], prediction_map)
+        else:
+            for n, i in enumerate(low_var_index):
+                prediction_map = np.where(prediction_map == i, low_var_index[-1], prediction_map)
+                if i == 1 and 2 not in low_var_index:
+                    pass
+                    # prediction_times[i] = np.average(prediction_times[[1, 2]], axis = 0)
+                    # prediction_times[low_var_index[n]] = np.ma.array(np.zeros(prediction_times.shape[1]), mask = True)
+                if i == 2 and 1 not in low_var_index:
+                    pass
+                    # prediction_times[i] = np.ma.array(np.zeros(prediction_times.shape[1]), mask = True)
+                    # prediction_times[[low_var_index[-1]]] = np.ma.array(np.zeros(prediction_times.shape[1]), mask = True)
+                    # prediction_times[low_var_index[n]] = np.ma.array(np.zeros(prediction_times.shape[1]), mask = True) #prediction_times[i]
+    else:
+        print("not enough traces to merge, skipping")
+    return prediction_times, prediction_map
+
 
 def update_prediction_map(prediction_map, mapping, inplace = False):
     """
@@ -311,7 +300,7 @@ def update_prediction_map(prediction_map, mapping, inplace = False):
     prediction_map : array-like
         The prediction map to be updated.
     mapping : array-like
-        The new mapping to apply to the prediction map.
+        The new mapping to apply to the prediction map.119, 103, 64, 
     inplace : bool, default=False
         If True, the prediction map is updated in-place. Otherwise,
         a new array is returned with the updated mapping.
@@ -369,7 +358,7 @@ def extract_times(
     # Merge similar clusters depending on their timecourse
     def do_merge(time_input = prediction_times, prediction_map = prediction_map):
         global prediction_times, label_changes
-        time_input[:], label_changes = merge_cs_seg(
+        time_input[:], label_changes = merge_cs_corr(
             time_input, similarity_threhsold
         )
         # Optionally update prediction_map

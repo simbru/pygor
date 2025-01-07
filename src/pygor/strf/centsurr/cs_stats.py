@@ -8,8 +8,18 @@ import pygor.np_ext as np_ext
 import pygor.np_ext
 import pygor.strf.spatial
 
-# def cs_ratio(cs_times):
-#     neg = cs_times[:, 0]
-#     pos = cs_times[:, -1]
-#     return np.max(cs_times) / np.min(cs_times)
+"""
+All functions here should take as input either 
+prediction_map or prediction_timse (or both), from
+cs_segment.run
+"""
+
+def cs_ratio(cs_times):
+    neg = np.min(cs_times[0])
+    pos = np.max(cs_times[1])
+    bck = np.median(cs_times[2])
+    neg_to_bck = neg - bck
+    pos_to_bck = pos - bck
+    ratio = pos_to_bck / neg_to_bck
+    return ratio
 
