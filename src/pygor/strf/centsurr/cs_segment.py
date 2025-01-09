@@ -50,11 +50,11 @@ def fractional_subsample(video, factor, kernel = "gaussian"):
 
 def segmentation_algorithm(
     inputdata_3d,
-    smooth_times =5,   #4
+    smooth_times =4,   #4
     smooth_space =5,   #4
+    upscale_time =2,#None
     upscale_space=None,  #1
-    upscale_time =None,#None
-    centre_on_zero=False,
+    centre_on_zero=True,
     # time_upscale=None,
     # space_upsacle=None,
     plot_demo=False,
@@ -215,7 +215,7 @@ def merge_cs_corr(
         list(zip(row_indices[exceed_indices], col_indices[exceed_indices]))
     )
     if not similar_pairs_index.any():
-        return times # empty dictionary because subsequent function exepcts a dict is returned in 2nd index
+        return times, map # empty dictionary because subsequent function exepcts a dict is returned in 2nd index
     # Construct adjacency graph and find connected components
     n = traces_correlation.shape[0]
     adj_matrix = np.zeros((n, n), dtype=bool)
@@ -255,24 +255,12 @@ def merge_cs_corr(
     if debug_return is True:
         return merged_traces, labels, label_changes
     else:
-
-
-        # # Merge similar clusters depending on their timecourse
-        # def do_merge(time_input = times, prediction_map = map):
-        #     global prediction_times, label_changes
-        # time_input[:], label_changes = merge_cs_corr(
-        #     time_input, similarity_thresh
-        # )
-        # Optionally update prediction_map
+        # Update prediction_map
         if label_changes is not None:
             # Change prediction_map array directly, not on copy
             for key, value in label_changes.items():
                 map[np.isin(map, value)] = key
-        # if distance_merge: Not yet implemented
-        # Order the timecourses by their amplitudes
-        # if similarity_merge:
-        # do_merge()
-        return merged_traces#, map
+        return merged_traces, map
 
         # return merged_traces, label_changes
     
@@ -332,6 +320,7 @@ def update_prediction_map(prediction_map, mapping, inplace = False):
     if isinstance(mapping, np.ndarray) is False:
         mapping = np.array(mapping)
     if inplace is False:
+        # mapping = np.array([1, 1])
         prediction_map = mapping[prediction_map]
     else:
         prediction_map[:] = mapping[prediction_map]    
@@ -441,28 +430,34 @@ def run(d3_arr, plot=False,
         sort_strategy = "corrcoef",
         segmentation_params = {}, 
         extract_params = {},
-        merge_params = {"var_thresh" : 0.5, "corr_thresh" : .9},
+        merge_params = {"var_thresh" : 1, "corr_thresh" : .95},
         plot_params = {"ms_dur" : 1300, "degree_visang" : 20, "block_size ": 200}):
-    """
+    """151, 155, 157, 167, 107, 104, 90, 88, 83, 77, 74
+    The main function for running the CS segmentation pipeline on a given 3D array (time x space x space).
+
     Parameters
     ----------
-    d3_arr : 3D array
-        The spatial map of the STRF
+    d3_arr : 3D numpy array
+        The input 3D array to be segmented.
     plot : bool, optional
-        Whether to show a plot of the segmentation and time extraction, by default False
-    parameters : dict, optional
-        A dictionary of parameters to pass to the segmentation algorithm and/or the time extraction function
+        Whether to plot the output using seaborn. Defaults to False.
+    sort_strategy : str, optional
+        The strategy for sorting the extracted timecourses. Defaults to "corrcoef".
     segmentation_params : dict, optional
-        A dictionary of parameters to pass to the segmentation algorithm, by default {}
+        Parameters for the segmentation algorithm. Defaults to {}.
     extract_params : dict, optional
-        A dictionary of parameters to pass to the time extraction function, by default {}
-
+        Parameters for extracting the timecourses from the segmented map. Defaults to {}.
+    merge_params : dict, optional
+        Parameters for merging the clusters. Defaults to {"var_thresh" : 0.5, "corr_thresh" : .9}.
+    plot_params : dict, optional
+        Parameters for plotting the output. Defaults to {"ms_dur" : 1300, "degree_visang" : 20, "block_size ": 200}.
+    
     Returns
     -------
-    segmented_map : 2D array
-        The map of the segmented clusters
-    times_extracted : 2D array
-        The timecourses of the extracted signals
+    segmented_map : 2D numpy array
+        The segmented map of the input 3D array.
+    times_extracted : 2D numpy array
+        The extracted timecourses from the segmented map.
     """
     # 1. Apply segmentation clustering algorithm on times and fetch the 
     # spatial locations of the resulting cluster labels (per pixel's timecourse)
@@ -474,7 +469,7 @@ def run(d3_arr, plot=False,
     # This is needed becasue we always ask for 3 labels, but if signal is really 
     # strong and there is no opponency, it will place 2 labels within the centre.
     if merge_params["corr_thresh"] is not None:
-        times_extracted = merge_cs_corr(times_extracted, segmented_map, merge_params["corr_thresh"]) 
+        times_extracted, segmented_map = merge_cs_corr(times_extracted, segmented_map, merge_params["corr_thresh"]) 
     # 3.2 Sort the times, as the clustering labels will be arbitrary and not structured
     # in any meaningful order. Here, we ensure we get a predictable order (centre, surround, noise)
     times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
@@ -569,9 +564,9 @@ def run(d3_arr, plot=False,
         cbar.set_ticks(tick_locs)
         if sort_strategy is not None:
             cbar.ax.invert_yaxis()
-            standard_labels = ["Noise", "Surround", "Centre"]
-            labels = [standard_labels[i] for i in range(counter)]
-            # print(labels, np.arange(counter, num_clusts))
+            standard_labels = np.array(["Noise", "Surround", "Centre"])            
+            # labels = np.array([standard_labels[i] for i in range(counter)])
+            labels = standard_labels[np.unique(segmented_map).astype(int)]
             cbar.set_ticklabels(labels)
         plt.show()
     return segmented_map, times_extracted
