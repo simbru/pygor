@@ -430,7 +430,7 @@ def run(d3_arr, plot=False,
         sort_strategy = "corrcoef",
         segmentation_params = {}, 
         extract_params = {},
-        merge_params = {"var_thresh" : 1, "corr_thresh" : .95},
+        merge_params = {"var_thresh" : 1, "corr_thresh" : .80},
         plot_params = {"ms_dur" : 1300, "degree_visang" : 20, "block_size ": 200}):
     """151, 155, 157, 167, 107, 104, 90, 88, 83, 77, 74
     The main function for running the CS segmentation pipeline on a given 3D array (time x space x space).
