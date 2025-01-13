@@ -192,7 +192,7 @@ def biphasic_index(timeseries, axis=-1):
     if timeseries.ndim == 1:
         return index(timeseries)
     if timeseries.ndim > 1:
-        # Time axis needs to be last index. If it is not, move it to last index using transpose
+        # Time axis needs to be last index. If it is not, move it to last index
         if axis != -1:
             timeseries = np.moveaxis(timeseries, axis, -1)
         return np.apply_along_axis(index, axis, timeseries)
