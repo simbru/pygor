@@ -40,8 +40,8 @@ def cs_ratio(csn_times):
     float
         CS ratio value.
     """
-    absmax_c = pygor.np_ext.maxabs(csn_times[0])
-    absmax_s = pygor.np_ext.maxabs(csn_times[1])
+    absmax_c = np.abs(pygor.np_ext.maxabs(csn_times[0]))
+    absmax_s = np.abs(pygor.np_ext.maxabs(csn_times[1]))
     with np.errstate(divide='ignore'):
         value = (absmax_c / absmax_s)
     if np.ma.is_masked(value):
@@ -67,6 +67,8 @@ def cs_contrast(prediction_times):
     surround = prediction_times[1]
     centre_ampl = pygor.np_ext.absmax(centre)
     surround_ampl = pygor.np_ext.absmax(surround)
+    if np.all(surround == 0):
+        return np.nan 
     with np.errstate(divide='ignore', invalid='ignore'):
         value = (centre_ampl - surround_ampl) / (centre_ampl + surround_ampl)
     if np.ma.is_masked(value):
@@ -143,8 +145,8 @@ def polarity_index(csn_times):
         Polarity index of center and surround.
     """
     def calculate_polarity(signal):
-        pos_area = np.trapz(signal[signal > 0])
-        neg_area = np.trapz(signal[signal < 0])
+        pos_area = np.abs(np.trapz(signal[signal > 0]))
+        neg_area = np.abs(np.trapz(signal[signal < 0]))
         return (pos_area - neg_area) / (pos_area + neg_area)
     polarity_c = calculate_polarity(csn_times[0])
     polarity_s = calculate_polarity(csn_times[1])
@@ -187,9 +189,9 @@ def snr(csn_times):
     return snr_value
 
 
-def run_stats(strfs_arrs_list):
+def gen_stats(strfs_arrs_list, segmentation_params = {}, extract_params = {}, **kwargs):
     """
-    Run statistics on a list of STRF arrays.
+    Generate statistics on a list of STRF arrays.
 
     Parameters
     ----------
@@ -203,7 +205,7 @@ def run_stats(strfs_arrs_list):
     """
     output = defaultdict(list)
     for i in strfs_arrs_list:
-        prediction_map, prediction_times = pygor.strf.centsurr.run(i)
+        prediction_map, prediction_times = pygor.strf.centsurr.run(i, segmentation_params = segmentation_params, extract_params = extract_params, **kwargs)
         prediction_times = prediction_times.data
         with np.errstate(divide='ignore', invalid='ignore'):
             # Base stats
@@ -216,6 +218,11 @@ def run_stats(strfs_arrs_list):
             output["absmax_c"].append(pygor.np_ext.maxabs(prediction_times[0]))
             output["absmax_s"].append(pygor.np_ext.maxabs(prediction_times[1]))
             output["absmax_n"].append(pygor.np_ext.maxabs(prediction_times[2]))
+            
+            output["maxabs_c"].append(pygor.np_ext.absmax(prediction_times[0]))
+            output["maxabs_s"].append(pygor.np_ext.absmax(prediction_times[1]))
+            output["maxabs_n"].append(pygor.np_ext.absmax(prediction_times[2]))
+            
             output["sum_c"].append(np.sum(prediction_times[0]))
             output["sum_s"].append(np.sum(prediction_times[1]))
             output["sum_n"].append(np.sum(prediction_times[2]))

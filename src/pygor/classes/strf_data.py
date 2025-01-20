@@ -1039,6 +1039,21 @@ class STRF(Core):
             return pygor.plotting.play_movie(arr, rgb_repr=True)
         else:
             return arr
+        
+    def demo_cs_seg(self, roi, **kwargs):
+        pygor.strf.centsurr.run(self.strfs_no_border[roi], plot = True, **kwargs)
+        plt.show()
+
+    def cs_seg(self, roi = None, **kwargs):
+        if roi is None:
+            maps = []
+            times = []
+            for i in range(self.num_rois): 
+                map, time = pygor.strf.centsurr.run(self.strfs_no_border[i], **kwargs)
+                maps.append(map)
+                times.append(time)
+            return np.array(maps), np.array(times)
+        return pygor.strf.centsurr.run(self.strfs_no_border[roi], **kwargs)
 
 # class Clustering:
 #     def __init__(self):

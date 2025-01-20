@@ -165,7 +165,7 @@ def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1, result_plot = Fals
                     a.plot(contour_n[:, 1], contour_n[:, 0], lw = 3, ls = '-',alpha = .8, c = kwargs["c"])
     return contour    
 
-def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val, result_plot = False, surround_disksize = 4, ax = None):
+def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val, result_plot = False, surround_disksize = 20, ax = None):
     spatial_filter = np.squeeze(spatial_filter)
     if np.ma.isMaskedArray(spatial_filter):
         spatial_filter = spatial_filter.data
