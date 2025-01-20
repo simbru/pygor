@@ -10,55 +10,54 @@ import pygor.np_ext as np_ext
 import pygor.np_ext
 import pygor.strf.spatial
 
-def fractional_subsample(video, factor, kernel = "gaussian"):
-    """
-    Subsamples a 3D array (video) with fractional pixel averaging.
+# def fractional_subsample(video, factor, kernel = "gaussian"):
+#     """
+#     Subsamples a 3D array (video) with fractional pixel averaging.
     
-    Parameters:
-    - video: 3D numpy array of shape (t, h, w)
-    - factor: Fractional pixel size for averaging (e.g., 1.2)
+#     Parameters:
+#     - video: 3D numpy array of shape (t, h, w)
+#     - factor: Fractional pixel size for averaging (e.g., 1.2)
     
-    Returns:
-    - 3D numpy array of the same shape as the input
-    """
-    # Upsample by the inverse of the fractional factor (e.g., for 1.2, upsample by 1/1.2)
-    upsample_factor = 1 / factor
-    # upsample_factor = factor
-    upsampled = scipy.ndimage.zoom(video, zoom=(1, upsample_factor, upsample_factor), order=1)
+#     Returns:
+#     - 3D numpy array of the same shape as the input
+#     """
+#     # Upsample by the inverse of the fractional factor (e.g., for 1.2, upsample by 1/1.2)
+#     upsample_factor = 1 / factor
+#     # upsample_factor = factor
+#     upsampled = scipy.ndimage.zoom(video, zoom=(1, upsample_factor, upsample_factor), order=1)
 
-    if kernel == "uniform":
-        # Create a uniform kernel for averaging
-        kernel_size = int(np.ceil(factor))  # Kernel size that covers the fractional range
-        kernel = np.ones((1, kernel_size, kernel_size)) / (kernel_size**2)
-    elif kernel == "gaussian":
-        # Create a Gaussian kernel for averaging
-        kernel_size = int(np.ceil(factor))  # Kernel size that covers the fractional range
-        sigma = kernel_size
-        kernel = np.expand_dims(skimage.morphology.disk(sigma), 0)
-    else:
-        raise ValueError("Invalid kernel type. Must be 'uniform' or 'gaussian'.")
-    # Apply convolution (spatial axes only)
-    smoothed = scipy.signal.fftconvolve(upsampled, kernel, axes=(1, 2), mode="same")
+#     if kernel == "uniform":
+#         # Create a uniform kernel for averaging
+#         kernel_size = int(np.ceil(factor))  # Kernel size that covers the fractional range
+#         kernel = np.ones((1, kernel_size, kernel_size)) / (kernel_size**2)
+#     elif kernel == "gaussian":
+#         # Create a Gaussian kernel for averaging
+#         kernel_size = int(np.ceil(factor))  # Kernel size that covers the fractional range
+#         sigma = kernel_size
+#         kernel = np.expand_dims(skimage.morphology.disk(sigma), 0)
+#     else:
+#         raise ValueError("Invalid kernel type. Must be 'uniform' or 'gaussian'.")
+#     # Apply convolution (spatial axes only)
+#     smoothed = scipy.signal.fftconvolve(upsampled, kernel, axes=(1, 2), mode="same")
 
-    # Downsample back to original dimensions
-    downsampled = scipy.ndimage.zoom(smoothed, zoom=(1, factor, factor), order=1)
+#     # Downsample back to original dimensions
+#     downsampled = scipy.ndimage.zoom(smoothed, zoom=(1, factor, factor), order=1)
 
-    # Resize to ensure exact original shape
-    resized = scipy.ndimage.zoom(downsampled, zoom=(1, video.shape[1] / downsampled.shape[1], video.shape[2] / downsampled.shape[2]), order=1)
+#     # Resize to ensure exact original shape
+#     resized = scipy.ndimage.zoom(downsampled, zoom=(1, video.shape[1] / downsampled.shape[1], video.shape[2] / downsampled.shape[2]), order=1)
 
-    return resized
+#     return resized
 
 def segmentation_algorithm(
     inputdata_3d,
     smooth_times =4,   #4
-    smooth_space =5,   #4
+    smooth_space =4,   #4
     upscale_time =2,#None
-    upscale_space=None,  #1
+    upscale_space=2,  #1
     centre_on_zero=True,
-    # time_upscale=None,
-    # space_upsacle=None,
     plot_demo=False,
     crop_time=None,
+    on_pcs=True,
     **kwargs,
 ):
     
@@ -123,7 +122,14 @@ def segmentation_algorithm(
     # Optionally centre prediction time on zero
     if centre_on_zero is True:
         fit_on = fit_on - fit_on[:, [0]] - np.mean(fit_on, axis=1, keepdims=True)
-
+    # Optionally calculate principal components and use these as input
+    if on_pcs is True:
+        # Perform PCA on the input data and use the first n_components as the input
+        # for the clustering algorithm
+        pca = sklearn.decomposition.PCA(n_components=n_clusters)
+        # fit_on = pca.fit_transform(fit_on.T)
+        # fit_on = pca.components_.T
+        fit_on = pca.fit_transform(fit_on)
     # Perform clustering on fit_on array
     clusterfunc = sklearn.cluster.AgglomerativeClustering(n_clusters=n_clusters)
     initial_prediction_map = clusterfunc.fit_predict(fit_on).reshape(
@@ -132,25 +138,7 @@ def segmentation_algorithm(
     num_clusts = len(np.unique(initial_prediction_map))
 
     prediction_map = initial_prediction_map
-    # cleans up prediction map
-    # prediction_map = np.nansum(
-    #     np.array(
-    #         [
-    #             np.where(
-    #                 skimage.morphology.remove_small_objects(
-    #                     skimage.morphology.remove_small_holes(
-    #                         prediction_map == i, island_size_min
-    #                     ),
-    #                     island_size_min,
-    #                 ),
-    #                 i,
-    #                 np.nan,
-    #             )
-    #             for i in range(num_clusts)
-    #         ]
-    #     ),
-    #     axis=0,
-    # )
+
     if len(np.unique(prediction_map)) > num_clusts:
         raise ValueError(
             f"Some clusters have been merged incorrectly, causing num_clusts < {num_clusts}. Manual fix required. Consider lowering island_size_min for now."
@@ -263,7 +251,68 @@ def merge_cs_corr(
         return merged_traces, map
 
         # return merged_traces, label_changes
+
+def merge_cs_corr2(
+    times,
+    map,
+    similarity_thresh,
+    debug_return=False,
+):
+
+    # Keep track of original number of timeseries
+    max_trace_idx_sort = np.argsort(np.abs(pygor.np_ext.maxabs(times, axis = 1)))
+    print(max_trace_idx_sort)
+    times = times[max_trace_idx_sort]
+    plt.plot(times.T)
+    plt.show()
+    # num_times = times.shape[0]
+    # Calculate correlation matrix
+    # times = times[np.argsort(np.abs(pygor.np_ext.maxabs(times, axis = 1)))]
+    traces_correlation = np.corrcoef(times)
+    # Identify pairs to merge
+    np.fill_diagonal(traces_correlation, np.nan) #inplace
+    # Get indices of pairs exceeding the threshold
+    upper_triangle_indices = np.triu_indices_from(traces_correlation, k=0)
+    row_indices, col_indices = upper_triangle_indices[0], upper_triangle_indices[1]
+    exceed_indices = np.where(
+        traces_correlation[upper_triangle_indices] > similarity_thresh
+    )
+
+    similar_pairs_index = np.array(
+        list(zip(row_indices[exceed_indices], col_indices[exceed_indices]))
+    )
+    print(traces_correlation)
+    print(traces_correlation)
+    print(similar_pairs_index)
+
+    """
+    TODO uncommnet this:
+    """
+    # if not similar_pairs_index.any():
+    #     return times, map
+
+    # Construct adjacency graph and find connected components
+    # if similar_pairs_index.size != 0:
+    #     n = traces_correlation.shape[0]
+    #     adj_matrix = np.zeros((n, n), dtype=bool)
+    #     adj_matrix[similar_pairs_index[:, 0], similar_pairs_index[:, 1]] = True
+
+
+    # print(exceed_indices)
+    # print(traces_correlation)
+    # print(adj_matrix)
+
+    # merged_traces = np.array(
+    #     [np.average(times[label_changes[key]], axis = 0) for key in label_changes.keys()]
+    # )
     
+    # if merged_traces.shape[0] != num_times:
+    #     merged_traces = np.insert(merged_traces, 0, np.zeros((num_times - merged_traces.shape[0], merged_traces.shape[1])), axis=0)
+    #     merged_traces = np.ma.masked_equal(merged_traces, 0)
+
+    #     return merged_traces, map
+
+
 def merge_cs_var(prediction_times,
     prediction_map,
     var_threshold):
@@ -319,6 +368,8 @@ def update_prediction_map(prediction_map, mapping, inplace = False):
     """    
     if isinstance(mapping, np.ndarray) is False:
         mapping = np.array(mapping)
+    mapping = mapping.astype(int)
+    prediction_map = prediction_map.astype(int)
     if inplace is False:
         # mapping = np.array([1, 1])
         prediction_map = mapping[prediction_map]
@@ -430,7 +481,7 @@ def run(d3_arr, plot=False,
         sort_strategy = "corrcoef",
         segmentation_params = {}, 
         extract_params = {},
-        merge_params = {"var_thresh" : 1, "corr_thresh" : .80},
+        merge_params = {"var_thresh" : 1, "corr_thresh" : .96},
         plot_params = {"ms_dur" : 1300, "degree_visang" : 20, "block_size ": 200}):
     """151, 155, 157, 167, 107, 104, 90, 88, 83, 77, 74
     The main function for running the CS segmentation pipeline on a given 3D array (time x space x space).
@@ -468,15 +519,34 @@ def run(d3_arr, plot=False,
     # 3.1 Merge the clusters that share a particularily high degree of correlation.
     # This is needed becasue we always ask for 3 labels, but if signal is really 
     # strong and there is no opponency, it will place 2 labels within the centre.
-    if merge_params["corr_thresh"] is not None:
-        times_extracted, segmented_map = merge_cs_corr(times_extracted, segmented_map, merge_params["corr_thresh"]) 
-    # 3.2 Sort the times, as the clustering labels will be arbitrary and not structured
-    # in any meaningful order. Here, we ensure we get a predictable order (centre, surround, noise)
-    times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
     # 3.3 Finally merge clusters label regions together if there is no detectable signal (low variance),
     # generate an accurate background label. If so, fills the "noise" label with masked zeros 
     if merge_params["var_thresh"] is not None:
         times_extracted, segmented_map = merge_cs_var(times_extracted, segmented_map, merge_params["var_thresh"])
+
+
+    """
+    TODO
+    Rewrite merge_cs_corr such that the map and ordering (mappings?)
+    are acurately generated. This seems to work fine for merge_cs_var, 
+    but not for merge_cs_corr, meaning using corr after var scrambles
+    the correlation mappings in very unpleasant ways. 
+
+    """
+
+
+    if merge_params["corr_thresh"] is not None:
+        times_extracted, segmented_map = merge_cs_corr(times_extracted, segmented_map, merge_params["corr_thresh"]) 
+    # 3.2 Sort the times, as the clustering labels will be arbitrary and not structured
+    # in any meaningful order. Here, we ensure we get a predictable order (centre, surround, noise)
+    
+    """
+    TODO
+    Uncommnet this:
+    """
+    # times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
+
+
     # Optionally plot the output (these are pretty plots!)
     if plot is True:
         import seaborn as sns
