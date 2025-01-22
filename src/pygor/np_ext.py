@@ -13,5 +13,5 @@ def maxabs(x, axis = None):
         # Use np.take_along_axis to get the original values at those indices
         return np.take_along_axis(x, idx, axis=axis).squeeze(axis)
     
-# def absmax(x, axis = None):
-#     return np.max(np.abs(x), axis = None)
+def absmax(x, axis = None):
+    return np.max(np.abs(x), axis = None)

@@ -3,6 +3,7 @@ from scipy import signal
 from collections import defaultdict
 import pygor.np_ext
 import pygor.strf.spatial
+import pandas as pd
 
 def sd_index(csn_times):
     """
@@ -205,7 +206,7 @@ def gen_stats(strfs_arrs_list, segmentation_params = {}, extract_params = {}, **
     """
     output = defaultdict(list)
     for i in strfs_arrs_list:
-        prediction_map, prediction_times = pygor.strf.centsurr.run(i, segmentation_params = segmentation_params, extract_params = extract_params, **kwargs)
+        prediction_map, prediction_times = pygor.strf.centsurr.run(i, segmentation_params = segmentation_params, **kwargs)
         prediction_times = prediction_times.data
         with np.errstate(divide='ignore', invalid='ignore'):
             # Base stats
@@ -256,6 +257,23 @@ def gen_stats(strfs_arrs_list, segmentation_params = {}, extract_params = {}, **
             output["polarity_index_s"].append(polarity_s)
             output["correlation_coefficient"].append(correlation_coefficient(prediction_times))
             output["snr"].append(snr(prediction_times))
+            # Others 
+            
 
     # Check length of stats before returning dict
     return output
+
+def run_stats(files_list : list, segmentation_params = {}, extract_params = {}) -> pd.DataFrame:
+    dicts_list = []
+    df_list = []
+    for i in files_list:
+        strfs = pygor.filehandling.load(i, as_class=pygor.load.STRF, bs_bool = False)
+        tempdict = pygor.strf.centsurr.cs_stats.gen_stats(strfs.strfs_no_border,
+            segmentation_params=segmentation_params,
+            extract_params=extract_params)
+
+        tempdf = pd.DataFrame(tempdict)
+        dicts_list.append(tempdict)
+        df_list.append(tempdf)
+    df = pd.concat(df_list)
+    return df.reset_index()
