@@ -700,6 +700,8 @@ class STRF(Core):
         if roi is not None:
             if isinstance(roi, int):
                 iterate_through = [roi]
+            elif isinstance(roi, np.int_):
+                iterate_through = [roi.astype(int)]
             elif isinstance(roi, Iterable):
                 iterate_through = roi
             else:
