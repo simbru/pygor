@@ -38,19 +38,31 @@ compare_conditions = {
 # green_map  = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "white", "teal"])
 # blue_map   = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "white", "#5600fe"])
 # violet_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "white", "#ff00ff"])
-red_map = matplotlib.colors.LinearSegmentedColormap.from_list(
+red_map2 = matplotlib.colors.LinearSegmentedColormap.from_list(
     "", ["black", "silver", "#ef8e00"]
 )
-green_map = matplotlib.colors.LinearSegmentedColormap.from_list(
+green_map2 = matplotlib.colors.LinearSegmentedColormap.from_list(
     "", ["black", "silver", "teal"]
 )
-blue_map = matplotlib.colors.LinearSegmentedColormap.from_list(
+blue_map2 = matplotlib.colors.LinearSegmentedColormap.from_list(
     "", ["black", "silver", "#5600fe"]
 )
-violet_map = matplotlib.colors.LinearSegmentedColormap.from_list(
+violet_map2 = matplotlib.colors.LinearSegmentedColormap.from_list(
     "", ["black", "silver", "#ff00ff"]
 )
 
+red_map = matplotlib.colors.LinearSegmentedColormap.from_list(
+    "", ["black", "#ef8e00"]
+)
+green_map = matplotlib.colors.LinearSegmentedColormap.from_list(
+    "", ["black", "teal"]
+)
+blue_map = matplotlib.colors.LinearSegmentedColormap.from_list(
+    "", ["black", "#5600fe"]
+)
+violet_map = matplotlib.colors.LinearSegmentedColormap.from_list(
+    "", ["black", "#ff00ff"]
+)
 
 maps_concat = [red_map, green_map, blue_map, violet_map]
 
