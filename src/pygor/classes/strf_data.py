@@ -1058,6 +1058,8 @@ class STRF(Core):
             return np.array(maps), np.array(times)
         return pygor.strf.centsurr.run(self.strfs_no_border[roi], **kwargs)
 
+    # def convolve_with_img(self, img, roi = None):
+
 # class Clustering:
 #     def __init__(self):
 #         pass
