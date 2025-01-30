@@ -340,14 +340,14 @@ def gen_stats(strfs_obj, colour_list = ["R", "G", "B", "UV"], **kwargs):
     dict
         Dictionary containing various statistics.
     """
-    strfs_arrs_list = strfs_obj.strfs_no_border
+    #strfs_arrs_list = strfs_obj.strfs_no_border
     rois_index = np.repeat(np.arange(strfs_obj.num_rois), len(colour_list))
     if rois_index.size == 0:
         return None
     ipl_depths = np.repeat(strfs_obj.ipl_depths, len(colour_list))
     output = defaultdict(list)
-    for n, i in enumerate(strfs_arrs_list):
-        prediction_map, prediction_times = pygor.strf.centsurr.run(i, **kwargs)
+    for i in range(strfs_obj.num_rois * strfs_obj.numcolour):
+        prediction_map, prediction_times = strfs_obj.cs_seg(i)
         prediction_times = prediction_times.data
         with np.errstate(divide='ignore', invalid='ignore'):
             # Base stats
@@ -397,11 +397,11 @@ def gen_stats(strfs_obj, colour_list = ["R", "G", "B", "UV"], **kwargs):
             output["correlation_coefficient"].append(correlation_coefficient(prediction_times))
             output["snr"].append(snr(prediction_times))
             # Spatial
-            output["pix_n_c"] = np.sum(prediction_map == 0)
-            output["pix_n_s"] = np.sum(prediction_map == 1)
-            output["pix_n_n"] = np.sum(prediction_map == 2)
+            output["pix_n_c"].append(np.sum(prediction_map == 0))
+            output["pix_n_s"].append(np.sum(prediction_map == 1))
+            output["pix_n_n"].append(np.sum(prediction_map == 2))
             # Others 
-            output["colour"].append(colour_list[n % len(colour_list)])
+            output["colour"].append(colour_list[i % len(colour_list)])
             if np.abs(np.max(prediction_times[0])) > np.abs(np.min(prediction_times[0])):
                 pol = "ON"
             elif np.abs(np.max(prediction_times[0])) < np.abs(np.min(prediction_times[0])):
@@ -420,9 +420,9 @@ def gen_stats(strfs_obj, colour_list = ["R", "G", "B", "UV"], **kwargs):
             if (np.abs(absmaxC) > threshold and np.abs(absmaxS) > threshold) and (absmaxC < 0):
                 pol = "CS OFF"
             output["polarity"].append(pol)
-            output["IPL"].append(ipl_depths[n])
-            output["roi"].append(rois_index[n])
-            output["rel_index"].append(n)
+            output["IPL"].append(ipl_depths[i])
+            output["roi"].append(rois_index[i])
+            output["rel_index"].append(i)
             output["filename"].append(strfs_obj.filename)
             output["name"].append(strfs_obj.filename.stem)
 

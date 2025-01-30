@@ -132,7 +132,7 @@ class STRF(Core):
         """
         if parallel == None:
             parallel = self.bs_settings["time_parallel"]
-        # Generate bar for beuty
+        # Generate bar for beauty
         bar = tqdm(self.strfs, leave = False, position = 1, disable = None, 
             desc = f"Hang on, bootstrapping pygor.strf.temporal components {self.bs_settings['time_bs_n']} times")
         self._pval_time = np.array([pygor.strf.bootstrap.bootstrap_time(x, bootstrap_n=self.bs_settings["time_bs_n"], parallel = parallel) for x in bar])
@@ -320,7 +320,7 @@ class STRF(Core):
             np.ndarray: An array of p-values for time bootsrap.
         """
         if self.bs_settings["do_bootstrap"] == False:
-            return [np.nan] * self.num_strfs
+            return np.array([np.nan] * self.num_strfs)
         if self.bs_settings["do_bootstrap"] == True:
             try:
                 return self._pval_time
@@ -343,7 +343,7 @@ class STRF(Core):
             np.ndarray: An array of p-values for space bootstrap.
         """
         if self.bs_settings["do_bootstrap"] == False:
-            return [np.nan] * self.num_strfs
+            return np.array([np.nan] * self.num_strfs)
         if self.bs_settings["do_bootstrap"] == True:
             try:
                 return self._pval_space

@@ -1,4 +1,5 @@
 # Local imports
+import pygor.strf.centsurr
 import pygor.strf.contouring
 import pygor.strf.temporal
 
@@ -253,6 +254,9 @@ def _roi_by_roi_dict(data_strf_obj, df_return=False):  #
                     dict[i] = dict[i].astype(float)
                     difference = expected_lengths - len(dict[i])
                     dict[i] = np.pad(dict[i], (difference, 0), constant_values=np.nan)
+    # Include CS segmentation statistics 
+    cs_stats_dict = pygor.strf.centsurr.cs_stats.gen_stats(data_strf_obj)
+    dict.update(cs_stats_dict)
     if df_return is False:
         return dict
     if df_return is True:

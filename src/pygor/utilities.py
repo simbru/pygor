@@ -422,6 +422,8 @@ def multicolour_reshape(arr, n_colours):
         - The function requires 'n_colours' to be a positive integer.
         - The function preserves the order of elements in the original array when reshaping.
     """
+    if isinstance(arr, list):
+        arr = np.array(list)
     org_shape = arr.shape
     assert org_shape[0] % n_colours == 0
     new_shape = (n_colours, int(org_shape[0] / n_colours), *org_shape[1:])
