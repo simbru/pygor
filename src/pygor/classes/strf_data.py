@@ -43,7 +43,7 @@ class STRF(Core):
     ipl_depths   : np.ndarray = field(init=False)
     numcolour    : int = field(init=False) # gets interpreted from strf array shape
     strf_keys    : list = field(init=False)
-
+    
     ## Attributes
     def __post_init__(self):
         # Post initialise the contents of Data class to be inherited
@@ -69,6 +69,7 @@ class STRF(Core):
                 self.numcolour = 1
             self.strfs = pygor.data_helpers.load_strf(HDF5_file)
         self.num_strfs = len(self.strfs)
+        self.num_rois = int(self.num_strfs / self.numcolour)
         self.set_bootstrap_settings_default()
         if self.bs_settings["do_bootstrap"] == True:
             self.run_bootstrap()

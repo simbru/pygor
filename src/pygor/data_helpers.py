@@ -192,36 +192,6 @@ def load_strf(HDF5_file, post_process=True, fix_oversize=True):
     strf_arr = post_process_strf_all(strf_arr)
     return strf_arr
 
-
-def post_process_strf(arr_3d, correct_rotation=True, zscore=True):
-    """Gentle post processing that removes border
-    by masking and z-scores the STRFs"""
-    if arr_3d is np.nan:
-        return np.nan
-    # Remove border
-    border_mask = pygor.utilities.auto_border_mask(arr_3d)
-    arr_3d = np.ma.array(arr_3d, mask=border_mask)
-    if zscore == True:
-        ## Old implementation
-        # Z score over time and space
-        # arr_3d = scipy.stats.zscore(arr_3d, axis = None)
-        # centred_arr_3d = arr_3d
-        ## New implementation (normalised/centred to first frame)
-        avg_1stframe = np.ma.average(arr_3d[0])
-        std_1stframe = np.ma.std(arr_3d[0])
-        centred_arr_3d = (arr_3d - avg_1stframe) / std_1stframe
-        # # arr_3d = centred_arr_3d
-        return centred_arr_3d
-
-
-def post_process_strf_all(arr_4d, correct_rotation=True, zscore=True):
-    centred_arr_4d = np.ma.empty(arr_4d.shape)
-    for n, arr3d in enumerate(arr_4d):
-        arr3d = post_process_strf(arr3d)
-        centred_arr_4d[n] = arr3d
-    return centred_arr_4d
-
-
 def post_process_strf(arr_3d, correct_rotation=True, zscore=True):
     """Gentle post processing that removes border
     by masking and z-scores the STRFs"""

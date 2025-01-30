@@ -379,6 +379,8 @@ def extract_times(
 
 def amplitude_criteria(prediction_times, map, abs_criteria = 2) -> tuple[np.ma.MaskedArray, np.ndarray, bool]:
     maxval = np.ma.max(np.ma.abs(prediction_times).astype(float))
+    if abs_criteria is None: #pass through
+        return prediction_times, map, True 
     if  float(maxval) < float(abs_criteria):
         new_map = np.zeros(map.shape)
         new_times = np.ma.array(np.zeros(prediction_times.shape), mask = True)
@@ -469,17 +471,17 @@ def cs_segment_demo(inputdata_3d, **kwargs):
 
 def run(d3_arr, plot=False, 
         sort_strategy = "sorted",
-        exclude_sub = 1.5,
+        exclude_sub = 2,
         segmentation_params = {    
-            "smooth_times"  : 10,   #4
-            "smooth_space"  : 4,   #4
-            "upscale_time"  : 2,#None
+            "smooth_times"  : 2,   #4
+            "smooth_space"  : 2,   #4
+            "upscale_time"  : 1,#None
             "upscale_space" : 1,  #1
-            "centre_on_zero": True,
+            "centre_on_zero": False,
             "plot_demo"     : False,
             "crop_time"     : None,
             "on_pcs"        : True,}, 
-        merge_params = {"var_thresh" : 1, "corr_thresh" : .97},
+        merge_params = {"var_thresh" : .25, "corr_thresh" : .95},
         plot_params = {"ms_dur" : 1300, "degree_visang" : 20, "block_size ": 200}):
     """151, 155, 157, 167, 107, 104, 90, 88, 83, 77, 74
     The main function for running the CS segmentation pipeline on a given 3D array (time x space x space).
