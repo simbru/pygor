@@ -4,25 +4,38 @@ from sklearn.preprocessing import MinMaxScaler
 import matplotlib as plt
 import numyp as np
 import pygor.plotting
+try:
+    from collections.abc import Iterable
+except:
+    from collections import Iterable
 
-example_img = plt.imread(r"examples\test.png")
-img_zoom = 1/5
-arr_zoom = 20
-roi_index = -16
+example_img_path = r".\examples\example_img.png"
 
-img = np.rollaxis(np.array([scipy.ndimage.zoom(img[:, :, i], img_zoom) for i in range(3)]), 0, 3)
-pix_per_degree_img = img.shape[1]/60 # pix/degrees
-# degrees_per_pix_arr = 86.325/arr.shape[1]
-new_img = np.empty(img.shape)
-arr_list = []
-loopthrough = np.arange(strfs.strfs.shape[0]).reshape(-1, 4).astype(int)[roi_index]
-for n, i in enumerate(loopthrough[:3]):
-    # arr = np.squeeze(strfs.collapse_times(start_index + n))[arr_crop[0]:arr_crop[1], arr_crop[2]:arr_crop[3]]
-    arr = np.squeeze(strfs.collapse_times(i))
-    arr = scipy.ndimage.zoom(arr, arr_zoom)
-    arr_list.append(arr)
-    new_img[:, :, n] = scipy.signal.fftconvolve(img[:, :, n], arr, mode = "same")
-    # new_img = scipy.signal.convolve2d(img[:, :, n], arr, mode = "same")
+# roi_index = -16
+
+def convolve_image(strf_obj, roi_index, img = None, img_zoom = 1/5, arr_zoom = 20):
+    if img is None:
+        img = plt.imread(example_img_path)
+
+    img = np.rollaxis(np.array([scipy.ndimage.zoom(img[:, :, i], img_zoom) for i in range(3)]), 0, 3)
+    pix_per_degree_img = img.shape[1]/60 # pix/degrees
+    # degrees_per_pix_arr = 86.325/arr.shape[1]
+    new_img = np.empty(img.shape)
+    arr_list = []
+    loopthrough = np.arange(strf_obj.shape[0]).reshape(-1, 4).astype(int)[roi_index]
+    for n, i in enumerate(loopthrough[:3]):
+        # arr = np.squeeze(strfs.collapse_times(start_index + n))[arr_crop[0]:arr_crop[1], arr_crop[2]:arr_crop[3]]
+        arr = np.squeeze(strf_obj.collapse_times(i))
+        arr = scipy.ndimage.zoom(arr, arr_zoom)
+        arr_list.append(arr)
+        new_img[:, :, n] = scipy.signal.fftconvolve(img[:, :, n], arr, mode = "same")
+        # new_img = scipy.signal.convolve2d(img[:, :, n], arr, mode = "same")
+    if isinstance(roi_index, Iterable):
+        
+
+
+
+
 
 fig, ax = plt.subplots(4, 3, figsize = (15, 10))
 maxval = np.max(np.abs(arr_list))
