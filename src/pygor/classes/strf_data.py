@@ -17,6 +17,7 @@ import natsort
 import numpy as np
 import pandas as pd
 import sklearn.preprocessing
+import re
 from tqdm.auto import tqdm
 # Local imports
 import pygor.data_helpers
@@ -51,7 +52,9 @@ class STRF(Core):
         super().__post_init__()
         with h5py.File(self.filename) as HDF5_file:
             # Get keys for STRF, filter for only STRF + n where n is a number between 0 to 9 
-            keys = [i for i in HDF5_file.keys() if "STRF" in i and any(i[4] == np.arange(0, 10).astype("str"))]
+            # keys = [i for i in HDF5_file.keys() if "?STRF" in i and any(i[4] == np.arange(0, 10).astype("str"))]
+            pattern = re.compile(r"^STRF\d+_\d+_\d+$")
+            keys = [i for i in HDF5_file.keys() if pattern.match(i) and any(i[4] == np.arange(0, 10).astype("str"))]
             self.strf_keys = natsort.natsorted(keys)
             # Set bool for multi-colour RFs and ensure multicolour attributes set correctly
             bool_partofmulticolour_list = [len(n.removeprefix("STRF").split("_")) > 2 for n in keys]
