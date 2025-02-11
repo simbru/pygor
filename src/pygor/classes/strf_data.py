@@ -1061,7 +1061,11 @@ class STRF(Core):
             return np.array(maps), np.array(times)
         return pygor.strf.centsurr.run(self.strfs_no_border[roi], **kwargs)
 
-    # def convolve_with_img(self, img, roi = None):
+    def convolve_with_img(self, roi, img = "example", plot = False, **kwargs):
+        from pygor.strf import convolve
+        if roi is None:
+            raise ValueError("ROI must be supplied")
+        return convolve.convolve_image(self, roi, img, plot = plot, **kwargs)
 
 # class Clustering:
 #     def __init__(self):
