@@ -35,10 +35,10 @@ def try_fetch(file, key):
             result = np.array(result).T
     except KeyError as error:
         result = None
-        # raise KeyError(f"'{key}' not found in {file.filename}, setting to np.nan") from error
-        warnings.warn(
-            f"'{key}' not found in {file.filename}, setting to np.nan", stacklevel=2
-        )
+        # # raise KeyError(f"'{key}' not found in {file.filename}, setting to np.nan") from error
+        # warnings.warn(
+        #     f"'{key}' not found in {file.filename}, setting to np.nan", stacklevel=2
+        # )
         error
     return result
     
@@ -85,9 +85,9 @@ class Core:
             # Timing parameters
             self.triggertimes = try_fetch(HDF5_file, "Triggertimes")
             self.triggertimes = self.triggertimes[~np.isnan(self.triggertimes)].astype(
-                int
+                float
             )
-            self.triggerstime_frame = try_fetch(HDF5_file, "Triggertimes_Frame")
+            self.triggertimes_frame = try_fetch(HDF5_file, "Triggertimes_Frame")
             self.__skip_first_frames = int(try_fetch_os_params(HDF5_file, "Skip_First_Triggers")) # Note name mangling to prevent accidents if 
             self.__skip_last_frames = -int(try_fetch_os_params(HDF5_file, "Skip_Last_Triggers")) # private class attrs share names 
             self.ipl_depths = try_fetch(HDF5_file, "Positions")
@@ -109,10 +109,10 @@ class Core:
             self.ms_dur = self.averages.shape[-1]
         else:
             self.ms_dur = None
-        # Ensure triggerstime_frame does not include uneccessary nans
-        if self.triggerstime_frame is not None:
-            self.triggerstime_frame = self.triggerstime_frame[
-                ~np.isnan(self.triggerstime_frame)
+        # Ensure triggertimes_frame does not include uneccessary nans
+        if self.triggertimes_frame is not None:
+            self.triggertimes_frame = self.triggertimes_frame[
+                ~np.isnan(self.triggertimes_frame)
             ].astype(int)
         # Set name
         self.name = self.filename.stem
@@ -510,7 +510,7 @@ class Core:
             # Ignore skipping parameters
             first_trig_frame = 0
             last_trig_frame = 0
-            # triggers_frames = self.triggerstime_frame
+            # triggers_frames = self.triggertimes_frame
         else:
             # Othrwise, account for skipping parameters
             first_trig_frame = self.__skip_first_frames
@@ -520,7 +520,7 @@ class Core:
             )
         if last_trig_frame == 0:
             last_trig_frame = None
-        triggers_frames = self.triggerstime_frame[first_trig_frame:last_trig_frame]
+        triggers_frames = self.triggertimes_frame[first_trig_frame:last_trig_frame]
         # Get the frame interval over which to average the images
         rep_start_frames = triggers_frames[:: self.phase_num]
         rep_delta_frames = np.diff(
