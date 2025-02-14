@@ -9,6 +9,5 @@ class StaticBars(Core):
     def __post_init__(self):
         
         # # Post initialise the contents of Data class to be inherited
-        # super().__dict__["data_types"].append(self.type)
         super().__post_init__()
         # None

@@ -98,12 +98,12 @@ class Core:
             self.linedur_s = float(try_fetch_os_params(HDF5_file, "LineDuration"))
             self.average_stack = try_fetch(HDF5_file, "Stack_Ave")
             self.frame_hz = float(1/(self.average_stack.shape[0]/self.n_planes*self.linedur_s))
-        # Check that trigger mode matches phase number
-        if self.trigger_mode != self.phase_num:
-            warnings.warn(
-                f"{self.filename.stem}: Trigger mode {self.trigger_mode} does not match phase number {self.phase_num}",
-                stacklevel=3,
-            )
+        # # Check that trigger mode matches phase number --> Removed, seemed redundant
+        # if self.trigger_mode != self.phase_num:
+        #     warnings.warn(
+        #         f"{self.filename.stem}: Trigger mode {self.trigger_mode} does not match phase number {self.phase_num}",
+        #         stacklevel=3,
+        #     )
         # Imply from averages the ms_duration of one repeat
         if self.averages is not None:
             self.ms_dur = self.averages.shape[-1]
