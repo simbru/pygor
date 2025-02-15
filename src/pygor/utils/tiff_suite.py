@@ -31,6 +31,6 @@ def basic_stim_overlay(
         rgb_array[
             0:frame_duration,
             xy_loc[1] : xy_loc[1] + size,
-            xy_loc[0] + frame_widht * i : xy_loc[0] + size + frame_width * i,
+            xy_loc[0] + frame_width * i : xy_loc[0] + size + frame_width * i,
         ] = colour_list[i]
     return rgb_array
