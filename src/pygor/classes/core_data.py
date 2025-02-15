@@ -61,9 +61,9 @@ class Core:
     averages: np.array = np.nan
     snippets: np.array = np.nan
     ms_dur: int = np.nan
-    phase_num: int = (
-        1  # Default to 1, for simplicity in pygor.plotting.plots avgs etc...
-    )
+    # phase_num: int = (
+    #     1  # Default to 1, for simplicity in pygor.plotting.plots avgs etc...
+    # )
     num_rois: int = field(init=False)
 
     def __post_init__(self):
@@ -99,9 +99,9 @@ class Core:
             self.average_stack = try_fetch(HDF5_file, "Stack_Ave")
             self.frame_hz = float(1/(self.average_stack.shape[0]/self.n_planes*self.linedur_s))
         # # Check that trigger mode matches phase number --> Removed, seemed redundant
-        # if self.trigger_mode != self.phase_num:
+        # if self.trigger_mode != self.trigger_mode:
         #     warnings.warn(
-        #         f"{self.filename.stem}: Trigger mode {self.trigger_mode} does not match phase number {self.phase_num}",
+        #         f"{self.filename.stem}: Trigger mode {self.trigger_mode} does not match phase number {self.trigger_mode}",
         #         stacklevel=3,
         #     )
         # Imply from averages the ms_duration of one repeat
@@ -467,7 +467,7 @@ class Core:
             ):  # This takes care of passing just 1 roi, not breaking axs.flat in the next line
                 axs = np.array([axs])
             sd_ratio_scalebar = 0.5
-            phase_dur = self.ms_dur / self.phase_num
+            phase_dur = self.ms_dur / self.trigger_mode
             for n, (ax, roi, label) in enumerate(zip(axs.flat, rois, roi_labels)):
                 ax.plot(self.snippets[roi].T, c="grey", alpha=0.5)
                 ax.plot(self.averages[roi], color=colormap[n])
@@ -481,8 +481,8 @@ class Core:
                 ax.set_ylabel(label, rotation=0, verticalalignment="center")
                 ax.spines[["top", "bottom", "right"]].set_visible(False)
                 # Now we need to add axvspans (don't think I can avoid for loops inside for loops...)
-                if self.phase_num != 1:
-                    for interval in range(self.phase_num)[::2]:
+                if self.trigger_mode != 1:
+                    for interval in range(self.trigger_mode)[::2]:
                         ax.axvspan(
                             interval * phase_dur,
                             (interval + 1) * phase_dur,
@@ -538,7 +538,7 @@ class Core:
             The average image calculated from the trigger frames.
         """
         # If no repetitions
-        if self.phase_num == 1:
+        if self.trigger_mode == 1:
             warnings.warn("No repetitions detected, returning original images")
             return
         # Account for trigger skipping logic
@@ -558,25 +558,25 @@ class Core:
             last_trig_frame = None
         triggers_frames = self.triggertimes_frame[first_trig_frame:last_trig_frame]
         # Get the frame interval over which to average the images
-        rep_start_frames = triggers_frames[:: self.phase_num]
+        rep_start_frames = triggers_frames[:: self.trigger_mode]
         rep_delta_frames = np.diff(
-            triggers_frames[:: self.phase_num]
+            triggers_frames[:: self.trigger_mode]
         )  # time between repetitions, by frame number
         rep_delta = int(
             np.floor(np.average(rep_delta_frames))
         )  # take the average of the differentiated values, and round down. This your delta time in frames
         # Calculate number of full repetitions
         percise_reps = (
-            len(triggers_frames) / self.phase_num
+            len(triggers_frames) / self.trigger_mode
         )  # This may yield a float if partial repetition
         if (
             percise_reps % 1 != 0
         ):  # In that case, we don't have an exact loop so we ignore the residual partial loop
             reps = int(
                 triggers_frames[
-                    : int(np.floor(percise_reps) % percise_reps * self.phase_num)
+                    : int(np.floor(percise_reps) % percise_reps * self.trigger_mode)
                 ].shape[0]
-                / self.phase_num
+                / self.trigger_mode
             )  # number of full repetitions, by removing residual non-complete repetitions
             print(
                 f"Partial loop detected ({percise_reps}), using only",
@@ -592,7 +592,7 @@ class Core:
         images_to_average = np.concatenate(images_to_average, axis=0)
         # Print results
         print(
-            f"{len(triggers_frames)} triggers with a phase_num of {self.phase_num} gives {reps} full repetitions of {rep_delta} frames each."
+            f"{len(triggers_frames)} triggers with a trigger_mode of {self.trigger_mode} gives {reps} full repetitions of {rep_delta} frames each."
         )
         # Average the images
         split_arr = np.array(np.split(images_to_average, reps))

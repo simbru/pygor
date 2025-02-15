@@ -3,10 +3,8 @@ from pygor.classes.core_data import Core
 import numpy as np
 
 
-@dataclass(kw_only=True, repr=False)
+@dataclass(kw_only=False, repr=False) #Decide if kw_only is necessary
 class FullField(Core):
-    # key-word only, so phase_num must be specified when initialising Data_FFF
-    phase_num: int
     ipl_depths: np.ndarray = np.nan
     # Post init attrs
     name: str = field(init=False)

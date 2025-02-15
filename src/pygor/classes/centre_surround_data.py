@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 
 @dataclass(kw_only=True, repr=False)
 class CenterSurround(Core):
-    phase_num: int
 
     def __post_init__(self):
         # Post initialise the contents of Data class to be inherited
@@ -23,7 +22,7 @@ class CenterSurround(Core):
 
         if stims == None:
             stims: int  # type annotation
-            stims = self.phase_num
+            stims = self.trigger_mode
         if roi == None:
             times = self.averages
         else:
