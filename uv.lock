@@ -211,6 +211,18 @@ wheels = [
 ]
 
 [[package]]
+name = "cmap"
+version = "0.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ae/2c/b55c0391433445659e0150253fdc8331a3cf483c57e489d63cf7c95e0c58/cmap-0.5.0.tar.gz", hash = "sha256:2177fe5fa5b2ec616448384d9707813e75fa91598a338976c379562381042c13", size = 907819 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/1a/74a47561b5bce058e253770d728a19ab7f68e79d83032a36096bfe564e4d/cmap-0.5.0-py3-none-any.whl", hash = "sha256:b6e91b854c2416e3e6064c3716f31d050bf8f5550ea96fbccfd8297f4444f33d", size = 954765 },
+]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -930,12 +942,45 @@ wheels = [
 ]
 
 [[package]]
+name = "matplotlib-scalebar"
+version = "0.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c5/3d/e76e0e48c96e43b656446c35990824f20136de21940a7436020ab757a54d/matplotlib_scalebar-0.9.0.tar.gz", hash = "sha256:f91adc5e4e67ac920a8fa98a55f904d56e5c2da4d56286748c31ec62146362be", size = 1180588 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a8/c0/2dfab7b319dabe23f5a7b515a797c74b501d15c72e7a03837cf0cf779b9e/matplotlib_scalebar-0.9.0-py3-none-any.whl", hash = "sha256:5140525cd4e0c60bcade541b86571dabaf446fa69192530bd82d60b54601aa79", size = 16411 },
+]
+
+[[package]]
 name = "mdurl"
 version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979 },
+]
+
+[[package]]
+name = "microfilm"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cmap" },
+    { name = "h5py" },
+    { name = "imageio" },
+    { name = "matplotlib" },
+    { name = "matplotlib-scalebar" },
+    { name = "natsort" },
+    { name = "numpy" },
+    { name = "scikit-image" },
+    { name = "tifffile" },
+    { name = "xarray" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4c/d6/77eba72a829355717fd167a057ae86d2e815e3e8bfe59c0e05de0498cd33/microfilm-0.3.0.tar.gz", hash = "sha256:f06a458234a8bc5fec61eacf7523afbccde660e55b940deea58924a27a7b01ad", size = 83996674 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f3/17/504a5f77bc1998d18761008a400ef096ed66269fb87852aa2f6eb6e9d43c/microfilm-0.3.0-py3-none-any.whl", hash = "sha256:a7efcf3dff964fbcecfbab432d870a376dd52f40c23905cf1573e4eed90db35a", size = 25173 },
 ]
 
 [[package]]
@@ -995,6 +1040,23 @@ all = [
 ]
 
 [[package]]
+name = "napari-animated-gif-io"
+version = "0.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "imageio" },
+    { name = "microfilm" },
+    { name = "napari" },
+    { name = "napari-plugin-engine" },
+    { name = "napari-tools-menu" },
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2c/ce/36379a0ec01fa7b31a9f73e8d4ccf6d1c71277547bfd97a567e65877cf99/napari-animated-gif-io-0.1.2.tar.gz", hash = "sha256:ab9a3af2f74fd0eb63d99a94cade0a11da8f96dc1307161ec1b755bc815ac540", size = 7026 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/88/507132c61dce155d20711cab802a5e984c969b2c04c706b33a44bbeb57a6/napari_animated_gif_io-0.1.2-py3-none-any.whl", hash = "sha256:ca9b3ade7fa7f1a67f23bd68442bb5c9abf7f31244326881476b05903e12b530", size = 7123 },
+]
+
+[[package]]
 name = "napari-console"
 version = "0.1.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1046,6 +1108,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a7/90/802f8288d16c1513b908d644779e733461a53b6c1a2c7561f1464c9f1516/napari_svg-0.2.1.tar.gz", hash = "sha256:031f13b34b0948afbdcb11eb00728fe32ef7e4e3aa3905f923001d6871a08ad9", size = 17533 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d0/ae/0eeb22806c4157a9199f65a93374e5ff5c4d2cc1411b5d25053bcd9e6b91/napari_svg-0.2.1-py3-none-any.whl", hash = "sha256:9eaa54fbbf9bfd5078b67b7d1edc9eccfd872dab89fd586374909fef4ed89a49", size = 16458 },
+]
+
+[[package]]
+name = "napari-tools-menu"
+version = "0.1.20"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "napari" },
+    { name = "napari-plugin-engine" },
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/68/3a/0958cad426409230c34f01cd5febc273755cdb6804b1aab8fc075f09dc3d/napari_tools_menu-0.1.20.tar.gz", hash = "sha256:83684fae87faa612fd19f53f70aa70f1374c769fda2297347c2b9d3722e7b0d2", size = 7695 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/91/1a/6592e49b3eb7904ca4f4fd1f140841bff4133f8e02c01a4c57fdfcc7e2a4/napari_tools_menu-0.1.20-py3-none-any.whl", hash = "sha256:8149502ad3d76d1d5823977afa3b81e0defc049a53c911e918bf3a4bcc5c3de0", size = 7556 },
 ]
 
 [[package]]
@@ -1525,6 +1601,7 @@ dependencies = [
     { name = "ipywidgets" },
     { name = "matplotlib" },
     { name = "napari", extra = ["all"] },
+    { name = "napari-animated-gif-io" },
     { name = "natsort" },
     { name = "numpy" },
     { name = "pandas" },
@@ -1551,6 +1628,7 @@ requires-dist = [
     { name = "ipywidgets" },
     { name = "matplotlib" },
     { name = "napari", extras = ["all"], specifier = ">=0.5.6" },
+    { name = "napari-animated-gif-io", specifier = ">=0.1.2" },
     { name = "natsort" },
     { name = "numpy", specifier = ">2" },
     { name = "pandas", specifier = ">2.2.0" },
@@ -2389,6 +2467,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/6a/e1/0122853035b40b3f333bbb25f1939fc1045e21dd518f7f0922b60c156f7c/wrapt-1.17.2-cp313-cp313t-win32.whl", hash = "sha256:13e6afb7fe71fe7485a4550a8844cc9ffbe263c0f1a1eea569bc7091d4898555", size = 37986 },
     { url = "https://files.pythonhosted.org/packages/09/5e/1655cf481e079c1f22d0cabdd4e51733679932718dc23bf2db175f329b76/wrapt-1.17.2-cp313-cp313t-win_amd64.whl", hash = "sha256:eaf675418ed6b3b31c7a989fd007fa7c3be66ce14e5c3b27336383604c9da85c", size = 40750 },
     { url = "https://files.pythonhosted.org/packages/2d/82/f56956041adef78f849db6b289b282e72b55ab8045a75abad81898c28d19/wrapt-1.17.2-py3-none-any.whl", hash = "sha256:b18f2d1533a71f069c7f82d524a52599053d4c7166e9dd374ae2136b7f40f7c8", size = 23594 },
+]
+
+[[package]]
+name = "xarray"
+version = "2025.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "pandas" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/89/c0/edb2f6cfafa5369106f927409f6211141c3296c14877cc634d8ee4c970a4/xarray-2025.1.2.tar.gz", hash = "sha256:e7675c79ac69d274dd3b3c5450ce57176928d2792947576251ed1c7df1783224", size = 3271214 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/05/79/4e19100342fe13d69fd6e77b343e2269924fec681258e2ea21b55576aad2/xarray-2025.1.2-py3-none-any.whl", hash = "sha256:a7ad6a36c6e0becd67f8aff6a7808d20e4bdcd344debb5205f0a34b1a4a7f8d6", size = 1247773 },
 ]
 
 [[package]]
