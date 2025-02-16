@@ -22,6 +22,7 @@ import h5py
 import matplotlib.patheffects as path_effects
 import matplotlib
 import warnings
+import scipy.ndimage
 import math
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import skimage
@@ -61,9 +62,7 @@ class Core:
     averages: np.array = np.nan
     snippets: np.array = np.nan
     ms_dur: int = np.nan
-    # phase_num: int = (
-    #     1  # Default to 1, for simplicity in pygor.plotting.plots avgs etc...
-    # )
+    trigger_mode : int = 1 #defualt value
     num_rois: int = field(init=False)
 
     def __post_init__(self):
@@ -506,14 +505,18 @@ class Core:
             markers_arr = avg_epoch_triggertimes * (1 / self.linedur_s)
             markers_arr -= markers_arr[0]
             fig, ax = plt.subplots(1,)
+            # import sklearn.preprocessing
             # scaler = sklearn.preprocessing.MaxAbsScaler()
             arr = self.averages
-            # arr = scaler.fit_transform(arr.T).T
+            # arr = scaler.fit_transform(arr)
+            maxabs = np.max(np.abs(arr))
             img = ax.imshow(arr, aspect="auto", cmap = "Greys_r")
             # ax.set_xticklabels(np.round(load.triggertimes, 3))
             for i in markers_arr:
                 ax.axvline(x=i, color="r", alpha=0.5)
                 # ax.axvline(x=i + (avg_epoch_dur * (1 / load.linedur_s)/load.trigger_mode)/2, color="blue", alpha=0.5)
+
+
             plt.colorbar(img)
             # ax.set_xticklabels(np.round(self.triggertimes - self.triggertimes[0], 2) )
             # print(ax.xaxis.get_majorticklocs())
@@ -598,3 +601,26 @@ class Core:
         split_arr = np.array(np.split(images_to_average, reps))
         avg_movie = np.average(split_arr, axis=0)
         return avg_movie
+
+    @property
+    def rois_alt(self):
+        temp_rois = self.rois.copy()
+        temp_rois[temp_rois == 1] = np.nan
+        temp_rois *= -1
+        return temp_rois
+    
+    @property
+    def roi_centroids(self, force = True):
+        """
+        Get the centre of mass for each ROI in the image if not already done.
+        """
+        if np.all(np.logical_or(np.unique(self.rois) < 0, np.unique(self.rois) == 1)):
+            temp_rois = self.rois_alt
+            labels = np.unique(temp_rois)
+            labels = labels[~np.isnan(labels)]
+            centroids = scipy.ndimage.center_of_mass(temp_rois, temp_rois, labels)
+        else:
+            labels = np.unique(self.rois)
+            labels = labels[~np.isnan(labels)]
+            centroids = scipy.ndimage.center_of_mass(self.rois, self.rois, labels)
+        return np.array(centroids)
