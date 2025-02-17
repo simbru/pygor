@@ -501,6 +501,11 @@ class Core:
             temp_arr = np.empty(epoch_reshape.shape)
             for n, i in enumerate(epoch_reshape):
                 temp_arr[n] = i - (avg_epoch_dur * n)
+            """
+            TODO:
+            - Account for where triggers do not come at a regular interval such that 
+            triggers are plotted by their actual occurance, not by the trigger time diff 
+            """
             avg_epoch_triggertimes = np.average(temp_arr, axis=0)
             markers_arr = avg_epoch_triggertimes * (1 / self.linedur_s)
             markers_arr -= markers_arr[0]
