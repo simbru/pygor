@@ -130,14 +130,14 @@ def napari_depth_prompt(pygor_object, log = True):
                 logging.info(f"Setting active window to: {active_window.name}")
                 previous_window = active_window.name  # Update the previous window
                 if active_window != previous_window:
-                    if viewer_input.layers["lower IPL"].data:
-                        lower = viewer_input.layers["lower IPL"].data
+                    if viewer_input.layers["0% boundary"].data:
+                        lower = viewer_input.layers["0% boundary"].data
                         lower = interp_coords(lower[-1])
-                        viewer_input.layers["lower IPL"].data = [lower]
-                    if viewer_input.layers["upper IPL"].data:
-                        upper = viewer_input.layers["upper IPL"].data
+                        viewer_input.layers["0% boundary"].data = [lower]
+                    if viewer_input.layers["100% boundary"].data:
+                        upper = viewer_input.layers["100% boundary"].data
                         upper = interp_coords(upper[-1])
-                        viewer_input.layers["upper IPL"].data = [upper]
+                        viewer_input.layers["100% boundary"].data = [upper]
             if started_bool:
                 time.sleep(clock_speed)
                 try:
@@ -161,7 +161,7 @@ def napari_depth_prompt(pygor_object, log = True):
                         break
         logging.info("Thread stopping.")
         # Finally, do the calcluation
-        lower, upper = np.squeeze(viewer_input.layers["lower IPL"].data[0]), np.squeeze(viewer_input.layers["upper IPL"].data[0])
+        lower, upper = np.squeeze(viewer_input.layers["0% boundary"].data[0]), np.squeeze(viewer_input.layers["100% boundary"].data[0])
         orientation = determine_orientation(lower[:, 1], lower[:, 0])
         or_str = "Vertical" if orientation == 0 else "Horizontal"
         logging.info(f"Orientation is: {or_str}")
@@ -172,9 +172,8 @@ def napari_depth_prompt(pygor_object, log = True):
             lower = reorder(lower[:, 1], lower[:, 0])
             upper = reorder(upper[:, 1], upper[:, 0])
             depths = calculate_depths(lower, upper, pygor_object.roi_centroids)
-        print(np.abs(np.max(depths)))
         if np.abs(np.max(depths)) > 100:
-            raise AssertionError("Depths exceed range 0-100%, likely orientation is incorrect.")
+            raise AssertionError("Depths exceed range 0-100%, likely orientation is incorrect. You may need to bug fix this.")
         outlist[:] = depths  # Add depths to outlist
         logging.info("Procedure finished, depth inserted into return list.")
 
@@ -204,8 +203,8 @@ def napari_depth_prompt(pygor_object, log = True):
     viewer.add_image(avg_movie, name = "Average stack", colormap = "Greys_r")
     viewer.add_image(pygor_object.rois_alt, name = "ROIs", colormap = "rainbow", opacity = 0.25)
     viewer.add_points(pygor_object.roi_centroids, name = "ROI centroids", opacity = 1, face_color="orange", size = 1.5)
-    upper_layer = viewer.add_shapes(name = "upper IPL", edge_color = "red")
-    lower_layer = viewer.add_shapes(name = "lower IPL", edge_color = "blue")
+    upper_layer = viewer.add_shapes(name = "100% boundary", edge_color = "red")
+    lower_layer = viewer.add_shapes(name = "0% boundary", edge_color = "blue")
     # Set tool so its ready-to-go for clicking
     upper_layer.mode = 'add_polyline'
     lower_layer.mode = 'add_polyline'

@@ -395,7 +395,7 @@ class Core:
         int
             The depth of the images in the stack.
         """
-        return pygor.core.methods.napari_depth_prompt(self)
+        self.ipl_depths = pygor.core.methods.napari_depth_prompt(self)
 
     def plot_averages(
         self, rois=None, 
