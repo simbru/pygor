@@ -12,6 +12,7 @@ import pygor.strf.contouring
 import pygor.strf.temporal
 import pygor.plotting.basic
 import pygor.utils
+import pygor.core
 
 # Dependencies
 import operator
@@ -384,6 +385,17 @@ class Core:
         d3[:, :, 1] = base1
         d3[:, :, 2] = base2
         ax.imshow(pygor.utilities.min_max_norm(d3, 0, 1))
+
+    def get_depth(self):
+        """
+        Get the depth of the images in the stack.
+
+        Returns
+        -------
+        int
+            The depth of the images in the stack.
+        """
+        return pygor.core.methods.napari_depth_prompt(self)
 
     def plot_averages(
         self, rois=None, 
