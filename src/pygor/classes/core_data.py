@@ -397,6 +397,23 @@ class Core:
         """
         self.ipl_depths = pygor.core.methods.napari_depth_prompt(self)
 
+    def draw_rois(self, attribute = "calculate_image_average", style = "stacked",**kwargs):
+        """
+        Draw ROIs on the image stack.
+        """
+        def call_method(obj, method_str, *args, **kwargs):
+            # Extract method name by stripping trailing parentheses (if present)
+            method_name = method_str.split('(')[0].strip()  # Handles "method" or "method()"
+            method = getattr(obj, method_name)  # Get the method from the object
+            print(method)
+            if attribute in obj.__dict__:
+                return obj.__getattribute__(attribute)
+            else:
+                return method(*args, **kwargs)  # Call the method with arguments
+        target = call_method(self, attribute)
+        session = pygor.core.methods.napari_roi_prompt(target, traces_plot_style = style,**kwargs)
+        return session.run()
+
     def plot_averages(
         self, rois=None, 
         figsize=(None, None), 

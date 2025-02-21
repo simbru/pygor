@@ -4,6 +4,11 @@ import logging
 import sys
 import numpy as np
 from scipy.signal import savgol_filter
+from qtpy.QtCore import QEventLoop
+import matplotlib
+from skimage.draw import polygon
+from IPython import get_ipython
+import matplotlib.pyplot as plt
 
 def napari_depth_prompt(pygor_object, log = True):
     global viewer_input
@@ -212,3 +217,187 @@ def napari_depth_prompt(pygor_object, log = True):
     wait_for_variable(stop_event, viewer) # must run like this otherwise ipykernel kernel dies
     # Return data
     return outlist
+
+class napari_roi_prompt():
+    matplotlib.use("Qt5Agg")
+    def __init__(self, array_input, traces_plot_style = "stacked", plot = False):
+        if get_ipython() is not None:
+            get_ipython().run_line_magic('matplotlib', 'Qt5Agg')
+        import napari
+        self.traces_plot_style = traces_plot_style
+        self.roi_coordinates = None  # Store the computed value
+        self.mask = np.zeros(array_input[0].shape)
+        self.viewer = napari.Viewer()
+        self.arr = array_input
+        self.plot = plot
+        # Create a Qt event loop
+        self.event_loop = QEventLoop()
+        self.make_fig = True
+        self.already_plotted = []
+
+        @self.viewer.bind_key("c")
+        def plot_on_demand(viewer):
+            self.grab_coordinates()
+            self.generate_plot()
+
+        @self.viewer.bind_key("ctrl+k")
+        def clear_all_rois(viewer):
+            self.update_self()
+            if len(self.viewer.layers["place ROIs"].data) > 0:
+                self.viewer.layers["place ROIs"].data = []
+
+        @self.viewer.bind_key("k")
+        def clear_prev_roi(viewer):
+            self.update_self()
+            if len(self.viewer.layers["place ROIs"].data) > 0:
+                if self.traces_plot_style == "stacked":
+                    if self.traces is not None:
+                        plt.gcf().axes[1].lines[-1].remove()
+                        plt.gcf().axes[0].collections[-1].remove()
+
+                self.viewer.layers["place ROIs"].data = self.viewer.layers["place ROIs"].data[:-1]
+
+        # Override the close event
+        original_close_event = self.viewer.window._qt_window.closeEvent
+
+        def custom_close_event(event):
+            self.on_close()  # Run computations on close
+            original_close_event(event)  # Ensure proper closing
+            self.event_loop.quit()  # Exit the event loop
+
+        self.viewer.window._qt_window.closeEvent = custom_close_event
+
+    def grab_coordinates(self):
+        """Retrieve ROI coordinates, ensuring the latest data is captured."""
+        print("Processing user selection...")
+        # roi_layer.refresh()  # Force update before reading data
+        if self.viewer.layers["place ROIs"].data is not None:
+            # coords = self.viewer.layers["place ROIs"].data
+            # coords = [[np.clip(x, (0, self.arr[0].shape[1])), np.clip(y, 0, (self.arr[0].shape[0]))] for x, y in zip(coords[:, 0], coords[:, 1])]
+            # self.roi_coordinates = coords
+            """
+            TODO: Fix coordinates landing outside of the image. Its just annoying for keeping ROI count. 
+            Just delete them.
+            """
+            self.roi_coordinates = self.viewer.layers["place ROIs"].data
+            
+
+    def on_close(self):
+        """Function triggered when the viewer closes."""
+        print("Napari GUI closed. Generating final plot...")
+        self.grab_coordinates()  # Compute the final result
+        if self.viewer.layers["place ROIs"].data is not None:
+            self.generate_plot()
+
+    # Methods to handle ROI output
+    def mask_from_coords(self, coords_list, mask_shape):
+        mask = np.ones(mask_shape) * np.nan  # Boolean mask
+        for n, coords in enumerate(coords_list):
+            coords = np.ceil(coords)
+            # Fill the mask
+            x, y = polygon(coords[:, 0], coords[:, 1], shape=mask_shape)
+            mask[x, y] = n  # Fill the mask
+        mask = mask[:self.arr[0].shape[0], :self.arr[0].shape[1]]
+        return mask
+        
+    def fetch_traces(self, img_stack, roi_mask):
+        unique_vals = np.unique(roi_mask)
+        unique_vals = unique_vals[~np.isnan(unique_vals)]
+        traces = []
+        for n in unique_vals:
+            mask = (roi_mask == n)
+            # Efficiently compute the sum and count using einsum
+            sum_per_frame = np.einsum('ijk,jk->i', img_stack, mask, optimize=True)
+            count = mask.sum()
+            traces.append(sum_per_frame / count)
+        return np.array(traces)
+
+    def get_or_create_figure(self):
+        """Return the specific labeled figure, or create it if missing."""
+        FIGURE_LABEL = "Plot selected ROIs"
+        # Check all existing figures by iterating over them
+        if self.make_fig == False:
+            for fig_num in plt.get_fignums():
+                fig = plt.figure(fig_num)  # Get figure by number
+                if fig.get_label() == FIGURE_LABEL:  # Check label
+                    print("Reusing figure")
+                    # plt.show(block = False)
+                    plt.pause(.1)
+                    return fig, fig.axes
+        # Create a new figure if not found
+        print("Generating new plot")
+        fig, ax = plt.subplots(2, 1, figsize=(10,4), label = FIGURE_LABEL)
+        self.make_fig = False
+        plt.show(block=True)
+        return fig, ax
+
+    def update_self(self):
+        self.roi_coordinates = self.viewer.layers["place ROIs"].data
+        self.mask = self.mask_from_coords(self.roi_coordinates, self.arr[0].shape)
+        self.traces = self.fetch_traces(self.arr, self.mask)
+
+    def generate_plot(self):
+        self.update_self()
+        fig, ax = self.get_or_create_figure()
+        colormap = plt.cm.rainbow(np.linspace(0, 1, len(self.traces)))
+        ax[0].imshow(np.average(self.arr, axis = 0), cmap = "Greys_r")
+        ax[0].imshow(self.mask, cmap = "rainbow", alpha = 0.25)
+        for n, coords in enumerate(self.roi_coordinates):
+                ax[0].scatter(coords[:, 1], coords[:, 0], s = 1)
+                ax[0].text(np.average(coords[:, 1]), np.average(coords[:, 0]), str(n), fontsize=16, ha="center", va="center", color="black")
+                ax[0].text(np.average(coords[:, 1]), np.average(coords[:, 0]), str(n), fontsize=14, ha="center", va="center", color="white")
+        if self.traces_plot_style == "stacked":
+            for n, i in enumerate(self.traces):
+                ax[1].plot(i, color = colormap[-n], label = f"ROI {n}")
+                ax[1].legend()
+        if self.traces_plot_style == "individual":
+            # Get the figure and number of traces
+            fig = ax[0].figure
+            num_traces = len(self.traces)
+            # Clear existing axes except ax[0]
+            if len(self.traces) < 5:
+                for a in fig.axes[1:]:  # Keep ax[0], remove others
+                    a.remove()
+            else:
+                for a in fig.axes:
+                    a.remove()
+            # Create new gridspec: 1 main plot (ax[0]) + n trace plots
+            gs = fig.add_gridspec(num_traces + 1, 1)
+            # Reassign ax[0] to the top of the new grid
+            ax[0].set_subplotspec(gs[0, 0])
+            # Create new axes for traces below ax[0]
+            trace_axes = []
+            for n in range(num_traces):
+                new_ax = fig.add_subplot(gs[n+1, 0])
+                trace_axes.append(new_ax)
+            # Plot traces in new axes
+            for n, (trace, ax_trace) in enumerate(zip(self.traces, trace_axes)):
+                ax_trace.plot(trace, color=colormap[-n], label=f"ROI {n}")
+                ax_trace.spines[["top", "bottom", "right"]].set_visible(False)
+                ax_trace.set_yticks([])
+                ax_trace.set_ylabel(f"ROI {n}", rotation=90)
+            fig.subplots_adjust(hspace=0, wspace=0)
+        if self.traces_plot_style == "raster":
+            if len(self.traces) > 0:
+                ax[1].imshow(self.traces, aspect = "auto", cmap = "Greys_r", interpolation="none")
+        plt.draw()
+        
+    def run(self):
+        import napari
+        """Launch Napari and block execution properly."""
+        vmin, vmax = np.percentile(self.arr, (1, 99))
+        self.viewer.add_image(np.std(self.arr, axis = 0), name="SD")
+        self.viewer.add_image(np.mean(self.arr, axis = 0), name="Average")
+        self.viewer.add_image(self.arr, name="Image", opacity=.6, contrast_limits=(vmin, vmax))
+        roi_layer = self.viewer.add_shapes(name = "place ROIs", shape_type = 'polygon', opacity=.75, edge_width=.25, edge_color='yellow', face_color='transparent')
+        roi_layer.mode = 'add_ellipse'
+        self.viewer.layers[0]._keep_auto_contrast = True
+        napari.run()
+        self.event_loop.exec_()  # Block until close event triggers
+        if get_ipython() is not None:
+            get_ipython().run_line_magic('matplotlib', 'inline')
+        if self.viewer.layers["place ROIs"].data != []:
+            plt.show(block = False)
+        else:
+            plt.close()
+        return self.fetch_traces(self.arr, self.mask)  # Now `self.result` is updated before returning
