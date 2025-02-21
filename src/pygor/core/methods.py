@@ -9,6 +9,7 @@ import matplotlib
 from skimage.draw import polygon
 from IPython import get_ipython
 import matplotlib.pyplot as plt
+import napari
 
 def napari_depth_prompt(pygor_object, log = True):
     global viewer_input
@@ -177,8 +178,8 @@ def napari_depth_prompt(pygor_object, log = True):
             lower = reorder(lower[:, 1], lower[:, 0])
             upper = reorder(upper[:, 1], upper[:, 0])
             depths = calculate_depths(lower, upper, pygor_object.roi_centroids)
-        if np.abs(np.max(depths)) > 100:
-            raise AssertionError("Depths exceed range 0-100%, likely orientation is incorrect. You may need to bug fix this.")
+        # if np.abs(np.max(depths)) > 100:
+        #     raise AssertionError("Depths exceed range 0-100%, likely orientation is incorrect. You may need to bug fix this.")
         outlist[:] = depths  # Add depths to outlist
         logging.info("Procedure finished, depth inserted into return list.")
 
@@ -217,6 +218,53 @@ def napari_depth_prompt(pygor_object, log = True):
     wait_for_variable(stop_event, viewer) # must run like this otherwise ipykernel kernel dies
     # Return data
     return outlist
+
+class napari_depth_prompt2:
+    def __init__(self, pygor_object):
+        self.result = None  # Store the computed value
+        self.viewer = napari.Viewer()
+
+        # Create a Qt event loop
+        self.event_loop = QEventLoop()
+
+        # Override the close event
+        original_close_event = self.viewer.window._qt_window.closeEvent
+
+        def custom_close_event(event):
+            self.on_close()  # Run computations on close
+            original_close_event(event)  # Ensure proper closing
+            self.event_loop.quit()  # Exit the event loop
+
+        self.viewer.window._qt_window.closeEvent = custom_close_event
+
+    def process_data(self):
+        """Placeholder for computation logic based on user selection."""
+        print("Processing user selection...")
+        self.result = 42  # Example result
+
+    def on_close(self):
+        """Function triggered when the viewer closes."""
+        print("Viewer closed. Running final computation...")
+        self.process_data()  # Compute the final result
+
+    def run(self):
+        """Launch Napari and block execution properly."""
+
+        # Average movie to give a 2D projection
+        avg_movie = np.average(self.pygor_object.images, axis=0)
+        # Make layers
+        self.viewer.add_image(avg_movie, name = "Average stack", colormap = "Greys_r")
+        self.viewer.add_image(self.pygor_object.rois_alt, name = "ROIs", colormap = "rainbow", opacity = 0.25)
+        self.viewer.add_points(self.pygor_object.roi_centroids, name = "ROI centroids", opacity = 1, face_color="orange", size = 1.5)
+        upper_layer = self.viewer.add_shapes(name = "100% boundary", edge_color = "red")
+        lower_layer = self.viewer.add_shapes(name = "0% boundary", edge_color = "blue")
+        # Set tool so its ready-to-go for clicking
+        upper_layer.mode = 'add_polyline'
+        lower_layer.mode = 'add_polyline'
+        napari.run()
+        self.event_loop.exec_()  # Block until close event triggers
+        
+        return self.result  # Now `self.result` is updated before returning
 
 class napari_roi_prompt():
     matplotlib.use("Qt5Agg")

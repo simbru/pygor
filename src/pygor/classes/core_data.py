@@ -395,7 +395,7 @@ class Core:
         int
             The depth of the images in the stack.
         """
-        self.ipl_depths = pygor.core.methods.napari_depth_prompt(self)
+        self.ipl_depths = pygor.core.methods.napari_depth_prompt2(self)
 
     def draw_rois(self, attribute = "calculate_image_average", style = "stacked",**kwargs):
         """
