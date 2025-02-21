@@ -97,7 +97,13 @@ class Core:
             self.n_planes = int(try_fetch_os_params(HDF5_file, "nPlanes"))
             self.linedur_s = float(try_fetch_os_params(HDF5_file, "LineDuration"))
             self.average_stack = try_fetch(HDF5_file, "Stack_Ave")
-            self.frame_hz = float(1/(self.average_stack.shape[0]/self.n_planes*self.linedur_s))
+            # TODO: change the logic to conditionally pull info from OS_Params instead,
+            # because images or averege_stack can sometimes be cropped, leading to 
+            # inaccurate frame_hz. Better to fetch from metadata.
+            if self.images is not None:
+                self.frame_hz = float(1/(self.images.shape[1]/self.n_planes*self.linedur_s))
+            else:
+                self.frame_hz = float(1/(self.average_stack.shape[0]/self.n_planes*self.linedur_s))
         # # Check that trigger mode matches phase number --> Removed, seemed redundant
         # if self.trigger_mode != self.trigger_mode:
         #     warnings.warn(
