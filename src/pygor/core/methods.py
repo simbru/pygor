@@ -279,7 +279,15 @@ class napari_roi_prompt():
             TODO: Fix coordinates landing outside of the image. Its just annoying for keeping ROI count. 
             Just delete them.
             """
-            self.roi_coordinates = self.viewer.layers["place ROIs"].data
+            coordinates = self.viewer.layers["place ROIs"].data
+            shape = self.arr[0].shape
+            coordinates = [np.dstack([np.clip(curr_coord[:, 0], 0 , shape[0]), np.clip(curr_coord[:, 1], 0 , shape[1])]) for curr_coord in coordinates]
+
+            self.roi_coordinates = coordinates
+            print(coordinates)
+            # self.viewer.layers["place ROIs"].data = coordinates
+            
+            # self.roi_coordinates = self.viewer.layers["place ROIs"].data
             
 
     def on_close(self):
