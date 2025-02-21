@@ -62,7 +62,7 @@ Inside `pygor/src/pygor/` (Python's way of structuring a package with sub-module
 | Snippets0          | snippets             |
 | OS_Parameters[58]  | frame_hz             |
 | OS_Parameters[28]  | trigger_mode             |
-| Triggertimes_Frame          | triggerstime_frame             |
+| Triggertimes_Frame          | triggertimes_frame             |
 | Triggertimes          | triggertimes             |
 | Positions          | ipl_depths             |
 
