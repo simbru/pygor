@@ -140,7 +140,7 @@ class napari_depth_prompt:
 
 
     def process_data(self):
-        """Placeholder for computation logic based on user selection."""
+        """Calculates the depth of each ROI between the 0% and 100% boundaries."""
         print("Processing user selection...")
         # Finally, do the calcluation
         lower, upper = np.squeeze(self.viewer.layers["0% boundary"].data[0]), np.squeeze(self.viewer.layers["100% boundary"].data[0])
@@ -154,7 +154,7 @@ class napari_depth_prompt:
             lower = self.reorder(lower[:, 1], lower[:, 0])
             upper = self.reorder(upper[:, 1], upper[:, 0])
             depths = self.calculate_depths(lower, upper, self.pygor_object.roi_centroids)
-        self.result = depths  # Example result
+        self.result = depths
 
     def on_close(self):
         """Function triggered when the viewer closes."""
