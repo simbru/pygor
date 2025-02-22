@@ -9,12 +9,57 @@ import matplotlib
 from skimage.draw import polygon
 from IPython import get_ipython
 import matplotlib.pyplot as plt
+import napari
 
-def napari_depth_prompt(pygor_object, log = True):
-    global viewer_input
-    global outlist
-    import napari
-    def determine_orientation(x_func, y_func):
+class napari_depth_prompt:
+    def __init__(self, pygor_object):
+        self.result = None  # Store the computed value
+        self.viewer = napari.Viewer()
+        self.pygor_object = pygor_object
+        self.last_active_layer = None # set this later when Viewer is populated
+
+        # Create a Qt event loop
+        self.event_loop = QEventLoop()
+
+        # Override the close event
+        original_close_event = self.viewer.window._qt_window.closeEvent
+
+        def custom_close_event(event):
+            self.on_close()  # Run computations on close
+            original_close_event(event)  # Ensure proper closing
+            self.event_loop.quit()  # Exit the event loop
+
+        self.viewer.window._qt_window.closeEvent = custom_close_event
+
+    def interp_coords(self, coords, n_points = 1000, smooth = True, smooth_window = None, poly_order_smooth = 3):
+        if isinstance(coords, list):
+            coords = np.array(coords)
+        # Compute the cumulative distance along the path
+        distances = np.cumsum(np.linalg.norm(np.diff(coords, axis=0), axis=1))
+        distances = np.insert(distances, 0, 0)  # Insert 0 at the beginning
+        # Generate 128 evenlybb spaced points along the distance
+        interp_distances = np.linspace(0, distances[-1], n_points)
+        # Interpolate x and y separately
+        x_interp = np.interp(interp_distances, distances, coords[:, 0])
+        y_interp = np.interp(interp_distances, distances, coords[:, 1])
+        # Combine interpolated points
+        interpolated_coords = np.column_stack((x_interp, y_interp))
+        if smooth:
+            # Apply Savitzky-Golay filter
+            if smooth_window is None:
+                smooth_window = int(len(x_interp)/2)
+            if smooth_window % 2 == 0:
+                smooth_window -= 1
+            window_length = smooth_window# Must be an odd number
+            x_smooth = savgol_filter(x_interp, window_length, poly_order_smooth)
+            y_smooth = savgol_filter(y_interp, window_length, poly_order_smooth)
+            # Stack smoothed coordinates
+            smoothed_coords = np.column_stack((x_smooth, y_smooth))
+            return smoothed_coords
+        else:
+            return interpolated_coords
+
+    def determine_orientation(self, x_func, y_func):
         """
         Determines if the variations in the X direction are greater than or equal to the variations in the Y direction.
         
@@ -45,35 +90,7 @@ def napari_depth_prompt(pygor_object, log = True):
         # Determine dominant direction
         return int(x_range >= y_range)
 
-    def interp_coords(coords, n_points = 1000, smooth = True, smooth_window = None, poly_order_smooth = 3):
-        if isinstance(coords, list):
-            coords = np.array(coords)
-        # Compute the cumulative distance along the path
-        distances = np.cumsum(np.linalg.norm(np.diff(coords, axis=0), axis=1))
-        distances = np.insert(distances, 0, 0)  # Insert 0 at the beginning
-        # Generate 128 evenlybb spaced points along the distance
-        interp_distances = np.linspace(0, distances[-1], n_points)
-        # Interpolate x and y separately
-        x_interp = np.interp(interp_distances, distances, coords[:, 0])
-        y_interp = np.interp(interp_distances, distances, coords[:, 1])
-        # Combine interpolated points
-        interpolated_coords = np.column_stack((x_interp, y_interp))
-        if smooth:
-            # Apply Savitzky-Golay filter
-            if smooth_window is None:
-                smooth_window = int(len(x_interp)/2)
-            if smooth_window % 2 == 0:
-                smooth_window -= 1
-            window_length = smooth_window# Must be an odd number
-            x_smooth = savgol_filter(x_interp, window_length, poly_order_smooth)
-            y_smooth = savgol_filter(y_interp, window_length, poly_order_smooth)
-            # Stack smoothed coordinates
-            smoothed_coords = np.column_stack((x_smooth, y_smooth))
-            return smoothed_coords
-        else:
-            return interpolated_coords
-
-    def reorder(xwave, ywave):
+    def reorder(self, xwave, ywave):
         """
         Sorts xwave in ascending order and reorders ywave accordingly.
 
@@ -100,7 +117,7 @@ def napari_depth_prompt(pygor_object, log = True):
 
         return np.array([sorted_xwave, sorted_ywave]).T
 
-    def calculate_depths(lower, upper, roi_centroids):
+    def calculate_depths(self, lower, upper, roi_centroids):
         upper_x_coords = upper[:, 1]
         lower_x_coords = lower[:, 1]
         # find closest corresponding x point on upper and lower contours
@@ -122,101 +139,65 @@ def napari_depth_prompt(pygor_object, log = True):
         return percent_position
 
 
-
-    if log:
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', stream=sys.stdout)
-    def update_loop(viewer_input, stop_event):
-        previous_window = None
-        started_bool = False
-        clock_speed = .1
-        while not stop_event.is_set():
-            active_window = viewer_input.layers.selection.active
-            if active_window and active_window.name != previous_window:
-                logging.info(f"Setting active window to: {active_window.name}")
-                previous_window = active_window.name  # Update the previous window
-                if active_window != previous_window:
-                    if viewer_input.layers["0% boundary"].data:
-                        lower = viewer_input.layers["0% boundary"].data
-                        lower = interp_coords(lower[-1])
-                        viewer_input.layers["0% boundary"].data = [lower]
-                    if viewer_input.layers["100% boundary"].data:
-                        upper = viewer_input.layers["100% boundary"].data
-                        upper = interp_coords(upper[-1])
-                        viewer_input.layers["100% boundary"].data = [upper]
-            if started_bool:
-                time.sleep(clock_speed)
-                try:
-                    viewer_input.window._qt_window.isVisible()
-                except Exception as e:
-                    logging.info(f"Stopping thread as Napari stopped with error {e}.")
-                    stop_event.set()
-            if not started_bool:
-                logging.info("Starting")
-                while not stop_event.is_set():
-                    viewer.window._qt_window.isVisible()
-                    time.sleep(clock_speed)
-                    try:
-                        viewer.window._qt_window.isVisible()
-                    except Exception as e:
-                        logging.info(f"Exited with error: {e}")
-                        stop_event.set()
-                    if viewer_input.status == "Ready":
-                        started_bool = True
-                        logging.info("Started")
-                        break
-        logging.info("Thread stopping.")
+    def process_data(self):
+        """Placeholder for computation logic based on user selection."""
+        print("Processing user selection...")
         # Finally, do the calcluation
-        lower, upper = np.squeeze(viewer_input.layers["0% boundary"].data[0]), np.squeeze(viewer_input.layers["100% boundary"].data[0])
-        orientation = determine_orientation(lower[:, 1], lower[:, 0])
+        lower, upper = np.squeeze(self.viewer.layers["0% boundary"].data[0]), np.squeeze(self.viewer.layers["100% boundary"].data[0])
+        orientation = self.determine_orientation(lower[:, 1], lower[:, 0])
         or_str = "Vertical" if orientation == 0 else "Horizontal"
         logging.info(f"Orientation is: {or_str}")
         if orientation == 1:
-            depths = calculate_depths(lower, upper, pygor_object.roi_centroids)
+            depths = self.calculate_depths(lower, upper, self.pygor_object.roi_centroids)
         else:
             logging.info("Vertical orientation detected")
-            lower = reorder(lower[:, 1], lower[:, 0])
-            upper = reorder(upper[:, 1], upper[:, 0])
-            depths = calculate_depths(lower, upper, pygor_object.roi_centroids)
-        if np.abs(np.max(depths)) > 100:
-            raise AssertionError("Depths exceed range 0-100%, likely orientation is incorrect. You may need to bug fix this.")
-        outlist[:] = depths  # Add depths to outlist
-        logging.info("Procedure finished, depth inserted into return list.")
+            lower = self.reorder(lower[:, 1], lower[:, 0])
+            upper = self.reorder(upper[:, 1], upper[:, 0])
+            depths = self.calculate_depths(lower, upper, self.pygor_object.roi_centroids)
+        self.result = depths  # Example result
 
-    def wait_for_variable(stop_event, viewer_input):
-        # global viewer_input
-        while viewer is None and not stop_event.is_set():
-            time.sleep(1)  # Check every 1000ms
-        if stop_event.is_set():
-            return  # Stop thread if requested
-        logging.info("Variable is set, starting thread...")
-        thread = threading.Thread(target=update_loop, args=(viewer_input, stop_event), daemon=True)
-        thread.start()
-        return thread
-    # Create object to store data and return once program ends
-    outlist = np.empty(len(np.unique(pygor_object.rois))-1)
-    # Create the stop event
-    stop_event = threading.Event()
-    # Print off instructions
-    print("You will now be prompted with a napari viewer (it may hide in your taskbar). \n",
-        "Select the upper and lower contours in the their respective Napari layers. \n",
-        "Press a different layer to finish the line, and exit the viewer once done with both lines.")
-    # Generate viewer
-    viewer = napari.Viewer()
-    # Average movie to give a 2D projection
-    avg_movie = np.average(pygor_object.images, axis=0)
-    # Make layers
-    viewer.add_image(avg_movie, name = "Average stack", colormap = "Greys_r")
-    viewer.add_image(pygor_object.rois_alt, name = "ROIs", colormap = "rainbow", opacity = 0.25)
-    viewer.add_points(pygor_object.roi_centroids, name = "ROI centroids", opacity = 1, face_color="orange", size = 1.5)
-    upper_layer = viewer.add_shapes(name = "100% boundary", edge_color = "red")
-    lower_layer = viewer.add_shapes(name = "0% boundary", edge_color = "blue")
-    # Set tool so its ready-to-go for clicking
-    upper_layer.mode = 'add_polyline'
-    lower_layer.mode = 'add_polyline'
+    def on_close(self):
+        """Function triggered when the viewer closes."""
+        print("Viewer closed. Running final computation...")
+        if self.viewer.layers["0% boundary"].data != [] and self.viewer.layers["100% boundary"].data != []:
+            self.process_data()  # Compute the final result
+        else:
+            print("No data to process. Missing boundaries.")
+            self.result = None
 
-    wait_for_variable(stop_event, viewer) # must run like this otherwise ipykernel kernel dies
-    # Return data
-    return outlist
+    def on_layer_switch(self, event):
+        """Triggered when the active layer changes."""
+        current_layer = self.viewer.layers.selection.active        
+        if current_layer is None:
+            return  # No active layer selected
+        print(f"Switched from '{self.last_active_layer.name}' to '{current_layer.name}'")
+        if self.last_active_layer.name == "100% boundary" or self.last_active_layer.name == "0% boundary":
+            if self.last_active_layer.data != []:
+                print(f"Interpolating coordinates for '{self.last_active_layer.name}'")
+                self.last_active_layer.data = self.interp_coords(self.last_active_layer.data[-1])
+        # Update the last active layer
+        self.last_active_layer = current_layer
+
+    def run(self):
+        """Launch Napari and block execution properly."""
+        # Average movie to give a 2D projection
+        avg_movie = np.average(self.pygor_object.images, axis=0)
+        # Make layers
+        self.viewer.add_image(avg_movie, name = "Average stack", colormap = "Greys_r")
+        self.viewer.add_image(self.pygor_object.rois_alt, name = "ROIs", colormap = "rainbow", opacity = 0.25)
+        self.viewer.add_points(self.pygor_object.roi_centroids, name = "ROI centroids", opacity = 1, face_color="orange", size = 1.5)
+        upper_layer = self.viewer.add_shapes(name = "100% boundary", edge_color = "red")
+        lower_layer = self.viewer.add_shapes(name = "0% boundary", edge_color = "blue")
+        # Set tool so its ready-to-go for clicking
+        upper_layer.mode = 'add_polyline'
+        lower_layer.mode = 'add_polyline'
+        self.viewer.layers.selection.events.active.connect(self.on_layer_switch)
+        self.last_active_layer = self.viewer.layers[-1] #last added layer is always active first, and therefore the last_active_layer on firs layer switch
+        napari.run()
+        # Set the exception hook globally
+        # sys.excepthook = self.handle_exception
+        self.event_loop.exec_()  # Block until close event triggers
+        return self.result  # Now `self.result` is updated before returning
 
 class napari_roi_prompt():
     matplotlib.use("Qt5Agg")
