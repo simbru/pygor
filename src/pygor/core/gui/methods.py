@@ -200,7 +200,6 @@ class napari_depth_prompt:
         return self.result  # Now `self.result` is updated before returning
 
 class napari_roi_prompt():
-    matplotlib.use("Qt5Agg")
     def __init__(self, array_input, traces_plot_style = "stacked", plot = False):
         if get_ipython() is not None:
             get_ipython().run_line_magic('matplotlib', 'Qt5Agg')

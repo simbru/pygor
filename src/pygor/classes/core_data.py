@@ -401,7 +401,7 @@ class Core:
         int
             The depth of the images in the stack.
         """
-        session = pygor.core.methods.napari_depth_prompt(self)
+        session = pygor.core.napari_depth_prompt(self)
         return session.run()
 
     def draw_rois(self, attribute = "calculate_image_average", style = "stacked",**kwargs):
@@ -418,7 +418,7 @@ class Core:
             else:
                 return method(*args, **kwargs)  # Call the method with arguments
         target = call_method(self, attribute)
-        session = pygor.core.methods.napari_roi_prompt(target, traces_plot_style = style,**kwargs)
+        session = pygor.core.napari_roi_prompt(target, traces_plot_style = style,**kwargs)
         return session.run()
 
     def plot_averages(
