@@ -5,6 +5,7 @@ try:
 except ImportError:
     from collections.abc import Iterable
 # Local imports
+import pygor.core.plot
 import pygor.data_helpers
 import pygor.utils.helpinfo
 import pygor.strf.spatial
@@ -457,115 +458,9 @@ class Core:
         -------
         None
         """
-        # Handle arguments, keywords, and exceptions
         if self.averages is None:
-            raise AttributeError(
-                "self.averages is nan, meaning it has likely not been generated"
-            )
-        if rois is None:
-            rois = np.arange(0, self.num_rois)
-        if isinstance(rois, Iterable) is False:
-            rois = [rois]
-        if isinstance(rois, np.ndarray) is False:
-            rois = np.array(rois)
-        if rois is not None and isinstance(rois, Iterable) is False:
-            rois = np.array([rois])
-        if "sort_by" in kwargs:
-            rois = rois[
-                np.argsort(self.__keyword_lables[kwargs["sort_by"]][rois].astype(int))
-            ]
-        if "label_by" in kwargs:
-            roi_labels = self.__keyword_lables[kwargs["label_by"]][rois]
-        else:
-            roi_labels = rois
-        if "filter_by" in kwargs:
-            filter_result = self.__compare_ops_map[kwargs["filter_by"][1]](
-                kwargs["filter_by"][0](self.averages, axis=1), kwargs["filter_by"][2]
-            )
-            rois = rois[filter_result]
-        if figsize == (None, None):
-            figsize = (5, len(rois))
-        if figsize_scale is not None:
-            figsize = np.array(figsize) * np.array(figsize_scale)
-        if len(rois) < n_rois_raster:
-            # Generate matplotlib plot
-            colormap = plt.cm.jet_r(np.linspace(1, 0, len(rois)))
-            if axs is None:
-                fig, axs = plt.subplots(
-                    len(rois), figsize=figsize, sharey=True, sharex=True
-                )
-            else:
-                fig = plt.gcf()
-            # Loop through and plot wwithin axes
-            if len(
-                rois == 1
-            ):  # This takes care of passing just 1 roi, not breaking axs.flat in the next line
-                axs = np.array([axs])
-            sd_ratio_scalebar = 0.5
-            phase_dur = self.ms_dur / self.trigger_mode
-            for n, (ax, roi, label) in enumerate(zip(axs.flat, rois, roi_labels)):
-                ax.plot(self.snippets[roi].T, c="grey", alpha=0.5)
-                ax.plot(self.averages[roi], color=colormap[n])
-                ax.set_xlim(0, len(self.averages[0]))
-                if independent_scale is False:
-                    ax.set_ylim(np.min(self.snippets[rois]), np.max(self.snippets[rois]))
-                else:
-                    closest_sd = np.ceil(np.max(self.averages[roi])*sd_ratio_scalebar)
-                    pygor.plotting.add_scalebar(closest_sd, string = f"{closest_sd.astype(int)} SD",ax=ax, flip_text=True, x=1.015, y = 0.1)
-                ax.set_yticklabels([])
-                ax.set_ylabel(label, rotation=0, verticalalignment="center")
-                ax.spines[["top", "bottom", "right"]].set_visible(False)
-                # Now we need to add axvspans (don't think I can avoid for loops inside for loops...)
-                if self.trigger_mode != 1:
-                    for interval in range(self.trigger_mode)[::2]:
-                        ax.axvspan(
-                            interval * phase_dur,
-                            (interval + 1) * phase_dur,
-                            alpha=0.2,
-                            color="gray",
-                            lw=0,
-                        )
-                ax.grid(False)
-            if independent_scale is False:
-                closest_sd = np.ceil(np.max(self.averages[rois])*sd_ratio_scalebar)
-                pygor.plotting.add_scalebar(closest_sd, string = f"{closest_sd.astype(int)} SD",ax=axs.flat[-1], flip_text=True, x=1.015, y = 0.1)
-            ax.set_xlabel("Time (ms)")
-            fig.subplots_adjust(wspace=0, hspace=0)
-        else:
-            avg_epoch_dur = np.average(np.diff(self.triggertimes.reshape(-1, self.trigger_mode)[:, 0]))
-            epoch_reshape = self.triggertimes.reshape(-1, self.trigger_mode)
-            temp_arr = np.empty(epoch_reshape.shape)
-            for n, i in enumerate(epoch_reshape):
-                temp_arr[n] = i - (avg_epoch_dur * n)
-            """
-            TODO:
-            - Account for where triggers do not come at a regular interval such that 
-            triggers are plotted by their actual occurance, not by the trigger time diff 
-            """
-            avg_epoch_triggertimes = np.average(temp_arr, axis=0)
-            markers_arr = avg_epoch_triggertimes * (1 / self.linedur_s)
-            markers_arr -= markers_arr[0]
-            fig, ax = plt.subplots(1,)
-            # import sklearn.preprocessing
-            # scaler = sklearn.preprocessing.MaxAbsScaler()
-            arr = self.averages
-            # arr = scaler.fit_transform(arr)
-            maxabs = np.max(np.abs(arr))
-            img = ax.imshow(arr, aspect="auto", cmap = "Greys_r")
-            # ax.set_xticklabels(np.round(load.triggertimes, 3))
-            for i in markers_arr:
-                ax.axvline(x=i, color="r", alpha=0.5)
-                # ax.axvline(x=i + (avg_epoch_dur * (1 / load.linedur_s)/load.trigger_mode)/2, color="blue", alpha=0.5)
-
-
-            plt.colorbar(img)
-            # ax.set_xticklabels(np.round(self.triggertimes - self.triggertimes[0], 2) )
-            # print(ax.xaxis.get_majorticklocs())
-            ax.set_xticks(np.ceil(ax.xaxis.get_majorticklocs()), np.ceil(ax.xaxis.get_majorticklocs() / 1000))
-            ax.set_xlim(0, len(self.averages[0]))
-            # ax.set_xticklabels(np.array([int(i) for i in ax.get_xticklabels()]) / 1000)
-        # plt.tight_layout()
-        return fig, axs
+            raise ValueError("Averages do not exist.")
+        return pygor.core.plot.plot_averages(self, rois, figsize, figsize_scale, axs, independent_scale, n_rois_raster, **kwargs)
 
     def calculate_image_average(self, ignore_skip=False):
         """

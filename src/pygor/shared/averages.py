@@ -6,8 +6,9 @@ import seaborn as sns
 sns.set_theme()
 # import stumpy
 import math
+import matplotlib
 
-import utilities
+import pygor.utilities as utilities
 
 sns.set_context("paper")
 sns.set_style("whitegrid")
