@@ -17,6 +17,7 @@ import natsort
 import numpy as np
 import pandas as pd
 import sklearn.preprocessing
+import re
 from tqdm.auto import tqdm
 # Local imports
 import pygor.data_helpers
@@ -43,7 +44,7 @@ class STRF(Core):
     ipl_depths   : np.ndarray = field(init=False)
     numcolour    : int = field(init=False) # gets interpreted from strf array shape
     strf_keys    : list = field(init=False)
-
+    
     ## Attributes
     def __post_init__(self):
         # Post initialise the contents of Data class to be inherited
@@ -51,7 +52,9 @@ class STRF(Core):
         super().__post_init__()
         with h5py.File(self.filename) as HDF5_file:
             # Get keys for STRF, filter for only STRF + n where n is a number between 0 to 9 
-            keys = [i for i in HDF5_file.keys() if "STRF" in i and any(i[4] == np.arange(0, 10).astype("str"))]
+            # keys = [i for i in HDF5_file.keys() if "?STRF" in i and any(i[4] == np.arange(0, 10).astype("str"))]
+            pattern = re.compile(r"^STRF\d+_\d+_\d+$")
+            keys = [i for i in HDF5_file.keys() if pattern.match(i) and any(i[4] == np.arange(0, 10).astype("str"))]
             self.strf_keys = natsort.natsorted(keys)
             # Set bool for multi-colour RFs and ensure multicolour attributes set correctly
             bool_partofmulticolour_list = [len(n.removeprefix("STRF").split("_")) > 2 for n in keys]
@@ -69,6 +72,7 @@ class STRF(Core):
                 self.numcolour = 1
             self.strfs = pygor.data_helpers.load_strf(HDF5_file)
         self.num_strfs = len(self.strfs)
+        self.num_rois = int(self.num_strfs / self.numcolour)
         self.set_bootstrap_settings_default()
         if self.bs_settings["do_bootstrap"] == True:
             self.run_bootstrap()
@@ -131,7 +135,7 @@ class STRF(Core):
         """
         if parallel == None:
             parallel = self.bs_settings["time_parallel"]
-        # Generate bar for beuty
+        # Generate bar for beauty
         bar = tqdm(self.strfs, leave = False, position = 1, disable = None, 
             desc = f"Hang on, bootstrapping pygor.strf.temporal components {self.bs_settings['time_bs_n']} times")
         self._pval_time = np.array([pygor.strf.bootstrap.bootstrap_time(x, bootstrap_n=self.bs_settings["time_bs_n"], parallel = parallel) for x in bar])
@@ -319,7 +323,7 @@ class STRF(Core):
             np.ndarray: An array of p-values for time bootsrap.
         """
         if self.bs_settings["do_bootstrap"] == False:
-            return [np.nan] * self.num_strfs
+            return np.array([np.nan] * self.num_strfs)
         if self.bs_settings["do_bootstrap"] == True:
             try:
                 return self._pval_time
@@ -342,7 +346,7 @@ class STRF(Core):
             np.ndarray: An array of p-values for space bootstrap.
         """
         if self.bs_settings["do_bootstrap"] == False:
-            return [np.nan] * self.num_strfs
+            return np.array([np.nan] * self.num_strfs)
         if self.bs_settings["do_bootstrap"] == True:
             try:
                 return self._pval_space
@@ -699,6 +703,8 @@ class STRF(Core):
         if roi is not None:
             if isinstance(roi, int):
                 iterate_through = [roi]
+            elif isinstance(roi, np.int_):
+                iterate_through = [roi.astype(int)]
             elif isinstance(roi, Iterable):
                 iterate_through = roi
             else:
@@ -1039,6 +1045,27 @@ class STRF(Core):
             return pygor.plotting.play_movie(arr, rgb_repr=True)
         else:
             return arr
+        
+    def demo_cs_seg(self, roi, **kwargs):
+        pygor.strf.centsurr.run(self.strfs_no_border[roi], plot = True, **kwargs)
+        plt.show()
+
+    def cs_seg(self, roi = None, **kwargs):
+        if roi is None:
+            maps = []
+            times = []
+            for i in range(self.num_rois): 
+                map, time = pygor.strf.centsurr.run(self.strfs_no_border[i], **kwargs)
+                maps.append(map)
+                times.append(time)
+            return np.array(maps), np.array(times)
+        return pygor.strf.centsurr.run(self.strfs_no_border[roi], **kwargs)
+
+    def convolve_with_img(self, roi, img = "example", plot = False, **kwargs):
+        from pygor.strf import convolve
+        if roi is None:
+            raise ValueError("ROI must be supplied")
+        return convolve.convolve_image(self, roi, img, plot = plot, **kwargs)
 
 # class Clustering:
 #     def __init__(self):

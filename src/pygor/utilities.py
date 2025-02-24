@@ -102,20 +102,6 @@ def auto_border_mask(array):
     )  # very unlikely that a 10x10 region will be 0s
     return mask  # by chance
 
-
-def numpy_fillna(data):
-    if isinstance(data, np.ndarray) is False:
-        data = np.array(data, dtype=object)
-    # Get lengths of each row of data
-    lens = np.array([len(i) for i in data])
-    # Mask of valid places in each row
-    mask = np.arange(lens.max()) < lens[:, None]
-    # Setup output array and put elements from data into masked positions
-    out = np.zeros(mask.shape, dtype=data.dtype)
-    out[mask] = np.concatenate(data)
-    return out
-
-
 def polarity_neat(pol_arr):
     """Helper function which makes polarity more digestable to process by giving an
     array consisting of -1, 0, 1 or 2 to indicate polarity of STRF. 0 means no polarity,
@@ -436,6 +422,8 @@ def multicolour_reshape(arr, n_colours):
         - The function requires 'n_colours' to be a positive integer.
         - The function preserves the order of elements in the original array when reshaping.
     """
+    if isinstance(arr, list):
+        arr = np.array(list)
     org_shape = arr.shape
     assert org_shape[0] % n_colours == 0
     new_shape = (n_colours, int(org_shape[0] / n_colours), *org_shape[1:])

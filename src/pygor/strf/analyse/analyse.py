@@ -1,4 +1,5 @@
 # Local imports
+import pygor.strf.centsurr
 import pygor.strf.contouring
 import pygor.strf.temporal
 
@@ -45,214 +46,212 @@ def _roi_by_roi_dict(data_strf_obj, df_return=False):  #
     #   - Create DF from that dictionary
     #   - Don't bother storing strfs as they can be retrievied via file if needed
 
-    # Check that the instance is actually a pygor.load.STRF object and that it contains STRFs (instead of being empty, i.e. nan)
-    if (
-        isinstance(data_strf_obj, pygor.classes.strf_data.STRF)
-        and data_strf_obj.strfs is not np.nan
-    ):
-        # Create dict to write to
-        dict = {}
-        # Calculate how long each entry should be (should be same as number of STRFs)
-        # Note: Reshape/restructure pre-existing content to fit required structure
-        expected_lengths = len(data_strf_obj.strfs)
-        num_rois = len(np.unique(data_strf_obj.rois)) - 1
-        # Deal with metadata
-        metadata = data_strf_obj.metadata.copy()
-        # Note identifiers
-        path = pathlib.Path(metadata.pop("filename"))
-        dict["date"] = np.repeat(metadata["exp_date"], expected_lengths)
-        dict["path"] = np.repeat(path, expected_lengths)
-        dict["filename"] = np.repeat(path.name, expected_lengths)
-        # Make note of how many ROIs for easy indexing later
-        dict["roi"] = [int(i.split("_")[1]) for i in data_strf_obj.strf_keys]
-        # Get IPL info
-        dict["ipl_depths"] = np.repeat(
-            data_strf_obj.ipl_depths, data_strf_obj.numcolour
-        )
-        if np.all(np.isnan(dict["ipl_depths"]) == True):
-            raise AttributeError("ipl_depths are all NaNs")
-        dict["multicolour"] = np.repeat(data_strf_obj.multicolour, expected_lengths)
-        # fish_n_plane = pygor.data_helpers.label_from_str(path.name, (np.arange(0, 10).astype('str')))[:2]
-        colours_set = ("BW", "BWnoUV", "R", "G", "B", "UV")
-        chromatic_set = colours_set[2:]
-        colours_combos = pygor.utilities.powerset(
-            ("R", "G", "B", "UV"), combinations_only=True
-        )
-        if data_strf_obj.multicolour == True:
-            # Get last number in strf key
-            strf_key_colour_index = [
-                int(i.split("_")[-1]) for i in data_strf_obj.strf_keys
-            ]
-            # Assign colour accordingly
-            dict["colour"] = [chromatic_set[i] for i in strf_key_colour_index]
-        else:
-            dict["colour"] = [
-                pygor.data_helpers.label_from_str(path.name, colours_set)
-            ] * expected_lengths
-        dict["simultaneous"] = [
-            pygor.data_helpers.label_from_str(
-                path.name, colours_combos, label="y", else_return="n"
-            )
+    # Create dict to write to
+    dict = {}
+    # Calculate how long each entry should be (should be same as number of STRFs)
+    # Note: Reshape/restructure pre-existing content to fit required structure
+    expected_lengths = len(data_strf_obj.strfs)
+    num_rois = len(np.unique(data_strf_obj.rois)) - 1
+    # Deal with metadata
+    metadata = data_strf_obj.metadata.copy()
+    # Note identifiers
+    path = pathlib.Path(metadata.pop("filename"))
+    dict["date"] = np.repeat(metadata["exp_date"], expected_lengths)
+    dict["path"] = np.repeat(path, expected_lengths)
+    dict["filename"] = np.repeat(path.name, expected_lengths)
+    # Make note of how many ROIs for easy indexing later
+    dict["roi"] = [int(i.split("_")[1]) for i in data_strf_obj.strf_keys]
+    # Get IPL info
+    dict["ipl_depths"] = np.repeat(
+        data_strf_obj.ipl_depths, data_strf_obj.numcolour
+    )
+    if np.all(np.isnan(dict["ipl_depths"]) == True):
+        raise AttributeError("ipl_depths are all NaNs")
+    dict["multicolour"] = np.repeat(data_strf_obj.multicolour, expected_lengths)
+    # fish_n_plane = pygor.data_helpers.label_from_str(path.name, (np.arange(0, 10).astype('str')))[:2]
+    colours_set = ("BW", "BWnoUV", "R", "G", "B", "UV")
+    chromatic_set = colours_set[2:]
+    colours_combos = pygor.utilities.powerset(
+        ("R", "G", "B", "UV"), combinations_only=True
+    )
+    if data_strf_obj.multicolour == True:
+        # Get last number in strf key
+        strf_key_colour_index = [
+            int(i.split("_")[-1]) for i in data_strf_obj.strf_keys
+        ]
+        # Assign colour accordingly
+        dict["colour"] = [chromatic_set[i] for i in strf_key_colour_index]
+    else:
+        dict["colour"] = [
+            pygor.data_helpers.label_from_str(path.name, colours_set)
         ] * expected_lengths
-        dict["combo"] = [
-            pygor.data_helpers.label_from_str(path.name, colours_combos)
-        ] * expected_lengths
-        size = pygor.data_helpers.label_from_str(
-            path.name,
-            ("800", "400", "200", "100", "75", "50", "25"),
-            first_return_only=True,
+    dict["simultaneous"] = [
+        pygor.data_helpers.label_from_str(
+            path.name, colours_combos, label="y", else_return="n"
         )
+    ] * expected_lengths
+    dict["combo"] = [
+        pygor.data_helpers.label_from_str(path.name, colours_combos)
+    ] * expected_lengths
+    size = pygor.data_helpers.label_from_str(
+        path.name,
+        ("800", "400", "200", "100", "75", "50", "25"),
+        first_return_only=True,
+    )
+    try:
         try:
-            try:
-                if np.isnan(size):
-                    size = 0
-            except TypeError:
-                size = int(size)
-        except TypeError as e:
-            raise TypeError(
-                f"nan input error for input size = {size} with type {type(size)}"
-            ) from e
-        dict["size"] = [size] * expected_lengths
-        shape = np.stack([i.shape for i in data_strf_obj.strfs])
-        dict["shapeZ"] = shape[:, 0]
-        dict["shapeY"] = shape[:, 1]
-        dict["shapeX"] = shape[:, 2]
-        dict["XYratio"] = shape[:, 2] / shape[:, 1]
-        # Create a conversion factor between size in au, size in vis ang, and STRF area
-        visang_size = np.array(pygor.utils.unit_conversion.au_to_visang(size))
-        dict["visang_size"] = np.repeat(
-            visang_size, expected_lengths
-        )  # might as well store it
-        # dict["size_bias"] =  []
-        dict["frequency"] = [
-            pygor.data_helpers.label_from_str(path.name, ["10Hz", "5Hz"])
-        ] * expected_lengths
-        dict["noise"] = [
-            pygor.data_helpers.label_from_str(path.name, ["BWN", "SWN"])
-        ] * expected_lengths
-        # Compute results and append to dict
-        ## Compute stats
-        # P vals for time and space
-        dict["time_pval"] = [i for i in data_strf_obj.pval_time]
-        dict["space_pval"] = [i for i in data_strf_obj.pval_space]
+            if np.isnan(size):
+                size = 0
+        except TypeError:
+            size = int(size)
+    except TypeError as e:
+        raise TypeError(
+            f"nan input error for input size = {size} with type {type(size)}"
+        ) from e
+    dict["size"] = [size] * expected_lengths
+    shape = np.stack([i.shape for i in data_strf_obj.strfs])
+    dict["shapeZ"] = shape[:, 0]
+    dict["shapeY"] = shape[:, 1]
+    dict["shapeX"] = shape[:, 2]
+    dict["XYratio"] = shape[:, 2] / shape[:, 1]
+    # Create a conversion factor between size in au, size in vis ang, and STRF area
+    visang_size = np.array(pygor.utils.unit_conversion.au_to_visang(size))
+    dict["visang_size"] = np.repeat(
+        visang_size, expected_lengths
+    )  # might as well store it
+    # dict["size_bias"] =  []
+    dict["frequency"] = [
+        pygor.data_helpers.label_from_str(path.name, ["10Hz", "5Hz"])
+    ] * expected_lengths
+    dict["noise"] = [
+        pygor.data_helpers.label_from_str(path.name, ["BWN", "SWN"])
+    ] * expected_lengths
+    # Compute results and append to dict
+    ## Compute stats
+    # P vals for time and space
+    dict["time_pval"] = [i for i in data_strf_obj.pval_time]
+    dict["space_pval"] = [i for i in data_strf_obj.pval_space]
 
-        # Space
-        contour_count = np.array(data_strf_obj.get_contours_count())
-        neg_contour_count, pos_contour_count = contour_count[:, 0], contour_count[:, 1]
-        # dict["neg_contour_bool"] = [True for i in neg_contour_count if i > 0 else False for i in neg_contour_count]
-        dict["neg_contour_bool"] = [i > 0 for i in neg_contour_count]
-        dict["pos_contour_bool"] = [i > 0 for i in pos_contour_count]
-        # dict["multicontour_bool"] []
-        dict["neg_contour_count"] = neg_contour_count
-        dict["pos_contour_count"] = pos_contour_count
-        dict["total_contour_count"] = neg_contour_count + pos_contour_count
-        neg_contour_areas = [i[0] for i in data_strf_obj.get_contours_area()]
-        pos_contour_areas = [i[1] for i in data_strf_obj.get_contours_area()]
-        tot_neg_areas_corrected, tot_pos_areas_corrected = (
-            [np.sum(i) for i in neg_contour_areas],
-            [np.sum(i) for i in pos_contour_areas],
-        )
-        dict["neg_contour_areas"] = neg_contour_areas
-        dict["pos_contour_areas"] = pos_contour_areas
-        dict["neg_contour_area_total"] = tot_neg_areas_corrected
-        dict["pos_contour_area_total"] = tot_pos_areas_corrected
-        contour_area_total = np.sum(
-            (tot_neg_areas_corrected, tot_pos_areas_corrected), axis=0
-        )
-        dict["contour_area_total"] = contour_area_total
-        neg_largest = np.max(pygor.utilities.numpy_fillna(neg_contour_areas), axis=1)
-        pos_largest = np.max(pygor.utilities.numpy_fillna(pos_contour_areas), axis=1)
-        dict["neg_contour_area_largest"] = neg_largest
-        dict["pos_contour_area_largest"] = pos_largest
-        check_largest = np.vstack((neg_largest, pos_largest))
-        total_area_largest = np.max(check_largest, axis=0)
-        dict["total_contour_area_largest"] = total_area_largest
-        dict["diameter"] = 2 * np.sqrt(total_area_largest.astype(float) / np.pi)
-        dict["contour_complexity"] = np.nanmean(
-            data_strf_obj.calc_contours_complexities(), axis=1
-        )
+    # Space
+    contour_count = np.array(data_strf_obj.get_contours_count())
+    neg_contour_count, pos_contour_count = contour_count[:, 0], contour_count[:, 1]
+    # dict["neg_contour_bool"] = [True for i in neg_contour_count if i > 0 else False for i in neg_contour_count]
+    dict["neg_contour_bool"] = [i > 0 for i in neg_contour_count]
+    dict["pos_contour_bool"] = [i > 0 for i in pos_contour_count]
+    # dict["multicontour_bool"] []
+    dict["neg_contour_count"] = neg_contour_count
+    dict["pos_contour_count"] = pos_contour_count
+    dict["total_contour_count"] = neg_contour_count + pos_contour_count
+    neg_contour_areas = [i[0] for i in data_strf_obj.get_contours_area()]
+    pos_contour_areas = [i[1] for i in data_strf_obj.get_contours_area()]
+    tot_neg_areas_corrected, tot_pos_areas_corrected = (
+        [np.sum(i) for i in neg_contour_areas],
+        [np.sum(i) for i in pos_contour_areas],
+    )
+    dict["neg_contour_areas"] = neg_contour_areas
+    dict["pos_contour_areas"] = pos_contour_areas
+    dict["neg_contour_area_total"] = tot_neg_areas_corrected
+    dict["pos_contour_area_total"] = tot_pos_areas_corrected
+    contour_area_total = np.sum(
+        (tot_neg_areas_corrected, tot_pos_areas_corrected), axis=0
+    )
+    dict["contour_area_total"] = contour_area_total
+    neg_largest = np.max(pygor.utilities.numpy_fillna(neg_contour_areas), axis=1)
+    pos_largest = np.max(pygor.utilities.numpy_fillna(pos_contour_areas), axis=1)
+    dict["neg_contour_area_largest"] = neg_largest
+    dict["pos_contour_area_largest"] = pos_largest
+    check_largest = np.vstack((neg_largest, pos_largest))
+    total_area_largest = np.max(check_largest, axis=0)
+    dict["total_contour_area_largest"] = total_area_largest
+    dict["diameter"] = 2 * np.sqrt(total_area_largest.astype(float) / np.pi)
+    dict["contour_complexity"] = np.nanmean(
+        data_strf_obj.calc_contours_complexities(), axis=1
+    )
 
-        # Time
-        timecourses = data_strf_obj.get_timecourses()
-        timecourses_neg, timecourses_pos = timecourses[:, 0], timecourses[:, 1]
-        dict["polarity"] = data_strf_obj.get_polarities()
-        neg_biphasic, pos_biphasic = (
-            pygor.strf.temporal.biphasic_index(timecourses_neg),
-            pygor.strf.temporal.biphasic_index(timecourses_pos),
-        )
-        dict["neg_biphasic_index"] = neg_biphasic
-        dict["pos_biphasic_index"] = pos_biphasic
-        dict["dom_biphasic_index"] = np.where(
-            np.nan_to_num(neg_largest) > np.nan_to_num(pos_largest),
-            neg_biphasic,
-            pos_biphasic,
-        )
-        spearmans_rho = np.array(
-            [scipy.stats.spearmanr(i[0], i[1]) for i in timecourses]
-        )[:, 0]  # slice away the p vals (not accurate for low sample n)
-        dict["pols_corr"] = (
-            spearmans_rho  # corrcoef/Pearosns via [np.corrcoef(x)[0, 1] for x in timecourses]
-        )
-        dict["neg_auc"] = np.trapz(timecourses_neg)
-        dict["pos_auc"] = np.trapz(timecourses_pos)
-        neg_peaktime = np.argmin(timecourses_neg, axis=1)
-        pos_peaktime = np.argmax(timecourses_pos, axis=1)
-        dict["neg_peaktime"] = neg_peaktime
-        dict["pos_peaktime"] = pos_peaktime
-        dict["dom_peaktime"] = np.where(
-            np.nan_to_num(neg_largest) > np.nan_to_num(pos_largest),
-            neg_peaktime,
-            pos_peaktime,
-        )
-        neg_centroids, pos_centroids = data_strf_obj.calc_spectral_centroids()
-        dict["neg_centroids"] = neg_centroids
-        dict["pos_centroids"] = pos_centroids
-        dom_centroid = np.where(
-            np.nan_to_num(neg_largest) > np.nan_to_num(pos_largest),
-            neg_centroids,
-            pos_centroids,
-        )
-        dom_centroid = np.where(contour_area_total > 0, dom_centroid, 0)
-        dict["dom_centroids"] = dom_centroid
-        dict["time_amplitude"] = data_strf_obj.get_time_amps()
-        dict["space_amplitude"] = data_strf_obj.get_space_amps()
-        dict["weight_space"] = preprocessing.normalize(
-            pygor.utilities.multicolour_reshape(
-                data_strf_obj.get_space_amps(), data_strf_obj.numcolour
-            ),
-            axis=0,
-        ).flatten(order="F")
-        dict["weight_time"] = preprocessing.normalize(
-            pygor.utilities.multicolour_reshape(
-                data_strf_obj.get_time_amps(), data_strf_obj.numcolour
-            ),
-            axis=0,
-        ).flatten(order="F")
+    # Time
+    timecourses = data_strf_obj.get_timecourses()
+    timecourses_neg, timecourses_pos = timecourses[:, 0], timecourses[:, 1]
+    dict["polarity"] = data_strf_obj.get_polarities()
+    neg_biphasic, pos_biphasic = (
+        pygor.strf.temporal.biphasic_index(timecourses_neg),
+        pygor.strf.temporal.biphasic_index(timecourses_pos),
+    )
+    dict["neg_biphasic_index"] = neg_biphasic
+    dict["pos_biphasic_index"] = pos_biphasic
+    dict["dom_biphasic_index"] = np.where(
+        np.nan_to_num(neg_largest) > np.nan_to_num(pos_largest),
+        neg_biphasic,
+        pos_biphasic,
+    )
+    spearmans_rho = np.array(
+        [scipy.stats.spearmanr(i[0], i[1]) for i in timecourses]
+    )[:, 0]  # slice away the p vals (not accurate for low sample n)
+    dict["pols_corr"] = (
+        spearmans_rho  # corrcoef/Pearosns via [np.corrcoef(x)[0, 1] for x in timecourses]
+    )
+    dict["neg_auc"] = np.trapz(timecourses_neg)
+    dict["pos_auc"] = np.trapz(timecourses_pos)
+    neg_peaktime = np.argmin(timecourses_neg, axis=1)
+    pos_peaktime = np.argmax(timecourses_pos, axis=1)
+    dict["neg_peaktime"] = neg_peaktime
+    dict["pos_peaktime"] = pos_peaktime
+    dict["dom_peaktime"] = np.where(
+        np.nan_to_num(neg_largest) > np.nan_to_num(pos_largest),
+        neg_peaktime,
+        pos_peaktime,
+    )
+    neg_centroids, pos_centroids = data_strf_obj.calc_spectral_centroids()
+    dict["neg_centroids"] = neg_centroids
+    dict["pos_centroids"] = pos_centroids
+    dom_centroid = np.where(
+        np.nan_to_num(neg_largest) > np.nan_to_num(pos_largest),
+        neg_centroids,
+        pos_centroids,
+    )
+    dom_centroid = np.where(contour_area_total > 0, dom_centroid, 0)
+    dict["dom_centroids"] = dom_centroid
+    dict["time_amplitude"] = data_strf_obj.get_time_amps()
+    dict["space_amplitude"] = data_strf_obj.get_space_amps()
+    dict["weight_space"] = preprocessing.normalize(
+        pygor.utilities.multicolour_reshape(
+            data_strf_obj.get_space_amps(), data_strf_obj.numcolour
+        ),
+        axis=0,
+    ).flatten(order="F")
+    dict["weight_time"] = preprocessing.normalize(
+        pygor.utilities.multicolour_reshape(
+            data_strf_obj.get_time_amps(), data_strf_obj.numcolour
+        ),
+        axis=0,
+    ).flatten(order="F")
 
-        # Proof of concept for assigning entire arrays
-        # dict["-timecourse"] = data_strf_obj.get_timecourses()[:, 0].tolist()
-        # dict["+timecourse"] = data_strf_obj.get_timecourses()[:, 1].tolist()
+    # Proof of concept for assigning entire arrays
+    # dict["-timecourse"] = data_strf_obj.get_timecourses()[:, 0].tolist()
+    # dict["+timecourse"] = data_strf_obj.get_timecourses()[:, 1].tolist()
 
-        # Finally, loop through entire dictionary and check that all entries are of correct length
-        # The logic is that in many cases, there might not be data to compute stats on. These will
-        # emtpy lists, so we need to make a note that there was no data there (e.g. nan)
-        for i in dict:
-            # First check if dictionary entry is iterable
-            # If its not, assume we want stat per strfs, so duplicate the value n = strfs times
-            if isinstance(dict[i], Iterable) == False:
-                dict[i] = [dict[i]] * data_strf_obj.num_strfs
-            # Otherwise, continue and check that all entries are the correct length
-            if len(dict[i]) != expected_lengths and isinstance(dict[i], (str)) is False:
-                if len(dict[i]) > expected_lengths:
-                    # Just a little test to make sure dictionary entries make sense (e.g, one for each ROI/STRF)
-                    raise AttributeError(
-                        f"Dict key {i} was longer than number of expected RFs. Manual fix required."
-                    )
-                # If not, fill with nan
-                else:
-                    dict[i] = dict[i].astype(float)
-                    difference = expected_lengths - len(dict[i])
-                    dict[i] = np.pad(dict[i], (difference, 0), constant_values=np.nan)
+    # Finally, loop through entire dictionary and check that all entries are of correct length
+    # The logic is that in many cases, there might not be data to compute stats on. These will
+    # emtpy lists, so we need to make a note that there was no data there (e.g. nan)
+    for i in dict:
+        # First check if dictionary entry is iterable
+        # If its not, assume we want stat per strfs, so duplicate the value n = strfs times
+        if isinstance(dict[i], Iterable) == False:
+            dict[i] = [dict[i]] * data_strf_obj.num_strfs
+        # Otherwise, continue and check that all entries are the correct length
+        if len(dict[i]) != expected_lengths and isinstance(dict[i], (str)) is False:
+            if len(dict[i]) > expected_lengths:
+                # Just a little test to make sure dictionary entries make sense (e.g, one for each ROI/STRF)
+                raise AttributeError(
+                    f"Dict key {i} was longer than number of expected RFs. Manual fix required."
+                )
+            # If not, fill with nan
+            else:
+                dict[i] = dict[i].astype(float)
+                difference = expected_lengths - len(dict[i])
+                dict[i] = np.pad(dict[i], (difference, 0), constant_values=np.nan)
+    # Include CS segmentation statistics 
+    cs_stats_dict = pygor.strf.centsurr.cs_stats.gen_stats(data_strf_obj)
+    dict.update(cs_stats_dict)
     if df_return is False:
         return dict
     if df_return is True:
@@ -546,9 +545,25 @@ def roi_stats(
     if parallel is False:
         roi_dict = []
         for object in exp_obj.recording:
-            curr_dict = _roi_by_roi_dict(object)
-            roi_dict.append(pd.DataFrame(curr_dict))
+        # Check that the instance is actually a pygor.load.STRF object and that it contains STRFs (instead of being empty, i.e. nan)
+            if (
+                isinstance(object, pygor.classes.strf_data.STRF)
+                and object.strfs is not np.nan
+            ):
+                curr_dict = _roi_by_roi_dict(object)
+                roi_dict.append(pd.DataFrame(curr_dict))
+            else:
+                print(
+                    f"Skipping {object.metadata['filename']} because it is not a valid STRF object"
+                )
+                pass 
+                
     else:
+        """
+        TODO write in a object check for STRF class before running parallelisation below
+
+        Could 
+        """
         with joblib.Parallel(n_jobs=-1) as parallel:
             roi_dict = parallel(
                 joblib.delayed(_roi_by_roi_dict)(object, df_return=True)

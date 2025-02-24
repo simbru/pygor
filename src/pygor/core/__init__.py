@@ -1,1 +1,1 @@
-from .methods import *
+from .gui.methods import *
