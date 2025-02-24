@@ -1067,6 +1067,10 @@ class STRF(Core):
             raise ValueError("ROI must be supplied")
         return convolve.convolve_image(self, roi, img, plot = plot, **kwargs)
 
+    def napari_strfs(self, **kwargs):
+        import pygor.strf.gui.methods as gui
+        napari_session = gui.NapariSession(self)
+        return napari_session.run()
 # class Clustering:
 #     def __init__(self):
 #         pass
