@@ -130,7 +130,6 @@ def plot_averages(
         cax.set_xticks(np.ceil(ax.xaxis.get_majorticklocs()), np.ceil(ax.xaxis.get_majorticklocs() / 1000))
         cax.set_xlim(0, len(self.averages[0]))
         cax.set_xlabel("Time (s)")
-
     else:
         avg_epoch_dur = np.average(np.diff(self.triggertimes.reshape(-1, self.trigger_mode)[:, 0]))
         epoch_reshape = self.triggertimes.reshape(-1, self.trigger_mode)
@@ -152,9 +151,9 @@ def plot_averages(
             ax.axvline(x=i, color="r", alpha=0.5)
             # ax.axvline(x=i + (avg_epoch_dur * (1 / load.linedur_s)/load.trigger_mode)/2, color="blue", alpha=0.5)
         plt.colorbar(img)
-        ax.set_xticks(np.ceil(ax.xaxis.get_majorticklocs()), np.ceil(ax.xaxis.get_majorticklocs() / 1000))
-        ax.set_xlim(0, len(self.averages[0]))
-        ax.set_xlabel("Time (s)")
+        # ax.set_xticks(np.ceil(ax.xaxis.get_majorticklocs()), np.ceil(ax.xaxis.get_majorticklocs() / 1000))
+        # ax.set_xlim(0, len(self.averages[0]))
+        # ax.set_xlabel("Time (s)")
     # plt.tight_layout()
     return fig, axs
 
