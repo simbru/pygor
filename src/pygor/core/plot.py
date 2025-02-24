@@ -127,9 +127,9 @@ def plot_averages(
         # ax.set_xlabel("Time (ms)")
         fig.subplots_adjust(hspace=0)
         cax = axs[-1]
-        cax.set_xticks(np.ceil(ax.xaxis.get_majorticklocs()), np.ceil(ax.xaxis.get_majorticklocs() / 1000))
-        cax.set_xlim(0, len(self.averages[0]))
-        cax.set_xlabel("Time (s)")
+        # cax.set_xticks(np.ceil(ax.xaxis.get_majorticklocs()), np.ceil(ax.xaxis.get_majorticklocs() / 1000))
+        # cax.set_xlim(0, len(self.averages[0]))
+        # cax.set_xlabel("Time (s)")
     else:
         avg_epoch_dur = np.average(np.diff(self.triggertimes.reshape(-1, self.trigger_mode)[:, 0]))
         epoch_reshape = self.triggertimes.reshape(-1, self.trigger_mode)
