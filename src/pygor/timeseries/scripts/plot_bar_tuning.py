@@ -6,7 +6,7 @@ import pandas as pd
 import seaborn as sns
 
 sns.set_style("white")
-file = r"C:\Users\Simen\Downloads\2025-2-12_0_3_15deg_2s_lines_RGB.h5"
+file = r"D:\Box Sync\Imaging\OT_singleplane\st53\2024-10-14_x241014_53_cOTs.h5"
 def main(file):
     load = pygor.load.StaticBars(file)
     
