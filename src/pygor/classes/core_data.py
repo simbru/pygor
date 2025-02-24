@@ -5,6 +5,7 @@ try:
 except ImportError:
     from collections.abc import Iterable
 # Local imports
+import pygor.core.methods
 import pygor.core.plot
 import pygor.data_helpers
 import pygor.utils.helpinfo
@@ -537,6 +538,9 @@ class Core:
         split_arr = np.array(np.split(images_to_average, reps))
         avg_movie = np.average(split_arr, axis=0)
         return avg_movie
+
+    def get_average_markers(self):
+        return pygor.core.methods.determine_epoch_markers_ms(self)
 
     @property
     def rois_alt(self):

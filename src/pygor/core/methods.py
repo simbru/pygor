@@ -1,6 +1,6 @@
 import numpy as np
 
-def detrmine_epoch_markers_ms(self):
+def determine_epoch_markers_ms(self):
     """
 
     Parameters

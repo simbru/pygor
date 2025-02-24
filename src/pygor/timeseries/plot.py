@@ -19,7 +19,7 @@ def plot_AB_delta(
 ) -> None: 
     if isinstance(roi, int) is False:
         raise TypeError("roi must be int")
-    crop_points = pygor.core.methods.detrmine_epoch_markers_ms(self).astype(int)
+    crop_points = pygor.core.methods.determine_epoch_markers_ms(self).astype(int)
     split_list = np.split(self.averages, crop_points[1:], axis = 1)
     # curr_arr = split_list[phase][roi]
     # A_len = int(curr_arr.shape[0] * a_b_ratio)
@@ -40,7 +40,7 @@ def plot_AB_delta(
     # Calculate A and B values, in this case mean
     a_val = np.mean(curr_arr[ignore_indices_a:a_len])
     b_val = np.mean(curr_arr[b_len + ignore_indices_b :])
-    delta = b_val - a_val
+    delta = a_val - b_val
     print(a_len, b_len)
     if delta != self.get_AB_deltas(roi)[phase]:
         print(delta, self.get_AB_deltas(roi)[phase])

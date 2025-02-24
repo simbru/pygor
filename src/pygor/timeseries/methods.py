@@ -10,7 +10,7 @@ def calculate_AB_deltas(
     ignore_percentage: float = 0.1,
 ) -> np.ndarray:
     # Get epoch markers in ms
-    crop_points = pygor.core.methods.detrmine_epoch_markers_ms(self).astype(int)
+    crop_points = pygor.core.methods.determine_epoch_markers_ms(self).astype(int)
     # Split calculated averages (in ms) to into A_B segments according to epoch markers and a_b_ratio
     split_list = np.split(self.averages, crop_points[1:], axis=1)
     # Determine number of rois
@@ -34,5 +34,14 @@ def calculate_AB_deltas(
             a_val = np.mean(curr_arr[ignore_indices_a:a_len])
             b_val = np.mean(curr_arr[b_len + ignore_indices_b :])
             # Assign deltas to array
-            deltas[i, phase] = b_val - a_val
+            deltas[i, phase] = a_val - b_val
     return deltas if roi is None else deltas.flatten()
+
+# def calculate_AFF_deltas(
+#     self,
+#     roi: Union[int, list] = None,
+#     a_b_ratio: float = 0.5,
+#     ignore_percentage: float = 0.1,
+#     FFF_index = 7
+# ):
+    

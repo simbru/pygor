@@ -15,7 +15,7 @@ class StaticBars(Core):
         self.parameters = {
                 "trigger_mode" : self.trigger_mode,
                 "a_b_ratio" : .5,
-                "ignore_percentage" : 0.1
+                "ignore_percentage" : 0.2
                 }
 
     def get_AB_deltas(self, roi = None):

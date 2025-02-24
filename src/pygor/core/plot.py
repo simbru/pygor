@@ -54,6 +54,8 @@ def plot_averages(
         axs = kwargs['ax']
     if rois is None:
         rois = np.arange(0, self.num_rois)
+    if rois is not None:
+        rois = np.squeeze(rois)
     if isinstance(rois, Iterable) is False:
         rois = [rois]
     if isinstance(rois, np.ndarray) is False:
@@ -74,7 +76,7 @@ def plot_averages(
         )
         rois = rois[filter_result]
     if figsize == (None, None):
-        figsize = (5, len(rois))
+        figsize = (5*2, len(rois)*2)
     if figsize_scale is not None:
         figsize = np.array(figsize) * np.array(figsize_scale)
     if len(rois) < n_rois_raster:
@@ -126,7 +128,7 @@ def plot_averages(
             pygor.plotting.add_scalebar(closest_sd, string = f"{closest_sd.astype(int)} SD",ax=axs.flat[-1], flip_text=True, x=1.015, y = 0.1)
         # ax.set_xlabel("Time (ms)")
         fig.subplots_adjust(hspace=0)
-        cax = axs[-1]
+        cax = axs.flat[-1]
         cax.set_xticks(np.ceil(ax.xaxis.get_majorticklocs()), np.ceil(ax.xaxis.get_majorticklocs() / 1000))
         cax.set_xlim(0, len(self.averages[0]))
         cax.set_xlabel("Time (s)")
@@ -145,15 +147,17 @@ def plot_averages(
         arr = self.averages
         # arr = scaler.fit_transform(arr)
         maxabs = np.max(np.abs(arr))
+        if rois is not None:
+            arr = arr[rois]
         img = ax.imshow(arr, aspect="auto", cmap = "Greys_r")
         # ax.set_xticklabels(np.round(load.triggertimes, 3))
         for i in markers_arr:
             ax.axvline(x=i, color="r", alpha=0.5)
             # ax.axvline(x=i + (avg_epoch_dur * (1 / load.linedur_s)/load.trigger_mode)/2, color="blue", alpha=0.5)
         plt.colorbar(img)
-        # ax.set_xticks(np.ceil(ax.xaxis.get_majorticklocs()), np.ceil(ax.xaxis.get_majorticklocs() / 1000))
-        # ax.set_xlim(0, len(self.averages[0]))
-        # ax.set_xlabel("Time (s)")
+        ax.set_xticks(np.ceil(ax.xaxis.get_majorticklocs()), np.ceil(ax.xaxis.get_majorticklocs() / 1000))
+        ax.set_xlim(0, len(self.averages[0]))
+        ax.set_xlabel("Time (s)")
     # plt.tight_layout()
     return fig, axs
 
