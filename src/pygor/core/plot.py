@@ -16,6 +16,7 @@ def plot_averages(
     axs=None, 
     independent_scale = False, 
     n_rois_raster = 50,
+    sort_order = None,
     **kwargs,
 ):
     """
@@ -100,7 +101,11 @@ def plot_averages(
         at regular intervals but instead looks at the
         trigger times. 
         """
-        for n, (ax, roi, label) in enumerate(zip(axs.flat, rois, roi_labels)):
+        if sort_order is None:
+            loop_through = enumerate(zip(axs.flat, rois, roi_labels))
+        else:
+            loop_through = enumerate(zip(axs.flat, rois[sort_order], roi_labels[sort_order]))
+        for n, (ax, roi, label) in loop_through:
             ax.plot(self.snippets[roi].T, c="grey", alpha=0.5)
             ax.plot(self.averages[roi], color=colormap[n])
             ax.set_xlim(0, len(self.averages[0]))
@@ -133,6 +138,11 @@ def plot_averages(
         cax.set_xlim(0, len(self.averages[0]))
         cax.set_xlabel("Time (s)")
     else:
+        if sort_order is None:
+            rois = rois
+        else:
+            rois = rois[sort_order]
+        # Generate raster plot
         avg_epoch_dur = np.average(np.diff(self.triggertimes.reshape(-1, self.trigger_mode)[:, 0]))
         epoch_reshape = self.triggertimes.reshape(-1, self.trigger_mode)
         temp_arr = np.empty(epoch_reshape.shape)

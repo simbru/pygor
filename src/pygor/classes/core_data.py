@@ -430,6 +430,7 @@ class Core:
         axs=None, 
         independent_scale = False, 
         n_rois_raster = 50,
+        sort_order = None,
         **kwargs,
     ):
         """
@@ -461,7 +462,7 @@ class Core:
         """
         if self.averages is None:
             raise ValueError("Averages do not exist.")
-        return pygor.core.plot.plot_averages(self, rois, figsize, figsize_scale, axs, independent_scale, n_rois_raster, **kwargs)
+        return pygor.core.plot.plot_averages(self, rois, figsize, figsize_scale, axs, independent_scale, n_rois_raster, sort_order, **kwargs)
 
     def calculate_image_average(self, ignore_skip=False):
         """
