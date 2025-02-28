@@ -18,7 +18,7 @@ def load_example(example_img_path = example_img_path):
     img = plt.imread(example_img_path)
     return img
 
-def convolve_image(strf_obj, roi_index, img = "example", img_zoom = 1/5, arr_zoom = 3, plot = False, norm_output = True):
+def convolve_image(strf_obj, roi_index, img = "example", img_zoom = 1/5, arr_zoom = 3, plot = False, norm_output = True, xrange = None, yrange = None):
     if img is None:
         img = plt.imread(example_img_path)
 
@@ -32,10 +32,14 @@ def convolve_image(strf_obj, roi_index, img = "example", img_zoom = 1/5, arr_zoo
     # degrees_per_pix_arr = 86.325/arr.shape[1]
     rf_img_conv_output = np.empty(img.shape)
     arr_list = []
+    if xrange is None:
+        xrange = (None, None)
+    if yrange is None:
+        yrange = (None, None)
     loopthrough = np.arange(strf_obj.strfs.shape[0]).reshape(-1, 4).astype(int)[roi_index]
     for n, i in enumerate(loopthrough):
         # arr = np.squeeze(strfs.collapse_times(start_index + n))[arr_crop[0]:arr_crop[1], arr_crop[2]:arr_crop[3]]
-        arr = np.squeeze(strf_obj.collapse_times(i))
+        arr = np.squeeze(strf_obj.collapse_times(i)[:, yrange[0]:yrange[1], xrange[0]:xrange[1]])
         arr = scipy.ndimage.zoom(arr, arr_zoom)
         arr_list.append(arr)
         rf_img_conv_output[:, :, n] = scipy.signal.fftconvolve(img[:, :, n], arr, mode = "same")
