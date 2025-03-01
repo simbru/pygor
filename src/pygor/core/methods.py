@@ -28,3 +28,35 @@ def determine_epoch_markers_ms(self):
     # Subtract the first marker time, to remove pre-start time from epoch trigger tiems
     markers_ms_arr -= markers_ms_arr[0]
     return markers_ms_arr
+
+def correlation_map(array_3d, border=0):
+    """
+    Calculate Pearson correlation between each pixel's time series and its neighbors.
+    """
+    if isinstance(array_3d, np.ma.MaskedArray):
+        correlation_map = np.ma.masked_array(np.zeros((array_3d.shape[1], array_3d.shape[2])),
+                                        mask=np.zeros((array_3d.shape[1], array_3d.shape[2]), dtype=bool))
+    else:
+        correlation_map = np.zeros((array_3d.shape[1], array_3d.shape[2]))
+
+    for x in range(border, array_3d.shape[1] - border):
+        for y in range(border, array_3d.shape[2] - border):
+            if np.ma.is_masked(array_3d[:, x, y]):
+                correlation_map.mask[x, y] = True
+                continue  # Skip masked pixels
+            
+            # Central time series
+            centre_pix = array_3d[:, x, y]
+
+            # Collect valid neighbors safely
+            neighbors = []
+            for dx, dy in [(-1, 1), (0, 1), (1, 1), (-1, 0), (1, 0), (-1, -1), (0, -1), (1, -1)]:
+                xn, yn = x + dx, y + dy
+                if 0 <= xn < array_3d.shape[1] and 0 <= yn < array_3d.shape[2]:  # Bounds check
+                    neighbors.append(array_3d[:, xn, yn])
+
+            # Compute correlation coefficients
+            if neighbors:
+                corr_values = [np.corrcoef(centre_pix, n)[0, 1] for n in neighbors]
+                correlation_map[x, y] = np.nanmean(corr_values)  # Handle NaNs if needed
+    return correlation_map
