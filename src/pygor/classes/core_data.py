@@ -264,7 +264,7 @@ class Core:
         None
         """
         if figsize == (None, None):
-            figsize = (5, 5)
+            figsize = (10, 10)
         if figsize_scale is not None:
             figsize = np.array(figsize) * np.array(figsize_scale)
         else:
@@ -300,11 +300,11 @@ class Core:
         # color = cm.get_cmap('jet_r', num_rois)
         color = matplotlib.colormaps["jet_r"]
         if func == "average_stack":
-            scanv = ax.imshow(self.average_stack, cmap = "Greys_r", origin = "lower")
+            scanv = ax.imshow(self.average_stack, cmap = "Greys_r")
         else:
-            scanv = ax.imshow(func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis = axis), cmap ="Greys_r", origin = "lower")
+            scanv = ax.imshow(func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis = axis), cmap ="Greys_r")
         rois_masked = np.ma.masked_where(self.rois == 1, self.rois)[ystart:ystop, xstart:xstop]
-        rois = ax.imshow(rois_masked, cmap = color, alpha = alpha, origin = "lower")
+        rois = ax.imshow(rois_masked, cmap = color, alpha = alpha)
         ax.grid(False)
         ax.axis("off")
         if cbar == True:
@@ -403,7 +403,7 @@ class Core:
         int
             The depth of the images in the stack.
         """
-        session = pygor.core.napari_depth_prompt(self)
+        session = pygor.core.NapariDepthPrompt(self)
         return session.run()
 
     def draw_rois(self, attribute = "calculate_image_average", style = "stacked",**kwargs):
@@ -420,7 +420,7 @@ class Core:
             else:
                 return method(*args, **kwargs)  # Call the method with arguments
         target = call_method(self, attribute)
-        session = pygor.core.napari_roi_prompt(target, traces_plot_style = style,**kwargs)
+        session = pygor.core.NapariRoiPrompt(target, traces_plot_style = style,**kwargs)
         return session.run()
 
     def plot_averages(
@@ -543,11 +543,15 @@ class Core:
     def get_average_markers(self):
         return pygor.core.methods.determine_epoch_markers_ms(self)
 
+    def get_correlation_map(self):
+        return pygor.core.methods.correlation_map(self.images)
+
     @property
     def rois_alt(self):
         temp_rois = self.rois.copy()
         temp_rois[temp_rois == 1] = np.nan
         temp_rois *= -1
+        temp_rois = temp_rois - 1
         return temp_rois
     
     @property
@@ -556,7 +560,7 @@ class Core:
         Get the centre of mass for each ROI in the image if not already done.
         """
         if np.all(np.logical_or(np.unique(self.rois) < 0, np.unique(self.rois) == 1)):
-            temp_rois = self.rois_alt
+            temp_rois = self.rois_alt + 1
             labels = np.unique(temp_rois)
             labels = labels[~np.isnan(labels)]
             centroids = scipy.ndimage.center_of_mass(temp_rois, temp_rois, labels)
