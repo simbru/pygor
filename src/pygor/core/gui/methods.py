@@ -10,8 +10,31 @@ from skimage.draw import polygon
 from IPython import get_ipython
 import matplotlib.pyplot as plt
 import napari
+import napari
+from qtpy.QtWidgets import QApplication
+from qtpy.QtCore import QEventLoop
+import pygor.strf.spatial
+class NapariViewRois:
+    def __init__(self, pygor_object):
+        self.viewer = napari.Viewer()
+        self.pygor_object = pygor_object
+        # Create a Qt event loop
+        self.event_loop = QEventLoop()
 
-class napari_depth_prompt:
+    def run(self):
+        """Launch Napari and block execution properly."""
+        avg_movie = np.average(self.pygor_object.images, axis=0)
+        std_movie = np.std(self.pygor_object.images, axis=0)
+        corr_movie = pygor.strfs.spatial._legacy_corr_spacetime(self.pygor_object.images)
+        # Make layers
+        self.viewer.add_image(avg_movie, name = "Average", colormap = "Greys_r")
+        self.viewer.add_image(std_movie, name = "SD", colormap = "Greys_r")
+        self.viewer.add_points(self.pygor_object.roi_centroids, name = "ROI centroids", opacity = 1, face_color="orange", size = 1.5)
+        self.viewer.add_image(self.pygor_object.rois_alt, name = "ROIs", colormap = "rainbow", opacity = 0.25)
+
+        napari.run()
+        
+class NapariDepthPrompt:
     def __init__(self, pygor_object):
         self.result = None  # Store the computed value
         self.viewer = napari.Viewer()
@@ -199,7 +222,7 @@ class napari_depth_prompt:
         self.event_loop.exec_()  # Block until close event triggers
         return self.result  # Now `self.result` is updated before returning
 
-class napari_roi_prompt():
+class NapariRoiPrompt():
     def __init__(self, array_input, traces_plot_style = "stacked", plot = False):
         if get_ipython() is not None:
             get_ipython().run_line_magic('matplotlib', 'Qt5Agg')

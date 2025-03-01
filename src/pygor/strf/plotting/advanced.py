@@ -15,7 +15,6 @@ import pygor.strf.pixconverter
 
 from pygor.plotting.custom import red_map, green_map, blue_map, violet_map, fish_palette
 
-
 def chroma_overview(
     data_strf_object,
     specify_rois=None,

@@ -24,7 +24,8 @@ import pygor.data_helpers
 import pygor.strf.bootstrap
 import pygor.strf.contouring
 import pygor.strf.guesstimate
-import pygor.strf.plot
+import pygor.strf.plotting.advanced
+import pygor.strf.plotting.simple
 import pygor.strf.spatial
 import pygor.strf.temporal
 import pygor.utils
@@ -37,7 +38,7 @@ import scipy
 class STRF(Core):
     #type         : str = "STRF"
     # Params 
-    multicolour  : bool = False
+    multicolour  : bool = None
     bs_bool      : bool = False
     # Annotations
     strfs        : np.ndarray = field(init=False)
@@ -57,26 +58,29 @@ class STRF(Core):
             keys = [i for i in HDF5_file.keys() if pattern.match(i) and any(i[4] == np.arange(0, 10).astype("str"))]
             self.strf_keys = natsort.natsorted(keys)
             # Set bool for multi-colour RFs and ensure multicolour attributes set correctly
-            bool_partofmulticolour_list = [len(n.removeprefix("STRF").split("_")) > 2 for n in keys]
-            if all(bool_partofmulticolour_list) == True:
-                multicolour_bool = True
-            if all(bool_partofmulticolour_list) == False:
+            strf_colour_int_list = [int(n.removeprefix("STRF").split("_")[-1]) for n in keys]
+            if len(np.unique(strf_colour_int_list)) == 1: # only one colour according to STRF keys
                 multicolour_bool = False
-            if True in bool_partofmulticolour_list and False in bool_partofmulticolour_list:
-                raise AttributeError("There are both single-coloured and multi-coloured STRFs loaded. Manual fix required.")
+            else:
+                multicolour_bool = True
+            # if True in bool_partofmulticolour_list and False in bool_partofmulticolour_list:
+            #     raise AttributeError("There are both single-coloured and multi-coloured STRFs loaded. Manual fix required.")
             if multicolour_bool is True:
                 identified_labels = np.unique([(i.split('_')[-1]) for i in self.strf_keys])
                 self.numcolour = len([i for i in identified_labels if i.isdigit()])
                 self.multicolour = True
             else:
+                self.multicolour = False
                 self.numcolour = 1
             self.strfs = pygor.data_helpers.load_strf(HDF5_file)
         self.num_strfs = len(self.strfs)
-        self.num_rois = int(self.num_strfs / self.numcolour)
+        if self.num_rois == 0:
+            print("Number of ROIs not set, likely ROIs array is missing. Setting to number of STRFs divided by number of colours.")
+            self.num_rois = int(self.num_strfs / self.numcolour)
         self.set_bootstrap_settings_default()
         if self.bs_settings["do_bootstrap"] == True:
             self.run_bootstrap()
-        
+
     @property #
     def stim_size_arbitrary(self):
         """
@@ -368,8 +372,8 @@ class STRF(Core):
             "sig_R", "sig_G", "sig_B", "sig_UV", "sig_any"]
             return pd.DataFrame(final_arr, columns=column_labels)
         else:
-            space_vals = self.pval_space()
-            time_vals = self.pval_space()
+            space_vals = self.pval_space
+            time_vals = self.pval_space
             space_sig = space_vals <  self.bs_settings["space_sig_thresh"]
             time_sig = time_vals < self.bs_settings["time_sig_thresh"]
             both_sig = time_sig * space_sig
@@ -379,7 +383,10 @@ class STRF(Core):
     
     @property
     def num_rois_sig(self) -> int:
-        return self.get_pvals_table()["sig_any"].sum()
+        if self.multicolour == True:
+            return self.get_pvals_table()["sig_any"].sum()
+        if self.multicolour == False:
+            return self.get_pvals_table()["sig"].sum()
 
     @property
     def strfs_no_border(self) -> np.ndarray:
@@ -710,7 +717,7 @@ class STRF(Core):
             else:
                 raise ValueError("ROI must be None, int, or an iterable of ints")
         else:
-            iterate_through = range(self.num_rois * self.numcolour)
+            iterate_through = range(len(self.strfs))
         if isinstance(iterate_through, Iterable):
             target_shape = (len(iterate_through),
                             self.strfs.shape[2], 
@@ -740,7 +747,7 @@ class STRF(Core):
                 self._spatial_centered_collapse = shifted
             return self._spatial_centered_collapse
             #collapsed_strf_arr = shifted
-        return collapsed_strf_arr
+        return np.squeeze(collapsed_strf_arr)
         # spatial.collapse_3d(recording.strfs[strf_num])
     
     def get_polarities(self, exclude_FirstLast=(1,1)) -> np.ndarray:
@@ -932,15 +939,18 @@ class STRF(Core):
 
     def plot_timecourse(self, roi):
         plt.plot(self.get_timecourses()[roi].T)
-    
+
+    def plot_strfs_space(self, **kwargs): 
+        return pygor.strf.plotting.simple.plot_collapsed_strfs(self, **kwargs)
+
     def plot_chromatic_overview(self, roi = None, contours = False, with_times = True, **kwargs):
         with warnings.catch_warnings(record=True) as w:
             # Cause all warnings to always be triggered.
             warnings.simplefilter("always")
             if with_times == False:
-                return pygor.strf.plot.chroma_overview(self, roi, contours=contours, **kwargs)
+                return pygor.strf.plotting.advanced.chroma_overview(self, roi, contours=contours, **kwargs)
             if with_times == True:
-                return pygor.strf.plot.chroma_overview(self, roi, contours=contours, with_times=with_times, **kwargs)
+                return pygor.strf.plotting.advanced.chroma_overview(self, roi, contours=contours, with_times=with_times, **kwargs)
 
     def play_strf(self, roi, **kwargs):
         if isinstance(roi, tuple):
