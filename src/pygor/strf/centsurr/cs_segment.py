@@ -264,9 +264,11 @@ def merge_cs_corr(
 
     if not similar_pairs_index.any():
         return times, map
+    else:
+        print("CS CORR")
 
     new_times = np.zeros((times.shape))
-    new_times[similar_pairs_index[0]] = np.average(times[similar_pairs_index], axis = 0)
+    new_times[similar_pairs_index[-1]] = np.average(times[similar_pairs_index], axis = 0)
     for i in range(times.shape[0]):
         if i not in similar_pairs_index:
             new_times[i] = times[i]
@@ -282,8 +284,9 @@ def merge_cs_corr(
                 new_map = np.where(new_map == k, j, map)
         # map = np.where(map == k, j, map)
     else:
-        new_map = np.where(map == similar_pairs_index[1], similar_pairs_index[0], map)
-    new_times = np.ma.masked_equal(new_times, 0)
+        # new_map = np.where(map == similar_pairs_index[0], similar_pairs_index[1], map)
+        new_map = map  
+        # new_map[map == similar_pairs_index[1]] = 0
     return new_times, new_map
 
 def merge_cs_var(prediction_times,
@@ -295,15 +298,18 @@ def merge_cs_var(prediction_times,
     if low_var_index.size > 1:
         prediction_times[low_var_index[0]] = np.average(prediction_times[low_var_index], axis = 0)
         if low_var_index.tolist() == [0, 1, 2]:
+            print("CS MERGE A")
             prediction_times[0] = np.average(prediction_times[[0, 1, 2]], axis = 0)
             prediction_times[[1,2]] = np.ma.array(np.zeros(prediction_times.shape[1]), mask = True)
             # prediction_map = np.where(prediction_map == np.logical_and(1, 2), low_var_index[-1], prediction_map)
             prediction_map = np.zeros(prediction_map.shape)
         if low_var_index.tolist() == [1, 2]:
+            print("CS MERGE B")
             prediction_times[1] = np.average(prediction_times[[1, 2]], axis = 0)
             prediction_times[2] = np.ma.array(np.zeros(prediction_times.shape[1]), mask = True)
             prediction_map = np.where(prediction_map == np.logical_and(1, 2), low_var_index[-1], prediction_map)
         else:
+            print("CS MERGE C")
             bool_idx = np.bitwise_or(*[np.arange(3) == i for i in low_var_index]) #unpack
             # Where there is dominant signal, error if two indices
             prediction_times[np.arange(3)[np.invert(bool_idx)]] = prediction_times[np.invert(bool_idx)]
@@ -314,6 +320,19 @@ def merge_cs_var(prediction_times,
     prediction_times = np.ma.masked_equal(prediction_times, 0)
     return prediction_times, prediction_map
 
+def merge_cs_pol(prediction_times,
+    prediction_map):
+    # Get the peak value for each trace
+    peak_values = pygor.np_ext.maxabs(prediction_times, axis = 1)
+    prediction_times = prediction_times.data
+    signs = np.sign(peak_values)
+    if signs[0] == signs[1]:
+        prediction_times[2] = prediction_times[1] + prediction_times[2]
+        prediction_times[1] = np.zeros(20)
+        prediction_map = np.where(prediction_map == 1, 2, prediction_map)
+        prediction_times[-1] = np.ma.masked_equal(prediction_times[-1], 0)
+        print("PEAK MERGE", np.unique(prediction_map))
+    return prediction_times, prediction_map
 
 def update_prediction_map(prediction_map, mapping, inplace = False):
     """
@@ -430,7 +449,7 @@ def sort_extracted(prediction_times, map, reorder_strategy = "corrcoef"):
             idx = np.roll(np.argsort(corrs_with*-1), -2)
             # mapping = [0,1,2]
             # idx = np.argsort(corrs_with)
-            mapping = idx   
+            mapping = idx
         # print(idx, mapping)
         # print(corrs_with, corrs_with[idx])
         new_prediction_times = prediction_times[idx]
@@ -473,15 +492,15 @@ def run(d3_arr, plot=False,
         sort_strategy = "sorted",
         exclude_sub = 2,
         segmentation_params = {    
-            "smooth_times"  : 2,   #4
-            "smooth_space"  : 2,   #4
-            "upscale_time"  : 1,#None
-            "upscale_space" : 1,  #1
+            "smooth_times"  : None,   #4
+            "smooth_space"  : None,   #4
+            "upscale_time"  : None,#None
+            "upscale_space" : None,  #1
             "centre_on_zero": False,
             "plot_demo"     : False,
             "crop_time"     : None,
             "on_pcs"        : True,}, 
-        merge_params = {"var_thresh" : .25, "corr_thresh" : .95},
+        merge_params = {"var_thresh" : .2, "corr_thresh" : .95, "peak_merge" : True},
         plot_params = {"ms_dur" : 1300, "degree_visang" : 20, "block_size ": 200}):
     """151, 155, 157, 167, 107, 104, 90, 88, 83, 77, 74
     The main function for running the CS segmentation pipeline on a given 3D array (time x space x space).
@@ -542,7 +561,8 @@ def run(d3_arr, plot=False,
         if merge_params["corr_thresh"] is not None:
             times_extracted, segmented_map = merge_cs_corr(times_extracted, segmented_map, merge_params["corr_thresh"]) 
         times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
-
+        if merge_params["peak_merge"] is True:
+            times_extracted, segmented_map = merge_cs_pol(times_extracted, segmented_map)
 
     # 3.2 Sort the times, as the clustering labels will be arbitrary and not structured
     # in any meaningful order. Here, we ensure we get a predictable order (centre, surround, noise)
@@ -618,6 +638,7 @@ def run(d3_arr, plot=False,
             origin = "lower",
             alpha = 0.2
         )
+        print("Last map vals:", np.unique(segmented_map))
         degrees = plot_params["degree_visang"]
         visang_to_space = pygor.strf.pixconverter.visang_to_pix(
         degrees, pixwidth=40, block_size=200
