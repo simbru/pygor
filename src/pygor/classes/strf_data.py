@@ -1061,11 +1061,11 @@ class STRF(Core):
             return np.array(maps), np.array(times)
         return pygor.strf.centsurr.run(self.strfs_no_border[roi], **kwargs)
 
-    def convolve_with_img(self, roi, img = "example", plot = False, xrange = None, yrange = None, **kwargs):
+    def convolve_with_img(self, roi, img = "example", plot = False, xrange = None, auto_crop = True, auto_crop_thresh = 3, yrange = None, **kwargs):
         from pygor.strf import convolve
         if roi is None:
             raise ValueError("ROI must be supplied")
-        return convolve.convolve_image(self, roi, img, plot = plot, xrange = xrange, yrange = yrange, **kwargs)
+        return convolve.convolve_image(self, roi, img, plot = plot, auto_crop = auto_crop, auto_crop_thresh = auto_crop_thresh, xrange = xrange, yrange = yrange, **kwargs)
 
     def napari_strfs(self, **kwargs):
         import pygor.strf.gui.methods as gui

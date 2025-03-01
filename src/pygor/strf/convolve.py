@@ -18,7 +18,7 @@ def load_example(example_img_path = example_img_path):
     img = plt.imread(example_img_path)
     return img
 
-def convolve_image(strf_obj, roi_index, img = "example", img_zoom = 1/5, arr_zoom = 3, plot = False, norm_output = True, xrange = None, yrange = None):
+def convolve_image(strf_obj, roi_index, img = "example", img_zoom = 1/5, arr_zoom = 3, plot = False, norm_output = True, auto_crop = True, auto_crop_thresh = 3, xrange = None, yrange = None):
     if img is None:
         img = plt.imread(example_img_path)
 
@@ -32,14 +32,25 @@ def convolve_image(strf_obj, roi_index, img = "example", img_zoom = 1/5, arr_zoo
     # degrees_per_pix_arr = 86.325/arr.shape[1]
     rf_img_conv_output = np.empty(img.shape)
     arr_list = []
+    loopthrough = np.arange(strf_obj.strfs.shape[0]).reshape(-1, 4).astype(int)[roi_index]
+    if auto_crop is True:
+        inp_arr = inp_arr = np.abs(strf_obj.collapse_times(loopthrough))
+        inp_arr = np.sum(inp_arr, axis = 0)
+        mask = np.zeros(inp_arr.shape)
+        mask = np.where(np.abs(inp_arr) > auto_crop_thresh, 1, 0)
+        coords = np.argwhere(mask)
+        y_min, x_min = coords.min(axis=0)
+        y_max, x_max = coords.max(axis=0)
+        xrange = (x_min, x_max)
+        yrange = (y_min, y_max)
     if xrange is None:
         xrange = (None, None)
     if yrange is None:
-        yrange = (None, None)
-    loopthrough = np.arange(strf_obj.strfs.shape[0]).reshape(-1, 4).astype(int)[roi_index]
+        yrange = (None, None)        
+
     for n, i in enumerate(loopthrough):
-        # arr = np.squeeze(strfs.collapse_times(start_index + n))[arr_crop[0]:arr_crop[1], arr_crop[2]:arr_crop[3]]
         arr = np.squeeze(strf_obj.collapse_times(i)[:, yrange[0]:yrange[1], xrange[0]:xrange[1]])
+        # arr = np.squeeze(strfs.collapse_times(start_index + n))[arr_crop[0]:arr_crop[1], arr_crop[2]:arr_crop[3]]
         arr = scipy.ndimage.zoom(arr, arr_zoom)
         arr_list.append(arr)
         rf_img_conv_output[:, :, n] = scipy.signal.fftconvolve(img[:, :, n], arr, mode = "same")
@@ -68,7 +79,8 @@ def convolve_image(strf_obj, roi_index, img = "example", img_zoom = 1/5, arr_zoo
         else:
             plot_img = np.clip(MinMaxScaler().fit_transform(rf_img_conv_output.reshape(-1, 1)).reshape(img.shape), 0, 1)
         ax[1, 2].imshow(plot_img[:, :, :3])
-        titles = ["R", "G", "B", "UV", "Image", "Image and R", "Convolution", "", "R ch input", "G ch input", "B ch input", "UV ch input", "R ch output", "G ch output", "B ch output", "UV ch output"]
+        ax[1, 3].imshow(plot_img[:, :, [0, 1, -1]])
+        titles = ["R", "G", "B", "UV", "Image", "Image and R", "Convolution RGB", "Convolution RGU", "R ch input", "G ch input", "B ch input", "UV ch input", "R ch output", "G ch output", "B ch output", "UV ch output"]
         for n, cax in enumerate(ax.flat):
             cax.axis(False)
             cax.set_title(titles[n])
