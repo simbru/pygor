@@ -314,7 +314,8 @@ class Core:
         if labels == True:
             label_map = np.unique(self.rois)[:-1].astype(int)[
                 ::-1
-            ]  # -1 to count forwards instead of backwards
+            ] # -1 to count forwards instead of backwards
+            #label_map = label_map - 1 # count from 0
             if "label_by" in kwargs:
                 labels = self.__keyword_lables[kwargs["label_by"]]
                 if np.isnan(labels) is True:
@@ -420,7 +421,7 @@ class Core:
             else:
                 return method(*args, **kwargs)  # Call the method with arguments
         target = call_method(self, attribute)
-        session = pygor.core.NapariRoiPrompt(target, traces_plot_style = style,**kwargs)
+        session = pygor.core.gui.methods.NapariRoiPrompt(target, traces_plot_style = style,**kwargs)
         return session.run()
 
     def plot_averages(

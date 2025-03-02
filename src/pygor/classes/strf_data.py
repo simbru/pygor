@@ -29,10 +29,12 @@ import pygor.strf.plotting.simple
 import pygor.strf.spatial
 import pygor.strf.temporal
 import pygor.utils
+import pygor.strf.centsurr
 import pygor.utils.helpinfo
 import pygor.utils.unit_conversion as unit_conversion
 from pygor.classes.core_data import Core
 import scipy
+from pygor.classes.core_data import try_fetch_os_params
 
 @dataclass(repr = False)
 class STRF(Core):
@@ -45,7 +47,7 @@ class STRF(Core):
     ipl_depths   : np.ndarray = field(init=False)
     numcolour    : int = field(init=False) # gets interpreted from strf array shape
     strf_keys    : list = field(init=False)
-    
+    strf_ms      : int = field(init=False)
     ## Attributes
     def __post_init__(self):
         # Post initialise the contents of Data class to be inherited
@@ -63,6 +65,7 @@ class STRF(Core):
                 multicolour_bool = False
             else:
                 multicolour_bool = True
+            self.strf_dur_ms = try_fetch_os_params(HDF5_file, "Noise_FilterLength_s") * 1000
             # if True in bool_partofmulticolour_list and False in bool_partofmulticolour_list:
             #     raise AttributeError("There are both single-coloured and multi-coloured STRFs loaded. Manual fix required.")
             if multicolour_bool is True:
@@ -1055,21 +1058,24 @@ class STRF(Core):
             return pygor.plotting.play_movie(arr, rgb_repr=True)
         else:
             return arr
-        
-    def demo_cs_seg(self, roi, **kwargs):
-        pygor.strf.centsurr.run(self.strfs_no_border[roi], plot = True, **kwargs)
-        plt.show()
 
-    def cs_seg(self, roi = None, **kwargs):
-        if roi is None:
-            maps = []
-            times = []
-            for i in range(self.num_rois): 
-                map, time = pygor.strf.centsurr.run(self.strfs_no_border[i], **kwargs)
-                maps.append(map)
-                times.append(time)
-            return np.array(maps), np.array(times)
-        return pygor.strf.centsurr.run(self.strfs_no_border[roi], **kwargs)
+    # def cs_seg(self, roi = None, **kwargs):
+    #     if roi is None:
+    #         maps = []
+    #         times = []
+    #         for i in range(self.num_rois): 
+    #             map, time = pygor.strf.centsurr.run(self.strfs_no_border[i], **kwargs)
+    #             maps.append(map)
+    #             times.append(time)
+    #         return np.array(maps), np.array(times)
+    #     return pygor.strf.centsurr.run(self.strfs_no_border[roi], **kwargs)
+
+    def cs_seg(self, roi = None, plot = False, **kwargs):
+        return pygor.strf.centsurr.run_object(self, roi, plot = plot, **kwargs)
+
+    def demo_cs_seg(self, roi, **kwargs):
+        _ = self.cs_seg(roi, plot = True, **kwargs)
+        plt.show()
 
     def convolve_with_img(self, roi, img = "example", plot = False, xrange = None, auto_crop = True, auto_crop_thresh = 3, yrange = None, **kwargs):
         from pygor.strf import convolve
