@@ -169,81 +169,6 @@ def segmentation_algorithm(
     return prediction_map
 
 
-# def merge_cs_corr_old(
-#     times,
-#     map,
-#     similarity_thresh,
-#     debug_return=False,
-# ):
-
-#     # Keep track of original number of timeseries
-    
-#     num_times = times.shape[0]
-#     # Calculate correlation matrix
-#     # times = times[np.argsort(np.abs(pygor.np_ext.maxabs(times, axis = 1)))]
-#     traces_correlation = np.ma.corrcoef(times)
-
-#     # Identify pairs to merge
-#     np.fill_diagonal(traces_correlation, np.nan) #inplace
-#     # Get indices of pairs exceeding the threshold
-#     upper_triangle_indices = np.triu_indices_from(traces_correlation, k=0)
-#     row_indices, col_indices = upper_triangle_indices[0], upper_triangle_indices[1]
-#     exceed_indices = np.where(
-#         traces_correlation[upper_triangle_indices] > similarity_thresh
-#     )
-#     similar_pairs_index = np.array(
-#         list(zip(row_indices[exceed_indices], col_indices[exceed_indices]))
-#     )
-#     if not similar_pairs_index.any():
-#         return times, map # empty dictionary because subsequent function exepcts a dict is returned in 2nd index
-#     # Construct adjacency graph and find connected components
-#     n = traces_correlation.shape[0]
-#     adj_matrix = np.zeros((n, n), dtype=bool)
-#     adj_matrix[similar_pairs_index[:, 0], similar_pairs_index[:, 1]] = True
-
-#     adj_matrix |= adj_matrix.T  # Symmetric graph
-#     labels = np.zeros(n, dtype=int) - 1  # -1 indicates unvisited
-#     current_label = 0
-#     label_changes = {}  # Track how old labels map to new ones
-#     # Loop through connected components
-#     for node in range(n):
-#         if labels[node] == -1:
-#             # Perform a DFS/BFS to assign all connected nodes the same label
-#             stack = [node]
-#             while stack:
-#                 curr = stack.pop()
-#                 if labels[curr] == -1:
-#                     labels[curr] = current_label
-#                     neighbors = np.where(adj_matrix[curr])[0]
-#                     stack.extend(neighbors)
-#             # Record how this component is labeled
-#             label_changes[current_label] = np.where(labels == current_label)[0]
-#             current_label += 1
-#     # Vectorized (but per-label) averaging without sorting
-#     unique_labels = np.unique(labels)
-#     # merged_traces = np.array(
-#     #     [times[labels == label].mean(axis=0) for label in unique_labels]
-#     # )
-
-#     merged_traces = np.array(
-#         [np.average(times[label_changes[key]], axis = 0) for key in label_changes.keys()]
-#     )
-    
-#     if merged_traces.shape[0] != num_times:
-#         merged_traces = np.insert(merged_traces, 0, np.zeros((num_times - merged_traces.shape[0], merged_traces.shape[1])), axis=0)
-#         merged_traces = np.ma.masked_equal(merged_traces, 0)
-#     if debug_return is True:
-#         return merged_traces, labels, label_changes
-#     else:
-#         # Update prediction_map
-#         if label_changes is not None:
-#             # Change prediction_map array directly, not on copy
-#             for key, value in label_changes.items():
-#                 map[np.isin(map, value)] = key
-#         return merged_traces, map
-
-#         # return merged_traces, label_changes
-
 def merge_cs_corr(
     times,
     map,
@@ -272,7 +197,7 @@ def merge_cs_corr(
         print("CS CORR")
 
     new_times = np.zeros((times.shape))
-    new_times[similar_pairs_index[-1]] = np.average(times[similar_pairs_index], axis = 0)
+    new_times[similar_pairs_index[-1]] = np.ma.average(times[similar_pairs_index], axis = 0)
     for i in range(times.shape[0]):
         if i not in similar_pairs_index:
             new_times[i] = times[i]
@@ -293,49 +218,27 @@ def merge_cs_corr(
         # new_map[map == similar_pairs_index[1]] = 0
     return new_times, new_map
 
-def merge_cs_var(prediction_times,
-    prediction_map,
-    var_threshold):
-    variances = np.std(prediction_times, axis = 1)
+def merge_cs_var(arr_3d, prediction_times, prediction_map, var_threshold):
+    # Calculate variances of each signal
+    variances = np.std(prediction_times, axis=1)
+    # Identify indices of signals with variance below the threshold
     low_var_index = np.argwhere(variances < var_threshold).flatten()
-    # low_var_index = np.array([1, 2])
     if low_var_index.size > 1:
-        prediction_times[low_var_index[0]] = np.average(prediction_times[low_var_index], axis = 0)
-        if low_var_index.tolist() == [0, 1, 2]:
-            print("VAR MERGE A")
-            prediction_times[0] = np.average(prediction_times[[0, 1, 2]], axis = 0)
-            prediction_times[[1,2]] = np.ma.array(np.zeros(prediction_times.shape[1]), mask = True)
-            # prediction_map = np.where(prediction_map == np.logical_and(1, 2), low_var_index[-1], prediction_map)
-            prediction_map = np.zeros(prediction_map.shape)
-        if low_var_index.tolist() == [1, 2]:
-            print("VAR MERGE B")
-            prediction_times[1] = np.average(prediction_times[[1, 2]], axis = 0)
-            prediction_times[2] = np.ma.array(np.zeros(prediction_times.shape[1]), mask = True)
-            prediction_map = np.where(prediction_map == np.logical_and(1, 2), low_var_index[-1], prediction_map)
-        else:
-            print("VAR MERGE C")
-            bool_idx = np.bitwise_or(*[np.arange(3) == i for i in low_var_index]) #unpack
-            # Where there is dominant signal, error if two indices
-            prediction_times[np.arange(3)[np.invert(bool_idx)]] = prediction_times[np.invert(bool_idx)]
-            # Average over low index traces
-            prediction_times[low_var_index[0]] = np.average(prediction_times[bool_idx], axis = 0)
-            prediction_times[low_var_index[1]] = np.zeros(20)
-            prediction_map = np.where(prediction_map == low_var_index[1], low_var_index[0], prediction_map)
-    prediction_times = np.ma.masked_equal(prediction_times, 0)
-    return prediction_times, prediction_map
-
-def merge_cs_pol(prediction_times,
-    prediction_map):
-    # Get the peak value for each trace
-    peak_values = pygor.np_ext.maxabs(prediction_times, axis = 1)
-    prediction_times = prediction_times.data
-    signs = np.sign(peak_values)
-    if signs[0] == signs[1]:
-        prediction_times[2] = prediction_times[1] + prediction_times[2]
-        prediction_times[1] = np.zeros(prediction_times.shape[1])
-        prediction_map = np.where(prediction_map == 1, 2, prediction_map)
-        prediction_times[-1] = np.ma.masked_equal(prediction_times[-1], 0)
-        print("PEAK MERGE", np.unique(prediction_map))
+        print("MERGE CS VAR")
+        center_index = low_var_index[np.argmin(variances[low_var_index])]
+        other_indices = low_var_index[low_var_index != center_index]
+        # Update the prediction map
+        for idx in other_indices:
+            prediction_map = np.where(prediction_map == idx, center_index, prediction_map)
+        # Normalise prediction map values to between 0 and 1
+        prediction_map = prediction_map / np.max(prediction_map)
+        prediction_map = prediction_map.astype(int)
+        times_extracted = extract_times(prediction_map, arr_3d)
+        # plt.plot(times_extracted.T)
+        time_fill = np.zeros((1, times_extracted.shape[1]))
+        times_extracted = np.append(times_extracted, time_fill, axis = 0)        
+        prediction_times = times_extracted
+        prediction_times = np.ma.masked_equal(prediction_times, 0)
     return prediction_times, prediction_map
 
 def update_prediction_map(prediction_map, mapping, inplace = False):
@@ -369,6 +272,20 @@ def update_prediction_map(prediction_map, mapping, inplace = False):
         prediction_map[:] = mapping[prediction_map]    
     return prediction_map
 
+
+def extract_noncentre(
+    prediction_map,
+    inputdata_3d,):
+    # Create mask for non centre pixels
+    mask = np.where((prediction_map) == 0, 1, 0)
+    mask = np.repeat(np.expand_dims(mask, axis = 0), inputdata_3d.shape[0], axis = 0)
+    arr = np.ma.masked_array(inputdata_3d, mask = mask)
+    time = np.ma.average(arr, axis = (1, 2))
+    # fig, ax = plt.subplots(1, 2)
+    # ax[0].imshow(np.squeeze(mask[0]), origin = "lower")
+    # ax[1].plot(time)
+    return time
+
 def extract_times(
     prediction_map,
     inputdata_3d,
@@ -397,7 +314,7 @@ def extract_times(
             np.ma.average(np.ma.masked_array(inputdata_3d, mask=masks[i]), axis=(1, 2))
             for i in range(num_clusts)
         ]
-    )
+    ).data
     return prediction_times
 
 def amplitude_criteria(prediction_times, map, abs_criteria = 2) -> tuple[np.ma.MaskedArray, np.ndarray, bool]:
@@ -407,7 +324,7 @@ def amplitude_criteria(prediction_times, map, abs_criteria = 2) -> tuple[np.ma.M
     if  float(maxval) < float(abs_criteria):
         new_map = np.zeros(map.shape)
         new_times = np.ma.array(np.zeros(prediction_times.shape), mask = True)
-        new_times[2] = np.average(prediction_times, axis = 0)
+        new_times[2] = np.ma.average(prediction_times, axis = 0)
         return new_times, new_map, False
     else: #pass through
         return prediction_times, map, True
@@ -448,7 +365,12 @@ def sort_extracted(prediction_times, map, reorder_strategy = "corrcoef"):
         # Sort them by degree of correlation
         if np.ma.is_masked(prediction_times):
             idx = np.argsort(corrs_with *-1)
-            mapping = np.argsort(idx[:2])
+            # I have no idea why you need to do this, but if you don't the subsequent logic breaks
+            # and you get the wrong mapping in cases where the indices are already sorted by chance
+            if np.all(np.argsort(idx) == idx):
+                mapping = np.argsort(idx)
+            else:
+                mapping = np.argsort(idx[:2])
         else:
             idx = np.argsort(corrs_with *-1)
             idx[1], idx[2] = idx[2], idx[1]
@@ -531,7 +453,7 @@ def run(d3_arr, plot=False,
 
     default_segmnetation_params = {
         "smooth_times"  : None,   #4
-        "smooth_space"  : None,   #4
+        "smooth_space"  : 2,   #4
         "upscale_time"  : None,#None
         "upscale_space" : None,  #1
         "centre_on_zero": False,
@@ -582,7 +504,8 @@ def run(d3_arr, plot=False,
     times_extracted, segmented_map, pass_bool = amplitude_criteria(times_extracted, segmented_map, abs_criteria = exclude_sub)
     if pass_bool is True:
         if merge_params["var_thresh"] is not None:
-            times_extracted, segmented_map = merge_cs_var(times_extracted, segmented_map, merge_params["var_thresh"])
+            # times_extracted, segmented_map = merge_cs_var(times_extracted, segmented_map, merge_params["var_thresh"])
+            times_extracted, segmented_map = merge_cs_var(d3_arr, times_extracted, segmented_map, merge_params["var_thresh"])
         if merge_params["corr_thresh"] is not None:
             times_extracted, segmented_map = merge_cs_corr(times_extracted, segmented_map, merge_params["corr_thresh"]) 
         times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
@@ -593,9 +516,11 @@ def run(d3_arr, plot=False,
     # in any meaningful order. Here, we ensure we get a predictable order (centre, surround, noise)
 
     # Finally, check if only one trace was left, and if so, move it to noise index 
-    if np.ma.count_masked(times_extracted[:, 0], axis=0) == 2 and np.all(segmented_map != 2):
-        # times_extracted = np.roll(times_extracted, 2, axis = 0)
-        segmented_map = np.zeros(segmented_map.shape)
+    # if np.ma.count_masked(times_extracted[:, 0], axis=0) == 2 and np.all(segmented_map != 2):
+    #     # times_extracted = np.roll(times_extracted, 2, axis = 0)
+    #     segmented_map = np.zeros(segmented_map.shape)
+    
+
     # Optionally plot the output (these are pretty plots!)
     if plot is True:
         import seaborn as sns
@@ -621,6 +546,10 @@ def run(d3_arr, plot=False,
         cmap_vals = [[0, 1, 1,],
                     [1, 0, 1,],
                     [.75, .75, .75]]
+        lineplot_vals =  [[0, 1, 1,],
+                    [1, 0, 1,],
+                    [.75, .75, .75],
+                    [1, 0, 0]]
         cmap_vals = np.array(cmap_vals)
         cmap = plt.cm.colors.ListedColormap(cmap_vals)
         space_repr = pygor.strf.spatial.collapse_3d(d3_arr)
@@ -634,10 +563,11 @@ def run(d3_arr, plot=False,
             x_vals = np.linspace(0, times_extracted.shape[1], times_extracted.shape[1])
         for i in range(len(times_extracted)):
             if np.all(np.ma.is_masked(times_extracted[i])) == True:
-                ax[1].plot(x_vals, times_extracted[i].data, label = f"Cluster {i}", ls = "dashed", c = cmap_vals[i])
+                ax[1].plot(x_vals, times_extracted[i].data, label = f"Cluster {i}", ls = "dashed", c = lineplot_vals[i])
             else:
                 counter += 1
-                ax[1].plot(x_vals, times_extracted[i], label = f"Cluster {i}", c = cmap_vals[i])
+                ax[1].plot(x_vals, times_extracted[i], label = f"Cluster {i}", c = lineplot_vals[i])
+        ax[1].plot(x_vals, extract_noncentre(segmented_map, d3_arr), c = "k", label = "Non-centre", lw = 2.5, zorder = -1)
         ax[1].legend()
         ax[1].set_ylabel("Z-score (SD)")
         # ax[1].grid()
@@ -669,12 +599,12 @@ def run(d3_arr, plot=False,
         cbar = plt.colorbar(seg, ax = ax[0], )
         tick_locs = [2, 1, 0]
         cbar.set_ticks(tick_locs)
-        if sort_strategy is not None:
-            cbar.ax.invert_yaxis()
-            standard_labels = np.array(["Noise", "Surround", "Centre"])
-            # labels = np.array([standard_labels[i] for i in range(counter)])
-            # labels = standard_labels[np.unique(segmented_map).astype(int)]
-            cbar.set_ticklabels(standard_labels)
+        # if sort_strategy is not None:
+        cbar.ax.invert_yaxis()
+        standard_labels = np.array(["Noise", "Surround", "Centre"])
+        # labels = np.array([standard_labels[i] for i in range(counter)])
+        # labels = standard_labels[np.unique(segmented_map).astype(int)]
+        cbar.set_ticklabels(standard_labels)
         degrees = plot_params["degree_visang"]
         visang_to_space = pygor.strf.pixconverter.visang_to_pix(
         degrees, pixwidth=40, block_size=200
@@ -692,6 +622,8 @@ def run(d3_arr, plot=False,
         repr_cbar = plt.colorbar(repr, ax = ax[0], orientation = "horizontal", 
                                 label = "Z-score (SD)")
         plt.show()
+    # Add non-centre time courses to times_extracted
+    times_extracted = np.append(times_extracted, np.expand_dims(extract_noncentre(segmented_map, d3_arr), 0), axis = 0)
     return segmented_map, times_extracted
 
 def gen_cmap(colormap = plt.cm.tab10, num = 3):
@@ -737,15 +669,12 @@ def run_object(self, roi = None, **kwargs):
 TODO
 - [X] When merging clusters, especially time course, ensure that there are 3 arrays to end with
 - [X] The arrays are ordered: positive, negative, noise 
-- [ ] If no noise can be isolated, then set a array of np.zeros(len) and mask it --> np.ma.array
+- [X] If no noise can be isolated, then set a array of np.zeros(len) and mask it --> np.ma.array
 - [/] Polarity and determining noise from signal can in some cases be ambigious, so strategy is:
     - 1. Get the max amplitude cluster (sign is arbitrary)
     - 2. Determine the cluster that is most anti-correlated, designate this as the opposite cluster
     - 3. Then merge clusters together based on correlation and cumulative distance (work in notebook)
-- [ ] Distance merge
-- [ ] 
-Bugs:
-- IF smooth_times = True, sometimes you get a phanthom cluster, no clue what it is --> due to overlap in new maps after removing holes 
+
 """
 # Generate timecourses for each cluster
 # initial_masks = [
