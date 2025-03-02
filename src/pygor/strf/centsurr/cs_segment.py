@@ -5,6 +5,10 @@ import scipy.signal
 import scipy.ndimage
 import sklearn.cluster
 import skimage
+try:
+    from collections import Iterable
+except ImportError:
+    from collections.abc import Iterable
 # import skimage.morphology
 import pygor.np_ext as np_ext
 import pygor.np_ext
@@ -298,18 +302,18 @@ def merge_cs_var(prediction_times,
     if low_var_index.size > 1:
         prediction_times[low_var_index[0]] = np.average(prediction_times[low_var_index], axis = 0)
         if low_var_index.tolist() == [0, 1, 2]:
-            print("CS MERGE A")
+            print("VAR MERGE A")
             prediction_times[0] = np.average(prediction_times[[0, 1, 2]], axis = 0)
             prediction_times[[1,2]] = np.ma.array(np.zeros(prediction_times.shape[1]), mask = True)
             # prediction_map = np.where(prediction_map == np.logical_and(1, 2), low_var_index[-1], prediction_map)
             prediction_map = np.zeros(prediction_map.shape)
         if low_var_index.tolist() == [1, 2]:
-            print("CS MERGE B")
+            print("VAR MERGE B")
             prediction_times[1] = np.average(prediction_times[[1, 2]], axis = 0)
             prediction_times[2] = np.ma.array(np.zeros(prediction_times.shape[1]), mask = True)
             prediction_map = np.where(prediction_map == np.logical_and(1, 2), low_var_index[-1], prediction_map)
         else:
-            print("CS MERGE C")
+            print("VAR MERGE C")
             bool_idx = np.bitwise_or(*[np.arange(3) == i for i in low_var_index]) #unpack
             # Where there is dominant signal, error if two indices
             prediction_times[np.arange(3)[np.invert(bool_idx)]] = prediction_times[np.invert(bool_idx)]
@@ -328,7 +332,7 @@ def merge_cs_pol(prediction_times,
     signs = np.sign(peak_values)
     if signs[0] == signs[1]:
         prediction_times[2] = prediction_times[1] + prediction_times[2]
-        prediction_times[1] = np.zeros(20)
+        prediction_times[1] = np.zeros(prediction_times.shape[1])
         prediction_map = np.where(prediction_map == 1, 2, prediction_map)
         prediction_times[-1] = np.ma.masked_equal(prediction_times[-1], 0)
         print("PEAK MERGE", np.unique(prediction_map))
@@ -443,15 +447,12 @@ def sort_extracted(prediction_times, map, reorder_strategy = "corrcoef"):
         corrs_with = corrcoef[maxabs_ampl_trace_idx]
         # Sort them by degree of correlation
         if np.ma.is_masked(prediction_times):
-            idx = np.argsort(corrs_with)
-            mapping = idx[:2]
+            idx = np.argsort(corrs_with *-1)
+            mapping = np.argsort(idx[:2])
         else:
-            idx = np.roll(np.argsort(corrs_with*-1), -2)
-            # mapping = [0,1,2]
-            # idx = np.argsort(corrs_with)
-            mapping = idx
-        # print(idx, mapping)
-        # print(corrs_with, corrs_with[idx])
+            idx = np.argsort(corrs_with *-1)
+            idx[1], idx[2] = idx[2], idx[1]
+            mapping = np.argsort(idx)
         new_prediction_times = prediction_times[idx]
     elif reorder_strategy == "pixcount":
         # if similarity_merge:
@@ -489,19 +490,11 @@ def cs_segment_demo(inputdata_3d, **kwargs):
     segmentation_algorithm(inputdata_3d, plot_demo=True, **kwargs)
 
 def run(d3_arr, plot=False, 
-        sort_strategy = "sorted",
-        exclude_sub = 2,
-        segmentation_params = {    
-            "smooth_times"  : None,   #4
-            "smooth_space"  : None,   #4
-            "upscale_time"  : None,#None
-            "upscale_space" : None,  #1
-            "centre_on_zero": False,
-            "plot_demo"     : False,
-            "crop_time"     : None,
-            "on_pcs"        : True,}, 
-        merge_params = {"var_thresh" : .2, "corr_thresh" : .95, "peak_merge" : True},
-        plot_params = {"ms_dur" : 1300, "degree_visang" : 20, "block_size ": 200}):
+        sort_strategy = "corrcoef",
+        exclude_sub = 2.5,
+        segmentation_params : dict = None, 
+        merge_params : dict = None,
+        plot_params : dict = None):
     """151, 155, 157, 167, 107, 104, 90, 88, 83, 77, 74
     The main function for running the CS segmentation pipeline on a given 3D array (time x space x space).
 
@@ -529,12 +522,43 @@ def run(d3_arr, plot=False,
     times_extracted : 2D numpy array
         The extracted timecourses from the segmented map.
     """
+    default_plot_params = {"ms_dur" : 1300, 
+                        "degree_visang" : 20, 
+                        "block_size" : 200}
+    if plot_params is not None:
+        default_plot_params.update(plot_params)
+    plot_params = default_plot_params
+
+    default_segmnetation_params = {
+        "smooth_times"  : None,   #4
+        "smooth_space"  : None,   #4
+        "upscale_time"  : None,#None
+        "upscale_space" : None,  #1
+        "centre_on_zero": False,
+        "plot_demo"     : False,
+        "crop_time"     : None,
+        "on_pcs"        : True,
+    }
+    if segmentation_params is not None:
+        default_segmnetation_params.update(segmentation_params)
+    segmentation_params = default_segmnetation_params
+
+    default_merge_params = {
+        "var_thresh" : .2,
+        "corr_thresh" : .95,
+        "peak_merge" : True
+    }
+    if merge_params is not None:
+        default_merge_params.update(merge_params)
+    merge_params = default_merge_params
     # 1. Apply segmentation clustering algorithm on times and fetch the 
     # spatial locations of the resulting cluster labels (per pixel's timecourse)
     segmented_map = segmentation_algorithm(d3_arr, **segmentation_params)
     # 2. Extract the times from the given cluster label's spatial positions,
     # averaging them to get the temporal signal from the spatial positions
     times_extracted = extract_times(segmented_map, d3_arr)
+
+    # ----The following is old logic and is only here for reference.--------
     # 3.1 Merge the clusters that share a particularily high degree of correlation.
     # This is needed becasue we always ask for 3 labels, but if signal is really 
     # strong and there is no opponency, it will place 2 labels within the centre.
@@ -553,7 +577,8 @@ def run(d3_arr, plot=False,
     # 3.3 Finally merge clusters label regions together if there is no detectable signal (low variance),
     # generate an accurate background label. If so, fills the "noise" label with masked zeros 
     # times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
-
+    # ------- end of old logic --------------------------------------------
+    # New and improved optional logic
     times_extracted, segmented_map, pass_bool = amplitude_criteria(times_extracted, segmented_map, abs_criteria = exclude_sub)
     if pass_bool is True:
         if merge_params["var_thresh"] is not None:
@@ -561,8 +586,8 @@ def run(d3_arr, plot=False,
         if merge_params["corr_thresh"] is not None:
             times_extracted, segmented_map = merge_cs_corr(times_extracted, segmented_map, merge_params["corr_thresh"]) 
         times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
-        if merge_params["peak_merge"] is True:
-            times_extracted, segmented_map = merge_cs_pol(times_extracted, segmented_map)
+        # if merge_params["peak_merge"] is True:
+        #     times_extracted, segmented_map = merge_cs_pol(times_extracted, segmented_map)
 
     # 3.2 Sort the times, as the clustering labels will be arbitrary and not structured
     # in any meaningful order. Here, we ensure we get a predictable order (centre, surround, noise)
@@ -587,24 +612,24 @@ def run(d3_arr, plot=False,
         )  # update num_clusts after potential merges
         num_clusts = times_extracted.shape[0]
         # Specify colormap
-        colormap = plt.cm.tab10  # Use the entire Set1 colormap
         # Find which indices correspond to non-zero clusters
         idx = np.squeeze(np.arange(num_clusts)[np.count_nonzero(times_extracted, axis = 1).data != 0])
         # Genreate the colormap RGB values accordingly
-        if sort_strategy is None:
-            cmap_vals = np.array([colormap(i) for i in range(num_clusts)])
-        else:
-            cmap_vals = [[0, 1, 1,],
-                        [1, 0, 1,],
-                        [.75, .75, .75]]
+        # if sort_strategy is None:
+        #     cmap_vals = np.array([colormap(i) for i in range(num_clusts)])
+        # else:
+        cmap_vals = [[0, 1, 1,],
+                    [1, 0, 1,],
+                    [.75, .75, .75]]
         cmap_vals = np.array(cmap_vals)
-        cmap = plt.cm.colors.ListedColormap(cmap_vals[idx])
+        cmap = plt.cm.colors.ListedColormap(cmap_vals)
         space_repr = pygor.strf.spatial.collapse_3d(d3_arr)
         # space_repr = np.var(d3_arr, axis = 0) * pygor.strf.spatial.pixel_polarity(d3_arr)
         # Time components
         counter = 0
         if plot_params["ms_dur"] is not None:
             x_vals = np.linspace(plot_params["ms_dur"], 0, times_extracted.shape[1]) * -1
+            ax[1].set_xlabel("Time (ms)")
         else:
             x_vals = np.linspace(0, times_extracted.shape[1], times_extracted.shape[1])
         for i in range(len(times_extracted)):
@@ -619,7 +644,7 @@ def run(d3_arr, plot=False,
         # ax[1].axhline(0, ls = "-", c = "k", zorder = -2, lw = .75)
 
         # ax[1].set_xticklabels(tick_labels)
-        ax[1].set_xlabel("Time (ms)")
+
         if np.max(np.abs(times_extracted)) < 5:
             ax[1].set_ylim(-5, 5)
         # if np.max(np.abs(space_repr)) < 5:
@@ -633,12 +658,23 @@ def run(d3_arr, plot=False,
             origin = "lower",
         )
         ax[0].set_axis_off()
+        if len(np.unique(segmented_map)) == 1:
+            segmented_map = np.ones(segmented_map.shape)*2
         seg = ax[0].imshow(
-            segmented_map, cmap = cmap, 
+            segmented_map, cmap = cmap,
+            clim = (0, 2),
             origin = "lower",
             alpha = 0.2
         )
-        print("Last map vals:", np.unique(segmented_map))
+        cbar = plt.colorbar(seg, ax = ax[0], )
+        tick_locs = [2, 1, 0]
+        cbar.set_ticks(tick_locs)
+        if sort_strategy is not None:
+            cbar.ax.invert_yaxis()
+            standard_labels = np.array(["Noise", "Surround", "Centre"])
+            # labels = np.array([standard_labels[i] for i in range(counter)])
+            # labels = standard_labels[np.unique(segmented_map).astype(int)]
+            cbar.set_ticklabels(standard_labels)
         degrees = plot_params["degree_visang"]
         visang_to_space = pygor.strf.pixconverter.visang_to_pix(
         degrees, pixwidth=40, block_size=200
@@ -652,23 +688,50 @@ def run(d3_arr, plot=False,
             y = -0.05,
             offset_modifier = .7
         )
-        cbar = plt.colorbar(seg, ax = ax[0], )
+        plt.axhline(0, ls = "-", c = "k", zorder = -2, lw = .75)
         repr_cbar = plt.colorbar(repr, ax = ax[0], orientation = "horizontal", 
                                 label = "Z-score (SD)")
-        tick_locs = np.flip(np.unique(segmented_map))
-        cbar.set_ticks(tick_locs)
-        if sort_strategy is not None:
-            cbar.ax.invert_yaxis()
-            standard_labels = np.array(["Noise", "Surround", "Centre"])
-            # labels = np.array([standard_labels[i] for i in range(counter)])
-            labels = standard_labels[np.unique(segmented_map).astype(int)]
-            cbar.set_ticklabels(labels)
         plt.show()
     return segmented_map, times_extracted
 
 def gen_cmap(colormap = plt.cm.tab10, num = 3):
     return plt.cm.colors.ListedColormap([colormap(i) for i in range(num)])
     
+
+# def run_object(strf_obj, roi = None, **kwargs):
+#     if roi is None:
+#         roi = np.arange(strf_obj.strfs.shape[0])
+#     if isinstance(roi, Iterable) is False:
+#         roi = [roi]
+#     dur = strf_obj.strfs.shape[1]
+#     # Collect results
+#     maps = []
+#     times = []
+#     strf_dur_ms = strf_obj.strf_dur_ms
+#     for i in roi:
+#         # d3_arr = strf_obj.strfs_no_border[roi]
+#         cmap, ctimes = run(strf_obj.strfs_no_border[roi], plot_params = {"ms_dur": strf_dur_ms}, **kwargs)
+#         maps.append(cmap)
+#         times.append(ctimes)
+#     return [maps, times]
+
+def run_object(self, roi = None, **kwargs):
+    if roi is None:
+        roi = np.arange(self.strfs_no_border.shape[0])
+    if isinstance(roi, Iterable) is False:
+        roi = [roi]
+    maps = []
+    times = []
+    strf_ms_dur = self.strf_dur_ms
+    block_size =  self.stim_size_arbitrary
+    for i in roi: 
+        map, time = pygor.strf.centsurr.run(self.strfs_no_border[i],
+                                            plot_params = {"ms_dur": strf_ms_dur, "block_size": block_size},
+                                            **kwargs)
+        maps.append(map)
+        times.append(time)
+    return np.array(maps), np.array(times)
+    # return pygor.strf.centsurr.run(self.strfs_no_border[roi], **kwargs)
 
 """
 TODO
