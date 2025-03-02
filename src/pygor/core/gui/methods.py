@@ -223,7 +223,7 @@ class NapariDepthPrompt:
         return self.result  # Now `self.result` is updated before returning
 
 class NapariRoiPrompt():
-    def __init__(self, array_input, traces_plot_style = "stacked", plot = False):
+    def __init__(self, array_input, traces_plot_style = "individual", plot = False):
         if get_ipython() is not None:
             get_ipython().run_line_magic('matplotlib', 'Qt5Agg')
         import napari
@@ -399,6 +399,10 @@ class NapariRoiPrompt():
         vmin, vmax = np.percentile(self.arr, (1, 99))
         self.viewer.add_image(np.std(self.arr, axis = 0), name="SD")
         self.viewer.add_image(np.mean(self.arr, axis = 0), name="Average")
+#        try:
+#            self.viewer.add_image(self.calculate_image_average(), name="Average movie", opacity=.6, contrast_limits=(vmin, vmax))
+#        except ValueError:
+#            pass
         self.viewer.add_image(self.arr, name="Image", opacity=.6, contrast_limits=(vmin, vmax))
         roi_layer = self.viewer.add_shapes(name = "place ROIs", shape_type = 'polygon', opacity=.75, edge_width=.25, edge_color='yellow', face_color='transparent')
         roi_layer.mode = 'add_ellipse'

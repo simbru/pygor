@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.pyplot as plt
 
-def plot_collapsed_strfs(self, cval=None):
+def plot_collapsed_strfs(self, cval=None, cmap = "bwr", origin = "upper"):
     # Example data: Replace with your actual data
     array = self.collapse_times()
     # Grid layout
@@ -29,7 +29,7 @@ def plot_collapsed_strfs(self, cval=None):
 
     # Display
     fig, ax = plt.subplots(figsize=(10, 10))
-    ax.imshow(image, cmap="bwr", interpolation="none", clim=(-cval, cval))
+    ax.imshow(image, cmap=cmap, interpolation="none", clim=(-cval, cval), origin = origin)
     ax.axis("off")
 
     # Overlay slice numbers
