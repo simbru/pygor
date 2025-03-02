@@ -17,6 +17,9 @@ def plot_averages(
     independent_scale = False, 
     n_rois_raster = 50,
     sort_order = None,
+    skip_trigger = 1,
+    phase_dur_mod = 1,
+    kill_phase = None,
     **kwargs,
 ):
     """
@@ -55,8 +58,9 @@ def plot_averages(
         axs = kwargs['ax']
     if rois is None:
         rois = np.arange(0, self.num_rois)
-    if rois is not None:
-        rois = np.squeeze(rois)
+
+    if isinstance(rois, int) is True:
+        rois = [rois]
     if isinstance(rois, Iterable) is False:
         rois = [rois]
     if isinstance(rois, np.ndarray) is False:
@@ -95,7 +99,7 @@ def plot_averages(
         ):  # This takes care of passing just 1 roi, not breaking axs.flat in the next line
             axs = np.array([axs])
         sd_ratio_scalebar = 0.5
-        phase_dur = self.ms_dur / self.trigger_mode
+        phase_dur = self.ms_dur / self.trigger_mode * phase_dur_mod
         """
         TODO: Fix so it doesn't just put shading 
         at regular intervals but instead looks at the
@@ -118,8 +122,21 @@ def plot_averages(
             ax.set_ylabel(label, rotation=0, verticalalignment="center")
             ax.spines[["top", "bottom", "right"]].set_visible(False)
             # Now we need to add axvspans (don't think I can avoid for loops inside for loops...)
+            if phase_dur_mod != 1:
+                inner_loop = np.arange(
+                    self.trigger_mode * (1/phase_dur_mod)
+                )
+            else:
+                inner_loop = np.arange(self.trigger_mode)
+            if isinstance(kill_phase, Iterable) is False:
+                kill_phase = [kill_phase]
             if self.trigger_mode != 1:
-                for interval in range(self.trigger_mode)[::2]:
+#               for i in self.get_average_markers():
+#                   ax.axvline(i, color="k", lw=2, alpha = 0.33, zorder = 0)
+                for interval in inner_loop[::2][::skip_trigger]:
+                    ax.axvline(interval*phase_dur, color="k", lw=2, alpha = 0.2, zorder = 0)
+                    if interval in kill_phase:
+                        continue
                     ax.axvspan(
                         interval * phase_dur,
                         (interval + 1) * phase_dur,
@@ -127,6 +144,7 @@ def plot_averages(
                         color="gray",
                         lw=0,
                     )
+
             ax.grid(False)
         if independent_scale is False:
             closest_sd = np.ceil(np.max(self.averages[rois])*sd_ratio_scalebar)
