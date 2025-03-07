@@ -54,11 +54,11 @@ import pygor.strf.spatial
 
 def segmentation_algorithm(
     inputdata_3d,
-    smooth_times =3,   #4
-    smooth_space =3,   #4
-    upscale_time =2,#None
-    upscale_space=2,  #1
-    centre_on_zero=True,
+    smooth_times =None,   #4
+    smooth_space =None,   #4
+    upscale_time =None,#None
+    upscale_space=None,  #1
+    centre_on_zero=False,
     plot_demo=False,
     crop_time=None,
     on_pcs=True,
@@ -111,9 +111,6 @@ def segmentation_algorithm(
     # Optionally crop timeseries to emphasise differences over given time window
     if crop_time is not None:
         fit_on = fit_on[:, crop_time[0] : crop_time[1]]
-    # Optionally centre prediction time on zero
-    if centre_on_zero is True:
-        fit_on = fit_on - fit_on[:, [0]] - np.mean(fit_on, axis=1, keepdims=True)
     # Optionally calculate principal components and use these as input
     if on_pcs is True:
         # Perform PCA on the input data and use the first n_components as the input
@@ -122,6 +119,9 @@ def segmentation_algorithm(
         # fit_on = pca.fit_transform(fit_on.T)
         # fit_on = pca.components_.T
         fit_on = pca.fit_transform(fit_on)
+    # Optionally centre prediction time on zero
+    if centre_on_zero is True:
+        fit_on = fit_on - fit_on[:, [0]] - np.mean(fit_on, axis=1, keepdims=True)
     # Perform clustering on fit_on array
     clusterfunc = sklearn.cluster.AgglomerativeClustering(n_clusters=n_clusters)
     initial_prediction_map = clusterfunc.fit_predict(fit_on).reshape(
@@ -169,54 +169,53 @@ def segmentation_algorithm(
     return prediction_map
 
 
-def merge_cs_corr(
-    times,
-    map,
-    similarity_thresh,
-):
-    # Calculate correlation matrix
-    traces_correlation = np.ma.corrcoef(times)
-    # Identify pairs to merge
-    # np.fill_diagonal(traces_correlation, np.nan) #inplace
-    # Get indices of pairs exceeding the threshold
-    upper_triangle_indices = np.triu_indices_from(traces_correlation, k=1) #ignore diagonal 
-    row_indices, col_indices = upper_triangle_indices[0], upper_triangle_indices[1]
-    exceed_indices = np.where(
-        traces_correlation[upper_triangle_indices] > similarity_thresh
-    )
+# def merge_cs_corr(
+#     times,
+#     map,
+#     similarity_thresh,
+# ):
+#     # Calculate correlation matrix
+#     traces_correlation = np.ma.corrcoef(times)
+#     # Identify pairs to merge
+#     # np.fill_diagonal(traces_correlation, np.nan) #inplace
+#     # Get indices of pairs exceeding the threshold
+#     upper_triangle_indices = np.triu_indices_from(traces_correlation, k=1) #ignore diagonal 
+#     row_indices, col_indices = upper_triangle_indices[0], upper_triangle_indices[1]
+#     exceed_indices = np.where(
+#         traces_correlation[upper_triangle_indices] > similarity_thresh
+#     )
+#     # First merge times that are similar
+#     similar_pairs_index = np.squeeze(
+#         list(zip(row_indices[exceed_indices], col_indices[exceed_indices]))
+#     ).astype(int)
 
-
-    # First merge times that are similar
-    similar_pairs_index = np.squeeze(
-        list(zip(row_indices[exceed_indices], col_indices[exceed_indices]))
-    ).astype(int)
-
-    if not similar_pairs_index.any():
-        return times, map
-    else:
-        print("CS CORR")
-
-    new_times = np.zeros((times.shape))
-    new_times[similar_pairs_index[-1]] = np.ma.average(times[similar_pairs_index], axis = 0)
-    for i in range(times.shape[0]):
-        if i not in similar_pairs_index:
-            new_times[i] = times[i]
-    new_times = np.ma.masked_equal(new_times, 0)
+#     if not similar_pairs_index.any():
+#         # Exit function and return as-is
+#         return times, map
+#     else:
+#         print("CS CORR")
+#     print(similar_pairs_index)
+#     new_times = np.zeros((times.shape))
+#     new_times[similar_pairs_index[-1]] = np.ma.average(times[similar_pairs_index], axis = 0)
+#     for i in range(times.shape[0]):
+#         if i not in similar_pairs_index:
+#             new_times[i] = times[i]
+#     new_times = np.ma.masked_equal(new_times, 0)
     
-    # Then merge the map 
-    # new_map = np.copy(map)
-    if similar_pairs_index.size > 2:
-        for n, (j, k) in enumerate(similar_pairs_index):
-            if n == 0:
-                new_map = np.where(map == j, k, map)
-            else:
-                new_map = np.where(new_map == k, j, map)
-        # map = np.where(map == k, j, map)
-    else:
-        # new_map = np.where(map == similar_pairs_index[0], similar_pairs_index[1], map)
-        new_map = map  
-        # new_map[map == similar_pairs_index[1]] = 0
-    return new_times, new_map
+#     # Then merge the map 
+#     # new_map = np.copy(map)
+#     if similar_pairs_index.size > 2:
+#         for n, (j, k) in enumerate(similar_pairs_index):
+#             if n == 0:
+#                 new_map = np.where(map == j, k, map)
+#             else:
+#                 new_map = np.where(new_map == k, j, map)
+#         # map = np.where(map == k, j, map)
+#     else:
+#         new_map = np.where(map == similar_pairs_index[0], similar_pairs_index[1], map)
+#         # new_map = map  
+#         # new_map[map == similar_pairs_index[1]] = 0
+#     return new_times, new_map
 
 def merge_cs_var(arr_3d, prediction_times, prediction_map, var_threshold):
     # Calculate variances of each signal
@@ -224,7 +223,7 @@ def merge_cs_var(arr_3d, prediction_times, prediction_map, var_threshold):
     # Identify indices of signals with variance below the threshold
     low_var_index = np.argwhere(variances < var_threshold).flatten()
     if low_var_index.size > 1:
-        print("MERGE CS VAR")
+        #print("MERGE CS VAR")
         center_index = low_var_index[np.argmin(variances[low_var_index])]
         other_indices = low_var_index[low_var_index != center_index]
         # Update the prediction map
@@ -240,6 +239,55 @@ def merge_cs_var(arr_3d, prediction_times, prediction_map, var_threshold):
         prediction_times = times_extracted
         prediction_times = np.ma.masked_equal(prediction_times, 0)
     return prediction_times, prediction_map
+
+def merge_cs_corr(
+    d3_arr,
+    times,
+    map,
+    similarity_thresh,
+):
+    # # Sort times in ascending order (absolute value)
+    # times_max_idx = np.max(np.abs(times), axis=1)
+    # times_max_idx = np.argsort(times_max_idx)
+    # times = times[times_max_idx] # times is now ranked by amplitude
+    # Calculate correlation matrix
+    traces_correlation = np.ma.corrcoef(times)
+    # Identify pairs to merge
+    # np.fill_diagonal(traces_correlation, np.nan) #inplace
+    # Get indices of pairs exceeding the threshold
+    upper_triangle_indices = np.triu_indices_from(traces_correlation, k=1) #ignore diagonal 
+    row_indices, col_indices = upper_triangle_indices[0], upper_triangle_indices[1]
+    exceed_indices = np.where(
+        traces_correlation[upper_triangle_indices] > similarity_thresh
+    )
+
+    # First merge times that are similar
+    similar_pairs_index = np.array(
+        list(zip(row_indices[exceed_indices], col_indices[exceed_indices]))
+    ).astype(int)
+    correlations = traces_correlation[upper_triangle_indices]
+    if not similar_pairs_index.any():
+        # Exit function and return as-is
+        return times, map
+    #else:
+        #print("CS CORR")
+    
+    # Find the most correlated pair of traces (out 3 possible pairs)
+    most_similar_pair = -1
+    #print(most_similar_pair, similar_pairs_index)
+    chosen_pair = similar_pairs_index[most_similar_pair]
+
+    new_map = np.where(map == chosen_pair[1], chosen_pair[0], map)
+    
+    times_extracted = extract_times(new_map, d3_arr)
+    # plt.plot(times_extracted.T)
+    time_fill = np.zeros((1, times_extracted.shape[1]))
+    times_extracted = np.append(times_extracted, time_fill, axis = 0)    
+    new_times = times_extracted
+    new_times = np.ma.masked_equal(new_times, 0)
+
+    return new_times, new_map
+
 
 def update_prediction_map(prediction_map, mapping, inplace = False):
     """
@@ -269,7 +317,8 @@ def update_prediction_map(prediction_map, mapping, inplace = False):
     if inplace is False:
         prediction_map = mapping[prediction_map]
     else:
-        prediction_map[:] = mapping[prediction_map]    
+        prediction_map[:] = mapping[prediction_map]
+
     return prediction_map
 
 
@@ -317,7 +366,7 @@ def extract_times(
     ).data
     return prediction_times
 
-def amplitude_criteria(prediction_times, map, abs_criteria = 2) -> tuple[np.ma.MaskedArray, np.ndarray, bool]:
+def amplitude_criteria(prediction_times, map, abs_criteria = 3) -> tuple[np.ma.MaskedArray, np.ndarray, bool]:
     maxval = np.ma.max(np.ma.abs(prediction_times).astype(float))
     if abs_criteria is None: #pass through
         return prediction_times, map, True 
@@ -363,19 +412,10 @@ def sort_extracted(prediction_times, map, reorder_strategy = "corrcoef"):
         # based on that trace, which traces does it correlate with?
         corrs_with = corrcoef[maxabs_ampl_trace_idx]
         # Sort them by degree of correlation
-        if np.ma.is_masked(prediction_times):
-            idx = np.argsort(corrs_with *-1)
-            # I have no idea why you need to do this, but if you don't the subsequent logic breaks
-            # and you get the wrong mapping in cases where the indices are already sorted by chance
-            if np.all(np.argsort(idx) == idx):
-                mapping = np.argsort(idx)
-            else:
-                mapping = np.argsort(idx[:2])
-        else:
-            idx = np.argsort(corrs_with *-1)
-            idx[1], idx[2] = idx[2], idx[1]
-            mapping = np.argsort(idx)
-        new_prediction_times = prediction_times[idx]
+        idx = np.argsort(corrs_with *-1)
+        idx[1], idx[2] = idx[2], idx[1]
+        mapping = np.argsort(idx)
+        new_prediction_times = prediction_times[idx] # the order that sorts prediction times by correlation to maxamp trace
     elif reorder_strategy == "pixcount":
         # if similarity_merge:
             # do_merge()
@@ -413,7 +453,7 @@ def cs_segment_demo(inputdata_3d, **kwargs):
 
 def run(d3_arr, plot=False, 
         sort_strategy = "corrcoef",
-        exclude_sub = 2.5,
+        exclude_sub = 3,
         segmentation_params : dict = None, 
         merge_params : dict = None,
         plot_params : dict = None):
@@ -453,12 +493,12 @@ def run(d3_arr, plot=False,
 
     default_segmnetation_params = {
         "smooth_times"  : None,   #4
-        "smooth_space"  : 2,   #4
+        "smooth_space"  : None,   #4
         "upscale_time"  : None,#None
         "upscale_space" : None,  #1
         "centre_on_zero": False,
         "plot_demo"     : False,
-        "crop_time"     : None,
+        "crop_time"     : (3, -1),
         "on_pcs"        : True,
     }
     if segmentation_params is not None:
@@ -466,9 +506,8 @@ def run(d3_arr, plot=False,
     segmentation_params = default_segmnetation_params
 
     default_merge_params = {
-        "var_thresh" : .2,
+        "var_thresh" : .5,
         "corr_thresh" : .95,
-        "peak_merge" : True
     }
     if merge_params is not None:
         default_merge_params.update(merge_params)
@@ -501,14 +540,25 @@ def run(d3_arr, plot=False,
     # times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
     # ------- end of old logic --------------------------------------------
     # New and improved optional logic
-    times_extracted, segmented_map, pass_bool = amplitude_criteria(times_extracted, segmented_map, abs_criteria = exclude_sub)
-    if pass_bool is True:
-        if merge_params["var_thresh"] is not None:
-            # times_extracted, segmented_map = merge_cs_var(times_extracted, segmented_map, merge_params["var_thresh"])
-            times_extracted, segmented_map = merge_cs_var(d3_arr, times_extracted, segmented_map, merge_params["var_thresh"])
-        if merge_params["corr_thresh"] is not None:
-            times_extracted, segmented_map = merge_cs_corr(times_extracted, segmented_map, merge_params["corr_thresh"]) 
-        times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
+    times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
+    # if pass_bool is True:
+    if merge_params["var_thresh"] is not None:
+        # times_extracted, segmented_map = merge_cs_var(times_extracted, segmented_map, merge_params["var_thresh"])
+        times_extracted, segmented_map = merge_cs_var(d3_arr, times_extracted, segmented_map, merge_params["var_thresh"])
+    if merge_params["corr_thresh"] is not None:
+        # times_extracted, segmented_map = merge_cs_corr(times_extracted, segmented_map, merge_params["corr_thresh"]) 
+        times_extracted, segmented_map = merge_cs_corr(d3_arr, times_extracted, segmented_map, merge_params["corr_thresh"]) 
+    if np.max(np.abs(times_extracted)) > exclude_sub:
+        pass_bool = True
+    else:
+        pass_bool = False
+    if pass_bool is False:
+        times_extracted = np.zeros((3,times_extracted.shape[-1]))
+        # print(times_extracted.shape)
+        times_extracted[-1] = np.average(d3_arr, axis = (1,2))
+        times_extracted = np.ma.masked_equal(times_extracted, 0)
+        segmented_map = np.zeros(d3_arr[0].shape)
+    #times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
         # if merge_params["peak_merge"] is True:
         #     times_extracted, segmented_map = merge_cs_pol(times_extracted, segmented_map)
 
@@ -624,7 +674,7 @@ def run(d3_arr, plot=False,
         plt.show()
     # Add non-centre time courses to times_extracted
     times_extracted = np.append(times_extracted, np.expand_dims(extract_noncentre(segmented_map, d3_arr), 0), axis = 0)
-    return segmented_map, times_extracted
+    return np.ma.copy(np.squeeze(segmented_map)), np.ma.masked_equal((np.squeeze(times_extracted)), 0)
 
 def gen_cmap(colormap = plt.cm.tab10, num = 3):
     return plt.cm.colors.ListedColormap([colormap(i) for i in range(num)])
@@ -662,7 +712,7 @@ def run_object(self, roi = None, **kwargs):
                                             **kwargs)
         maps.append(map)
         times.append(time)
-    return np.array(maps), np.array(times)
+    return np.squeeze(np.array(maps)), np.squeeze(np.ma.masked_equal(times, 0))
     # return pygor.strf.centsurr.run(self.strfs_no_border[roi], **kwargs)
 
 """
