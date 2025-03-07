@@ -1,3 +1,4 @@
+from math import e
 import numpy as np
 from scipy import signal
 from collections import defaultdict
@@ -5,7 +6,7 @@ import pygor.np_ext
 import pygor.strf.spatial
 import pandas as pd
 from joblib import Parallel, delayed
-
+import matplotlib.pyplot as plt
 def sd_index(csn_times):
     """
     Calculate the SD index.
@@ -28,7 +29,7 @@ def sd_index(csn_times):
     else:
         return value 
 
-def cs_ratio(csn_times):
+def cs_ratio(csn_times, indices_around_peak=2):
     """
     Calculate the CS ratio.
 
@@ -42,16 +43,31 @@ def cs_ratio(csn_times):
     float
         CS ratio value.
     """
-    absmax_c = np.abs(pygor.np_ext.maxabs(csn_times[0]))
-    absmax_s = np.abs(pygor.np_ext.maxabs(csn_times[1]))
+    peak_time = np.argmax(np.abs(csn_times[0]))
+    if peak_time == 0:
+        return np.nan
+    start_time = peak_time - indices_around_peak
+    if start_time < 0:
+        start_time = 0
+    end_time = peak_time + indices_around_peak
+    print(start_time, peak_time, end_time)
+
+    cval = pygor.np_ext.maxabs(csn_times[0][start_time:end_time])
+    sval = pygor.np_ext.maxabs(csn_times[1][start_time:end_time])
+    print(cval, sval)
+    if np.sign(cval) == np.sign(sval):
+        return np.nan
+    absmax_c = np.abs(cval)
+    absmax_s = np.abs(sval)
     with np.errstate(divide='ignore'):
         value = (absmax_c / absmax_s)
+    # value = np.clip(value, 0, np.abs(value))
     if np.ma.is_masked(value):
         return np.nan
     else:    
         return value
 
-def cs_contrast(prediction_times):
+def cs_contrast(csn_times, indices_around_peak=2):
     """
     Calculate the CS contrast.
 
@@ -65,14 +81,21 @@ def cs_contrast(prediction_times):
     float
         CS contrast value.
     """
-    centre = prediction_times[0]
-    surround = prediction_times[1]
-    centre_ampl = pygor.np_ext.absmax(centre)
-    surround_ampl = pygor.np_ext.absmax(surround)
-    if np.all(surround == 0):
+    peak_time = np.argmax(np.abs(csn_times[0]))
+    if peak_time == 0:
+        return np.nan
+    start_time = peak_time - indices_around_peak
+    if start_time < 0:
+        start_time = 0
+    end_time = peak_time + indices_around_peak
+    cval = pygor.np_ext.maxabs(csn_times[0][start_time:end_time])
+    sval = pygor.np_ext.maxabs(csn_times[1][start_time:end_time])
+    if np.sign(cval) == np.sign(sval):
+        return np.nan
+    if np.all(sval == 0):
         return np.nan 
     with np.errstate(divide='ignore', invalid='ignore'):
-        value = (centre_ampl - surround_ampl) / (centre_ampl + surround_ampl)
+        value = (cval - sval) / (cval + sval)
     if np.ma.is_masked(value):
         return np.nan
     else:    
@@ -348,7 +371,7 @@ def gen_stats(strfs_obj, colour_list = ["R", "G", "B", "UV"], **kwargs):
     output = defaultdict(list)
     for i in range(strfs_obj.num_rois * strfs_obj.numcolour):
         prediction_map, prediction_times = strfs_obj.cs_seg(i)
-        prediction_times = prediction_times.data
+        #prediction_times = prediction_times.data
         with np.errstate(divide='ignore', invalid='ignore'):
             # Base stats
             output["max_c"].append(np.max(prediction_times[0]))
@@ -397,9 +420,19 @@ def gen_stats(strfs_obj, colour_list = ["R", "G", "B", "UV"], **kwargs):
             output["correlation_coefficient"].append(correlation_coefficient(prediction_times))
             output["snr"].append(snr(prediction_times))
             # Spatial
-            output["pix_n_c"].append(np.sum(prediction_map == 0))
-            output["pix_n_s"].append(np.sum(prediction_map == 1))
-            output["pix_n_n"].append(np.sum(prediction_map == 2))
+            num_pix_c = np.sum(prediction_map == 0)
+            num_pix_s = np.sum(prediction_map == 1)
+            num_pix_n = np.sum(prediction_map == 2)
+            output["pix_n_c"].append(num_pix_c)
+            output["pix_n_s"].append(num_pix_s)
+            output["pix_n_n"].append(num_pix_n)
+            # Estimate diameter
+            dia_c = 2 * np.sqrt(num_pix_c/np.pi)
+            dia_s = 2 * np.sqrt(num_pix_s/np.pi)
+            dia_n = 2 * np.sqrt(num_pix_n/np.pi)
+            output["dia_c"].append(dia_c)
+            output["dia_s"].append(dia_s)
+            output["dia_n"].append(dia_n)
             # Others 
             output["colour"].append(colour_list[i % len(colour_list)])
             if np.abs(np.max(prediction_times[0])) > np.abs(np.min(prediction_times[0])):
@@ -431,10 +464,11 @@ def gen_stats(strfs_obj, colour_list = ["R", "G", "B", "UV"], **kwargs):
     # Check length of stats before returning dict
     return output
 
-def run_stats(files_list : list, para = True) -> pd.DataFrame:
+
+def run_stats(files_list : list, parallel = True) -> pd.DataFrame:
     dicts_list = []
     df_list = []
-    if para is True:
+    if parallel is True:
         def loop(file):
             strfs = pygor.filehandling.load(file, as_class=pygor.load.STRF, bs_bool = False)
             #TODO: Add ability to augment segmentation and extraction params (removed due to broken behaviour)
@@ -451,6 +485,39 @@ def run_stats(files_list : list, para = True) -> pd.DataFrame:
             df_list.append(tempdf)
     df = pd.concat(df_list)
     return df.reset_index()
+
+def pivot_stats(stats_df, colour_list = ["R", "G", "B", "UV"], duplicate_cols = ["IPL", "condition", "name", "filename", "rel_index", "roi", "index"]):
+    # Assuming stats_df is your original DataFrame
+    # Create a pivot table excluding the specified columns
+    piv = stats_df.drop(columns=duplicate_cols).pivot(columns="colour").reset_index(drop=True)
+    # Flatten the MultiIndex columns
+    piv.columns = ['_'.join(map(str, col)) for col in piv.columns]
+    # Add the excluded columns back to the pivot table
+    for col in duplicate_cols:
+        piv[col] = stats_df[col].values
+    # Create a 'group' column based on the index
+    piv['group'] = piv.index // len(colour_list)
+    # Group by 'group' and take the first occurrence
+    grouped_df_piv = piv.groupby('group').first()
+
+    # Print the columns to verify
+    print(grouped_df_piv.columns)
+
+    # # Extract the 'condition_R' column if it exists
+    # if "condition_R" in grouped_df_piv.columns:
+    #     cond = grouped_df_piv["condition_R"]
+    #     # Assign the 'condition_R' column to 'condition'
+    #     grouped_df_piv["condition"] = cond
+
+    # Define the columns to remove
+    # remove_list = ["condition_B", "condition_G", "condition_R", "condition_UV"]
+
+    # Remove the specified columns if they exist
+    grouped_df_piv = grouped_df_piv.drop(columns=[col for col in duplicate_cols if col in grouped_df_piv.columns])
+
+    # Display the final DataFrame
+    return grouped_df_piv.reset_index(drop=True)
+
 
 # def run_stats(files_list : list, segmentation_params = {}, extract_params = {}) -> pd.DataFrame:
 #     dicts_list = []
