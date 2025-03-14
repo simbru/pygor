@@ -4,10 +4,11 @@ import numpy as np
 import pygor.timeseries.mixed_stimuli.methods
 
 @dataclass(kw_only=True, repr=False)
-class MixedObjects(Core):
+class MixedStimuli(Core):
     stimtypes: np.ndarray = np.nan
 
     def __post_init__(self):
+
         super().__post_init__()
 
     def mean_triggertimes_ms(self):
