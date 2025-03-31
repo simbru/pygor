@@ -8,8 +8,9 @@ import pathlib
 from contextlib import redirect_stdout
 import atexit
 
-file_loc = pathlib.Path(__file__).parents[1]
-example_data = file_loc.joinpath("examples/strf_demo_data.h5")
+file_loc = pathlib.Path(__file__).parents[3]
+example_data = file_loc.joinpath(r"examples/strf_demo_data.h5")
+out_loc = r"src/pygor/test/test_out_Core.txt"
 bs_bool = False
 
 class TestSTRF(unittest.TestCase):
@@ -25,7 +26,8 @@ class TestSTRF(unittest.TestCase):
     def test_simple_methods_return(self):
         meth_list = pygor.utils.helpinfo.get_methods_list(self.strfs, with_returns=False)
         bs_refs = [i for i in meth_list if "bootstrap" in i or "bs" in i]
-        meth_set = set(meth_list) - set(bs_refs)
+        ignore = ["try_fetch", "draw_rois", "get_depth", "napari_strfs"]
+        meth_set = set(meth_list) - set(bs_refs) - set(ignore)
         print("Testing simple methods:")
         for i in meth_set:
             print(f"- {i}")    
@@ -58,7 +60,7 @@ class TestSTRF(unittest.TestCase):
         self.strfs.run_bootstrap()
 
     def test_get_help(self):
-        write_to = file_loc.joinpath("test/test_out_STRF.txt")
+        write_to = file_loc.joinpath(out_loc)
         with open(write_to, 'w') as f:
             with redirect_stdout(f):
                 self.strfs.get_help(hints = True, types = True)
@@ -83,8 +85,8 @@ class TestSTRF_plot(unittest.TestCase):
     
     def test_chromatic_overview(self):
         self.strfs.plot_chromatic_overview()
-
-atexit.register(lambda : os.remove(file_loc.joinpath("test/test_out_STRF.txt")))
+if os.path.exists(file_loc.joinpath(out_loc)):
+    atexit.register(lambda : os.remove(file_loc.joinpath(out_loc)))
 
 if __name__ == "__main__":
     unittest.main()

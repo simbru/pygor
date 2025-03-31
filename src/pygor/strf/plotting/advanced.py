@@ -135,6 +135,12 @@ def chroma_overview(
             times = np.squeeze(pygor.utilities.multicolour_reshape(
                 data_strf_object.get_timecourses(fetch_indices), numcolour
             ))
+            # Hide data that is close to zero, does not contribute to the plot
+            times = np.ma.masked_equal(times, 0)
+            deviation = np.std(times, axis = -1)
+            close_to_zero = np.isclose(deviation, 0, rtol=.1, atol=.4)
+            times[close_to_zero] = np.nan
+
             for enum, plotme in enumerate(times):
                 ax[n, -1].plot(plotme.T, color=pygor.plotting.fish_palette[enum])
         if with_rgb == True:

@@ -462,7 +462,8 @@ class Core:
         None
         """
         if self.averages is None:
-            raise ValueError("Averages do not exist.")
+            warnings.warn("Averages do not exist.")
+            return
         return pygor.core.plot.plot_averages(self, rois, figsize, figsize_scale, axs, independent_scale, n_rois_raster, sort_order, **kwargs)
 
     def calculate_image_average(self, ignore_skip=False):

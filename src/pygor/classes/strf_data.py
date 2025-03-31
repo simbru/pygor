@@ -502,36 +502,47 @@ class STRF(Core):
     TODO Add lazy processing back into contouring (maybe skip timecourses, should be fast enough)
     """
     
-    def get_timecourses(self, roi = None, centre_on_zero = True, mask_empty = False, spoof_masks = False) -> np.ndarray:
+    def get_timecourses(self, roi = None, centre_on_zero = False, mask_empty = False, spoof_masks = False, method = "segmentation") -> np.ndarray:
         # try:
         #     return self.__timecourses 
         # except AttributeError:
-        # Get masks that we will apply (and make a copy in memory, because we are about to ammend these)
-        masked_strfs = copy.deepcopy(self.get_strf_masks(roi))
-        # masked_strfs = self.get_strf_masks() # <- this one overrides data, only for testing!
-        # if roi is None:
-        timecourses = np.ma.average(masked_strfs, axis = (-1,-2))
-        # Figure out where we have empty masks
-        empty_mask_indices = np.argwhere(timecourses.mask.any(axis = (-1,-2)))
-        # To get comparable averages, we may want to average over the same number of pixels as the fitted masks.
-        # # One strategy is to take the pre-existing fitted masks and apply them to the STRFs with no signal.
-        if spoof_masks is True:
-            # Generate spoofs for each ROI 
-            spoofed_masks = pygor.strf.guesstimate.gen_spoof_masks(self)
-            # Apply our spoofed masks to the initial extracted masks where we have no data
-            masked_strfs.mask[empty_mask_indices] = spoofed_masks[empty_mask_indices]
-            timecourses = np.ma.average(masked_strfs, axis = (2,3))            
-        # elif mask_empty is False:
-        #     # Sometimes we may/may not want to keep data where space has no correlations (all masked)
-        #     # Fill timecourses with noise array where space is masked
-        #     empty_mask_indices = np.argwhere(timecourses.mask.any(axis = (-1,-2)))
-        #     noise_times = np.expand_dims(np.average(self.strfs[empty_mask_indices], axis = (3, 4)), axis = 1)
-        #     noise_times = np.repeat(noise_times, 2, axis = 2)
-        #     timecourses[empty_mask_indices] = noise_times
-        # # print(timecourses.shape)
-        # plt.imshow(masked_strfs[1, 0, 0])
-        # plt.plot(timecourses[2].T)
-        # Most of the time it makes sense to centre on zero
+        if method == "contour":
+            # Get masks that we will apply (and make a copy in memory, because we are about to ammend these)
+            masked_strfs = copy.deepcopy(self.get_strf_masks(roi))
+            # masked_strfs = self.get_strf_masks() # <- this one overrides data, only for testing!
+            # if roi is None:
+            timecourses = np.ma.average(masked_strfs, axis = (-1,-2))
+            # Figure out where we have empty masks
+            empty_mask_indices = np.argwhere(timecourses.mask.any(axis = (-1,-2)))
+            # To get comparable averages, we may want to average over the same number of pixels as the fitted masks.
+            # # One strategy is to take the pre-existing fitted masks and apply them to the STRFs with no signal.
+            if spoof_masks is True:
+                # Generate spoofs for each ROI 
+                spoofed_masks = pygor.strf.guesstimate.gen_spoof_masks(self)
+                # Apply our spoofed masks to the initial extracted masks where we have no data
+                masked_strfs.mask[empty_mask_indices] = spoofed_masks[empty_mask_indices]
+                timecourses = np.ma.average(masked_strfs, axis = (2,3))            
+            # elif mask_empty is False:
+            #     # Sometimes we may/may not want to keep data where space has no correlations (all masked)
+            #     # Fill timecourses with noise array where space is masked
+            #     empty_mask_indices = np.argwhere(timecourses.mask.any(axis = (-1,-2)))
+            #     noise_times = np.expand_dims(np.average(self.strfs[empty_mask_indices], axis = (3, 4)), axis = 1)
+            #     noise_times = np.repeat(noise_times, 2, axis = 2)
+            #     timecourses[empty_mask_indices] = noise_times
+            # # print(timecourses.shape)
+            # plt.imshow(masked_strfs[1, 0, 0])
+            # plt.plot(timecourses[2].T)
+            # Most of the time it makes sense to centre on zero
+        if method == "segmentation":
+            # More elegant, faster, and centre always 1st index (surround if any 2nd)
+            _, times = self.cs_seg(roi = roi)
+            # times = times[roi:,:2]
+            if roi is None:
+                timecourses = times[roi:, :2,]
+            elif isinstance(roi, int):
+                timecourses = times[:2,]
+            else:
+                timecourses = times[:, :2]
         if centre_on_zero:
             first_indexes = np.expand_dims(timecourses[:, :, 0], -1)
             timecourses_centred = timecourses - first_indexes
@@ -566,7 +577,7 @@ class STRF(Core):
 
     def get_timecourses_dominant(self, **kwargs):
         dominant_times = []
-        for arr in self.get_timecourses(**kwargs).data:
+        for arr in self.get_timecourses(**kwargs):
             if np.max(np.abs(arr[0]) > np.max(np.abs(arr[1]))):
                 dominant_times.append(arr[0])
             else:
@@ -602,8 +613,10 @@ class STRF(Core):
                         roi = [roi]
                 # raise NotImplementedError("Implementation error, does not work yet")
                 # get 2d masks
-                all_masks = np.array([pygor.strf.contouring.bipolar_mask(i) for i in self.collapse_times(roi)])
+                all_masks = np.array([pygor.strf.contouring.bipolar_mask(i) for i in self.collapse_times(roi, border = True)])
+                print(all_masks.shape)
                 all_masks = np.repeat(np.expand_dims(all_masks, 2), self.strfs.shape[1], axis = 2)
+                print(all_masks.shape)
                 # Apply mask to expanded and repeated strfs (to get negative and positive)
                 strfs_expanded = np.repeat(np.expand_dims(self.strfs[roi], axis = 1), 2, axis = 1)
                 all_strfs_masked = np.ma.array(strfs_expanded, mask = all_masks, keep_mask=True)
@@ -709,7 +722,7 @@ class STRF(Core):
         strf_shifted = np.ma.array([np.roll(arr, shift_by[i], axis = (1,2)) for i, arr in enumerate(self.strfs)])
         return strf_shifted
 
-    def collapse_times(self, roi = None, zscore = False, spatial_centre = False, **kwargs) -> np.ma.masked_array:
+    def collapse_times(self, roi = None, zscore : bool = False, spatial_centre : bool = False, border : bool = False, **kwargs) -> np.ma.masked_array:
         if roi is not None:
             if isinstance(roi, int):
                 iterate_through = [roi]
@@ -721,17 +734,21 @@ class STRF(Core):
                 raise ValueError("ROI must be None, int, or an iterable of ints")
         else:
             iterate_through = range(len(self.strfs))
+        if border == True:
+            strfs_arr = self.strfs
+        if border == False:
+            strfs_arr = self.strfs_no_border
         if isinstance(iterate_through, Iterable):
             target_shape = (len(iterate_through),
-                            self.strfs.shape[2], 
-                            self.strfs.shape[3])
+                            strfs_arr.shape[2], 
+                            strfs_arr.shape[3])
         else:
             target_shape = (1,
                             self.strfs.shape[2],
                             self.strfs.shape[3])
         collapsed_strf_arr = np.ma.empty(target_shape)
         for n, roi in enumerate(iterate_through):
-            collapsed_strf_arr[n] = pygor.strf.spatial.collapse_3d(self.strfs[roi], zscore = zscore, **kwargs)
+                collapsed_strf_arr[n] = pygor.strf.spatial.collapse_3d(strfs_arr[roi], zscore = zscore, **kwargs)
         if spatial_centre == True:
             try:
                 return self._spatial_centered_collapse
@@ -753,20 +770,30 @@ class STRF(Core):
         return np.squeeze(collapsed_strf_arr)
         # spatial.collapse_3d(recording.strfs[strf_num])
     
-    def get_polarities(self, exclude_FirstLast=(1,1)) -> np.ndarray:
-        # Get the time as absolute values, then get the max value
-        abs_time_max = np.max(np.abs(self.get_timecourses(mask_empty = True).data), axis = 2)
-        # First find the obvious polarities
-        pols = np.where(abs_time_max[:, 0] > abs_time_max[:, 1], -1, 1)
-        # Now we check if values are close
-        ## We reoder, becasue np.isclose(a, b) assumes b is the reference 
-        ## and we will use the largst value as the reference
-        abs_time_max_reordered = np.sort(abs_time_max, axis = 1)
-        outcome = np.isclose(abs_time_max_reordered[:, 0], abs_time_max_reordered[:, 1], rtol = .33, atol = .01)
-        # If values were close, we assign 2
-        pols = np.where(outcome, 2, pols)
-        # Now we need to set values to 0 where there is no signal
-        pols = pols * np.prod(np.where(abs_time_max == 0, 0, 1), axis = 1)
+    def get_polarities(self, exclude_FirstLast=(1,1), new_old = "new") -> np.ndarray:
+        if new_old == "old":
+            # Get the time as absolute values, then get the max value
+            abs_time_max = np.max(np.abs(self.get_timecourses(mask_empty = True).data), axis = 2)
+            # First find the obvious polarities
+            pols = np.where(abs_time_max[:, 0] > abs_time_max[:, 1], -1, 1)
+            # Now we check if values are close
+            ## We reoder, becasue np.isclose(a, b) assumes b is the reference 
+            ## and we will use the largst value as the reference
+            abs_time_max_reordered = np.sort(abs_time_max, axis = 1)
+            outcome = np.isclose(abs_time_max_reordered[:, 0], abs_time_max_reordered[:, 1], rtol = .33, atol = .01)
+            # If values were close, we assign 2
+            pols = np.where(outcome, 2, pols)
+            # Now we need to set values to 0 where there is no signal
+            pols = pols * np.prod(np.where(abs_time_max == 0, 0, 1), axis = 1)
+        if new_old == "new":
+            # Get the time as absolute values, then get the max value
+            abs_time_max = np.max(np.abs(self.get_timecourses(mask_empty = True).data), axis = 2)
+            times_peak = pygor.np_ext.maxabs(self.get_timecourses(mask_empty = True), axis = 2)
+            # First find the obvious polarities
+            pols = np.where(times_peak[:, 0] < 0, -1, 1)
+            # If values are 0, we assign 0
+            zero_bools = np.all(times_peak == 0, axis = 1)
+            pols = np.where(zero_bools == True, np.nan, pols)
         return pols
 
     def get_opponency_bool(self) -> bool:
@@ -1070,8 +1097,45 @@ class STRF(Core):
     #         return np.array(maps), np.array(times)
     #     return pygor.strf.centsurr.run(self.strfs_no_border[roi], **kwargs)
 
-    def cs_seg(self, roi = None, plot = False, **kwargs):
-        return pygor.strf.centsurr.run_object(self, roi, plot = plot, **kwargs)
+    # def cs_seg(self, roi = None, plot = False, **kwargs):
+    #     return pygor.strf.centsurr.run_object(self, roi, plot = plot, **kwargs)
+
+    def cs_seg(self, roi = None, plot = False, force_recompute = False, **kwargs):
+        if plot is False:
+            if force_recompute is True:
+                maps, times =  pygor.strf.centsurr.run_object(self, **kwargs)
+                self._cs_seg_results_times = times
+                self._cs_seg_results_maps = maps
+                return np.squeeze(self._cs_seg_results_maps[roi]), np.squeeze(self._cs_seg_results_times[roi])
+            try:
+                return np.squeeze(self._cs_seg_results_maps[roi]), np.squeeze(self._cs_seg_results_times[roi])
+            except AttributeError:
+                maps, times =  pygor.strf.centsurr.run_object(self, **kwargs)
+                self._cs_seg_results_times = times
+                self._cs_seg_results_maps = maps
+                return np.squeeze(self._cs_seg_results_maps[roi]), np.squeeze(self._cs_seg_results_times[roi])
+        else:
+            return pygor.strf.centsurr.run_object(self, roi, plot = plot, **kwargs)
+
+    def get_seg_centres(self, roi = None, weighted = False, channel_reshape = True,**kwargs):
+        cmaps, _ = self.cs_seg(**kwargs)
+        centres_list = []
+        for n, segmap in enumerate(cmaps):
+            centre_coords = np.argwhere(segmap == 0)
+            if len(np.unique(segmap)) == 1:
+                centres_list.append(np.array([np.nan, np.nan]))
+            else:
+                if weighted is True:
+                    weights = np.abs(np.max(self.collapse_times(n)[centre_coords[:, 0], centre_coords[:, 1]]))
+                else:
+                    weights = None
+                centre = np.average(centre_coords, axis = 0, weights = weights)
+                centres_list.append(centre)
+        centres = np.array(centres_list)
+        if channel_reshape is True:
+            # print(centres.shape)
+            centres = np.reshape(centres, (-1, self.numcolour, 2))
+        return np.squeeze(centres[roi])
 
     def demo_cs_seg(self, roi, **kwargs):
         _ = self.cs_seg(roi, plot = True, **kwargs)

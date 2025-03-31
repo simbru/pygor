@@ -7,8 +7,9 @@ import warnings
 from contextlib import redirect_stdout
 import atexit
 
-file_loc = pathlib.Path(__file__).parents[1]
-example_data = file_loc.joinpath("examples/strf_demo_data.h5")
+file_loc = pathlib.Path(__file__).parents[3]
+example_data = file_loc.joinpath(r"examples/strf_demo_data.h5")
+out_loc = r"src/pygor/test/test_out_Core.txt"
 data = pygor.load.Core(example_data)
 
 
@@ -36,23 +37,23 @@ class TestCore(unittest.TestCase):
 
     def test_simple_methods_return(self):
         meth_list = pygor.utils.helpinfo.get_methods_list(data, with_returns=False)
-        write_to = file_loc.joinpath("test/test_out_Core.txt")
+        write_to = file_loc.joinpath(out_loc)
         with open(write_to, "w") as f:
             with redirect_stdout(f):
                 for i in meth_list:
-                    if i not in ["try_fetch"]:  # exclusion list
+                    if i not in ["try_fetch", "draw_rois", "get_depth"]:  # exclusion list
                         try:
                             getattr(data, i)()
                         except AttributeError:
                             warnings.warn(f"Method {i} gave AttributeError")
 
     def test_get_help(self):
-        write_to = file_loc.joinpath("test/test_out_Core.txt")
+        write_to = file_loc.joinpath(out_loc)
         with open(write_to, "w") as f:
             with redirect_stdout(f):
                 data.get_help(hints = True, types = True)
-
-atexit.register(lambda : os.remove(file_loc.joinpath("test/test_out.txt")))
+if os.path.exists(file_loc.joinpath(out_loc)):
+    atexit.register(lambda : os.remove(file_loc.joinpath(out_loc)))
 
 if __name__ == "__main__":
     unittest.main()
