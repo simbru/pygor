@@ -20,7 +20,7 @@ def determine_epoch_markers_ms(self):
     # Loop through and subtract the average epoch duration, to get the time deltas in each epoch
     temp_arr = np.empty(epoch_reshape.shape)
     for n, i in enumerate(epoch_reshape):
-        temp_arr[n] = i - (avg_epoch_dur * n)    
+        temp_arr[n] = i - (avg_epoch_dur * n)
     # Average the trigger times in each epoch, to generate the average epoch trigger times
     avg_epoch_triggertimes = np.average(temp_arr, axis=0)
     # Divide the average epoch trigger times by the line duration, to get the marker times in ms

@@ -1,15 +1,18 @@
+from re import S
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 import scipy.signal
 import scipy.ndimage
 import sklearn.cluster
+import warnings
 import skimage
 try:
     from collections import Iterable
 except ImportError:
     from collections.abc import Iterable
 # import skimage.morphology
+from pygor.core import plot
 import pygor.np_ext as np_ext
 import pygor.np_ext
 import pygor.strf.spatial
@@ -58,10 +61,12 @@ def segmentation_algorithm(
     smooth_space =None,   #4
     upscale_time =None,#None
     upscale_space=None,  #1
-    centre_on_zero=False,
+    centre_on_zero=True,
+    amplitude_boost=None,
     plot_demo=False,
     crop_time=None,
     on_pcs=True,
+    kick_surr_pix = None,
     **kwargs,
 ):
     
@@ -74,6 +79,9 @@ def segmentation_algorithm(
     n_clusters=3
     # Keep track of original shape
     original_shape = inputdata_3d.shape
+
+
+    # Keep track of original shape
     if plot_demo is True:
         original_input = np.copy(inputdata_3d)
     if upscale_space is not None or upscale_time is not None:
@@ -105,32 +113,94 @@ def segmentation_algorithm(
             cropped = inputdata_3d[:, :original_shape[1], :original_shape[2]]
             pad_width = [(0, max(0, o - c)) for o, c in zip(original_shape, cropped.shape)]
             inputdata_3d = np.pad(cropped, pad_width, mode='constant')[:, :original_shape[1], :original_shape[2]]
-    # Reshape to flat array
+    # Reshape to flat array without centering
     inputdata_reshaped = inputdata_3d.reshape(inputdata_3d.shape[0], -1)
+
+    if centre_on_zero is True:
+        # Subtract the mean per pixel
+        inputdata_reshaped = inputdata_reshaped - np.mean(inputdata_reshaped, axis=1, keepdims=True)
+        # Subtract the mean per timepoint
+        inputdata_reshaped = inputdata_reshaped - np.mean(inputdata_reshaped, axis=0, keepdims=True)
+        # # Subtract the first timepoint
+        # inputdata_reshaped = inputdata_reshaped - inputdata_reshaped[0, :]
+
     fit_on = inputdata_reshaped.T
+    fit_on_org = None
+    if plot_demo is True:
+        fit_on_org = np.copy(inputdata_3d.reshape(inputdata_3d.shape[0], -1)).T
+    if amplitude_boost is True:
+        fit_on_std = np.ma.std(fit_on, axis=1)
+        #fit_on_std = fit_on_std * amplitude_boost
+        fit_on = fit_on * np.expand_dims(fit_on_std, axis=1)# - np.expand_dims(np.mean(fit_on, axis=1), axis=1)        
+    elif amplitude_boost is False or amplitude_boost is None:
+        pass
+    else:
+        raise ValueError("amplitude_boost must be a bool or None")
+    
+    # raise NotImplementedError("Decide if zero subtraction comes before or after amp boost (after looks promsiing)")
+    #if centre_on_zero is True:
+    #    # Subtract the mean per pixel
+    #    fit_on = fit_on - np.mean(fit_on, axis=1, keepdims=True)
+    #    # Subtract the mean per timepoint
+    #    fit_on = fit_on - np.mean(fit_on, axis=0, keepdims=True)
+    #    # # Subtract the first timepoint
+    #    # fit_on = fit_on - fit_on[0, :]
+
     # Optionally crop timeseries to emphasise differences over given time window
     if crop_time is not None:
+
         fit_on = fit_on[:, crop_time[0] : crop_time[1]]
     # Optionally calculate principal components and use these as input
+    # Optionally centre prediction time on zero
     if on_pcs is True:
         # Perform PCA on the input data and use the first n_components as the input
         # for the clustering algorithm
         pca = sklearn.decomposition.PCA(n_components=n_clusters)
-        # fit_on = pca.fit_transform(fit_on.T)
-        # fit_on = pca.components_.T
         fit_on = pca.fit_transform(fit_on)
-    # Optionally centre prediction time on zero
-    if centre_on_zero is True:
-        fit_on = fit_on - fit_on[:, [0]] - np.mean(fit_on, axis=1, keepdims=True)
     # Perform clustering on fit_on array
-    clusterfunc = sklearn.cluster.AgglomerativeClustering(n_clusters=n_clusters)
+    clusterfunc = sklearn.cluster.AgglomerativeClustering(n_clusters=n_clusters, compute_distances=True)
     initial_prediction_map = clusterfunc.fit_predict(fit_on).reshape(
         original_shape[1], original_shape[2]
     )  # 1d -> 2d shape
     num_clusts = len(np.unique(initial_prediction_map))
 
     prediction_map = initial_prediction_map
+    if kick_surr_pix is not None:
+        times_temp = extract_times(prediction_map, inputdata_3d, **kwargs)
+        max_index = np.unravel_index(np.argmax(np.abs(times_temp)), times_temp.shape)[0] # get max time index for each cluster
+        min_index = np.unravel_index(np.argmin(np.abs(times_temp)), times_temp.shape)[0]
+        possible_times = [0, 1, 2]
+        noise_index = np.setdiff1d(possible_times, [max_index, min_index])
+        # Fetch only the part of the prediction map that is the max time index
+        temp_signal_area_pre_erode = prediction_map == max_index
+        temp_noise_area_pre_erode = prediction_map == noise_index
+        # Erode the prediction map to remove surrounding pixels
+        temp_prediction_map_eroded = scipy.ndimage.binary_dilation(temp_signal_area_pre_erode, iterations = kick_surr_pix)
+        # Find intersection of signal area and eroded area
+        temp_signal_area = temp_prediction_map_eroded ^ temp_signal_area_pre_erode
+        # Put the intersection as noise area
+        temp_noise_map_applied = np.logical_not(temp_signal_area, temp_noise_area_pre_erode)
+        # Split out channels
+        channels = [(prediction_map == i).astype(np.uint8) for i in np.unique(prediction_map)]
+        channels = np.stack(channels, axis=0)  # Shape: (num_features, H, W)
+        # Apply noise border subtraction
 
+        """
+        What needs doing:
+        - First, correctly assign indices, and extract channels accordingly
+        - Then, in each channel except the one we want to make into noise (according to
+        erision/dialation), remove the noise border
+        - Then apply the noise border in the noise channel
+        - Then sum the channels such that we get the final prediction map
+        without having any overlap 
+        Sumasumarum: Allocate new indices and then move/remove them from other 
+        channels to accomodate the new indices
+        """
+        raise NotImplementedError("Implementation error, does not work yet")
+        # Merge back into original shape of prediction map
+        # prediction_map = np.sum(channels, axis=0)
+        plt.imshow(channels[min_index])
+        #print("LEFT OFF HERE")
     if len(np.unique(prediction_map)) > num_clusts:
         raise ValueError(
             f"Some clusters have been merged incorrectly, causing num_clusts < {num_clusts}. Manual fix required. Consider lowering island_size_min for now."
@@ -146,9 +216,12 @@ def segmentation_algorithm(
         cmap = plt.cm.colors.ListedColormap([colormap(i) for i in range(num_clusts)])
         space_repr = pygor.strf.spatial.collapse_3d(original_input)
         ax[0].imshow(space_repr, cmap = "RdBu", clim = (-np.max(np.abs(space_repr)), np.max(np.abs(space_repr))))
-        ax[1].imshow(pygor.strf.spatial.collapse_3d(inputdata_3d), cmap="RdBu")
+        if amplitude_boost is True:
+            std_repr = space_repr * fit_on_std.reshape(space_repr.shape)
+            ax[1].imshow(std_repr, cmap="RdBu", clim = (-np.max(np.abs(std_repr)), np.max(np.abs(std_repr))))
         ax[2].plot(original_input.reshape(original_shape[0], -1), alpha=0.05, c="black")
-        ax[3].plot(fit_on.T, alpha=0.05, c="black")
+        ax[3].plot(inputdata_reshaped, alpha=0.05, c="black")
+        ax[4].plot(fit_on.T, alpha=0.05, c="black")
         # top_3 = np.argsort(np.std(prediction_times, axis=1))[-2:]
         # ax[4].plot(prediction_times[top_3].T)
         ax[5].plot(prediction_times.T)
@@ -156,10 +229,10 @@ def segmentation_algorithm(
         ax[6].imshow(prediction_map, cmap=cmap, alpha=0.25)
         titles = [
             "Space_collapse",
-            "Raw",
-            "Processed",
-            "Kernel",
-            "MaxVarClusts",
+            "Space_collapse * amp boost",
+            "Raw input",
+            "Processed input",
+            " ",
             "AllClusts",
             "ClustSpatial",
         ]
@@ -218,26 +291,32 @@ def segmentation_algorithm(
 #     return new_times, new_map
 
 def merge_cs_var(arr_3d, prediction_times, prediction_map, var_threshold):
-    # Calculate variances of each signal
-    variances = np.std(prediction_times, axis=1)
-    # Identify indices of signals with variance below the threshold
-    low_var_index = np.argwhere(variances < var_threshold).flatten()
-    if low_var_index.size > 1:
-        #print("MERGE CS VAR")
-        center_index = low_var_index[np.argmin(variances[low_var_index])]
-        other_indices = low_var_index[low_var_index != center_index]
-        # Update the prediction map
-        for idx in other_indices:
-            prediction_map = np.where(prediction_map == idx, center_index, prediction_map)
-        # Normalise prediction map values to between 0 and 1
-        prediction_map = prediction_map / np.max(prediction_map)
-        prediction_map = prediction_map.astype(int)
-        times_extracted = extract_times(prediction_map, arr_3d)
-        # plt.plot(times_extracted.T)
-        time_fill = np.zeros((1, times_extracted.shape[1]))
-        times_extracted = np.append(times_extracted, time_fill, axis = 0)        
-        prediction_times = times_extracted
-        prediction_times = np.ma.masked_equal(prediction_times, 0)
+    # Keep track of original shape
+    times_shape_org = prediction_times.shape
+    with np.errstate(invalid='ignore'):
+        # Calculate variances of each signal
+        variances = np.std(prediction_times, axis=1)
+        # Identify indices of signals with variance below the threshold
+        low_var_index = np.argwhere(variances < var_threshold).flatten()
+        if low_var_index.size > 1:
+            #print("MERGE CS VAR")
+            center_index = low_var_index[np.argmin(variances[low_var_index])]
+            other_indices = low_var_index[low_var_index != center_index]
+            # Update the prediction map
+            for idx in other_indices:
+                prediction_map = np.where(prediction_map == idx, center_index, prediction_map)
+            # Normalise prediction map values to between 0 and 1
+            prediction_map = prediction_map / np.max(prediction_map)
+            prediction_map = prediction_map.astype(int)
+            times_extracted = extract_times(prediction_map, arr_3d)
+            # Replaced merged traces with zeros
+            if times_extracted.shape != times_shape_org:
+                # Determine number of traces to add
+                num_traces_to_add = times_shape_org[0] - times_extracted.shape[0]
+                time_fill = np.zeros((num_traces_to_add, times_extracted.shape[1]))
+                times_extracted = np.append(times_extracted, time_fill, axis = 0)   
+            prediction_times = times_extracted
+            prediction_times = np.ma.masked_equal(prediction_times, 0)
     return prediction_times, prediction_map
 
 def merge_cs_corr(
@@ -260,32 +339,54 @@ def merge_cs_corr(
     exceed_indices = np.where(
         traces_correlation[upper_triangle_indices] > similarity_thresh
     )
-
+    # Keep track of original shape
+    times_shape_org = times.shape
     # First merge times that are similar
     similar_pairs_index = np.array(
         list(zip(row_indices[exceed_indices], col_indices[exceed_indices]))
     ).astype(int)
     correlations = traces_correlation[upper_triangle_indices]
+    #print(similar_pairs_index, correlations)
+    # print(correlations, similar_pairs_index)
     if not similar_pairs_index.any():
         # Exit function and return as-is
         return times, map
     #else:
-        #print("CS CORR")
+    #    print("CS CORR")
     
     # Find the most correlated pair of traces (out 3 possible pairs)
-    most_similar_pair = -1
-    #print(most_similar_pair, similar_pairs_index)
+    if len (similar_pairs_index) <= 1:
+        most_similar_pair = 0
+    else:
+        ## Determine peak amplitudes
+        amplitudes = np.max(np.abs(times), axis=1)
+        #print(amplitudes)
+        min = np.min(times, axis = 1)
+        max = np.max(times, axis = 1)
+        polarity = [1 if np.abs(i[0]) < i[1] else -1 for i in zip(min, max)]
+        #print(min, max, polarity)
+        # Get the two indices with the higest amplitudes
+        sorted_amplitudes = np.argsort(amplitudes)
+        most_similar_pair = sorted_amplitudes[0]
+        if most_similar_pair == len(similar_pairs_index):
+            warnings.warn("Most similar pair fell outside of similar pairs index. Using -1")
+            most_similar_pair = -1
+        #print(most_similar_pair)
+#    if most_similar_pair == -1:
+#        raise ValueError("No similar pairs found")
     chosen_pair = similar_pairs_index[most_similar_pair]
 
     new_map = np.where(map == chosen_pair[1], chosen_pair[0], map)
     
     times_extracted = extract_times(new_map, d3_arr)
-    # plt.plot(times_extracted.T)
-    time_fill = np.zeros((1, times_extracted.shape[1]))
-    times_extracted = np.append(times_extracted, time_fill, axis = 0)    
+    # Replace merged traces with zeros
+    if times_extracted.shape != times_shape_org:
+        # Determine number of traces to add
+        num_traces_to_add = times_shape_org[0] - times_extracted.shape[0]
+        time_fill = np.zeros((num_traces_to_add, times_extracted.shape[1]))
+        times_extracted = np.append(times_extracted, time_fill, axis = 0)    
     new_times = times_extracted
     new_times = np.ma.masked_equal(new_times, 0)
-
     return new_times, new_map
 
 
@@ -338,6 +439,7 @@ def extract_noncentre(
 def extract_times(
     prediction_map,
     inputdata_3d,
+    #amplitude_boost = True # depricated
 ):
     # Work out how many clusters
     num_clusts = len(np.unique(prediction_map))
@@ -364,6 +466,10 @@ def extract_times(
             for i in range(num_clusts)
         ]
     ).data
+    # if amplitude_boost is True:
+    #prediction_times_std = np.ma.std(prediction_times, axis = 0)
+    #prediction_times = prediction_times * prediction_times_std
+    #prediction_times = prediction_times - np.ma.average(prediction_times, axis = 0)
     return prediction_times
 
 def amplitude_criteria(prediction_times, map, abs_criteria = 3) -> tuple[np.ma.MaskedArray, np.ndarray, bool]:
@@ -386,13 +492,24 @@ def sort_extracted(prediction_times, map, reorder_strategy = "corrcoef"):
         empty_prediction_times = np.ma.array(np.zeros(prediction_times.shape), mask = True)
         empty_prediction_times[-1] = prediction_times[nonzero_index]
         return empty_prediction_times, empty_prediction_map
-    if reorder_strategy == "sorted":
-        # if similarity_merge:
-        #     do_merge()
+    if reorder_strategy == "sorted" or reorder_strategy == "sorted_mod":
+        # if reorder_strategy == "sorted":
         # Order by reverse absolute max
         maxabs = np.abs(np_ext.maxabs(prediction_times, axis=1)) *-1
-        idx = np.argsort(maxabs)
         # Sort prediction_times
+        idx = np.argsort(maxabs)
+        # Do extra correlation check
+        if reorder_strategy == "sorted_mod":
+            temp_times = prediction_times[idx]
+            # Now, check if there is signal in the noise cluster
+            C_time = temp_times[0]
+            N_time = temp_times[-1]
+            correlation = np.correlate(C_time, N_time)
+            #If correlation is negative, switch order
+            if correlation < -50:
+                idx[1], idx[-1] = idx[-1], idx[1]
+                # new_prediction_times[1], new_prediction_times[-1] = new_prediction_times[-1], new_prediction_times[1]
+        # Reorder accordingly
         new_prediction_times = prediction_times[idx]
         # Map changes to reflect changes in prediction map
         #if the last trace is masked, it means there are only 2 signals, 
@@ -415,7 +532,7 @@ def sort_extracted(prediction_times, map, reorder_strategy = "corrcoef"):
         idx = np.argsort(corrs_with *-1)
         idx[1], idx[2] = idx[2], idx[1]
         mapping = np.argsort(idx)
-        new_prediction_times = prediction_times[idx] # the order that sorts prediction times by correlation to maxamp trace
+        new_prediction_times = prediction_times[idx] # the order that sorts prediction times by correlation to maxamp trace    
     elif reorder_strategy == "pixcount":
         # if similarity_merge:
             # do_merge()
@@ -448,12 +565,57 @@ def sort_extracted(prediction_times, map, reorder_strategy = "corrcoef"):
         new_prediction_map = update_prediction_map(map, mapping, inplace = False)
     return new_prediction_times, new_prediction_map
 
+# def merge_cs_amp(prediction_times, map, **kwargs):
+#     if 
+#     return new_times, new_map
+
+def covariance_merge(time, map, threshold = 1):
+    # Calculate the covariance matrix
+    cov_matrix = np.cov(time)
+    # Number of signals
+    num_signals = time.shape[0]
+    # Initialize a list to keep track of which signals to merge
+    merge_indices = []
+    if num_signals < 5:
+        # Check covariance for each pair of signals
+        for i in range(num_signals):
+            for j in range(i + 1, num_signals):
+                if cov_matrix[i, j] > threshold:
+                    merge_indices.append(i)
+                    merge_indices.append(j)
+
+        # Get unique indices of signals to merge
+        merge_indices = list(set(merge_indices))
+    else:
+        # Use the mask to find indices of signals to merge
+        high_cov_mask = cov_matrix > threshold
+        merge_indices = np.unique(np.where(np.triu(high_cov_mask, k=1))[0])
+    if merge_indices:
+        # Combine the signals by averaging
+        combined_signal = np.mean(time[merge_indices], axis=0)
+
+        # Replace the merged signals with zeros where appropriate
+        output_time = np.copy(time)
+        for idx in merge_indices:
+            output_time[idx] = np.zeros(time.shape[1])
+        output_time[merge_indices[0]] = combined_signal
+        # Update the map array to reflect the merging
+        updated_map = np.copy(map)
+        for idx in merge_indices[1:]:
+            updated_map[map == idx] = merge_indices[0]
+    else:
+        # If no signals have high covariance, keep the original signals and map
+        output_time = time
+        updated_map = map
+
+    return output_time, updated_map
+
 def cs_segment_demo(inputdata_3d, **kwargs):
     segmentation_algorithm(inputdata_3d, plot_demo=True, **kwargs)
 
 def run(d3_arr, plot=False, 
-        sort_strategy = "corrcoef",
-        exclude_sub = 3,
+        sort_strategy = "sorted_mod", #sorted was last tried in the fine noise
+        exclude_sub = 1.5,
         segmentation_params : dict = None, 
         merge_params : dict = None,
         plot_params : dict = None):
@@ -484,21 +646,23 @@ def run(d3_arr, plot=False,
     times_extracted : 2D numpy array
         The extracted timecourses from the segmented map.
     """
-    default_plot_params = {"ms_dur" : 1300, 
-                        "degree_visang" : 20, 
-                        "block_size" : 200}
+    default_plot_params = {"ms_dur" : None, 
+                        "degree_visang" : 20,
+                        "screen_width_degrees" : None,}
+    
     if plot_params is not None:
-        default_plot_params.update(plot_params)
+        default_plot_params.update(plot_params)        
     plot_params = default_plot_params
 
     default_segmnetation_params = {
-        "smooth_times"  : None,   #4
-        "smooth_space"  : None,   #4
-        "upscale_time"  : None,#None
-        "upscale_space" : None,  #1
-        "centre_on_zero": False,
+        "smooth_times"  : 2,   #2
+        "smooth_space"  : 2,   
+        "upscale_time"  : None,
+        "upscale_space" : None,  
+        "centre_on_zero": True,
         "plot_demo"     : False,
-        "crop_time"     : (3, -1),
+        "crop_time"     : (1, -1), 
+        "amplitude_boost": False,
         "on_pcs"        : True,
     }
     if segmentation_params is not None:
@@ -506,9 +670,15 @@ def run(d3_arr, plot=False,
     segmentation_params = default_segmnetation_params
 
     default_merge_params = {
-        "var_thresh" : .5,
+        "var_thresh" : .6125,
         "corr_thresh" : .95,
+        "covar_merge" : 2,
     }
+    # default_merge_params = {
+    #     "var_thresh" : .33,
+    #     "corr_thresh" : .95,
+    #     "covar_merge" : 5,
+    # }
     if merge_params is not None:
         default_merge_params.update(merge_params)
     merge_params = default_merge_params
@@ -518,6 +688,13 @@ def run(d3_arr, plot=False,
     # 2. Extract the times from the given cluster label's spatial positions,
     # averaging them to get the temporal signal from the spatial positions
     times_extracted = extract_times(segmented_map, d3_arr)
+    #print("run function times:", times_extracted.shape)
+    # times_extracted_sd = np.ma.std(times_extracted, axis = 0)
+    # times_extracted = times_extracted * times_extracted_sd - np.ma.average(times_extracted_sd, axis = 0)
+
+    #prediction_times_std = np.ma.std(prediction_times, axis = 0)
+    #prediction_times = prediction_times * prediction_times_std - np.ma.average(prediction_times, axis = 0)
+
 
     # ----The following is old logic and is only here for reference.--------
     # 3.1 Merge the clusters that share a particularily high degree of correlation.
@@ -541,6 +718,7 @@ def run(d3_arr, plot=False,
     # ------- end of old logic --------------------------------------------
     # New and improved optional logic
     times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
+    original_times_shape = times_extracted.shape
     # if pass_bool is True:
     if merge_params["var_thresh"] is not None:
         # times_extracted, segmented_map = merge_cs_var(times_extracted, segmented_map, merge_params["var_thresh"])
@@ -548,7 +726,11 @@ def run(d3_arr, plot=False,
     if merge_params["corr_thresh"] is not None:
         # times_extracted, segmented_map = merge_cs_corr(times_extracted, segmented_map, merge_params["corr_thresh"]) 
         times_extracted, segmented_map = merge_cs_corr(d3_arr, times_extracted, segmented_map, merge_params["corr_thresh"]) 
-    if np.max(np.abs(times_extracted)) > exclude_sub:
+    if merge_params["covar_merge"] is not None:
+        times_extracted, segmented_map = covariance_merge(times_extracted, segmented_map, threshold = merge_params["covar_merge"])
+    #print("after var thresh times:", times_extracted.shape)
+    #print("after corr thresh times:", times_extracted.shape)
+    if np.max(np.abs(times_extracted[0])) > exclude_sub:
         pass_bool = True
     else:
         pass_bool = False
@@ -558,6 +740,9 @@ def run(d3_arr, plot=False,
         times_extracted[-1] = np.average(d3_arr, axis = (1,2))
         times_extracted = np.ma.masked_equal(times_extracted, 0)
         segmented_map = np.zeros(d3_arr[0].shape)
+    #print("interemdiate run function times:", times_extracted.shape)
+    if times_extracted.shape != original_times_shape:
+        raise ValueError("times_extracted shape changed after merging, manual fix required. Previously this due to not checking how many traces had been merged (replace n)")
     #times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
         # if merge_params["peak_merge"] is True:
         #     times_extracted, segmented_map = merge_cs_pol(times_extracted, segmented_map)
@@ -655,26 +840,32 @@ def run(d3_arr, plot=False,
         # labels = np.array([standard_labels[i] for i in range(counter)])
         # labels = standard_labels[np.unique(segmented_map).astype(int)]
         cbar.set_ticklabels(standard_labels)
-        degrees = plot_params["degree_visang"]
-        visang_to_space = pygor.strf.pixconverter.visang_to_pix(
-        degrees, pixwidth=40, block_size=200
-        )
-        pygor.plotting.add_scalebar(
-            visang_to_space,
-            ax=ax[0],
-            string=f"{degrees}°",
-            orientation="h",
-            line_width=5,
-            y = -0.05,
-            offset_modifier = .7
-        )
+        if plot_params["screen_width_degrees"] is not None:
+            degrees = plot_params["degree_visang"]
+            visang_to_space = pygor.strf.pixconverter.visang_to_pix(
+            degrees, pixwidth=d3_arr.shape[-1], screen_width_visang=plot_params["screen_width_degrees"], 
+            )
+            pygor.plotting.add_scalebar(
+                visang_to_space,
+                ax=ax[0],
+                string=f"{degrees}°",
+                orientation="h",
+                line_width=5,
+                y = -0.05,
+                offset_modifier = .7
+            )
         plt.axhline(0, ls = "-", c = "k", zorder = -2, lw = .75)
         repr_cbar = plt.colorbar(repr, ax = ax[0], orientation = "horizontal", 
                                 label = "Z-score (SD)")
         plt.show()
     # Add non-centre time courses to times_extracted
     times_extracted = np.append(times_extracted, np.expand_dims(extract_noncentre(segmented_map, d3_arr), 0), axis = 0)
-    return np.ma.copy(np.squeeze(segmented_map)), np.ma.masked_equal((np.squeeze(times_extracted)), 0)
+    times_extracted = np.ma.masked_equal((np.squeeze(times_extracted)), 0)
+    # Make sure everything is squeezed
+    times_extracted = np.squeeze(times_extracted)
+    segmented_map = np.squeeze(segmented_map)
+    #print("final run function times:", times_extracted.shape)
+    return segmented_map, times_extracted
 
 def gen_cmap(colormap = plt.cm.tab10, num = 3):
     return plt.cm.colors.ListedColormap([colormap(i) for i in range(num)])
@@ -697,7 +888,7 @@ def gen_cmap(colormap = plt.cm.tab10, num = 3):
 #         times.append(ctimes)
 #     return [maps, times]
 
-def run_object(self, roi = None, **kwargs):
+def run_object(self, roi = None, plot_params = None, **kwargs):
     if roi is None:
         roi = np.arange(self.strfs_no_border.shape[0])
     if isinstance(roi, Iterable) is False:
@@ -705,14 +896,28 @@ def run_object(self, roi = None, **kwargs):
     maps = []
     times = []
     strf_ms_dur = self.strf_dur_ms
-    block_size =  self.stim_size_arbitrary
-    for i in roi: 
+    base_screen_size = pygor.strf.pixconverter.screen_width_height_visang[0]
+    # Calculate screen percentage lost to border
+    target_screen_width = self.strfs.shape[-1]
+    no_border_screen_width = self.strfs_no_border.shape[-1]
+    # Calculate new screen size after cropping border, pass that to plotting
+    new_screen_size = base_screen_size - ((target_screen_width - no_border_screen_width) / target_screen_width) * base_screen_size
+    for n, i in enumerate(roi): 
+    #    print(f"Running STRF {n+1}/{len(roi)}")
+        if "full_demo" in kwargs.keys():
+            full_demo = True
+        else:
+            full_demo = False
         map, time = pygor.strf.centsurr.run(self.strfs_no_border[i],
-                                            plot_params = {"ms_dur": strf_ms_dur, "block_size": block_size},
+                                            # plot_params = {"ms_dur": strf_ms_dur, "screen_width_degrees": new_screen_size,
+                                            #                 "plot_demo": full_demo},
+                                            plot_params = plot_params,
                                             **kwargs)
         maps.append(map)
         times.append(time)
-    return np.squeeze(np.array(maps)), np.squeeze(np.ma.masked_equal(times, 0))
+    maps = np.array(maps)
+    times = np.array(times)
+    return maps, times
     # return pygor.strf.centsurr.run(self.strfs_no_border[roi], **kwargs)
 
 """

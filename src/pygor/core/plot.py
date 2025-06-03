@@ -20,6 +20,8 @@ def plot_averages(
     skip_trigger = 1,
     phase_dur_mod = 1,
     kill_phase = None,
+    include_snippets = True,
+    text_size = 10,
     **kwargs,
 ):
     """
@@ -110,14 +112,15 @@ def plot_averages(
         else:
             loop_through = enumerate(zip(axs.flat, rois[sort_order], roi_labels[sort_order]))
         for n, (ax, roi, label) in loop_through:
-            ax.plot(self.snippets[roi].T, c="grey", alpha=0.5)
+            if include_snippets is True:
+                ax.plot(self.snippets[roi].T, c="grey", alpha=0.5)
             ax.plot(self.averages[roi], color=colormap[n])
             ax.set_xlim(0, len(self.averages[0]))
             if independent_scale is False:
                 ax.set_ylim(np.min(self.snippets[rois]), np.max(self.snippets[rois]))
             else:
                 closest_sd = np.ceil(np.max(self.averages[roi])*sd_ratio_scalebar)
-                pygor.plotting.add_scalebar(closest_sd, string = f"{closest_sd.astype(int)} SD",ax=ax, flip_text=True, x=1.015, y = 0.1)
+                pygor.plotting.add_scalebar(closest_sd, string = f"{closest_sd.astype(int)} SD",ax=ax, flip_text=True, x=1.015, y = 0.1, text_size = text_size)
             ax.set_yticklabels([])
             ax.set_ylabel(label, rotation=0, verticalalignment="center")
             ax.spines[["top", "bottom", "right"]].set_visible(False)
@@ -148,7 +151,7 @@ def plot_averages(
             ax.grid(False)
         if independent_scale is False:
             closest_sd = np.ceil(np.max(self.averages[rois])*sd_ratio_scalebar)
-            pygor.plotting.add_scalebar(closest_sd, string = f"{closest_sd.astype(int)} SD",ax=axs.flat[-1], flip_text=True, x=1.015, y = 0.1)
+            pygor.plotting.add_scalebar(closest_sd, string = f"{closest_sd.astype(int)} SD",ax=axs.flat[-1], flip_text=True, x=1.015, y = 0.1, text_size = text_size)
         # ax.set_xlabel("Time (ms)")
         fig.subplots_adjust(hspace=0)
         cax = axs.flat[-1]

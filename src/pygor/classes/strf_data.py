@@ -417,11 +417,30 @@ class STRF(Core):
         if self.bs_settings["do_bootstrap"] == True:
             time_pvals = self.pval_time
             space_pvals = self.pval_space
+        
             __contours = [pygor.strf.contouring.bipolar_contour(arr) # ensures no contour is drawn if pval not sig enough
                             if time_pvals[count] < self.bs_settings["time_sig_thresh"] and space_pvals[count] < self.bs_settings["space_sig_thresh"]
                             else  (np.array([]), np.array([]))
                             for count, arr in enumerate(self.collapse_times(roi))]
+        
+            # __contours = []
+            # for count, arr in enumerate(self.collapse_times(roi)):
+            #     if time_pvals[count] < self.bs_settings["time_sig_thresh"] and space_pvals[count] < self.bs_settings["space_sig_thresh"]:
+            #         print(arr.shape, "bbb")
+            #         contour = pygor.strf.contouring.bipolar_contour(arr)  # ensures no contour is drawn if pval not sig enough
+            #     else:
+            #         contour = (np.array([]), np.array([]))
+            #     __contours.append(contour)
+        
         if self.bs_settings["do_bootstrap"] == False:
+            
+            # # Simple version without p-value checks
+            # __contours = []
+            # for count, arr in enumerate(self.collapse_times()):
+            #     print(arr.shape, "ccc")
+            #     contour = pygor.strf.contouring.bipolar_contour(arr)
+            #     __contours.append(contour)
+
             __contours = [pygor.strf.contouring.bipolar_contour(arr) for count, arr in enumerate(self.collapse_times())]
         __contours = np.array(__contours, dtype = "object")
         return __contours
@@ -585,8 +604,11 @@ class STRF(Core):
         dominant_times = np.array(dominant_times)
         return dominant_times
 
-    def get_pix_times(self):
-        return np.array([np.reshape(i, (i.shape[0], -1)) for i in self.strfs])
+    def get_pix_times(self, incl_borders = False):
+        if incl_borders is True:
+            return np.array([np.reshape(i, (i.shape[0], -1)) for i in self.strfs])
+        else:
+            return np.array([np.reshape(i, (i.shape[0], -1)) for i in self.strfs_no_border])
 
     ## Methods__________________________________________________________________________________________________________
 
@@ -611,12 +633,20 @@ class STRF(Core):
                 else:
                     if isinstance(roi, Iterable) is False:
                         roi = [roi]
+                        
                 # raise NotImplementedError("Implementation error, does not work yet")
                 # get 2d masks
-                all_masks = np.array([pygor.strf.contouring.bipolar_mask(i) for i in self.collapse_times(roi, border = True)])
-                print(all_masks.shape)
+                print(self.collapse_times(roi, border = True).shape)
+                # patch a deeper bug with inconsistent use of dimensionality squeezing
+                # check dim
+                colapse_times = self.collapse_times(roi, border = True)
+                if colapse_times.ndim != 3:
+                    colapse_times = np.expand_dims(colapse_times, 0)
+                #print(colapse_times.shape)
+                all_masks = np.array([pygor.strf.contouring.bipolar_mask(i) for i in colapse_times])
+                #print(all_masks.shape)
                 all_masks = np.repeat(np.expand_dims(all_masks, 2), self.strfs.shape[1], axis = 2)
-                print(all_masks.shape)
+                #print(all_masks.shape)
                 # Apply mask to expanded and repeated strfs (to get negative and positive)
                 strfs_expanded = np.repeat(np.expand_dims(self.strfs[roi], axis = 1), 2, axis = 1)
                 all_strfs_masked = np.ma.array(strfs_expanded, mask = all_masks, keep_mask=True)
@@ -690,10 +720,10 @@ class STRF(Core):
             raise AttributeError("Not a multicoloured STRF, self.multicolour != True.")
 
     def get_spatial_masks(self, roi = None) -> tuple[np.ndarray, np.ndarray]:
-        masks = self.get_strf_masks(roi).mask[:, :, 0]
+        masks = self.get_strf_masks(roi).mask#[:, :, 0]
         neg_mask2d, pos_mask2d = masks[:, 0], masks[:, 1]
         #return np.array([neg_mask2d, pos_mask2d])
-        return (neg_mask2d, pos_mask2d)
+        return (np.squeeze(neg_mask2d), np.squeeze(pos_mask2d))
 
     @property
     def rf_masks_combined(self) -> np.ndarray:
@@ -767,11 +797,11 @@ class STRF(Core):
                 self._spatial_centered_collapse = shifted
             return self._spatial_centered_collapse
             #collapsed_strf_arr = shifted
-        return np.squeeze(collapsed_strf_arr)
+        return collapsed_strf_arr # do not squeeze for more predictable output
         # spatial.collapse_3d(recording.strfs[strf_num])
     
-    def get_polarities(self, exclude_FirstLast=(1,1), new_old = "new") -> np.ndarray:
-        if new_old == "old":
+    def get_polarities(self, roi = None, exclude_FirstLast=(1,1), mode = "smart_extra", force_recompute = False) -> np.ndarray:
+        if mode == "old":
             # Get the time as absolute values, then get the max value
             abs_time_max = np.max(np.abs(self.get_timecourses(mask_empty = True).data), axis = 2)
             # First find the obvious polarities
@@ -785,7 +815,7 @@ class STRF(Core):
             pols = np.where(outcome, 2, pols)
             # Now we need to set values to 0 where there is no signal
             pols = pols * np.prod(np.where(abs_time_max == 0, 0, 1), axis = 1)
-        if new_old == "new":
+        if mode == "new":
             # Get the time as absolute values, then get the max value
             abs_time_max = np.max(np.abs(self.get_timecourses(mask_empty = True).data), axis = 2)
             times_peak = pygor.np_ext.maxabs(self.get_timecourses(mask_empty = True), axis = 2)
@@ -793,7 +823,54 @@ class STRF(Core):
             pols = np.where(times_peak[:, 0] < 0, -1, 1)
             # If values are 0, we assign 0
             zero_bools = np.all(times_peak == 0, axis = 1)
-            pols = np.where(zero_bools == True, np.nan, pols)
+            pols = np.where(zero_bools == True, np.nan, pols)    
+        if mode =="smart" or mode == "smart_extra":
+            _, prediction_times_ROIs = self.cs_seg(force_recompute = force_recompute)
+            covar_thresh = -.5
+            var_thresh = .2
+            S_absamp_thresh = .5
+
+            length = prediction_times_ROIs.shape[-1]
+            # C_times = prediction_times_ROIs[:, 0, length//2:]
+            # S_times = prediction_times_ROIs[:, 1, length//2:]
+            C_times = prediction_times_ROIs[:, 0, :]
+            S_times = prediction_times_ROIs[:, 1, :]
+            C_centered = C_times - C_times.mean(axis=1, keepdims=True)
+            S_centered = S_times - S_times.mean(axis=1, keepdims=True)
+
+            # Compute covariance for each pair
+            CS_covariances = np.sum(C_centered * S_centered, axis=1) / (C_times.shape[1] - 1)
+
+            # Get absolute max for each value of C and S
+            C_maxabs = pygor.np_ext.maxabs(C_times, axis=1)
+            S_maxabs = pygor.np_ext.maxabs(S_times, axis=1)
+
+            # Get signs for each value of C and S times
+            C_signs = np.sign(C_times.mean(axis=1))
+            #S_signs = np.sign(S_times.mean(axis=1))
+
+            #cat = np.empty(prediction_times_ROIs.shape[0], dtype="str")
+            cat = np.where(C_signs > 0, "ON", "OFF")
+            zerovals = C_signs==0
+            cat[zerovals] = "NaN"
+            amplitude_pass_idx = np.abs(S_maxabs) > S_absamp_thresh
+            var_pass_idx = np.var(S_times, axis=1) > var_thresh
+            covariance_pass_idx = CS_covariances < covar_thresh
+            pass_bool = np.bitwise_and(amplitude_pass_idx, covariance_pass_idx) * var_pass_idx
+            cat = np.where(pass_bool, cat + " CS", cat)
+            # Extra check to test if CS is weak or strong
+            if mode == "smart_extra":
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    # condition1 = np.isclose(np.abs(C_maxabs/S_maxabs), -1, atol=1e1)
+                    lower_bound = .5
+                    upper_bound = 2
+                    condition1 = (np.abs(C_maxabs / S_maxabs) >= lower_bound) & (np.abs(C_maxabs / S_maxabs) <= upper_bound)                
+                condition2 = [True if "CS" in c else False for c in cat]
+                cat = np.where(np.bitwise_and(condition1, condition2), cat + " strong", cat)
+                # cat = np.where(, cat + " weak", cat)
+
+            pols = cat
+    
         return pols
 
     def get_opponency_bool(self) -> bool:
@@ -951,7 +1028,8 @@ class STRF(Core):
         neg_c, pos_c = pygor.strf.contouring.bipolar_contour(self.collapse_times(roi), plot_results= True, ax = ax)
         ax[0, -1].plot(np.squeeze(self.get_timecourses(roi)).T, label = ["neg", "pos"])
         ax[0, -1].legend()
-        spatial_mask = np.squeeze(self.get_spatial_masks(roi))
+        spatial_mask = np.array(self.get_spatial_masks(roi))[:, 0]
+        print(spatial_mask.shape)
         ax[1, -1].imshow((spatial_mask[0] * -1) + spatial_mask[1], origin = "lower")
         gs = ax[1, 2].get_gridspec()
         for a in ax[0:, 0]:
@@ -989,7 +1067,7 @@ class STRF(Core):
             use_map = pygor.plotting.maps_concat[roi[0]]
             anim = pygor.plotting.play_movie(chroma_arr[roi], cmap = use_map,**kwargs)
         else:
-            anim = pygor.plotting.play_movie(self.strfs[roi], **kwargs)
+            anim = pygor.plotting.play_movie(np.squeeze(self.strfs[roi]), **kwargs)
         return anim
 
     def play_multichrom_strf(self, roi = None, **kwargs):
@@ -1115,6 +1193,7 @@ class STRF(Core):
                 self._cs_seg_results_maps = maps
                 return np.squeeze(self._cs_seg_results_maps[roi]), np.squeeze(self._cs_seg_results_times[roi])
         else:
+            print(kwargs)
             return pygor.strf.centsurr.run_object(self, roi, plot = plot, **kwargs)
 
     def get_seg_centres(self, roi = None, weighted = False, channel_reshape = True,**kwargs):
@@ -1122,11 +1201,12 @@ class STRF(Core):
         centres_list = []
         for n, segmap in enumerate(cmaps):
             centre_coords = np.argwhere(segmap == 0)
+            # If empty, return nan
             if len(np.unique(segmap)) == 1:
                 centres_list.append(np.array([np.nan, np.nan]))
             else:
                 if weighted is True:
-                    weights = np.abs(np.max(self.collapse_times(n)[centre_coords[:, 0], centre_coords[:, 1]]))
+                    weights =  np.abs(np.squeeze(self.collapse_times(roi))[centre_coords[:, 0], centre_coords[:, 1]])**2
                 else:
                     weights = None
                 centre = np.average(centre_coords, axis = 0, weights = weights)
@@ -1137,8 +1217,8 @@ class STRF(Core):
             centres = np.reshape(centres, (-1, self.numcolour, 2))
         return np.squeeze(centres[roi])
 
-    def demo_cs_seg(self, roi, **kwargs):
-        _ = self.cs_seg(roi, plot = True, **kwargs)
+    def demo_cs_seg(self, roi):
+        _ = self.cs_seg(roi, plot = True, segmentation_params = {"plot_demo": True})
         plt.show()
 
     def convolve_with_img(self, roi, img = "example", plot = False, xrange = None, auto_crop = True, auto_crop_thresh = 3, yrange = None, **kwargs):

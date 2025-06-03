@@ -108,9 +108,9 @@ def pix_to_visang(
 def visang_to_pix(
     *pix,
     pixwidth,
-    block_size,
-    jitter_upsale=4,
-    screen_width_pix=1820,
+    block_size=None,
+    jitter_upsale=None,
+    screen_width_pix=None,
     screen_width_visang=86.306,
 ):
     """The function `visang_to_pix` converts visual angle measurements to pixel measurements based on
@@ -146,6 +146,12 @@ def visang_to_pix(
     returned.
 
     """
+    if block_size is not None:
+        raise DeprecationWarning("block_size has been deprecated")
+    if jitter_upsale is not None:
+        raise DeprecationWarning("jitter_upsale has been deprecated")
+    if screen_width_pix is not None:
+        raise DeprecationWarning("screen_width_pix has been deprecated")
     # output = [pix_to_visang(1, block_size = block_size) * num for num in visang]
     output = [num / (screen_width_visang / pixwidth) for num in pix]
     if len(pix) == 1:

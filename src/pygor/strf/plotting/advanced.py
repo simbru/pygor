@@ -67,7 +67,7 @@ def chroma_overview(
     # Handle colour limits
     if clim == "all":
         # Use the abs max of the entre input
-        abs_max = np.max(np.abs(strfs_chroma))
+        abs_max = np.max(np.abs(data_strf_object.strfs_chroma))
         clim_vals = (-abs_max, abs_max)
     else:
         # Otherwise use user input (two floats or ints)
@@ -165,7 +165,7 @@ def chroma_overview(
             axis.set_yticklabels([])
             axis.set_ylabel(label, rotation="horizontal", labelpad=15)
     if with_times == True:
-        # Calculate correctino for axis stuff first
+        # Calculate correction for axis stuff first
         ref_ax = ax[0, 0]
         asp = np.diff(ref_ax.get_ylim())[0] / np.diff(ref_ax.get_xlim())[0]
         # Get max abs

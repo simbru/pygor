@@ -50,11 +50,11 @@ def cs_ratio(csn_times, indices_around_peak=2):
     if start_time < 0:
         start_time = 0
     end_time = peak_time + indices_around_peak
-    print(start_time, peak_time, end_time)
+    #print(start_time, peak_time, end_time)
 
     cval = pygor.np_ext.maxabs(csn_times[0][start_time:end_time])
     sval = pygor.np_ext.maxabs(csn_times[1][start_time:end_time])
-    print(cval, sval)
+    #print(cval, sval)
     if np.sign(cval) == np.sign(sval):
         return np.nan
     absmax_c = np.abs(cval)
@@ -369,23 +369,25 @@ def gen_stats(strfs_obj, colour_list = ["R", "G", "B", "UV"], **kwargs):
         return None
     ipl_depths = np.repeat(strfs_obj.ipl_depths, len(colour_list))
     output = defaultdict(list)
-    for i in range(strfs_obj.num_rois * strfs_obj.numcolour):
+    for i in np.arange(strfs_obj.num_rois * strfs_obj.numcolour):
         prediction_map, prediction_times = strfs_obj.cs_seg(i)
+        time_len = prediction_times.shape[1]
+        half_time = time_len // 2
         #prediction_times = prediction_times.data
         with np.errstate(divide='ignore', invalid='ignore'):
             # Base stats
-            output["max_c"].append(np.max(prediction_times[0]))
-            output["max_s"].append(np.max(prediction_times[1]))
-            output["max_n"].append(np.max(prediction_times[2]))
-            output["min_c"].append(np.min(prediction_times[0]))
-            output["min_s"].append(np.min(prediction_times[1]))
-            output["min_n"].append(np.min(prediction_times[2]))
-            output["absmax_c"].append(pygor.np_ext.absmax(prediction_times[0]))
-            output["absmax_s"].append(pygor.np_ext.absmax(prediction_times[1]))
-            output["absmax_n"].append(pygor.np_ext.absmax(prediction_times[2]))
-            output["maxabs_c"].append(pygor.np_ext.maxabs(prediction_times[0]))
-            output["maxabs_s"].append(pygor.np_ext.maxabs(prediction_times[1]))
-            output["maxabs_n"].append(pygor.np_ext.maxabs(prediction_times[2]))
+            output["max_c"].append(np.max(prediction_times[0, half_time:]))
+            output["max_s"].append(np.max(prediction_times[1, half_time:]))
+            output["max_n"].append(np.max(prediction_times[2, half_time:]))
+            output["min_c"].append(np.min(prediction_times[0, half_time:]))
+            output["min_s"].append(np.min(prediction_times[1, half_time:]))
+            output["min_n"].append(np.min(prediction_times[2, half_time:]))
+            output["absmax_c"].append(pygor.np_ext.absmax(prediction_times[0, half_time:]))
+            output["absmax_s"].append(pygor.np_ext.absmax(prediction_times[1, half_time:]))
+            output["absmax_n"].append(pygor.np_ext.absmax(prediction_times[2, half_time:]))
+            output["maxabs_c"].append(pygor.np_ext.maxabs(prediction_times[0, half_time:]))
+            output["maxabs_s"].append(pygor.np_ext.maxabs(prediction_times[1, half_time:]))
+            output["maxabs_n"].append(pygor.np_ext.maxabs(prediction_times[2, half_time:]))
             output["sum_c"].append(np.sum(prediction_times[0]))
             output["sum_s"].append(np.sum(prediction_times[1]))
             output["sum_n"].append(np.sum(prediction_times[2]))
@@ -423,6 +425,12 @@ def gen_stats(strfs_obj, colour_list = ["R", "G", "B", "UV"], **kwargs):
             num_pix_c = np.sum(prediction_map == 0)
             num_pix_s = np.sum(prediction_map == 1)
             num_pix_n = np.sum(prediction_map == 2)
+            if num_pix_c == prediction_map.size or num_pix_c == 0:
+                num_pix_c = np.nan
+            if num_pix_s == prediction_map.size or num_pix_s == 0:
+                num_pix_s = np.nan
+            if num_pix_n == prediction_map.size or num_pix_n == 0:
+                num_pix_n = np.nan
             output["pix_n_c"].append(num_pix_c)
             output["pix_n_s"].append(num_pix_s)
             output["pix_n_n"].append(num_pix_n)
@@ -433,25 +441,49 @@ def gen_stats(strfs_obj, colour_list = ["R", "G", "B", "UV"], **kwargs):
             output["dia_c"].append(dia_c)
             output["dia_s"].append(dia_s)
             output["dia_n"].append(dia_n)
-            # Others 
+            # Others
             output["colour"].append(colour_list[i % len(colour_list)])
-            if np.abs(np.max(prediction_times[0])) > np.abs(np.min(prediction_times[0])):
-                pol = "ON"
-            elif np.abs(np.max(prediction_times[0])) < np.abs(np.min(prediction_times[0])):
-                pol = "OFF"
+            # Assign polarity
+
+            # if np.abs(np.max(prediction_times[0])) > np.abs(np.min(prediction_times[0])):
+            #     pol = "ON"
+            # elif np.abs(np.max(prediction_times[0])) < np.abs(np.min(prediction_times[0])):
+            #     pol = "OFF"
+            # else:
+            #     pol = "other"
+            # maxabsC = pygor.np_ext.maxabs(prediction_times[0])
+            # maxabsS = pygor.np_ext.maxabs(prediction_times[1])
+            # C_sign = np.sign(maxabsC)
+            # S_sign = np.sign(maxabsS)
+            # threshold = 1
+            # if maxabsC > 0 and maxabsS < 0 and (np.abs(maxabsC) > threshold) and (np.abs(maxabsS) > threshold) and C_sign != S_sign:
+            #     pol = "CS ON"
+            #     print("Went to CS ON because", maxabsC, maxabsS, C_sign, S_sign)
+            #     if C_sign == S_sign:
+            #         raise ValueError("logic broken")
+            # if maxabsC < 0 and maxabsS > 0 and (np.abs(maxabsC) > threshold and np.abs(maxabsS) > threshold) and (maxabsC < 0) and C_sign != S_sign:
+            #     pol = "CS OFF"
+            #     print("Went to CS OFF because", maxabsC, maxabsS, C_sign, S_sign)
+            c_threshold = 2
+            s_threshold = 1
+            maxabsC = pygor.np_ext.maxabs(prediction_times[0])
+            maxabsS = pygor.np_ext.maxabs(prediction_times[1])
+            C_sign = np.sign(maxabsC)
+            S_sign = np.sign(maxabsS)
+
+            if maxabsC == 0 and maxabsS == 0:
+                pol = "undefined"
+            elif np.abs(maxabsC) > c_threshold and np.abs(maxabsS) > s_threshold:
+                if C_sign == S_sign:
+                    pol = "ON" if C_sign > 0 else "OFF"
+                else:
+                    pol = "CS ON" if C_sign > 0 else "CS OFF"
+            elif np.abs(maxabsC) > c_threshold:
+                pol = "ON" if C_sign > 0 else "OFF"
             else:
                 pol = "other"
-            # maxC = np.max(prediction_times[0])
-            # maxS = np.max(prediction_times[1])
-            # minC = np.min(prediction_times[0])
-            # minS = np.min(prediction_times[1])
-            absmaxC = pygor.np_ext.maxabs(prediction_times[0])
-            absmaxS = pygor.np_ext.maxabs(prediction_times[1])
-            threshold = 2.5
-            if (np.abs(absmaxC) > threshold) and (np.abs(absmaxS) > threshold):
-                pol = "CS ON"
-            if (np.abs(absmaxC) > threshold and np.abs(absmaxS) > threshold) and (absmaxC < 0):
-                pol = "CS OFF"
+
+            
             output["polarity"].append(pol)
             output["IPL"].append(ipl_depths[i])
             output["roi"].append(rois_index[i])

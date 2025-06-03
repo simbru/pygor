@@ -1,12 +1,13 @@
-import numpy as np
-import matplotlib.pyplot as plt
+import pygor
 
 import numpy as np
 import matplotlib.pyplot as plt
 
-def plot_collapsed_strfs(self, cval=None, cmap = "bwr", origin = "upper"):
-    # Example data: Replace with your actual data
-    array = self.collapse_times()
+def plot_collapsed_strfs(self, cval=None, channel = None, cmap = "bwr", origin = "upper"):
+    if channel is not None:
+        array = pygor.utilities.multicolour_reshape(self.collapse_times(), channel)[channel-1]
+    else:
+        array = self.collapse_times()
     # Grid layout
     max_x = 10
     num_slices = array.shape[0]
@@ -31,15 +32,18 @@ def plot_collapsed_strfs(self, cval=None, cmap = "bwr", origin = "upper"):
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.imshow(image, cmap=cmap, interpolation="none", clim=(-cval, cval), origin = origin)
     ax.axis("off")
-
+    print(max_x, num_slices)
     # Overlay slice numbers
     h, w = array.shape[1], array.shape[2]  # Individual block height and width
     for i in range(num_rows):
         for j in range(max_x):
-            slice_idx = i * max_x + j
-            if slice_idx < num_slices:  # Avoid labeling padded regions
-                x_pos = j * w + 1  # Adjust text position slightly
-                y_pos = i * h + 1  # Adjust for visibility
-                ax.text(x_pos, y_pos, str(slice_idx), fontsize=8, color="black", 
-                        bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
+            if channel is not None:
+                slice_idx = i * max_x + j * channel
+            else:
+                slice_idx = i * max_x + j
+            # if slice_idx < num_slices:  # Avoid labeling padded regions
+            x_pos = j * w + 1  # Adjust text position slightly
+            y_pos = i * h + 1  # Adjust for visibility
+            ax.text(x_pos, y_pos, str(slice_idx), fontsize=8, color="black", 
+                    bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
     plt.show()

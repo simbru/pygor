@@ -164,9 +164,9 @@ def _roi_by_roi_dict(data_strf_obj, df_return=False):  #
     total_area_largest = np.max(check_largest, axis=0)
     dict["total_contour_area_largest"] = total_area_largest
     dict["diameter"] = 2 * np.sqrt(total_area_largest.astype(float) / np.pi)
-    dict["contour_complexity"] = np.nanmean(
-        data_strf_obj.calc_contours_complexities(), axis=1
-    )
+    # dict["contour_complexity"] = np.nanmean(
+    #     data_strf_obj.calc_contours_complexities(), axis=1
+    # )
 
     # Time
     timecourses = data_strf_obj.get_timecourses()
@@ -393,15 +393,15 @@ def _chromatic_dict(
         polarities = pygor.utilities.multicolour_reshape(
             data_strf_obj.get_polarities(), num_wavelengths
         )
-        complexities = pygor.utilities.multicolour_reshape(
-            np.nanmean(
-                pygor.strf.contouring.complexity_weighted(
-                    data_strf_obj.fit_contours(), data_strf_obj.get_contours_area()
-                ),
-                axis=1,
-            ),
-            num_wavelengths,
-        )
+        # complexities = pygor.utilities.multicolour_reshape(
+        #     np.nanmean(
+        #         pygor.strf.contouring.complexity_weighted(
+        #             data_strf_obj.fit_contours(), data_strf_obj.get_contours_area()
+        #         ),
+        #         axis=1,
+        #     ),
+        #     num_wavelengths,
+        # )
         area_t = data_strf_obj.calc_tunings_area(size).T
         diam_t = 2 * np.sqrt(area_t / np.pi)
         ampl_t = data_strf_obj.calc_tunings_amplitude(spoof_masks=True).T
@@ -438,7 +438,7 @@ def _chromatic_dict(
             dict[f"centdom_{i}"] = cent_dom_t[n]
             dict[f"peakneg_{i}"] = neg_peak_t[n]
             dict[f"peakpos_{i}"] = pos_peak_t[n]
-            dict[f"comp_{i}"] = complexities[n]
+            # dict[f"comp_{i}"] = complexities[n]
             if store_arrs:
                 dict[f"temporal_{i}"] = temporal_filter[n].tolist()
                 dict[f"spatial_{i}"] = spatial_filter[n].tolist()

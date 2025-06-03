@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import warnings
 import scipy
-global_thresh_val = 2
+global_thresh_val = 1.5
 min_targets =     5
 min_hole_size =   3
 min_object_size = min_targets
@@ -273,6 +273,8 @@ def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, result_p
     ValueError
         If the masking logic is insufficient and leads to overlapping masks.
     """
+#    if spatial_filter.ndim != 2:
+#        raise ValueError("Spatial filter must be 2D.")
     # Split arrays
     neg_filter = np.clip(spatial_filter, None, 0)
     pos_filter = np.clip(spatial_filter, 0, None)
@@ -424,7 +426,9 @@ def rotation_direction(coordinates):
     """
     # Ensure we have at least 3 coordinates for meaningful rotation analysis
     if len(coordinates) < 3:
+        # warnings.warn("At least 3 coordinates are required")
         raise ValueError("At least 3 coordinates are required")
+        #return 0
     coordinates = np.array(coordinates)
     # Compute the vectors between consecutive points
     v1 = coordinates[1:] - coordinates[:-1]
