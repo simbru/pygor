@@ -492,14 +492,14 @@ def sort_extracted(prediction_times, map, reorder_strategy = "corrcoef"):
         empty_prediction_times = np.ma.array(np.zeros(prediction_times.shape), mask = True)
         empty_prediction_times[-1] = prediction_times[nonzero_index]
         return empty_prediction_times, empty_prediction_map
-    if reorder_strategy == "sorted" or reorder_strategy == "sorted_mod":
+    if reorder_strategy == "sorted" or reorder_strategy == "sorted_corr":
         # if reorder_strategy == "sorted":
         # Order by reverse absolute max
         maxabs = np.abs(np_ext.maxabs(prediction_times, axis=1)) *-1
         # Sort prediction_times
         idx = np.argsort(maxabs)
         # Do extra correlation check
-        if reorder_strategy == "sorted_mod":
+        if reorder_strategy == "sorted_corr":
             temp_times = prediction_times[idx]
             # Now, check if there is signal in the noise cluster
             C_time = temp_times[0]
@@ -614,8 +614,8 @@ def cs_segment_demo(inputdata_3d, **kwargs):
     segmentation_algorithm(inputdata_3d, plot_demo=True, **kwargs)
 
 def run(d3_arr, plot=False, 
-        sort_strategy = "sorted_mod", #sorted was last tried in the fine noise
-        exclude_sub = 1.5,
+        sort_strategy = "sorted_corr", #sorted was last tried in the fine noise
+        exclude_sub = 2,
         segmentation_params : dict = None, 
         merge_params : dict = None,
         plot_params : dict = None):

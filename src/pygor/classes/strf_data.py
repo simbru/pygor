@@ -1,6 +1,7 @@
 # Dependencies
 from dataclasses import dataclass, field
 
+import pygor.strf.unit_conversion
 import pygor.utilities
 try:
     from collections import Iterable
@@ -128,9 +129,12 @@ class STRF(Core):
         '''
         return pygor.utils.unit_conversion.au_to_visang(self.stim_size_arbitrary) / upscaling_factor
 
-    @property
-    def strfs_chroma(self):
-        return pygor.utilities.multicolour_reshape(self.strfs, self.numcolour)
+    #@property
+    def strfs_chroma(self, border = False):
+        if border == False:
+            return pygor.utilities.multicolour_reshape(self.strfs_no_border, self.numcolour)
+        else:
+            return pygor.utilities.multicolour_reshape(self.strfs, self.numcolour)
     
     ## Bootstrapping
     def __calc_pval_time(self, parallel = None, **kwargs) -> np.ndarray:
@@ -520,7 +524,7 @@ class STRF(Core):
     """
     TODO Add lazy processing back into contouring (maybe skip timecourses, should be fast enough)
     """
-    
+
     def get_timecourses(self, roi = None, centre_on_zero = False, mask_empty = False, spoof_masks = False, method = "segmentation") -> np.ndarray:
         # try:
         #     return self.__timecourses 
@@ -780,27 +784,29 @@ class STRF(Core):
         for n, roi in enumerate(iterate_through):
                 collapsed_strf_arr[n] = pygor.strf.spatial.collapse_3d(strfs_arr[roi], zscore = zscore, **kwargs)
         if spatial_centre == True:
-            try:
-                return self._spatial_centered_collapse
-            except AttributeError:
-                # Calculate shifts required for each image (vectorised)
-                arr3d = collapsed_strf_arr
-                # Ideally (but does not seem to work correctly, skewed by spurrious contours)
-                contours_centers = np.where(self.get_contours_centres() > 0, np.floor(self.get_contours_centres()), np.ceil(self.get_contours_centres()))
-                target_pos = np.array(arr3d.shape[1:]) / 2
-                shift_by = target_pos - contours_centers
-                #print("Shift by", shift_by)
-                shift_by = np.nan_to_num(shift_by).astype(int) 
-                shift_by = shift_by
-                # np.roll does not support rolling 3D along depth, so 
-                shifted = np.ma.array([np.roll(arr, shift_by[i], axis = (0,1)) for i, arr in enumerate(arr3d)])
-                self._spatial_centered_collapse = shifted
+            # try:
+            #     return self._spatial_centered_collapse
+            # except AttributeError:
+            # Calculate shifts required for each image (vectorised)
+            arr3d = collapsed_strf_arr
+            # Ideally (but does not seem to work correctly, skewed by spurrious contours)
+            contours_centers = np.where(self.get_contours_centres() > 0, np.floor(self.get_contours_centres()), np.ceil(self.get_contours_centres()))
+            # contours_centers = self.centre_strfs
+            # contours_centers = self.get_seg_centres()
+            target_pos = np.array(arr3d.shape[1:]) / 2
+            shift_by = target_pos - contours_centers
+            #print("Shift by", shift_by)
+            shift_by = np.nan_to_num(shift_by).astype(int) 
+            shift_by = shift_by
+            # np.roll does not support rolling 3D along depth, so 
+            shifted = np.ma.array([np.roll(arr, shift_by[i], axis = (0,1)) for i, arr in enumerate(arr3d)])
+            self._spatial_centered_collapse = shifted
             return self._spatial_centered_collapse
             #collapsed_strf_arr = shifted
         return collapsed_strf_arr # do not squeeze for more predictable output
         # spatial.collapse_3d(recording.strfs[strf_num])
     
-    def get_polarities(self, roi = None, exclude_FirstLast=(1,1), mode = "smart_extra", force_recompute = False) -> np.ndarray:
+    def get_polarities(self, roi = None, exclude_FirstLast=(1,1), mode = "cs_pol", force_recompute = False) -> np.ndarray:
         if mode == "old":
             # Get the time as absolute values, then get the max value
             abs_time_max = np.max(np.abs(self.get_timecourses(mask_empty = True).data), axis = 2)
@@ -824,11 +830,11 @@ class STRF(Core):
             # If values are 0, we assign 0
             zero_bools = np.all(times_peak == 0, axis = 1)
             pols = np.where(zero_bools == True, np.nan, pols)    
-        if mode =="smart" or mode == "smart_extra":
+        if mode =="cs_pol" or mode == "cs_pol_extra": 
             _, prediction_times_ROIs = self.cs_seg(force_recompute = force_recompute)
             covar_thresh = -.5
             var_thresh = .2
-            S_absamp_thresh = .5
+            S_absamp_thresh = 1.5
 
             length = prediction_times_ROIs.shape[-1]
             # C_times = prediction_times_ROIs[:, 0, length//2:]
@@ -848,18 +854,20 @@ class STRF(Core):
             # Get signs for each value of C and S times
             C_signs = np.sign(C_times.mean(axis=1))
             #S_signs = np.sign(S_times.mean(axis=1))
-
             #cat = np.empty(prediction_times_ROIs.shape[0], dtype="str")
-            cat = np.where(C_signs > 0, "ON", "OFF")
+            # cat = np.where(C_signs > 0, "ON", "OFF")
+            cat = np.where(C_signs > 0, 1, -1)
+            cat = cat.astype("float")
             zerovals = C_signs==0
-            cat[zerovals] = "NaN"
+            cat[zerovals] = np.nan
             amplitude_pass_idx = np.abs(S_maxabs) > S_absamp_thresh
             var_pass_idx = np.var(S_times, axis=1) > var_thresh
             covariance_pass_idx = CS_covariances < covar_thresh
             pass_bool = np.bitwise_and(amplitude_pass_idx, covariance_pass_idx) * var_pass_idx
-            cat = np.where(pass_bool, cat + " CS", cat)
+            # cat = np.where(pass_bool, cat + " CS", cat)
+            cat = np.where(pass_bool, 2, cat)
             # Extra check to test if CS is weak or strong
-            if mode == "smart_extra":
+            if mode == "cs_pol_extra":
                 with np.errstate(divide='ignore', invalid='ignore'):
                     # condition1 = np.isclose(np.abs(C_maxabs/S_maxabs), -1, atol=1e1)
                     lower_bound = .5
@@ -868,9 +876,28 @@ class STRF(Core):
                 condition2 = [True if "CS" in c else False for c in cat]
                 cat = np.where(np.bitwise_and(condition1, condition2), cat + " strong", cat)
                 # cat = np.where(, cat + " weak", cat)
-
             pols = cat
-    
+        elif mode == "on_off_gabor":
+            # First separate out to ON and OFF
+            spaces = self.collapse_times()
+            space_min = np.min(spaces, axis=(1, 2))
+            space_max = np.max(spaces, axis=(1, 2))
+            cat = np.where(np.abs(space_min) < space_max, 1, -1)
+            thresh = 5
+            min_below_thresh = np.abs(space_min) < thresh
+            max_below_thresh = np.abs(space_max) < thresh
+            no_signal = np.bitwise_and(min_below_thresh, max_below_thresh)
+            cat = cat.astype(float)
+            cat[no_signal] = np.nan
+            # Then separate out "gabor" cells 
+            # with np.errstate(divide='ignore', invalid='ignore'):
+            #     # condition1 = np.isclose(np.abs(C_maxabs/S_maxabs), -1, atol=1e1)
+            #     lower_bound = .5
+            #     upper_bound = 3
+            #     condition1 = (np.abs(C_maxabs / S_maxabs) >= lower_bound) & (np.abs(C_maxabs / S_maxabs) <= upper_bound)                
+            condition2 =  np.bitwise_and(space_min < -thresh, space_max > thresh)
+            cat = np.where(condition2, 2, cat)
+            pols = cat
         return pols
 
     def get_opponency_bool(self) -> bool:
@@ -885,7 +912,55 @@ class STRF(Core):
         else:
             raise AttributeError("Operation cannot be done since object property '.multicolour' is False")
 
-    def get_polarity_category(self) -> str:
+    def compute_average_spaces(self):
+        spaces = self.collapse_times()
+        spaces = pygor.utilities.multicolour_reshape(spaces, self.numcolour)
+        spaces = np.average(spaces, axis = 0)
+        return spaces
+
+    def check_space_average_gabor(self, ampl_thresh = 2):
+        spaces = self.compute_average_spaces()
+        maxes = np.max(spaces, axis = (1, 2))
+        mins = np.min(spaces, axis = (1, 2))
+        condition1 = maxes > ampl_thresh
+        condition2 = mins < -ampl_thresh
+        return np.bitwise_and(condition1, condition2)
+    
+    def calc_balance_ratio(self, mode = None):
+        if mode == None or mode == "all":
+            arrs = self.collapse_times()    
+        if mode == "white":
+            arrs = self.compute_average_spaces()
+        return pygor.strf.spatial.snr_gated_balance_ratio(arrs)
+        
+    def calc_spatial_opponency(self, mode = None):
+        if mode == None or mode == "all":
+            arrs = self.collapse_times()    
+        if mode == "white":
+            arrs = self.compute_average_spaces()
+        return pygor.strf.spatial.snr_gated_spatial_opponency(arrs)
+        
+    def calc_centre_distances(self, mode = "cs_seg"):
+        if mode == "cs_seg":
+            cell_centres = np.nanmean(self.get_seg_centres(), axis = 1, keepdims = True)
+            rf_centres = self.get_seg_centres()
+            euclidian_dist = np.sqrt(np.sum((cell_centres - rf_centres)**2, axis = 2))
+            euclidian_dist = euclidian_dist * self.stim_size
+            # pygor.strf.unit_conversion
+            return euclidian_dist
+        else:
+            raise NotImplementedError
+
+    def get_polarity_labels(self, mode = "on_off_gabor"):
+        pols = self.get_polarities(mode = mode)
+        pols_out = pols.astype(str)
+        pols_out[pols == 1] = "ON"
+        pols_out[pols == -1] = "OFF"
+        pols_out[pols == 2] = "Gabor"
+        pols_out[pols == np.nan] = "NaN"
+        return pols_out
+
+    def get_polarity_category_cell(self) -> str:
         result = []
         arr = pygor.utilities.multicolour_reshape(self.get_polarities(), self.numcolour).T
         for i in arr:
@@ -937,7 +1012,7 @@ class STRF(Core):
     # def get_time_to_peak(self):
 
 
-    def calc_tunings_amplitude(self,dimstr = "time", **kwargs) -> np.ndarray:
+    def calc_tunings_amplitude(self,dimstr = "time", treshhold = 2, **kwargs) -> np.ndarray:
         if self.multicolour == True:
             if dimstr == "time":
                 largest_by_colour = pygor.utilities.multicolour_reshape(self.get_time_amps(**kwargs), self.numcolour)
@@ -947,10 +1022,18 @@ class STRF(Core):
                 tuning_functions = largest_by_colour
             else:
                 raise ValueError("dimstr must be 'time' or 'space'")
+            if treshhold != None:
+                tuning_functions = np.where(np.abs(tuning_functions) > treshhold, tuning_functions, np.nan)
             # Returns wavelengths according to order in self.strfs, invert order for UV - R by wavelength (increasing)
             return tuning_functions.T #transpose for simplicity
         else:
             raise AttributeError("Operation cannot be done since object property '.multicolour.' is False")
+
+    def calc_mean_absolute_deviation(self, dimstr = "space", **kwargs):
+        tunings = self.calc_tunings_amplitude(dimstr = dimstr, **kwargs)
+        mad = np.mean(np.abs(tunings - np.mean(tunings, axis = 1, keepdims=True)), axis = 1)
+        mad = np.where(mad == 0, np.inf, mad)
+        return mad
 
     def calc_tunings_area(self, size = None, upscale_factor = 4, largest_only = True) -> np.ndarray:
         if self.multicolour == True:
@@ -1051,7 +1134,7 @@ class STRF(Core):
     def plot_strfs_space(self, **kwargs): 
         return pygor.strf.plotting.simple.plot_collapsed_strfs(self, **kwargs)
 
-    def plot_chromatic_overview(self, roi = None, contours = False, with_times = True, **kwargs):
+    def plot_chromatic_overview(self, roi = None, contours = False, with_times = False, **kwargs):
         with warnings.catch_warnings(record=True) as w:
             # Cause all warnings to always be triggered.
             warnings.simplefilter("always")
@@ -1099,8 +1182,8 @@ class STRF(Core):
         with open(final_path, 'wb') as outp:
             joblib.dump(self, outp, compress='zlib')
 
-    def to_rgb(self, roi = None, rgb_channels = [0, 1, 2], bgr = True, plot = False, method = "grey_centered",
-            remove_borders = True, **kwargs):
+    def to_rgb(self, roi = None, rgb_channels = [0, 1, 3], bgr = True, plot = False, gamma = None, method = "abs",
+            remove_borders = None, **kwargs):
         # input_arr = np.squeeze(pygor.utilities.multicolour_reshape(self.collapse_times(), self.numcolour))[:, roi]
         def _fetch_data(roi):
             # start_index = roi + (roi * self.numcolour)
@@ -1110,13 +1193,16 @@ class STRF(Core):
 
         def _run(self, roiinput, rgb_channels = rgb_channels):
             arr = _fetch_data(roiinput)
-            norm_arr = pygor.utilities.scale_by(arr, method = method)
+            norm_arr = pygor.utilities.scale_by(arr, method=method)
+        
             # Only extract channels after normalising
             norm_arr = norm_arr[rgb_channels]
             if remove_borders is True:
                 norm_arr = pygor.utilities.auto_remove_border(norm_arr)
             if bgr is True:
                 norm_arr = np.rollaxis(norm_arr, axis=0, start=3)
+            if gamma is not None:
+                norm_arr = np.power(norm_arr / norm_arr.max(), gamma) * norm_arr.max()
             return norm_arr
         if plot is True:
             if isinstance(roi, Iterable) is True:
@@ -1196,7 +1282,7 @@ class STRF(Core):
             print(kwargs)
             return pygor.strf.centsurr.run_object(self, roi, plot = plot, **kwargs)
 
-    def get_seg_centres(self, roi = None, weighted = False, channel_reshape = True,**kwargs):
+    def get_seg_centres(self, roi = None, weighted = True, channel_reshape = True,**kwargs):
         cmaps, _ = self.cs_seg(**kwargs)
         centres_list = []
         for n, segmap in enumerate(cmaps):
@@ -1206,7 +1292,7 @@ class STRF(Core):
                 centres_list.append(np.array([np.nan, np.nan]))
             else:
                 if weighted is True:
-                    weights =  np.abs(np.squeeze(self.collapse_times(roi))[centre_coords[:, 0], centre_coords[:, 1]])**2
+                    weights = np.abs(np.squeeze(self.collapse_times(n))[centre_coords[:, 0], centre_coords[:, 1]])**2
                 else:
                     weights = None
                 centre = np.average(centre_coords, axis = 0, weights = weights)

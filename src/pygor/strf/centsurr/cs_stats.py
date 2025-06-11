@@ -2,6 +2,8 @@ from math import e
 import numpy as np
 from scipy import signal
 from collections import defaultdict
+
+from sklearn.metrics import euclidean_distances
 import pygor.np_ext
 import pygor.strf.spatial
 import pandas as pd
@@ -65,7 +67,7 @@ def cs_ratio(csn_times, indices_around_peak=2):
     if np.ma.is_masked(value):
         return np.nan
     else:    
-        return value
+        return 1 / value
 
 def cs_contrast(csn_times, indices_around_peak=2):
     """
@@ -365,10 +367,16 @@ def gen_stats(strfs_obj, colour_list = ["R", "G", "B", "UV"], **kwargs):
     """
     #strfs_arrs_list = strfs_obj.strfs_no_border
     rois_index = np.repeat(np.arange(strfs_obj.num_rois), len(colour_list))
+    polarities = strfs_obj.get_polarities()
     if rois_index.size == 0:
         return None
     ipl_depths = np.repeat(strfs_obj.ipl_depths, len(colour_list))
+    chroma_mads = np.repeat(strfs_obj.calc_mean_absolute_deviation(), len(colour_list)) 
+    gabor_bools = np.repeat(strfs_obj.check_space_average_gabor(), len(colour_list))
     output = defaultdict(list)
+    spatial_balance = np.repeat(strfs_obj.calc_balance_ratio(mode="white"), len(colour_list))
+    spatial_opponency = np.repeat(strfs_obj.calc_spatial_opponency(mode="white"), len(colour_list))
+    euclidean_distance = np.reshape(strfs_obj.calc_centre_distances(), -1)
     for i in np.arange(strfs_obj.num_rois * strfs_obj.numcolour):
         prediction_map, prediction_times = strfs_obj.cs_seg(i)
         time_len = prediction_times.shape[1]
@@ -443,6 +451,7 @@ def gen_stats(strfs_obj, colour_list = ["R", "G", "B", "UV"], **kwargs):
             output["dia_n"].append(dia_n)
             # Others
             output["colour"].append(colour_list[i % len(colour_list)])
+            output["centre_distance"].append(euclidean_distance[i])
             # Assign polarity
 
             # if np.abs(np.max(prediction_times[0])) > np.abs(np.min(prediction_times[0])):
@@ -471,19 +480,26 @@ def gen_stats(strfs_obj, colour_list = ["R", "G", "B", "UV"], **kwargs):
             C_sign = np.sign(maxabsC)
             S_sign = np.sign(maxabsS)
 
-            if maxabsC == 0 and maxabsS == 0:
-                pol = "undefined"
-            elif np.abs(maxabsC) > c_threshold and np.abs(maxabsS) > s_threshold:
-                if C_sign == S_sign:
-                    pol = "ON" if C_sign > 0 else "OFF"
-                else:
-                    pol = "CS ON" if C_sign > 0 else "CS OFF"
-            elif np.abs(maxabsC) > c_threshold:
-                pol = "ON" if C_sign > 0 else "OFF"
-            else:
-                pol = "other"
-
-            
+            # if maxabsC == 0 and maxabsS == 0:
+            #     pol = "undefined"
+            # elif np.abs(maxabsC) > c_threshold and np.abs(maxabsS) > s_threshold:
+            #     if C_sign == S_sign:
+            #         pol = "ON" if C_sign > 0 else "OFF"
+            #     else:
+            #         pol = "CS ON" if C_sign > 0 else "CS OFF"
+            # elif np.abs(maxabsC) > c_threshold:
+            #     pol = "ON" if C_sign > 0 else "OFF"
+            # else:
+            #     pol = "other"
+            pol = polarities[i]
+            chroma_mad = chroma_mads[i]
+            curr_gabor_bool = gabor_bools[i]
+            balance = spatial_balance[i]
+            opponency = spatial_opponency[i]
+            output["gabor_bool"].append(curr_gabor_bool)
+            output["white_balance"].append(balance)
+            output["white_opponency"].append(opponency)
+            output["chroma_mad"].append(chroma_mad)
             output["polarity"].append(pol)
             output["IPL"].append(ipl_depths[i])
             output["roi"].append(rois_index[i])

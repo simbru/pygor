@@ -33,6 +33,94 @@ def centroid(arr):#
         sum_y = np.sum(arr[1])
     return sum_x/length, sum_y/length
 
+def snr_gated_balance_ratio(sta_array, axis=(-2, -1), snr_threshold=5.0, noise_method='std'):
+    """
+    Calculate SNR-gated balance ratio for spatial opponency.
+    
+    Parameters:
+    -----------
+    sta_array : numpy array
+        STA data of any shape
+    axis : int, tuple of ints, or None
+        Axis/axes along which to compute the metric. If None, compute over entire array.
+        For shape (cell_idx, num_colours, x, y), use axis=(2,3) to compute per cell/color
+    snr_threshold : float
+        Minimum SNR required to compute balance ratio
+    noise_method : str
+        Method to estimate noise ('std' or 'periphery')
+    
+    Returns:
+    --------
+    balance_ratio : numpy array
+        Balance ratios (NaN where SNR < threshold)
+    snr : numpy array  
+        Signal-to-noise ratios
+    """
+    
+    # Calculate SNR
+    peak_signal = np.max(np.abs(sta_array), axis=axis, keepdims=True)
+    
+    if noise_method == 'std':
+        noise_level = np.std(sta_array, axis=axis, keepdims=True)
+    else:  # Could add periphery method later
+        noise_level = np.std(sta_array, axis=axis, keepdims=True)
+    
+    snr = peak_signal / (noise_level + 1e-10)  # Avoid division by zero
+    
+    # Calculate balance ratio where SNR is sufficient
+    pos_sum = np.sum(np.maximum(sta_array, 0), axis=axis, keepdims=True)
+    neg_sum = np.abs(np.sum(np.minimum(sta_array, 0), axis=axis, keepdims=True))
+    
+    # Avoid division by zero
+    max_sum = np.maximum(pos_sum, neg_sum)
+    min_sum = np.minimum(pos_sum, neg_sum)
+    
+    balance_ratio = np.where(max_sum > 0, min_sum / max_sum, 0)
+    
+    # Apply SNR gate
+    balance_ratio = np.where(snr.squeeze() >= snr_threshold, balance_ratio.squeeze(), np.nan)
+    
+    return balance_ratio#, snr.squeeze()
+
+def snr_gated_spatial_opponency(sta_array, axis=(-2, -1), snr_threshold=3.0, noise_method='std'):
+    """
+    Calculate SNR-gated spatial opponency (net vs total energy).
+    
+    Parameters same as above.
+    
+    Returns:
+    --------
+    spatial_opponency : numpy array
+        Spatial opponency values (NaN where SNR < threshold)  
+    snr : numpy array
+        Signal-to-noise ratios
+    """
+    
+    # Calculate SNR (same as above)
+    peak_signal = np.max(np.abs(sta_array), axis=axis, keepdims=True)
+    
+    if noise_method == 'std':
+        noise_level = np.std(sta_array, axis=axis, keepdims=True)
+    else:
+        noise_level = np.std(sta_array, axis=axis, keepdims=True)
+    
+    snr = peak_signal / (noise_level + 1e-10)
+    
+    # Calculate spatial opponency
+    net_response = np.sum(sta_array, axis=axis, keepdims=True)
+    total_energy = np.sum(np.abs(sta_array), axis=axis, keepdims=True)
+    
+    spatial_opponency = np.where(total_energy > 0, 
+                                1 - (np.abs(net_response) / total_energy), 
+                                0)
+    
+    # Apply SNR gate
+    spatial_opponency = np.where(snr.squeeze() >= snr_threshold, 
+                                spatial_opponency.squeeze(), 
+                                np.nan)
+    
+    return spatial_opponency 
+
 def _legacy_pixel_polarity(array_3d):
     """
     Calculate the polarity of each pixel in a 3D array based on the time series
@@ -232,6 +320,8 @@ def corr_spacetime(arr_3d, convolve = True, kernel_width = 3, kernel_depth = 5,
         # Finally we re-scale the data to apply the same range as we had before (makes life a bit easier)
         temp_arr = prod_funct(arr_3d, axis = 0)
         min, max = np.min(temp_arr), np.max(temp_arr)
+        if min == max:
+            min, max = 0, 1
         scaler = MinMaxScaler(feature_range=(min, max))
         corr_arr = scaler.fit_transform(corr_arr.reshape(-1, 1)).reshape(corr_arr.shape)
     else:
@@ -477,6 +567,17 @@ def centre_on_max(arr_3d):
     shift_by = target_pos - arr_2d_max
     shift_by = np.nan_to_num(shift_by).astype(int)
     strf_shifted = np.roll(arr_3d, shift_by, axis = (1,2))
+    return strf_shifted
+
+def centre_on_max2d(arr_2d):
+    """
+    Simpler, faster centring on max pixel in RF (approximating centre) for 2D arrays
+    """
+    arr_2d_max = np.unravel_index(np.argmax(np.abs(arr_2d)), arr_2d.shape)
+    target_pos = np.array(arr_2d.shape) / 2  # middle
+    shift_by = target_pos - arr_2d_max
+    shift_by = np.nan_to_num(shift_by).astype(int)
+    strf_shifted = np.roll(arr_2d, shift_by, axis=(0, 1))
     return strf_shifted
 
 def centre_on_mass(arr_3d):

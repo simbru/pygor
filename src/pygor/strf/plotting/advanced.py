@@ -7,6 +7,7 @@ try:
 except ImportError:
     from collections.abc import Iterable
 # Local imports
+import pygor.plotting
 import pygor.utilities
 import pygor.strf.spatial
 import pygor.strf.temporal
@@ -14,27 +15,33 @@ import pygor.strf.contouring
 import pygor.strf.pixconverter
 
 from pygor.plotting.custom import red_map, green_map, blue_map, violet_map, fish_palette
-
+pygor.plotting.fish_palette.append("dimgrey")
+pygor.plotting.fish_palette.append("grey")
 def chroma_overview(
     data_strf_object,
     specify_rois=None,
     ipl_sort=False,
     y_crop=(0, 0),
     x_crop=(0, 0),
-    column_titles=["588 nm", "478 nm", "422 nm", "375 nm"],
-    colour_maps=[red_map, green_map, blue_map, violet_map],
+    column_titles=["588 nm", "478 nm", "422 nm", "375 nm", "Broad spectrum", "Full spectrum"],
+    colour_maps=[red_map, green_map, blue_map, violet_map, "Greys_r", "Greys_r"],
+    centre_dots = True,
     contours=False,
+    crosshairs=True,
     ax=None,
     high_contrast=True,
-    remove_border=True,
+    remove_border=False,
     labels=None,
     clim="roi",
-    with_times=True,
+    with_times=False,
     with_rgb=True,
     time_setting="1d",
     time_dur=1.3,
+    figsize = None,
 ):
     # Create iterators depneding on desired output
+    if isinstance(specify_rois, np.int64) or isinstance(specify_rois, np.int32):
+        specify_rois = int(specify_rois) # handle silly numpy int types issue
     if isinstance(
         specify_rois, int
     ):  # user specifies number of rois from "start", although negative is also allowed
@@ -53,7 +60,9 @@ def chroma_overview(
         specify_rois = range(data_strf_object.num_rois)
     if isinstance(colour_maps, Iterable) is False:
         colour_maps = [colour_maps] * len(column_titles)
-    if isinstance(data_strf_object, pygor.classes.strf_data.STRF) is False:
+    # if isinstance(data_strf_object, pygor.classes.strf_data.STRF) is False:
+    if str(data_strf_object) != "<class 'pygor.classes.strf_data.STRF'>":
+        print(data_strf_object)
         raise AttributeError("Input object is not a STRF object.")
         # warnings.warn(
         #     "Input object is not a STRF object. Attempting to treat as nxm Numpy array. Use-case not intended, expect errors."
@@ -82,7 +91,9 @@ def chroma_overview(
         else:
             num_rows = len(specify_rois)
         figsize_scaler = 1
-        fig, ax = plt.subplots(num_rows,num_cols,figsize=(num_cols * 2 * figsize_scaler, num_rows * 1 * figsize_scaler),layout="constrained",)
+        if figsize is None:
+            figsize = (num_cols * 2 * figsize_scaler, num_rows * 1 * figsize_scaler)
+        fig, ax = plt.subplots(num_rows,num_cols,figsize=figsize,layout="constrained",)
     else:
         fig = plt.gcf()
     for n, roi in enumerate(rois_specified):
@@ -96,7 +107,7 @@ def chroma_overview(
             border_tup = pygor.utilities.check_border(strfs_chroma)
             strfs_chroma = np.copy(
                 pygor.utilities.auto_remove_border(strfs_chroma)
-            )  # this works
+            )
         else:
             border_tup = (0, 0, 0, 0)
         if clim == "roi" or clim == None:
@@ -131,6 +142,15 @@ def chroma_overview(
                 np.abs(
                     np.diff(ax[n, 0].get_ylim())[0] / np.diff(ax[0, 0].get_xlim())[0]
                 )
+            # if centre_dots == True:
+            #     centres = data_strf_object.get_seg_centres(fetch_indices)
+            #     for colour_num, colour_centre in enumerate(centres):
+            #         ax[n, colour_num].plot(
+            #             colour_centre[:, 1],
+            #             colour_centre[:, 0],
+            #             "o",
+            #             color=pygor.plotting.fish_palette[colour_num],
+            #         )
         if with_times == True:
             times = np.squeeze(pygor.utilities.multicolour_reshape(
                 data_strf_object.get_timecourses(fetch_indices), numcolour
@@ -149,13 +169,30 @@ def chroma_overview(
                 specify_rois=roi,
                 ax=ax[n, numcolour : numcolour + 2],
                 contours=False,
+                remove_border=remove_border,
                 x_crop=x_crop,
                 y_crop=y_crop,
             )
-    for axis in ax.flat:
+    for n, axis in enumerate(ax.flat):
         axis.axis(False)
+        if crosshairs == True:
+            if len(axis.images) > 0: 
+                xlim = axis.get_xlim()
+                ylim = axis.get_ylim()
+                axis.axhline(
+                    y=ylim[0] + (ylim[1] - ylim[0]) / 2,
+                    color="w",
+                    linewidth=1,
+                )
+                axis.axvline(
+                    x=xlim[0] + (xlim[1] - xlim[0]) / 2,
+                    color="w",
+                    linewidth=1,
+                )
     if labels != None:
-        for axis, label in zip(ax.flat[::numcolour], labels):
+        if labels == "auto":
+            labels = [f"ROI {roi}" for roi in specify_rois]
+        for axis, label in zip(ax[:, 0].flat, labels):
             axis.axis(True)
             axis.spines["top"].set_visible(False)
             axis.spines["right"].set_visible(False)
@@ -210,7 +247,7 @@ def chroma_overview(
         #     AssertionError("Unexpected input for time_setting")
     degrees = 15
     visang_to_space = pygor.strf.pixconverter.visang_to_pix(
-        degrees, pixwidth=40, block_size=data_strf_object.stim_size_arbitrary
+        degrees, pixwidth=40, #block_size=data_strf_object.stim_size_arbitrary
     )
     pygor.plotting.add_scalebar(
         visang_to_space,
@@ -229,7 +266,7 @@ def _contours_plotter(
 ):
     if ax is None:
         fig, ax = plt.subplots()
-    contours = pygor.utilities.multicolour_reshape(data_strf_object.fit_contours(), 4)[
+    contours = pygor.utilities.multicolour_reshape(data_strf_object.fit_contours(), data_strf_object.numcolour)[
         :, roi
     ]
     neg_contours = contours[:, 0]
@@ -304,7 +341,7 @@ def rgb_representation(
     x_crop=(0, 0),
     ax=None,
     contours=False,
-    remove_border=True,
+    remove_border=False,
 ):
     # Create iterators depneding on desired output
     if isinstance(specify_rois, int) or isinstance(

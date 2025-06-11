@@ -30,39 +30,42 @@ compare_conditions = {
 # green_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["dimgrey", "grey","white","mediumaquamarine","teal"])
 # blue_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["dimgrey", "grey","white","#5600fe","#4400cb"])
 # violet_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["dimgrey", "grey","white","fuchsia","#b22cb2"])
+
 # red_map    = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "lightgrey", "#ef8e00"])
 # green_map  = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "lightgrey", "teal"])
 # blue_map   = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "lightgrey", "#5600fe"])
 # violet_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "lightgrey", "#ff00ff"])
-# red_map    = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "white", "#ef8e00"])
-# green_map  = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "white", "teal"])
-# blue_map   = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "white", "#5600fe"])
-# violet_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "white", "#ff00ff"])
-red_map2 = matplotlib.colors.LinearSegmentedColormap.from_list(
+
+red_map    = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "dimgrey", "#ef8e00"])
+green_map  = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "dimgrey", "teal"])
+blue_map   = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "dimgrey", "#5600fe"])
+violet_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "dimgrey", "#ff00ff"])
+
+red_map = matplotlib.colors.LinearSegmentedColormap.from_list(
     "", ["black", "silver", "#ef8e00"]
 )
-green_map2 = matplotlib.colors.LinearSegmentedColormap.from_list(
+green_map = matplotlib.colors.LinearSegmentedColormap.from_list(
     "", ["black", "silver", "teal"]
 )
-blue_map2 = matplotlib.colors.LinearSegmentedColormap.from_list(
+blue_map = matplotlib.colors.LinearSegmentedColormap.from_list(
     "", ["black", "silver", "#5600fe"]
 )
-violet_map2 = matplotlib.colors.LinearSegmentedColormap.from_list(
+violet_map = matplotlib.colors.LinearSegmentedColormap.from_list(
     "", ["black", "silver", "#ff00ff"]
 )
 
-red_map = matplotlib.colors.LinearSegmentedColormap.from_list(
-    "", ["black", "#ef8e00"]
-)
-green_map = matplotlib.colors.LinearSegmentedColormap.from_list(
-    "", ["black", "teal"]
-)
-blue_map = matplotlib.colors.LinearSegmentedColormap.from_list(
-    "", ["black", "#5600fe"]
-)
-violet_map = matplotlib.colors.LinearSegmentedColormap.from_list(
-    "", ["black", "#ff00ff"]
-)
+# red_map = matplotlib.colors.LinearSegmentedColormap.from_list(
+#     "", ["black", "#ef8e00"]
+# )
+# green_map = matplotlib.colors.LinearSegmentedColormap.from_list(
+#     "", ["black", "teal"]
+# )
+# blue_map = matplotlib.colors.LinearSegmentedColormap.from_list(
+#     "", ["black", "#5600fe"]
+# )
+# violet_map = matplotlib.colors.LinearSegmentedColormap.from_list(
+#     "", ["black", "#ff00ff"]
+# )
 
 maps_concat = [red_map, green_map, blue_map, violet_map]
 

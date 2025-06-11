@@ -388,7 +388,7 @@ def _chromatic_dict(
         dict["ipl_depths"] = (
             data_strf_obj.ipl_depths
         )  # some things are already aligned by cell_id naturally (from Igor)
-        dict["cat_pol"] = data_strf_obj.get_polarity_category()
+        dict["cat_pol"] = data_strf_obj.get_polarity_category_cell()
 
         polarities = pygor.utilities.multicolour_reshape(
             data_strf_obj.get_polarities(), num_wavelengths
