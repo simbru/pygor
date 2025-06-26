@@ -179,6 +179,8 @@ def plot_averages(
         # arr = scaler.fit_transform(arr)
         maxabs = np.max(np.abs(arr))
         if rois is not None:
+            print(rois)
+            print(arr.shape)
             arr = arr[rois]
         img = ax.imshow(arr, aspect="auto", cmap = "Greys_r")
         # ax.set_xticklabels(np.round(load.triggertimes, 3))
