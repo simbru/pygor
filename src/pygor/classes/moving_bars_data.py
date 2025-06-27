@@ -133,3 +133,10 @@ class MovingBars(Core):
         """Plot directional responses in circular arrangement"""
         arr = np.squeeze(self.split_averages_directionally()[:, [roi_index]])
         return circular_directional_plots.plot_directional_responses_circular(arr, self.directions_list, figsize)
+    
+    def plot_circular_responses_with_polar(self, roi_index=-1, metric='peak', figsize=(10, 10)):
+        """Plot directional responses with central polar summary"""
+        arr = np.squeeze(self.split_averages_directionally()[:, [roi_index]])
+        return circular_directional_plots.plot_directional_responses_circular_with_polar(
+            arr, self.directions_list, figsize=figsize, metric=metric
+        )
