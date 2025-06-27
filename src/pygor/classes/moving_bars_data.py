@@ -134,9 +134,34 @@ class MovingBars(Core):
         arr = np.squeeze(self.split_averages_directionally()[:, [roi_index]])
         return circular_directional_plots.plot_directional_responses_circular(arr, self.directions_list, figsize)
     
-    def plot_circular_responses_with_polar(self, roi_index=-1, metric='peak', figsize=(10, 10)):
-        """Plot directional responses with central polar summary"""
-        arr = np.squeeze(self.split_averages_directionally()[:, [roi_index]])
+    def plot_circular_responses_with_polar(self, roi_index=-1, metric='peak', figsize=(10, 10), 
+                                        show_trials=True, polar_size=0.3):
+        """
+        Plot directional responses with central polar summary and optional individual trials.
+        
+        Parameters:
+        -----------
+        roi_index : int, optional
+            ROI index to plot (default -1 for last ROI)
+        metric : str, optional
+            Summary metric for polar plot ('peak', 'auc', 'mean', etc.)
+        figsize : tuple, optional
+            Figure size (width, height)
+        show_trials : bool, optional
+            Whether to show individual trial traces as faint lines (default False)
+        polar_size : float, optional
+            Size of the central polar plot as fraction of figure (default 0.3)
+        
+        Returns:
+        --------
+        fig, ax_polar : matplotlib objects
+            Figure and polar axes objects
+        """
         return circular_directional_plots.plot_directional_responses_circular_with_polar(
-            arr, self.directions_list, figsize=figsize, metric=metric
+            moving_bars_obj=self,
+            roi_index=roi_index,
+            metric=metric,
+            figsize=figsize,
+            show_trials=show_trials,
+            polar_size=polar_size
         )
