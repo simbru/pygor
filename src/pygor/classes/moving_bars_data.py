@@ -135,7 +135,7 @@ class MovingBars(Core):
         return circular_directional_plots.plot_directional_responses_circular(arr, self.directions_list, figsize)
     
     def plot_circular_responses_with_polar(self, roi_index=-1, metric='peak', figsize=(10, 10), 
-                                        show_trials=True, polar_size=0.3):
+                                        show_trials=True, polar_size=0.3, data_crop=None):
         """
         Plot directional responses with central polar summary and optional individual trials.
         
@@ -163,5 +163,6 @@ class MovingBars(Core):
             metric=metric,
             figsize=figsize,
             show_trials=show_trials,
-            polar_size=polar_size
+            polar_size=polar_size,
+            data_crop=data_crop
         )

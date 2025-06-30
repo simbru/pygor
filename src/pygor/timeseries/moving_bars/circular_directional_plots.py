@@ -66,6 +66,7 @@ def plot_directional_responses_circular_with_polar(
     polar_size=0.3,
     roi_index=-1,
     show_trials=True,
+    data_crop=None
 ):
     """
     Plot directional responses in a circular arrangement with central polar plot.
@@ -117,6 +118,12 @@ def plot_directional_responses_circular_with_polar(
     if show_trials:
         # Shape: (n_directions, n_rois, n_trials, n_timepoints) -> (n_directions, n_trials, n_timepoints)
         trial_data = moving_bars_obj.split_snippets_directionally()[:, roi_index, :, :]
+
+    if data_crop is not None:
+        print(data.shape)
+        data = data[:, data_crop[0]:data_crop[1]]
+        if trial_data is not None:
+            trial_data = trial_data[:, :, data_crop[0]:data_crop[1]]
 
     # # Handle the case where data is None but moving_bars_obj is provided
     # data = np.squeeze(moving_bars_obj.split_averages_directionally()[:, [roi_index]])
@@ -217,7 +224,7 @@ def plot_directional_responses_circular_with_polar(
 
         # Clean styling
         ax.set_xlim(0, len(data[i]))
-        y_range = np.max(np.abs(data)) * 1.25 if np.max(np.abs(data)) > 0 else 1
+        y_range = np.max(np.abs(data)) * 1.25 if np.max(np.abs(data)) > 5 else 5
         ax.set_ylim(-y_range, y_range)
         ax.set_xticks([])
         ax.set_yticks([])
