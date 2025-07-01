@@ -53,9 +53,9 @@ class MovingBars(Core):
             
             adjusted_array = array[tuple(slices)]
             
-            print(f"Warning: Trimmed {remainder} elements from axis {axis} "
-                  f"(original length: {axis_length}, new length: {trim_length}) "
-                  f"to allow even splitting into {n_splits} parts.")
+            # print(f"Warning: Trimmed {remainder} elements from axis {axis} "
+            #       f"(original length: {axis_length}, new length: {trim_length}) "
+            #       f"to allow even splitting into {n_splits} parts.")
             
             return adjusted_array, n_splits, remainder
 
@@ -124,8 +124,8 @@ class MovingBars(Core):
                 self.averages[:, 1:], self.dir_num, axis=-1
             )
         
-        if remainder > 0:
-            print(f"DirectionalAverages: Lost {remainder} time points to ensure even splitting")
+        # if remainder > 0:
+        #     print(f"DirectionalAverages: Lost {remainder} time points to ensure even splitting")
             
         return np.array(np.split(adjusted_data, actual_splits, axis=-1))
     
@@ -165,4 +165,43 @@ class MovingBars(Core):
             show_trials=show_trials,
             polar_size=polar_size,
             data_crop=data_crop
+        )
+    
+    def plot_dual_phase_responses(self, roi_index=-1, phase_split=3200, metric='peak', 
+                            figsize=(12, 10), show_trials=True, polar_kwargs=None,
+                            phase_colors=("#2E8B57", "#B8860B")):
+        """
+        Plot directional responses for two stimulus phases (OFF->ON and ON->OFF) 
+        with overlapping polar plots and separate trace arrangements.
+
+        Parameters:
+        -----------
+        phase_split : int, optional
+            Frame number where phase 1 ends and phase 2 begins (default 3200)
+        roi_index : int, optional
+            ROI index to plot (default -1 for last ROI)
+        metric : str, optional
+            Summary metric for polar plots ('peak', 'auc', 'mean', etc.)
+        figsize : tuple, optional
+            Figure size (width, height)
+        show_trials : bool, optional
+            Whether to show individual trial traces (default True)
+        polar_kwargs : dict, optional
+            Additional keyword arguments for polar plot styling
+        phase_colors : tuple, optional
+            Colors for (phase1, phase2) plots
+
+        Returns:
+        --------
+        fig, ax_polar : matplotlib objects
+            Figure and polar axes objects
+        """
+        return circular_directional_plots.plot_directional_responses_dual_phase(
+            moving_bars_obj=self,
+            roi_index=roi_index,
+            metric=metric,
+            figsize=figsize,
+            show_trials=show_trials,
+            polar_kwargs=polar_kwargs,
+            phase_colors=phase_colors
         )

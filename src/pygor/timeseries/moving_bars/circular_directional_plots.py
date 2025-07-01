@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+
 def plot_directional_responses_circular(data, directions_list=None, figsize=(8, 8)):
     """
     Plot directional responses in a circular arrangement.
@@ -66,7 +67,7 @@ def plot_directional_responses_circular_with_polar(
     polar_size=0.3,
     roi_index=-1,
     show_trials=True,
-    data_crop=None
+    data_crop=None,
 ):
     """
     Plot directional responses in a circular arrangement with central polar plot.
@@ -121,9 +122,9 @@ def plot_directional_responses_circular_with_polar(
 
     if data_crop is not None:
         print(data.shape)
-        data = data[:, data_crop[0]:data_crop[1]]
+        data = data[:, data_crop[0] : data_crop[1]]
         if trial_data is not None:
-            trial_data = trial_data[:, :, data_crop[0]:data_crop[1]]
+            trial_data = trial_data[:, :, data_crop[0] : data_crop[1]]
 
     # # Handle the case where data is None but moving_bars_obj is provided
     # data = np.squeeze(moving_bars_obj.split_averages_directionally()[:, [roi_index]])
@@ -158,6 +159,11 @@ def plot_directional_responses_circular_with_polar(
     sort_indices = np.argsort(directions_deg)
     sorted_angles = angles[sort_indices]
     sorted_values = values[sort_indices]
+    sorted_data = data[sort_indices]
+    sorted_directions_deg = directions_deg[sort_indices]
+    # Also sort trial data if it exists
+    if show_trials and trial_data is not None:
+        sorted_trial_data = trial_data[sort_indices]
 
     # Set up polar plot defaults
     default_polar_kwargs = {
@@ -194,13 +200,30 @@ def plot_directional_responses_circular_with_polar(
         pad=20,
     )
     ax_polar.grid(True, alpha=0.3)
+    # Calculate global y-limits for all traces
+    if show_trials and trial_data is not None:
+        # Use trial data for scaling to capture full variability
+        all_trace_data = sorted_trial_data.flatten()
+    else:
+        # Use average data for scaling
+        all_trace_data = sorted_data.flatten()
 
+    global_min = np.min(all_trace_data)
+    global_max = np.max(all_trace_data)
+    global_range = global_max - global_min
+    padding = global_range * 0.1  # 25% padding
+    y_min_global = global_min - padding
+    y_max_global = global_max + padding
+    # Set minimum range to (-3, 3)
+    y_min_global = min(y_min_global, -5)
+    y_max_global = max(y_max_global, 5)
     # Add individual trace plots around the perimeter
-    for i, angle in enumerate(angles):
+    for i, angle in enumerate(sorted_angles):
         # Calculate subplot position (further out to accommodate central polar plot)
+        # Fixed angle calculation to match standard directional conventions
         radius = 0.38  # Increased radius to make room for central plot
-        x_center = 0.5 + radius * np.cos(angle - np.pi / 2)
-        y_center = 0.5 + radius * np.sin(angle - np.pi / 2)
+        x_center = 0.5 + radius * np.cos(-angle + np.pi / 2)  # Fixed: negative angle
+        y_center = 0.5 + radius * np.sin(-angle + np.pi / 2)  # Fixed: negative angle
 
         # Create subplot
         subplot_size = 0.08  # Slightly smaller to fit more around
@@ -213,24 +236,240 @@ def plot_directional_responses_circular_with_polar(
             ]
         )
 
-        # Plot trace
+        # Plot trace - use sorted data
         if show_trials:
-            ax.plot(trial_data[i].T, "k-", linewidth=.5, alpha=0.33)
-        ax.plot(data[i], "k-", linewidth=1)
+            ax.plot(sorted_trial_data[i].T, "k-", linewidth=0.5, alpha=0.33)
+        ax.plot(sorted_data[i], "k-", linewidth=1)
         ax.axhline(0, color="gray", linestyle="-", alpha=0.3, linewidth=0.5)
 
         # Clean neutral background
         # ax.set_facecolor("#f8f8f8")
 
         # Clean styling
-        ax.set_xlim(0, len(data[i]))
-        y_range = np.max(np.abs(data)) * 1.25 if np.max(np.abs(data)) > 5 else 5
-        ax.set_ylim(-y_range, y_range)
+        ax.set_xlim(0, len(sorted_data[i]))  # Fixed: use sorted_data
+        # y_range = np.max(np.abs(data)) * 1.25 if np.max(np.abs(data)) > 5 else 5
+        # y_range = data_absmax + data_absmax * 0.5
+        # ax.set_ylim(-y_range, y_range)
+        ax.set_ylim(y_min_global, y_max_global)
         ax.set_xticks([])
         ax.set_yticks([])
-        sns.despine(ax=ax, left=False, bottom=False, right=True, top=True)
+        # ax.set_title(f"{directions_deg[i]:.0f}° or {angle:.0f} rad", fontsize=8)
+        ax.set_title(f"{sorted_directions_deg[i]:.0f}°", fontsize=8)
+        # sns.despine(ax=ax, left=False, bottom=False, right=True, top=False)
 
+    return fig, ax_polar
+
+
+def plot_directional_responses_dual_phase(
+    moving_bars_obj,
+    phase_split=None,
+    directions_list=None,
+    figsize=(12, 10),
+    metric="peak",
+    polar_kwargs=None,
+    roi_index=-1,
+    show_trials=True,
+    phase_colors=("#2E8B57", "#B8860B"),  # Sea green, Dark goldenrod
+):
+    """
+    Plot directional responses for two stimulus phases (OFF->ON and ON->OFF)
+    with overlapping polar plots and separate trace arrangements.
+
+    Parameters:
+    -----------
+    moving_bars_obj : MovingBars object
+        Object containing the directional response data
+    phase_split : int
+        Frame number where phase 1 ends and phase 2 begins (default 3200)
+    directions_list : list of int/float, optional
+        List of direction values in degrees
+    figsize : tuple
+        Figure size (width, height)
+    metric : str or callable
+        Summary metric for polar plots
+    polar_kwargs : dict, optional
+        Additional keyword arguments for polar plot styling
+    roi_index : int, optional
+        ROI index to plot (default -1 for last ROI)
+    show_trials : bool, optional
+        Whether to show individual trial traces
+    phase_colors : tuple
+        Colors for (phase1, phase2) plots
+
+    Returns:
+    --------
+    fig : matplotlib.figure.Figure
+    ax_polar : matplotlib.axes.Axes
+        The central polar plot axes
+    """
+
+    # Extract data
+    data = np.squeeze(moving_bars_obj.split_averages_directionally()[:, [roi_index]])
+    directions_list = moving_bars_obj.directions_list
+
+    # Get trial data if requested
+    trial_data = None
+    if show_trials:
+        trial_data = moving_bars_obj.split_snippets_directionally()[:, roi_index, :, :]
+    if phase_split is None:
+        phase_split = phase_split = moving_bars_obj.averages.shape[1] // moving_bars_obj.trigger_mode // 2  # Should be ~2866
+        print(f"Phase split: {phase_split}")
+    else:
+        phase_split = int(phase_split)
+    # Split data into two phases
+    phase1_data = data[:, :phase_split]  # OFF->ON
+    phase2_data = data[:, phase_split:]  # ON->OFF
+
+    if trial_data is not None:
+        phase1_trial_data = trial_data[:, :, :phase_split]
+        phase2_trial_data = trial_data[:, :, phase_split:]
+
+    n_directions = data.shape[0]
+
+    # Convert directions and sort
+    if directions_list is not None:
+        angles = np.radians(directions_list)
+        directions_deg = np.array(directions_list)
+    else:
+        angles = np.linspace(0, 2 * np.pi, n_directions, endpoint=False)
+        directions_deg = np.degrees(angles)
+
+    sort_indices = np.argsort(directions_deg)
+    sorted_angles = angles[sort_indices]
+    sorted_directions_deg = directions_deg[sort_indices]
+
+    # Sort both phases
+    sorted_phase1_data = phase1_data[sort_indices]
+    sorted_phase2_data = phase2_data[sort_indices]
+
+    if trial_data is not None:
+        sorted_phase1_trial_data = phase1_trial_data[sort_indices]
+        sorted_phase2_trial_data = phase2_trial_data[sort_indices]
+
+    # Calculate metrics for both phases
+    if metric == "peak":
+        phase1_values = np.array(
+            [np.max(np.abs(trace)) for trace in sorted_phase1_data]
+        )
+        phase2_values = np.array(
+            [np.max(np.abs(trace)) for trace in sorted_phase2_data]
+        )
+    elif metric == "auc":
+        phase1_values = np.array(
+            [np.trapz(np.abs(trace)) for trace in sorted_phase1_data]
+        )
+        phase2_values = np.array(
+            [np.trapz(np.abs(trace)) for trace in sorted_phase2_data]
+        )
+    elif metric == "mean":
+        phase1_values = np.array([np.mean(trace) for trace in sorted_phase1_data])
+        phase2_values = np.array([np.mean(trace) for trace in sorted_phase2_data])
+    elif metric == "peak_positive":
+        phase1_values = np.array([np.max(trace) for trace in sorted_phase1_data])
+        phase2_values = np.array([np.max(trace) for trace in sorted_phase2_data])
+    elif metric == "peak_negative":
+        phase1_values = np.array([np.min(trace) for trace in sorted_phase1_data])
+        phase2_values = np.array([np.min(trace) for trace in sorted_phase2_data])
+    elif callable(metric):
+        phase1_values = np.array([metric(trace) for trace in sorted_phase1_data])
+        phase2_values = np.array([metric(trace) for trace in sorted_phase2_data])
+    else:
+        raise ValueError(f"Unknown metric: {metric}")
+
+    # Calculate global y-limits using both phases
+    if show_trials and trial_data is not None:
+        all_trace_data = np.concatenate(
+            [sorted_phase1_trial_data.flatten(), sorted_phase2_trial_data.flatten()]
+        )
+    else:
+        all_trace_data = np.concatenate(
+            [sorted_phase1_data.flatten(), sorted_phase2_data.flatten()]
+        )
+
+    global_min = np.min(all_trace_data)
+    global_max = np.max(all_trace_data)
+    global_range = global_max - global_min
+    padding = global_range * 0.25
+    y_min_global = global_min - padding
+    y_max_global = global_max + padding
+
+    # Set minimum range to (-3, 3)
+    y_min_global = min(y_min_global, -3)
+    y_max_global = max(y_max_global, 3)
+
+    # Create figure
+    fig = plt.figure(figsize=figsize, facecolor="white")
+
+    # Create central polar plot
+    ax_polar = fig.add_axes([0.225, 0.22, 0.55, 0.55], projection="polar")
+
+    # Plot both phases on same polar plot
+    for phase_idx, (values, color, label) in enumerate(
+        zip([phase1_values, phase2_values], phase_colors, ["OFF→ON", "ON→OFF"])
+    ):
+        # Close the circle
+        polar_angles = np.append(sorted_angles, sorted_angles[0])
+        polar_values = np.append(values, values[0])
+
+        # Set up plot style
+        plot_kwargs = {
+            "color": color,
+            "linewidth": 2.5,
+            "marker": "o",
+            "markersize": 6,
+            "alpha": 0.8,
+            "label": label,
+        }
+        if polar_kwargs:
+            plot_kwargs.update(polar_kwargs)
+
+        ax_polar.plot(polar_angles, polar_values, **plot_kwargs)
+        ax_polar.fill(polar_angles, polar_values, alpha=0.2, color=color)
+
+    # Style polar plot
+    ax_polar.set_theta_zero_location("N")
+    ax_polar.set_theta_direction(-1)
+    ax_polar.set_title(
+        f"Dual Phase Directional Tuning\n({metric.replace('_', ' ').title()})",
+        fontsize=14,
+        fontweight="bold",
+        pad=20,
+    )
+    ax_polar.grid(True, alpha=0.3)
+    ax_polar.legend(loc="upper right", bbox_to_anchor=(1.45, 1.1))
+
+    # Add trace plots around perimeter - Phase 1 (inner ring)
+    for i, angle in enumerate(sorted_angles):
+        # Single trace plot per direction
+        radius = 0.38  
+        x_center = 0.5 + radius * np.cos(-angle + np.pi / 2)
+        y_center = 0.5 + radius * np.sin(-angle + np.pi / 2)
         
+        subplot_size = 0.08
+        ax = fig.add_axes([
+            x_center - subplot_size / 2,
+            y_center - subplot_size / 2,
+            subplot_size,
+            subplot_size
+        ])
+        
+        # Plot both phases on same axes with different colors
+        if show_trials and trial_data is not None:
+            ax.plot(sorted_phase1_trial_data[i].T, color=phase_colors[0], 
+                    linewidth=0.3, alpha=0.3)
+            ax.plot(sorted_phase2_trial_data[i].T, color=phase_colors[1], 
+                    linewidth=0.3, alpha=0.3)
+        
+        # Plot average traces for both phases
+        ax.plot(sorted_phase1_data[i], color=phase_colors[0], linewidth=2, label='OFF→ON')
+        ax.plot(sorted_phase2_data[i], color=phase_colors[1], linewidth=2, label='ON→OFF')
+        ax.axhline(0, color="gray", linestyle="-", alpha=0.3, linewidth=0.5)
+        
+        ax.set_xlim(0, max(len(sorted_phase1_data[i]), len(sorted_phase2_data[i])))
+        ax.set_ylim(y_min_global, y_max_global)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_title(f"{sorted_directions_deg[i]:.0f}°", fontsize=8)
     return fig, ax_polar
 
 

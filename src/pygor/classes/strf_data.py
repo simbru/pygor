@@ -1131,7 +1131,15 @@ class STRF(Core):
     def plot_timecourse(self, roi):
         plt.plot(self.get_timecourses()[roi].T)
 
-    def plot_strfs_space(self, **kwargs): 
+    def plot_space(self, roi = None, **kwargs):
+        space = self.collapse_times(roi)
+        maxabs = np.max(np.abs(space))
+        if "clim" not in kwargs:
+            kwargs["clim"] = [-maxabs, maxabs]
+        plt.imshow(np.squeeze(space), origin = "lower", cmap = "Greys_r", **kwargs)
+        plt.colorbar()
+
+    def plot_strfs_space(self, roi = None, **kwargs): 
         return pygor.strf.plotting.simple.plot_collapsed_strfs(self, **kwargs)
 
     def plot_chromatic_overview(self, roi = None, contours = False, with_times = False, **kwargs):
