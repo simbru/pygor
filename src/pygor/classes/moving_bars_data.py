@@ -1,16 +1,18 @@
 from pygor.classes.core_data import Core
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 
 from pygor.timeseries.moving_bars import circular_directional_plots
 
-@dataclass(kw_only=True, repr=False)
+@dataclass(kw_only=False, repr=False)
 class MovingBars(Core):
-    dir_num: int
-    colour_num: int
-    
+    dir_num: int = field(default=None, metadata={"required": True})
+    colour_num: int = field(default=1)
+    directions_list: list = field(default=None)
+
     def __post_init__(self):
-        self.directions_list: list = None
+        if self.dir_num is None:
+            raise ValueError("dir_num must be specified for MovingBars data")
         super().__post_init__()
         # Set default directions if not provided
         if self.directions_list is None:

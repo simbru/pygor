@@ -158,6 +158,7 @@ def plot_averages(
         cax.set_xticks(np.ceil(ax.xaxis.get_majorticklocs()), np.ceil(ax.xaxis.get_majorticklocs() / 1000))
         cax.set_xlim(0, len(self.averages[0]))
         cax.set_xlabel("Time (s)")
+        return fig, axs
     else:
         if sort_order is None:
             rois = rois
@@ -172,17 +173,18 @@ def plot_averages(
         avg_epoch_triggertimes = np.average(temp_arr, axis=0)
         markers_arr = avg_epoch_triggertimes * (1 / self.linedur_s)
         markers_arr -= markers_arr[0]
-        fig, ax = plt.subplots(1,)
+        fig, ax = plt.subplots(1, figsize = figsize)
         # import sklearn.preprocessing
         # scaler = sklearn.preprocessing.MaxAbsScaler()
         arr = self.averages
         # arr = scaler.fit_transform(arr)
         maxabs = np.max(np.abs(arr))
         if rois is not None:
-            print(rois)
-            print(arr.shape)
             arr = arr[rois]
-        img = ax.imshow(arr, aspect="auto", cmap = "Greys_r")
+        if "clim" in kwargs:
+            img = ax.imshow(arr, aspect="auto", cmap = "Greys_r", clim = kwargs["clim"])
+        else:
+            img = ax.imshow(arr, aspect="auto", cmap = "Greys_r")
         # ax.set_xticklabels(np.round(load.triggertimes, 3))
         for i in markers_arr:
             ax.axvline(x=i, color="r", alpha=0.5)
@@ -191,6 +193,8 @@ def plot_averages(
         ax.set_xticks(np.ceil(ax.xaxis.get_majorticklocs()), np.ceil(ax.xaxis.get_majorticklocs() / 1000))
         ax.set_xlim(0, len(self.averages[0]))
         ax.set_xlabel("Time (s)")
+        return fig, ax
     # plt.tight_layout()
-    return fig, axs
+    
+    
 

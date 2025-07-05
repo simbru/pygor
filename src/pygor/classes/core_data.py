@@ -456,6 +456,8 @@ class Core:
         label_by : String, optional
             As above, but instead of changing the order of pygor.plotting.plots, changes the label associated with
             each ROI to be the specified metric.
+        clim : tuple, optional
+            A tuple that determines the lower and upper bounds of the clim for the imshow version of the plot, respectively.
 
         Returns
         -------

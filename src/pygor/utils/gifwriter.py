@@ -3,17 +3,22 @@ import scipy.ndimage
 import numpy as np
 import pathlib
 import warnings
-def write_gif(arr2d, out_path = None, upscale = 1, fps = 50, percentile_range = [0, 100]):
-    # video_array = bar.calculate_image_average()
+def write_gif(arr2d, out_path = None, upscale = 1, fps = 50, percentile_range = [0, 100], global_range = None):
     video_array = arr2d
     # Adaptive contrast limits (percentile-based to avoid extreme clipping)
-    vmin, vmax = np.percentile(video_array, [percentile_range[0], percentile_range[1]])  # Avoids extreme outliers
+    if global_range is not None:
+        # Calculate percentiles from data, then clamp to global range
+        vmin_data, vmax_data = np.percentile(video_array, [percentile_range[0], percentile_range[1]])
+        vmin = max(vmin_data, global_range[0])  # Don't go below global min
+        vmax = min(vmax_data, global_range[1])  # Don't go above global max
+    else:
+        vmin, vmax = np.percentile(video_array, [percentile_range[0], percentile_range[1]])  # Avoids extreme outliers
     # Clip
     video_array_clipped = np.clip(video_array, vmin, vmax)
     # Scale to RGB space
     video_array = ((video_array_clipped - vmin) / (vmax - vmin) * 255).astype(np.uint8)
     if upscale > 1:
-        video_array = np.array([scipy.ndimage.zoom(i, 5, order = 0) for i in video_array])
+        video_array = np.array([scipy.ndimage.zoom(i, upscale, order = 0) for i in video_array])
     # Save as GIF
     if out_path is None:
         out_path = pathlib.Path("output_adaptive.gif")
