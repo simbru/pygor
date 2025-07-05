@@ -207,3 +207,129 @@ class MovingBars(Core):
             polar_kwargs=polar_kwargs,
             phase_colors=phase_colors
         )
+
+    def compute_tuning_function(self, roi_index=None, window=None, metric='max'):
+        """
+        Compute tuning function for each ROI across all directions.
+        
+        Parameters:
+        -----------
+        window : int or tuple, optional
+            Time window within each direction phase to analyze.
+            If int, uses that many frames from start of each direction.
+            If tuple (start, end), uses that slice within each direction.
+            If None, uses entire duration of each direction.
+        metric : str or callable, optional
+            Metric to compute for each direction. Built-in options:
+            - 'max': maximum value
+            - 'absmax': maximum absolute value  
+            - 'min': minimum value
+            - 'avg' or 'mean': average value
+            - 'range': max - min
+            - 'auc': area under curve (absolute)
+            - 'peak': alias for 'absmax'
+            - 'peak_positive': maximum positive value
+            - 'peak_negative': minimum negative value
+            Or pass a callable function that takes 1D array and returns scalar.
+        roi_index : int, optional
+            If specified, returns tuning for only this ROI as 1D array.
+            If None, returns tuning for all ROIs as 2D array.
+            
+        Returns:
+        --------
+        np.ndarray
+            If roi_index is None: tuning values with shape (n_rois, n_directions).
+            If roi_index is specified: tuning values with shape (n_directions,).
+            Values are ordered according to self.directions_list.
+        """
+        # Get directionally split averages: (n_directions, n_rois, timepoints_per_direction)
+        dir_averages = self.split_averages_directionally()
+        
+        # Apply window if specified
+        if window is not None:
+            if isinstance(window, int):
+                # Use first 'window' frames
+                dir_averages = dir_averages[:, :, :window]
+            elif isinstance(window, (tuple, list)) and len(window) == 2:
+                # Use slice [start:end]
+                start, end = window
+                dir_averages = dir_averages[:, :, start:end]
+            else:
+                raise ValueError("window must be int or tuple of (start, end)")
+        
+        # Compute metric for each direction and ROI
+        if metric == 'max':
+            tuning_values = np.max(dir_averages, axis=2)
+        elif metric in ['absmax', 'peak']:
+            tuning_values = np.max(np.abs(dir_averages), axis=2)
+        elif metric == 'min':
+            tuning_values = np.min(dir_averages, axis=2)
+        elif metric in ['avg', 'mean']:
+            tuning_values = np.mean(dir_averages, axis=2)
+        elif metric == 'range':
+            tuning_values = np.max(dir_averages, axis=2) - np.min(dir_averages, axis=2)
+        elif metric == 'auc':
+            tuning_values = np.trapz(np.abs(dir_averages), axis=2)
+        elif metric == 'peak_positive':
+            tuning_values = np.max(dir_averages, axis=2)
+        elif metric == 'peak_negative':
+            tuning_values = np.min(dir_averages, axis=2)
+        elif callable(metric):
+            # Apply custom function to each direction/ROI combination
+            tuning_values = np.array([[metric(dir_averages[d, r, :]) 
+                                     for r in range(dir_averages.shape[1])]
+                                    for d in range(dir_averages.shape[0])])
+        else:
+            raise ValueError(f"Unknown metric: {metric}")
+        
+        # Transpose to get (n_rois, n_directions) as requested
+        tuning_values = tuning_values.T
+        
+        # Return single ROI if specified
+        if roi_index is not None:
+            return tuning_values[roi_index, :]
+        else:
+            return tuning_values
+
+    def plot_tuning_function(self, rois=None, figsize=(6, 6), colors=None, ax=None, show_title=True, show_theta_labels=True, **kwargs):
+        """
+        Plot tuning functions as polar plots.
+        
+        Parameters:
+        -----------
+        rois : list of int or None
+            ROI indices to plot. If None, plots all ROIs
+        figsize : tuple
+            Figure size (width, height)
+        colors : list or None
+            Colors for each ROI. If None, uses default color cycle
+        ax : matplotlib.axes.Axes or None
+            Existing polar axes to plot on. If None, creates new figure and axes
+        show_title : bool
+            Whether to show the title on the plot (default True)
+        show_theta_labels : bool
+            Whether to show the theta (direction) labels on the plot (default True)
+        **kwargs
+            Additional arguments passed to compute_tuning_function
+        
+        Returns:
+        --------
+        fig : matplotlib.figure.Figure
+            The figure object
+        ax : matplotlib.axes.Axes
+            The polar plot axes object
+        """
+        # Get tuning functions for all ROIs
+        tuning_functions = self.compute_tuning_function(**kwargs)
+        
+        return circular_directional_plots.plot_tuning_function_polar(
+            tuning_functions.T,  # Transpose to (n_directions, n_rois)
+            self.directions_list,
+            rois=rois,
+            figsize=figsize,
+            colors=colors,
+            metric=kwargs.get('metric', 'peak'),
+            ax=ax,
+            show_title=show_title,
+            show_theta_labels=show_theta_labels
+        )

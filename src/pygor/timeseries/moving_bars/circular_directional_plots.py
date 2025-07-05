@@ -27,9 +27,9 @@ def plot_directional_responses_circular(data, directions_list=None, figsize=(8, 
     fig = plt.figure(figsize=figsize, facecolor="white")
 
     for i, angle in enumerate(angles):
-        # Calculate subplot position (start from top, go clockwise)
-        x_center = 0.5 + 0.32 * np.cos(angle - np.pi / 2)
-        y_center = 0.5 + 0.32 * np.sin(angle - np.pi / 2)
+        # Calculate subplot position (start from right, go counter-clockwise to match polar)
+        x_center = 0.5 + 0.32 * np.cos(angle)
+        y_center = 0.5 + 0.32 * np.sin(angle)
 
         # Create subplot
         ax = fig.add_axes([x_center - 0.06, y_center - 0.06, 0.12, 0.12])
@@ -191,8 +191,8 @@ def plot_directional_responses_circular_with_polar(
     )
 
     # Style polar plot
-    ax_polar.set_theta_zero_location("N")  # 0° at top
-    ax_polar.set_theta_direction(-1)  # Clockwise
+    ax_polar.set_theta_zero_location("E")  # 0° at right (90° north)
+    # ax_polar.set_theta_direction(-1)  # Clockwise
     ax_polar.set_title(
         f"Directional Tuning\n({metric.replace('_', ' ').title()})",
         fontsize=12,
@@ -222,8 +222,8 @@ def plot_directional_responses_circular_with_polar(
         # Calculate subplot position (further out to accommodate central polar plot)
         # Fixed angle calculation to match standard directional conventions
         radius = 0.38  # Increased radius to make room for central plot
-        x_center = 0.5 + radius * np.cos(-angle + np.pi / 2)  # Fixed: negative angle
-        y_center = 0.5 + radius * np.sin(-angle + np.pi / 2)  # Fixed: negative angle
+        x_center = 0.5 + radius * np.cos(angle)  # 0° at right, counter-clockwise
+        y_center = 0.5 + radius * np.sin(angle)  # 0° at right, counter-clockwise
 
         # Create subplot
         subplot_size = 0.08  # Slightly smaller to fit more around
@@ -427,8 +427,8 @@ def plot_directional_responses_dual_phase(
         ax_polar.fill(polar_angles, polar_values, alpha=0.2, color=color)
 
     # Style polar plot
-    ax_polar.set_theta_zero_location("N")
-    ax_polar.set_theta_direction(-1)
+    ax_polar.set_theta_zero_location("E")  # 0° at right (90° north)
+    # ax_polar.set_theta_direction(-1)
     ax_polar.set_title(
         f"Dual Phase Directional Tuning\n({metric.replace('_', ' ').title()})",
         fontsize=14,
@@ -555,3 +555,87 @@ def calculate_orientation_selectivity_index(values, directions_list):
     if preferred + orthogonal == 0:
         return 0
     return (preferred - orthogonal) / (preferred + orthogonal)
+
+
+def plot_tuning_function_polar(tuning_functions, directions_list, rois=None, figsize=(6, 6), colors=None, metric='peak', ax=None, show_title=True, show_theta_labels=True):
+    """
+    Plot tuning functions as polar plots.
+    
+    Parameters:
+    -----------
+    tuning_functions : np.ndarray
+        Array of shape (n_directions, n_rois) containing tuning functions
+    directions_list : list of int/float
+        List of direction values in degrees
+    rois : list of int or None
+        ROI indices to plot. If None, plots all ROIs
+    figsize : tuple
+        Figure size (width, height)
+    colors : list or None
+        Colors for each ROI. If None, uses default color cycle
+    metric : str or callable
+        Metric used to compute tuning function (for title display)
+    ax : matplotlib.axes.Axes or None
+        Existing polar axes to plot on. If None, creates new figure and axes
+    show_title : bool
+        Whether to show the title on the plot (default True)
+    show_theta_labels : bool
+        Whether to show the theta (direction) labels on the plot (default True)
+    
+    Returns:
+    --------
+    fig : matplotlib.figure.Figure
+        The figure object
+    ax : matplotlib.axes.Axes
+        The polar plot axes object
+    """
+    if rois is None:
+        rois = list(range(tuning_functions.shape[1]))
+    elif isinstance(rois, int):
+        rois = [rois]
+    
+    # Sort by direction for proper polar plot connectivity
+    sort_order = np.argsort(directions_list)
+    degrees = np.deg2rad(directions_list)[sort_order]
+    
+    if ax is None:
+        fig = plt.figure(figsize=figsize)
+        ax = plt.subplot(projection='polar')
+        # Set polar plot orientation to match other functions
+        ax.set_theta_zero_location("E")  # 0° at right (90° north)
+    else:
+        fig = ax.figure
+    
+    # Set up colors
+    if colors is None:
+        colors = plt.cm.nipy_spectral(np.linspace(0, 1, len(rois)))
+    
+    for i, roi_idx in enumerate(rois):
+        tuning_function = tuning_functions[sort_order, roi_idx]
+        
+        # Close the loop
+        tuning_function_closed = np.concatenate((tuning_function, [tuning_function[0]]))
+        degrees_closed = np.concatenate((degrees, [degrees[0]]))
+        
+        ax.plot(degrees_closed, tuning_function_closed, marker='o', 
+                color=colors[i], label=f'ROI {roi_idx}')
+    
+    if len(rois) > 1:
+        ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
+    
+    # Format metric name for title
+    if show_title:
+        if callable(metric):
+            metric_name = getattr(metric, '__name__', 'custom function')
+        else:
+            metric_name = metric.replace('_', ' ').title()
+        
+        ax.set_title(f'Directional tuning ({metric_name})', fontsize=12, pad=20)
+    
+    ax.grid(True, alpha=0.3)
+    
+    # Hide theta labels if requested
+    if not show_theta_labels:
+        ax.set_thetagrids([])
+    
+    return fig, ax

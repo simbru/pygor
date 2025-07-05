@@ -1,0 +1,3 @@
+## Project Structure and Design Principles
+
+- Take note of how repository is structured, and how we went from tinkering with code in a notebook to various implementations in scripts. Simple methods live in the corresponding class file, and advanced functions live in the directory structure. That way, simple short-hand access to complex functions can happen by passing functions through to methods in the class
