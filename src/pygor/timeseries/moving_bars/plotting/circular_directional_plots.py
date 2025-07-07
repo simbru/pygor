@@ -557,7 +557,7 @@ def calculate_orientation_selectivity_index(values, directions_list):
     return (preferred - orthogonal) / (preferred + orthogonal)
 
 
-def plot_tuning_function_polar(tuning_functions, directions_list, rois=None, figsize=(6, 6), colors=None, metric='peak', ax=None, show_title=True, show_theta_labels=True):
+def plot_tuning_function_polar(tuning_functions, directions_list, rois=None, figsize=(6, 6), colors=None, metric='peak', ax=None, show_title=True, show_theta_labels=True, show_mean_vector=False, mean_vector_color='red', show_orientation_vector=False, orientation_vector_color='orange'):
     """
     Plot tuning functions as polar plots.
     
@@ -581,6 +581,14 @@ def plot_tuning_function_polar(tuning_functions, directions_list, rois=None, fig
         Whether to show the title on the plot (default True)
     show_theta_labels : bool
         Whether to show the theta (direction) labels on the plot (default True)
+    show_mean_vector : bool
+        Whether to show mean direction vectors as overlays (default False)
+    mean_vector_color : str
+        Color for mean direction vector arrows (default 'red')
+    show_orientation_vector : bool
+        Whether to show mean orientation vectors as overlays (default False)
+    orientation_vector_color : str
+        Color for mean orientation vector arrows (default 'orange')
     
     Returns:
     --------
@@ -637,5 +645,61 @@ def plot_tuning_function_polar(tuning_functions, directions_list, rois=None, fig
     # Hide theta labels if requested
     if not show_theta_labels:
         ax.set_thetagrids([])
+    
+    # Add mean direction vectors if requested
+    if show_mean_vector:
+        from pygor.timeseries.moving_bars import tuning_metrics
+        
+        for i, roi_idx in enumerate(rois):
+            # Get tuning function for this ROI
+            roi_tuning = tuning_functions[:, roi_idx][sort_order]
+            directions_sorted = np.array(directions_list)[sort_order]
+            
+            # Compute mean direction vector
+            mean_vector = tuning_metrics.extract_mean_vector(roi_tuning, directions_sorted)
+            
+            if not np.isnan(mean_vector['angle']):
+                # Convert to radians
+                mean_angle_rad = np.deg2rad(mean_vector['angle'])
+                
+                # Scale magnitude for visibility
+                mean_mag_scaled = mean_vector['magnitude'] * np.max(roi_tuning)
+                
+                # Use the same color as the tuning function for this ROI
+                arrow_color = colors[i] if isinstance(colors, (list, np.ndarray)) else mean_vector_color
+                
+                # Plot mean direction vector arrow (no dot at the end)
+                ax.annotate('', xy=(mean_angle_rad, mean_mag_scaled), 
+                           xytext=(0, 0),
+                           arrowprops=dict(arrowstyle='->', color=arrow_color, lw=3),
+                           zorder=10)
+    
+    # Add mean orientation vectors if requested
+    if show_orientation_vector:
+        from pygor.timeseries.moving_bars import tuning_metrics
+        
+        for i, roi_idx in enumerate(rois):
+            # Get tuning function for this ROI
+            roi_tuning = tuning_functions[:, roi_idx][sort_order]
+            directions_sorted = np.array(directions_list)[sort_order]
+            
+            # Compute mean orientation vector
+            orientation_vector = tuning_metrics.extract_orientation_vector(roi_tuning, directions_sorted)
+            
+            if not np.isnan(orientation_vector['angle']):
+                # Convert to radians
+                orient_angle_rad = np.deg2rad(orientation_vector['angle'])
+                
+                # Scale magnitude for visibility
+                orient_mag_scaled = orientation_vector['magnitude'] * np.max(roi_tuning)
+                
+                # Use orientation vector color
+                orient_arrow_color = orientation_vector_color
+                
+                # Plot mean orientation vector arrow
+                ax.annotate('', xy=(orient_angle_rad, orient_mag_scaled), 
+                           xytext=(0, 0),
+                           arrowprops=dict(arrowstyle='->', color=orient_arrow_color, lw=3),
+                           zorder=9)
     
     return fig, ax

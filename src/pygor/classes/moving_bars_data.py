@@ -2,7 +2,8 @@ from pygor.classes.core_data import Core
 from dataclasses import dataclass, field
 import numpy as np
 
-from pygor.timeseries.moving_bars import circular_directional_plots
+from pygor.timeseries.moving_bars.plotting import circular_directional_plots
+from pygor.timeseries.moving_bars import tuning_metrics
 
 @dataclass(kw_only=False, repr=False)
 class MovingBars(Core):
@@ -291,7 +292,7 @@ class MovingBars(Core):
         else:
             return tuning_values
 
-    def plot_tuning_function(self, rois=None, figsize=(6, 6), colors=None, ax=None, show_title=True, show_theta_labels=True, **kwargs):
+    def plot_tuning_function(self, rois=None, figsize=(6, 6), colors=None, ax=None, show_title=True, show_theta_labels=True, show_mean_vector=False, mean_vector_color='red', show_orientation_vector=False, orientation_vector_color='orange', **kwargs):
         """
         Plot tuning functions as polar plots.
         
@@ -309,6 +310,14 @@ class MovingBars(Core):
             Whether to show the title on the plot (default True)
         show_theta_labels : bool
             Whether to show the theta (direction) labels on the plot (default True)
+        show_mean_vector : bool
+            Whether to show mean direction vectors as overlays (default False)
+        mean_vector_color : str
+            Color for mean direction vector arrows (default 'red')
+        show_orientation_vector : bool
+            Whether to show mean orientation vectors as overlays (default False)
+        orientation_vector_color : str
+            Color for mean orientation vector arrows (default 'orange')
         **kwargs
             Additional arguments passed to compute_tuning_function
         
@@ -322,6 +331,7 @@ class MovingBars(Core):
         # Get tuning functions for all ROIs
         tuning_functions = self.compute_tuning_function(**kwargs)
         
+        # Create the polar plot with all functionality handled in the plotting module
         return circular_directional_plots.plot_tuning_function_polar(
             tuning_functions.T,  # Transpose to (n_directions, n_rois)
             self.directions_list,
@@ -331,5 +341,104 @@ class MovingBars(Core):
             metric=kwargs.get('metric', 'peak'),
             ax=ax,
             show_title=show_title,
-            show_theta_labels=show_theta_labels
+            show_theta_labels=show_theta_labels,
+            show_mean_vector=show_mean_vector,
+            mean_vector_color=mean_vector_color,
+            show_orientation_vector=show_orientation_vector,
+            orientation_vector_color=orientation_vector_color
         )
+
+    def compute_tuning_metrics(self, metric='peak', roi_indices=None):
+        """
+        Compute directional tuning metrics for ROIs.
+        
+        Computes vector magnitude (r), circular variance (CV), directional 
+        selectivity index (DSI), preferred direction, and mean direction 
+        for each ROI using circular statistics.
+        
+        Parameters:
+        -----------
+        metric : str or callable
+            Metric to use for computing tuning functions (default 'peak')
+        roi_indices : list or None
+            ROI indices to analyze. If None, analyzes all ROIs.
+            
+        Returns:
+        --------
+        dict : Dictionary containing arrays of metrics for each ROI:
+            - 'vector_magnitude': How directionally tuned (0-1)
+            - 'circular_variance': Spread of directional response (0-1)  
+            - 'dsi': Preference for one direction vs opposite (-1 to 1)
+            - 'preferred_direction': Direction with maximum response (degrees)
+            - 'mean_direction': Mean direction from circular stats (degrees)
+            - 'roi_indices': ROI indices that were analyzed
+        """
+        return tuning_metrics.compute_all_tuning_metrics(
+            self, metric=metric, roi_indices=roi_indices
+        )
+    
+    def plot_tuning_metrics_histograms(self, metric='peak', roi_indices=None, 
+                                     figsize=(15, 10), bins=20):
+        """
+        Plot histograms of directional tuning metrics.
+        
+        Parameters:
+        -----------
+        metric : str or callable
+            Metric to use for computing tuning functions (default 'peak')
+        roi_indices : list or None
+            ROI indices to analyze. If None, analyzes all ROIs.
+        figsize : tuple
+            Figure size
+        bins : int
+            Number of histogram bins
+            
+        Returns:
+        --------
+        fig : matplotlib.figure.Figure
+            Figure object
+        metrics_dict : dict
+            Dictionary of computed metrics
+        """
+        metrics_dict = self.compute_tuning_metrics(metric=metric, roi_indices=roi_indices)
+        fig = tuning_metrics.plot_tuning_metrics_histograms(
+            metrics_dict, figsize=figsize, bins=bins
+        )
+        return fig, metrics_dict
+    
+    def extract_direction_vectors(self, roi_index, metric='peak'):
+        """
+        Extract individual direction vectors for a specific ROI.
+        
+        Parameters:
+        -----------
+        roi_index : int
+            ROI index to analyze
+        metric : str or callable
+            Metric to use for computing tuning function
+            
+        Returns:
+        --------
+        dict : Dictionary containing individual direction vectors
+        """
+        responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
+        return tuning_metrics.extract_direction_vectors(responses, self.directions_list)
+    
+    def extract_mean_vector(self, roi_index, metric='peak'):
+        """
+        Extract mean vector for a specific ROI.
+        
+        Parameters:
+        -----------
+        roi_index : int
+            ROI index to analyze
+        metric : str or callable
+            Metric to use for computing tuning function
+            
+        Returns:
+        --------
+        dict : Dictionary containing mean vector information
+        """
+        responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
+        return tuning_metrics.extract_mean_vector(responses, self.directions_list)
+    
