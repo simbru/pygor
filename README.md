@@ -4,41 +4,41 @@ Welcome to Pygor!
 
 A Python toolkit for working alongside Baden-lab's IGOR Pro pipeline, seamlessly importing processed data via H5 files and extending analysis capabilities with Python's flexible framework.
 
-## Here's the main points:
+## Here are the main points:
 
 - Pygor consists of data-objects, data-object-specific directories, and an Experiment (name to be decided) class that allows you to collect data-objects and analyse them using the data-directories.
 - Pygor classes are built using [dataclasses](https://docs.python.org/3/library/dataclasses.html), which are simple Python classes that store information and methods with minimal configuration and templating.
-- The special Pygor class `pygor.classes.experiment.Experiment` provides a handy way to collate Pygor objects, in such a way that analyses can be ran on arbitrarily many datasets at a time.
-- Pygor classes can be built by inheriting the `pygor.classes.core_data.Core` object, which comes with handy methods like plotting your scan average, ROI positions, amd getting contextual help.
+- The special Pygor class `pygor.classes.experiment.Experiment` provides a handy way to collate Pygor objects, in such a way that analyses can be run on arbitrarily many datasets at a time.
+- Pygor classes can be built by inheriting the `pygor.classes.core_data.Core` object, which comes with handy methods like plotting your scan average, ROI positions, and getting contextual help.
 - Pygor objects can be called simply by passing `from pygor.load import "class name"`, as the import logic dictated by `pygor.load.py` takes care of the potentially confusing (and mostly just annoying) navigation of the directory structure, which can serve as a barrier of entry to novice users.
-- Extending the functionality of Pygor is intended to be *simple*. There are certain design princples the user can follow in order to build out their own analyses pipelines, that can be shared and further improved by other users.
+- Extending the functionality of Pygor is intended to be *simple*. There are certain design principles the user can follow in order to build out their own analyses pipelines, that can be shared and further improved by other users.
 
-## How do I install Pygor
+## How do I install Pygor?
 
 
 ### Sync with uv (preferred)
-An new package managment framework called uv simplifies install, but makes 
+A new package management framework called uv simplifies installation, but makes 
 a local virtual environment that you must use instead of making your own. 
 1. [Install uv](https://docs.astral.sh/uv/getting-started/installation/)
-2. git clone https://github.com/simbru/pygor` into target directory
+2. Run `git clone https://github.com/simbru/pygor` into target directory
 3. Change directory into the pygor folder, and run `uv sync`. This should build Pygor and install it into the local uv-managed .venv folder.
 4. Use `.venv/scripts/activate` to activate the environment.
 
 More information on [uv by Astral here](https://docs.astral.sh/uv/).
 
 ### Build with hatch and install with pip (old method)
-Currently, the package will very likely require you to do your own development. This sounds scary, but its pretty easy. For that, we need
-to install the latest version of the pacakge in an "editable" state.
+Currently, the package will very likely require you to do your own development. This sounds scary, but it's pretty easy. For that, we need
+to install the latest version of the package in an "editable" state.
 
 1. Install [hatch](https://hatch.pypa.io/latest/) on your computer, either via executable or via pip in your environment.
 2. Download Pygor from the Github repo (I prefer using `git clone https://github.com/simbru/pygor` in my target directory).
 3. Open up your favorite command line (CMD for example) and change directory to your Pygor folder. You will know  you are in the right spot if you see a file called `pyproject.toml`
-4. Simply run `hatch build` from the command line inside the directroy. You should see some reference to "building wheels". This means you're on the rigth track.
-5. Once that is done, simply stay in the directroy, activate whatever Python envrionment you want to use, and type `pip install -e .` -> This will allow you to use Pygor, while changing the contents of Pygor's files (editable).
+4. Simply run `hatch build` from the command line inside the directory. You should see some reference to "building wheels". This means you're on the right track.
+5. Once that is done, simply stay in the directory, activate whatever Python environment you want to use, and type `pip install -e .` -> This will allow you to use Pygor, while changing the contents of Pygor's files (editable).
 
 That's it! Activate your environment in your favorite IDE and get going with Pygor! Please flag it if you run across any issues. 
 
-*Alternatively, you should be able to simply download the Git repositroy, set your working directories correctly, and be on your merry way (but this is completely untested, and you might have to move your Jupyter notebooks around for imports to work properly).*
+*Alternatively, you should be able to simply download the Git repository, set your working directories correctly, and be on your merry way (but this is completely untested, and you might have to move your Jupyter notebooks around for imports to work properly).*
 
 ## Pygor design principles
 
