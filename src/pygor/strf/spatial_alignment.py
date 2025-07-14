@@ -207,6 +207,71 @@ def compute_spatial_offset(strf1_2d, strf2_2d, threshold=3.0, method='centroid')
     }
 
 
+def compute_spatial_offset_between_channels(strf_obj, roi, color_channels=(0, 1), 
+                                          threshold=3.0, method='centroid', 
+                                          collapse_method='peak'):
+    """
+    Compute spatial offset between two color channels for a single ROI.
+    
+    Parameters
+    ----------
+    strf_obj : STRF object
+        STRF object containing multicolor data
+    roi : int
+        ROI index to analyze
+    color_channels : tuple of int, optional
+        Two color channel indices to compare. Default is (0, 1).
+    threshold : float, optional
+        Threshold for defining active regions. Default is 3.0.
+    method : str, optional
+        Method for computing offset. Options: 'centroid', 'peak', 'cross_correlation'.
+        Default is 'centroid'.
+    collapse_method : str, optional
+        Method for collapsing time dimension. Options: 'peak', 'std', 'sum'. Default is 'peak'.
+    
+    Returns
+    -------
+    dict : Dictionary containing offset measurements
+    """
+    
+    if not strf_obj.multicolour:
+        raise ValueError("Spatial offset analysis requires multicolor STRF data")
+    
+    # Get spatial maps for both channels
+    spatial_maps = []
+    for color_idx in color_channels:
+        strf_idx = roi * strf_obj.numcolour + color_idx
+        if strf_idx >= len(strf_obj.strfs):
+            raise IndexError(f"ROI {roi}, color {color_idx} exceeds available STRFs")
+        
+        strf_3d = strf_obj.strfs[strf_idx]
+        
+        # Collapse time dimension
+        if collapse_method == 'peak':
+            spatial_map = strf_3d[np.argmax(np.max(np.abs(strf_3d), axis=(1, 2)))]
+        elif collapse_method == 'std':
+            spatial_map = np.std(strf_3d, axis=0)
+        elif collapse_method == 'sum':
+            spatial_map = np.sum(np.abs(strf_3d), axis=0)
+        else:
+            raise ValueError(f"Unknown collapse method: {collapse_method}")
+        
+        spatial_maps.append(spatial_map)
+    
+    # Compute offset
+    offset_info = compute_spatial_offset(
+        spatial_maps[0], spatial_maps[1], threshold=threshold, method=method
+    )
+    
+    # Add metadata
+    offset_info['roi_index'] = roi
+    offset_info['color_channels'] = color_channels
+    offset_info['collapse_method'] = collapse_method
+    offset_info['threshold'] = threshold
+    
+    return offset_info
+
+
 def analyze_multicolor_spatial_alignment(strf_obj, roi, threshold=3.0, 
                                        reference_channel=0, collapse_method='peak'):
     """
@@ -403,3 +468,99 @@ def plot_spatial_alignment(alignment_results, figsize=(15, 10)):
     
     plt.tight_layout()
     return fig
+
+
+def compute_color_channel_overlap_wrapper(strf_obj, roi, color_channels=(0, 1), threshold=3.0, 
+                                        collapse_method='peak'):
+    """
+    Compute spatial overlap metrics between two specific color channels.
+    
+    Parameters
+    ----------
+    strf_obj : STRF object
+        STRF object containing multicolor data
+    roi : int
+        ROI index to analyze
+    color_channels : tuple of int, optional
+        Two color channel indices to compare. Default is (0, 1).
+    threshold : float, optional
+        Threshold for defining active regions. Default is 3.0.
+    collapse_method : str, optional
+        Method for collapsing time dimension. Options: 'peak', 'std', 'sum'. Default is 'peak'.
+    
+    Returns
+    -------
+    dict : Dictionary containing spatial overlap metrics
+    """
+    
+    if not strf_obj.multicolour:
+        raise ValueError("Color channel overlap requires multicolor STRF data")
+    
+    # Get spatial maps for both channels
+    spatial_maps = []
+    for color_idx in color_channels:
+        strf_idx = roi * strf_obj.numcolour + color_idx
+        if strf_idx >= len(strf_obj.strfs):
+            raise IndexError(f"ROI {roi}, color {color_idx} exceeds available STRFs")
+        
+        strf_3d = strf_obj.strfs[strf_idx]
+        
+        # Collapse time dimension
+        if collapse_method == 'peak':
+            spatial_map = strf_3d[np.argmax(np.max(np.abs(strf_3d), axis=(1, 2)))]
+        elif collapse_method == 'std':
+            spatial_map = np.std(strf_3d, axis=0)
+        elif collapse_method == 'sum':
+            spatial_map = np.sum(np.abs(strf_3d), axis=0)
+        else:
+            raise ValueError(f"Unknown collapse method: {collapse_method}")
+        
+        spatial_maps.append(spatial_map)
+    
+    # Compute overlap metrics
+    overlap_metrics = compute_spatial_overlap_metrics(
+        spatial_maps[0], spatial_maps[1], threshold=threshold, method='all'
+    )
+    
+    # Add metadata
+    overlap_metrics['roi_index'] = roi
+    overlap_metrics['color_channels'] = color_channels
+    overlap_metrics['collapse_method'] = collapse_method
+    
+    return overlap_metrics
+
+
+def plot_spatial_alignment_wrapper(strf_obj, roi, threshold=3.0, reference_channel=0, 
+                                 collapse_method='peak', figsize=(15, 10)):
+    """
+    Plot spatial alignment visualization for a ROI.
+    
+    Parameters
+    ----------
+    strf_obj : STRF object
+        STRF object containing the data
+    roi : int
+        ROI index to analyze
+    threshold : float, optional
+        Threshold for defining active regions. Default is 3.0.
+    reference_channel : int, optional
+        Color channel to use as reference. Default is 0.
+    collapse_method : str, optional
+        Method for collapsing time dimension. Default is 'peak'.
+    figsize : tuple, optional
+        Figure size. Default is (15, 10).
+    
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        Figure object
+    """
+    
+    # Get alignment analysis
+    alignment_results = analyze_multicolor_spatial_alignment(
+        strf_obj, roi=roi, threshold=threshold, reference_channel=reference_channel,
+        collapse_method=collapse_method
+    )
+    
+    # Create plot
+    return plot_spatial_alignment(alignment_results, figsize=figsize)

@@ -1356,49 +1356,11 @@ class STRF(Core):
         """
         import pygor.strf.extrema_timing as extrema_timing
         
-        if roi is not None:
-            # Single ROI analysis
-            if self.multicolour:
-                strf_idx = roi * self.numcolour + color_channel
-                if strf_idx >= len(self.strfs):
-                    raise IndexError(f"ROI {roi}, color {color_channel} exceeds available STRFs")
-                strf_3d = self.strfs[strf_idx]
-            else:
-                if roi >= len(self.strfs):
-                    raise IndexError(f"ROI {roi} exceeds available STRFs")
-                strf_3d = self.strfs[roi]
-            
-            timing_map = extrema_timing.map_extrema_timing(
-                strf_3d, threshold=threshold, exclude_firstlast=exclude_firstlast
-            )
-            
-            if return_milliseconds:
-                timing_map = extrema_timing.convert_timing_to_milliseconds(
-                    timing_map, frame_rate_hz, exclude_firstlast[0]
-                )
-            
-            return timing_map
-        
-        else:
-            # All ROIs analysis - vectorized
-            if self.multicolour:
-                # Extract specific color channel for all ROIs
-                n_rois = len(self.strfs) // self.numcolour
-                strf_indices = [i * self.numcolour + color_channel for i in range(n_rois)]
-                strfs_subset = self.strfs[strf_indices]
-            else:
-                strfs_subset = self.strfs
-            
-            timing_maps = extrema_timing.map_extrema_timing(
-                strfs_subset, threshold=threshold, exclude_firstlast=exclude_firstlast
-            )
-            
-            if return_milliseconds:
-                timing_maps = extrema_timing.convert_timing_to_milliseconds(
-                    timing_maps, frame_rate_hz, exclude_firstlast[0]
-                )
-            
-            return timing_maps
+        return extrema_timing.map_extrema_timing_wrapper(
+            self, roi=roi, color_channel=color_channel, threshold=threshold,
+            exclude_firstlast=exclude_firstlast, return_milliseconds=return_milliseconds,
+            frame_rate_hz=frame_rate_hz
+        )
 
     def compare_color_channel_timing(self, roi, color_channels=(0, 1), threshold=3.0,
                                    exclude_firstlast=(1, 1), return_milliseconds=False, 
@@ -1427,25 +1389,13 @@ class STRF(Core):
             2D array (y, x) of timing differences (channel2 - channel1).
             NaN where either channel is below threshold.
         """
+        import pygor.strf.extrema_timing as extrema_timing
         
-        if not self.multicolour:
-            raise ValueError("Color channel comparison requires multicolor STRF data")
-        
-        # Get timing maps for both color channels
-        timing1 = self.map_extrema_timing(
-            roi=roi, color_channel=color_channels[0], threshold=threshold,
+        return extrema_timing.compare_color_channel_timing_wrapper(
+            self, roi=roi, color_channels=color_channels, threshold=threshold,
             exclude_firstlast=exclude_firstlast, return_milliseconds=return_milliseconds,
             frame_rate_hz=frame_rate_hz
         )
-        
-        timing2 = self.map_extrema_timing(
-            roi=roi, color_channel=color_channels[1], threshold=threshold,
-            exclude_firstlast=exclude_firstlast, return_milliseconds=return_milliseconds,
-            frame_rate_hz=frame_rate_hz
-        )
-        
-        # Return timing difference
-        return timing2 - timing1
 
     def analyze_spatial_alignment(self, roi, threshold=3.0, reference_channel=0, 
                                 collapse_method='peak'):
@@ -1496,41 +1446,10 @@ class STRF(Core):
         """
         import pygor.strf.spatial_alignment as spatial_alignment
         
-        if not self.multicolour:
-            raise ValueError("Color channel overlap requires multicolor STRF data")
-        
-        # Get spatial maps for both channels
-        spatial_maps = []
-        for color_idx in color_channels:
-            strf_idx = roi * self.numcolour + color_idx
-            if strf_idx >= len(self.strfs):
-                raise IndexError(f"ROI {roi}, color {color_idx} exceeds available STRFs")
-            
-            strf_3d = self.strfs[strf_idx]
-            
-            # Collapse time dimension
-            if collapse_method == 'peak':
-                spatial_map = strf_3d[np.argmax(np.max(np.abs(strf_3d), axis=(1, 2)))]
-            elif collapse_method == 'std':
-                spatial_map = np.std(strf_3d, axis=0)
-            elif collapse_method == 'sum':
-                spatial_map = np.sum(np.abs(strf_3d), axis=0)
-            else:
-                raise ValueError(f"Unknown collapse method: {collapse_method}")
-            
-            spatial_maps.append(spatial_map)
-        
-        # Compute overlap metrics
-        overlap_metrics = spatial_alignment.compute_spatial_overlap_metrics(
-            spatial_maps[0], spatial_maps[1], threshold=threshold, method='all'
+        return spatial_alignment.compute_color_channel_overlap_wrapper(
+            self, roi=roi, color_channels=color_channels, threshold=threshold,
+            collapse_method=collapse_method
         )
-        
-        # Add metadata
-        overlap_metrics['roi_index'] = roi
-        overlap_metrics['color_channels'] = color_channels
-        overlap_metrics['collapse_method'] = collapse_method
-        
-        return overlap_metrics
 
     def compute_spatial_offset_between_channels(self, roi, color_channels=(0, 1), 
                                               threshold=3.0, method='centroid', 
@@ -1558,42 +1477,10 @@ class STRF(Core):
         """
         import pygor.strf.spatial_alignment as spatial_alignment
         
-        if not self.multicolour:
-            raise ValueError("Spatial offset analysis requires multicolor STRF data")
-        
-        # Get spatial maps for both channels
-        spatial_maps = []
-        for color_idx in color_channels:
-            strf_idx = roi * self.numcolour + color_idx
-            if strf_idx >= len(self.strfs):
-                raise IndexError(f"ROI {roi}, color {color_idx} exceeds available STRFs")
-            
-            strf_3d = self.strfs[strf_idx]
-            
-            # Collapse time dimension
-            if collapse_method == 'peak':
-                spatial_map = strf_3d[np.argmax(np.max(np.abs(strf_3d), axis=(1, 2)))]
-            elif collapse_method == 'std':
-                spatial_map = np.std(strf_3d, axis=0)
-            elif collapse_method == 'sum':
-                spatial_map = np.sum(np.abs(strf_3d), axis=0)
-            else:
-                raise ValueError(f"Unknown collapse method: {collapse_method}")
-            
-            spatial_maps.append(spatial_map)
-        
-        # Compute offset
-        offset_info = spatial_alignment.compute_spatial_offset(
-            spatial_maps[0], spatial_maps[1], threshold=threshold, method=method
+        return spatial_alignment.compute_spatial_offset_between_channels(
+            self, roi=roi, color_channels=color_channels, threshold=threshold,
+            method=method, collapse_method=collapse_method
         )
-        
-        # Add metadata
-        offset_info['roi_index'] = roi
-        offset_info['color_channels'] = color_channels
-        offset_info['collapse_method'] = collapse_method
-        offset_info['threshold'] = threshold
-        
-        return offset_info
 
     def plot_spatial_alignment(self, roi, threshold=3.0, reference_channel=0, 
                              collapse_method='peak', figsize=(15, 10)):
@@ -1620,14 +1507,10 @@ class STRF(Core):
         """
         import pygor.strf.spatial_alignment as spatial_alignment
         
-        # Get alignment analysis
-        alignment_results = self.analyze_spatial_alignment(
-            roi=roi, threshold=threshold, reference_channel=reference_channel,
-            collapse_method=collapse_method
+        return spatial_alignment.plot_spatial_alignment_wrapper(
+            self, roi=roi, threshold=threshold, reference_channel=reference_channel,
+            collapse_method=collapse_method, figsize=figsize
         )
-        
-        # Create plot
-        return spatial_alignment.plot_spatial_alignment(alignment_results, figsize=figsize)
 
     def napari_strfs(self, **kwargs):
         import pygor.strf.gui.methods as gui
