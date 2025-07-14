@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from pygor.timeseries.moving_bars.plotting import circular_directional_plots
-from pygor.timeseries.moving_bars import tuning_metrics
+from pygor.timeseries.moving_bars import tuning_metrics, tuning_computation
 
 @dataclass(kw_only=False, repr=False)
 class MovingBars(Core):
@@ -209,7 +209,7 @@ class MovingBars(Core):
             phase_colors=phase_colors
         )
 
-    def compute_tuning_function(self, roi_index=None, window=None, metric='max'):
+    def compute_tuning_function(self, roi_index=None, window=None, metric='max', phase_num=None):
         """
         Compute tuning function for each ROI across all directions.
         
@@ -220,6 +220,7 @@ class MovingBars(Core):
             If int, uses that many frames from start of each direction.
             If tuple (start, end), uses that slice within each direction.
             If None, uses entire duration of each direction.
+            Ignored if phase_num is specified.
         metric : str or callable, optional
             Metric to compute for each direction. Built-in options:
             - 'max': maximum value
@@ -235,64 +236,26 @@ class MovingBars(Core):
         roi_index : int, optional
             If specified, returns tuning for only this ROI as 1D array.
             If None, returns tuning for all ROIs as 2D array.
+        phase_num : int, optional
+            If specified, splits each direction duration into n equal phases.
+            Returns tuning values for each phase.
             
         Returns:
         --------
         np.ndarray
-            If roi_index is None: tuning values with shape (n_rois, n_directions).
-            If roi_index is specified: tuning values with shape (n_directions,).
+            If phase_num is None:
+                If roi_index is None: tuning values with shape (n_rois, n_directions).
+                If roi_index is specified: tuning values with shape (n_directions,).
+            If phase_num is specified:
+                If roi_index is None: tuning values with shape (n_rois, n_directions, n_phases).
+                If roi_index is specified: tuning values with shape (n_directions, n_phases).
             Values are ordered according to self.directions_list.
         """
-        # Get directionally split averages: (n_directions, n_rois, timepoints_per_direction)
-        dir_averages = self.split_averages_directionally()
-        
-        # Apply window if specified
-        if window is not None:
-            if isinstance(window, int):
-                # Use first 'window' frames
-                dir_averages = dir_averages[:, :, :window]
-            elif isinstance(window, (tuple, list)) and len(window) == 2:
-                # Use slice [start:end]
-                start, end = window
-                dir_averages = dir_averages[:, :, start:end]
-            else:
-                raise ValueError("window must be int or tuple of (start, end)")
-        
-        # Compute metric for each direction and ROI
-        if metric == 'max':
-            tuning_values = np.max(dir_averages, axis=2)
-        elif metric in ['absmax', 'peak']:
-            tuning_values = np.max(np.abs(dir_averages), axis=2)
-        elif metric == 'min':
-            tuning_values = np.min(dir_averages, axis=2)
-        elif metric in ['avg', 'mean']:
-            tuning_values = np.mean(dir_averages, axis=2)
-        elif metric == 'range':
-            tuning_values = np.max(dir_averages, axis=2) - np.min(dir_averages, axis=2)
-        elif metric == 'auc':
-            tuning_values = np.trapz(np.abs(dir_averages), axis=2)
-        elif metric == 'peak_positive':
-            tuning_values = np.max(dir_averages, axis=2)
-        elif metric == 'peak_negative':
-            tuning_values = np.min(dir_averages, axis=2)
-        elif callable(metric):
-            # Apply custom function to each direction/ROI combination
-            tuning_values = np.array([[metric(dir_averages[d, r, :]) 
-                                     for r in range(dir_averages.shape[1])]
-                                    for d in range(dir_averages.shape[0])])
-        else:
-            raise ValueError(f"Unknown metric: {metric}")
-        
-        # Transpose to get (n_rois, n_directions) as requested
-        tuning_values = tuning_values.T
-        
-        # Return single ROI if specified
-        if roi_index is not None:
-            return tuning_values[roi_index, :]
-        else:
-            return tuning_values
+        return tuning_computation.compute_tuning_function(
+            self, roi_index=roi_index, window=window, metric=metric, phase_num=phase_num
+        )
 
-    def plot_tuning_function(self, rois=None, figsize=(6, 6), colors=None, ax=None, show_title=True, show_theta_labels=True, show_mean_vector=False, mean_vector_color='red', show_orientation_vector=False, orientation_vector_color='orange', **kwargs):
+    def plot_tuning_function(self, rois=None, figsize=(6, 6), colors=None, ax=None, show_title=True, show_theta_labels=True, show_tuning=True, show_mean_vector=False, mean_vector_color='red', show_orientation_vector=False, orientation_vector_color='orange', **kwargs):
         """
         Plot tuning functions as polar plots.
         
@@ -310,6 +273,8 @@ class MovingBars(Core):
             Whether to show the title on the plot (default True)
         show_theta_labels : bool
             Whether to show the theta (direction) labels on the plot (default True)
+        show_tuning : bool
+            Whether to show the tuning curve itself (default True). When False, only shows vectors.
         show_mean_vector : bool
             Whether to show mean direction vectors as overlays (default False)
         mean_vector_color : str
@@ -319,7 +284,8 @@ class MovingBars(Core):
         orientation_vector_color : str
             Color for mean orientation vector arrows (default 'orange')
         **kwargs
-            Additional arguments passed to compute_tuning_function
+            Additional arguments passed to compute_tuning_function.
+            If phase_num is specified, plots each phase separately with phase-dependent vectors.
         
         Returns:
         --------
@@ -331,24 +297,45 @@ class MovingBars(Core):
         # Get tuning functions for all ROIs
         tuning_functions = self.compute_tuning_function(**kwargs)
         
-        # Create the polar plot with all functionality handled in the plotting module
-        return circular_directional_plots.plot_tuning_function_polar(
-            tuning_functions.T,  # Transpose to (n_directions, n_rois)
-            self.directions_list,
-            rois=rois,
-            figsize=figsize,
-            colors=colors,
-            metric=kwargs.get('metric', 'peak'),
-            ax=ax,
-            show_title=show_title,
-            show_theta_labels=show_theta_labels,
-            show_mean_vector=show_mean_vector,
-            mean_vector_color=mean_vector_color,
-            show_orientation_vector=show_orientation_vector,
-            orientation_vector_color=orientation_vector_color
-        )
+        # Handle phase data by plotting each phase separately
+        if 'phase_num' in kwargs and kwargs['phase_num'] is not None:
+            return circular_directional_plots.plot_tuning_function_multi_phase(
+                tuning_functions=tuning_functions,
+                directions_list=self.directions_list,
+                phase_num=kwargs['phase_num'],
+                rois=rois,
+                figsize=figsize,
+                colors=colors,
+                ax=ax,
+                show_title=show_title,
+                show_theta_labels=show_theta_labels,
+                show_tuning=show_tuning,
+                show_mean_vector=show_mean_vector,
+                mean_vector_color=mean_vector_color,
+                show_orientation_vector=show_orientation_vector,
+                orientation_vector_color=orientation_vector_color,
+                metric=kwargs.get('metric', 'peak')
+            )
+        else:
+            # Regular single-phase plotting
+            return circular_directional_plots.plot_tuning_function_polar(
+                tuning_functions.T,  # Transpose to (n_directions, n_rois)
+                self.directions_list,
+                rois=rois,
+                figsize=figsize,
+                colors=colors,
+                metric=kwargs.get('metric', 'peak'),
+                ax=ax,
+                show_title=show_title,
+                show_theta_labels=show_theta_labels,
+                show_tuning=show_tuning,
+                show_mean_vector=show_mean_vector,
+                mean_vector_color=mean_vector_color,
+                show_orientation_vector=show_orientation_vector,
+                orientation_vector_color=orientation_vector_color
+            )
 
-    def compute_tuning_metrics(self, metric='peak', roi_indices=None):
+    def compute_tuning_metrics(self, roi_indices=None, metric='peak'):
         """
         Compute directional tuning metrics for ROIs.
         
@@ -358,10 +345,10 @@ class MovingBars(Core):
         
         Parameters:
         -----------
-        metric : str or callable
-            Metric to use for computing tuning functions (default 'peak')
         roi_indices : list or None
             ROI indices to analyze. If None, analyzes all ROIs.
+        metric : str or callable
+            Metric to use for computing tuning functions (default 'peak')
             
         Returns:
         --------
@@ -373,21 +360,23 @@ class MovingBars(Core):
             - 'mean_direction': Mean direction from circular stats (degrees)
             - 'roi_indices': ROI indices that were analyzed
         """
+        if isinstance(roi_indices, int):
+            roi_indices = [roi_indices]
         return tuning_metrics.compute_all_tuning_metrics(
-            self, metric=metric, roi_indices=roi_indices
+            self, roi_indices=roi_indices, metric=metric
         )
     
-    def plot_tuning_metrics_histograms(self, metric='peak', roi_indices=None, 
+    def plot_tuning_metrics_histograms(self, roi_indices=None, metric='peak', 
                                      figsize=(15, 10), bins=20):
         """
         Plot histograms of directional tuning metrics.
         
         Parameters:
         -----------
-        metric : str or callable
-            Metric to use for computing tuning functions (default 'peak')
         roi_indices : list or None
             ROI indices to analyze. If None, analyzes all ROIs.
+        metric : str or callable
+            Metric to use for computing tuning functions (default 'peak')
         figsize : tuple
             Figure size
         bins : int
@@ -400,7 +389,7 @@ class MovingBars(Core):
         metrics_dict : dict
             Dictionary of computed metrics
         """
-        metrics_dict = self.compute_tuning_metrics(metric=metric, roi_indices=roi_indices)
+        metrics_dict = self.compute_tuning_metrics(roi_indices=roi_indices, metric=metric)
         fig = tuning_metrics.plot_tuning_metrics_histograms(
             metrics_dict, figsize=figsize, bins=bins
         )
@@ -441,4 +430,94 @@ class MovingBars(Core):
         """
         responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
         return tuning_metrics.extract_mean_vector(responses, self.directions_list)
+    
+    def extract_orientation_vector(self, roi_index, metric='peak'):
+        """
+        Extract orientation vector for a specific ROI.
+        
+        Parameters:
+        -----------
+        roi_index : int
+            ROI index to analyze
+        metric : str or callable
+            Metric to use for computing tuning function
+            
+        Returns:
+        --------
+        dict : Dictionary containing orientation vector information
+        """
+        responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
+        return tuning_metrics.extract_orientation_vector(responses, self.directions_list)
+    
+    def compute_orientation_selectivity_index(self, roi_index, metric='peak'):
+        """
+        Compute orientation selectivity index (OSI) for a specific ROI.
+        
+        Parameters:
+        -----------
+        roi_index : int
+            ROI index to analyze
+        metric : str or callable
+            Metric to use for computing tuning function
+            
+        Returns:
+        --------
+        dict : Dictionary containing OSI calculation results
+        """
+        responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
+        return tuning_metrics.compute_orientation_selectivity_index(responses, self.directions_list)
+    
+    def plot_orientation_tuning_cartesian(self, roi_index, metric='peak', **kwargs):
+        """
+        Plot orientation tuning curve in cartesian coordinates for a specific ROI.
+        
+        Parameters:
+        -----------
+        roi_index : int
+            ROI index to analyze
+        metric : str or callable
+            Metric to use for computing tuning function
+        **kwargs : additional arguments
+            Passed to plot_orientation_tuning_cartesian function
+            
+        Returns:
+        --------
+        fig : matplotlib.figure.Figure
+            Figure object
+        ax : matplotlib.axes.Axes
+            Axes object
+        osi_info : dict
+            Dictionary containing OSI calculation results
+        """
+        responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
+        return circular_directional_plots.plot_orientation_tuning_cartesian(
+            responses, self.directions_list, **kwargs
+        )
+    
+    def plot_orientation_tuning_comparison(self, roi_index, metric='peak', **kwargs):
+        """
+        Plot side-by-side comparison of polar and cartesian orientation tuning.
+        
+        Parameters:
+        -----------
+        roi_index : int
+            ROI index to analyze
+        metric : str or callable
+            Metric to use for computing tuning function
+        **kwargs : additional arguments
+            Passed to plot_orientation_tuning_comparison function
+            
+        Returns:
+        --------
+        fig : matplotlib.figure.Figure
+            Figure object
+        axes : list
+            List containing [polar_ax, cartesian_ax]
+        osi_info : dict
+            Dictionary containing OSI calculation results
+        """
+        responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
+        return circular_directional_plots.plot_orientation_tuning_comparison(
+            responses, self.directions_list, **kwargs
+        )
     

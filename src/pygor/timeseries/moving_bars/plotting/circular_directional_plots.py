@@ -427,7 +427,7 @@ def plot_directional_responses_dual_phase(
         ax_polar.fill(polar_angles, polar_values, alpha=0.2, color=color)
 
     # Style polar plot
-    ax_polar.set_theta_zero_location("E")  # 0° at right (90° north)
+    # ax_polar.set_theta_zero_location("E")  # 0° at right (90° north)
     # ax_polar.set_theta_direction(-1)
     ax_polar.set_title(
         f"Dual Phase Directional Tuning\n({metric.replace('_', ' ').title()})",
@@ -442,8 +442,8 @@ def plot_directional_responses_dual_phase(
     for i, angle in enumerate(sorted_angles):
         # Single trace plot per direction
         radius = 0.38  
-        x_center = 0.5 + radius * np.cos(-angle + np.pi / 2)
-        y_center = 0.5 + radius * np.sin(-angle + np.pi / 2)
+        x_center = 0.5 + radius * np.cos(angle)
+        y_center = 0.5 + radius * np.sin(angle)
         
         subplot_size = 0.08
         ax = fig.add_axes([
@@ -453,19 +453,22 @@ def plot_directional_responses_dual_phase(
             subplot_size
         ])
         
-        # Plot both phases on same axes with different colors
+        # Concatenate both phases into a continuous trace
         if show_trials and trial_data is not None:
-            ax.plot(sorted_phase1_trial_data[i].T, color=phase_colors[0], 
-                    linewidth=0.3, alpha=0.3)
-            ax.plot(sorted_phase2_trial_data[i].T, color=phase_colors[1], 
-                    linewidth=0.3, alpha=0.3)
+            # Concatenate trial data for both phases
+            combined_trial_data = np.concatenate([sorted_phase1_trial_data[i], sorted_phase2_trial_data[i]], axis=1)
+            ax.plot(combined_trial_data.T, "k-", linewidth=0.3, alpha=0.3)
         
-        # Plot average traces for both phases
-        ax.plot(sorted_phase1_data[i], color=phase_colors[0], linewidth=2, label='OFF→ON')
-        ax.plot(sorted_phase2_data[i], color=phase_colors[1], linewidth=2, label='ON→OFF')
+        # Concatenate average traces for both phases
+        combined_data = np.concatenate([sorted_phase1_data[i], sorted_phase2_data[i]])
+        ax.plot(combined_data, "k-", linewidth=2)
+        
+        # Add vertical line to separate the two phases
+        phase1_len = len(sorted_phase1_data[i])
+        ax.axvline(phase1_len, color="k", linestyle="--", alpha=0.5, linewidth=1.5)
         ax.axhline(0, color="gray", linestyle="-", alpha=0.3, linewidth=0.5)
         
-        ax.set_xlim(0, max(len(sorted_phase1_data[i]), len(sorted_phase2_data[i])))
+        ax.set_xlim(0, len(combined_data))
         ax.set_ylim(y_min_global, y_max_global)
         ax.set_xticks([])
         ax.set_yticks([])
@@ -557,7 +560,7 @@ def calculate_orientation_selectivity_index(values, directions_list):
     return (preferred - orthogonal) / (preferred + orthogonal)
 
 
-def plot_tuning_function_polar(tuning_functions, directions_list, rois=None, figsize=(6, 6), colors=None, metric='peak', ax=None, show_title=True, show_theta_labels=True, show_mean_vector=False, mean_vector_color='red', show_orientation_vector=False, orientation_vector_color='orange'):
+def plot_tuning_function_polar(tuning_functions, directions_list, rois=None, figsize=(6, 6), colors=None, metric='peak', ax=None, show_title=True, show_theta_labels=True, show_tuning=True, show_mean_vector=False, mean_vector_color='red', show_orientation_vector=False, orientation_vector_color='orange'):
     """
     Plot tuning functions as polar plots.
     
@@ -581,6 +584,8 @@ def plot_tuning_function_polar(tuning_functions, directions_list, rois=None, fig
         Whether to show the title on the plot (default True)
     show_theta_labels : bool
         Whether to show the theta (direction) labels on the plot (default True)
+    show_tuning : bool
+        Whether to show the tuning curve itself (default True). When False, only shows vectors.
     show_mean_vector : bool
         Whether to show mean direction vectors as overlays (default False)
     mean_vector_color : str
@@ -618,17 +623,20 @@ def plot_tuning_function_polar(tuning_functions, directions_list, rois=None, fig
     if colors is None:
         colors = plt.cm.nipy_spectral(np.linspace(0, 1, len(rois)))
     
-    for i, roi_idx in enumerate(rois):
-        tuning_function = tuning_functions[sort_order, roi_idx]
-        
-        # Close the loop
-        tuning_function_closed = np.concatenate((tuning_function, [tuning_function[0]]))
-        degrees_closed = np.concatenate((degrees, [degrees[0]]))
-        
-        ax.plot(degrees_closed, tuning_function_closed, marker='o', 
-                color=colors[i], label=f'ROI {roi_idx}')
+    # Plot tuning curves only if show_tuning is True
+    if show_tuning:
+        for i, roi_idx in enumerate(rois):
+            tuning_function = tuning_functions[sort_order, roi_idx]
+            
+            # Close the loop
+            tuning_function_closed = np.concatenate((tuning_function, [tuning_function[0]]))
+            degrees_closed = np.concatenate((degrees, [degrees[0]]))
+            
+            ax.plot(degrees_closed, tuning_function_closed, marker='o', 
+                    color=colors[i], label=f'ROI {roi_idx}')
     
-    if len(rois) > 1:
+    # Show legend if multiple ROIs and tuning is shown, or if vectors are shown
+    if (len(rois) > 1 and show_tuning) or show_mean_vector or show_orientation_vector:
         ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
     
     # Format metric name for title
@@ -668,11 +676,15 @@ def plot_tuning_function_polar(tuning_functions, directions_list, rois=None, fig
                 # Use the same color as the tuning function for this ROI
                 arrow_color = colors[i] if isinstance(colors, (list, np.ndarray)) else mean_vector_color
                 
-                # Plot mean direction vector arrow (no dot at the end)
+                # Plot mean direction vector arrow with label for legend
                 ax.annotate('', xy=(mean_angle_rad, mean_mag_scaled), 
                            xytext=(0, 0),
                            arrowprops=dict(arrowstyle='->', color=arrow_color, lw=3),
                            zorder=10)
+                
+                # Add invisible line for legend entry
+                ax.plot([], [], color=arrow_color, marker='>', markersize=8, 
+                       linestyle='None', label=f'ROI {roi_idx} Direction Vector')
     
     # Add mean orientation vectors if requested
     if show_orientation_vector:
@@ -701,5 +713,491 @@ def plot_tuning_function_polar(tuning_functions, directions_list, rois=None, fig
                            xytext=(0, 0),
                            arrowprops=dict(arrowstyle='->', color=orient_arrow_color, lw=3),
                            zorder=9)
+                
+                # Add invisible line for legend entry
+                ax.plot([], [], color=orient_arrow_color, marker='>', markersize=8, 
+                       linestyle='None', label=f'ROI {roi_idx} Orientation Vector')
     
     return fig, ax
+
+
+def plot_tuning_function_multi_phase(tuning_functions, directions_list, phase_num, rois=None, 
+                                    figsize=(6, 6), colors=None, ax=None, show_title=True, 
+                                    show_theta_labels=True, show_tuning=True, show_mean_vector=False, 
+                                    mean_vector_color='red', show_orientation_vector=False, 
+                                    orientation_vector_color='orange', metric='peak'):
+    """
+    Plot multi-phase tuning functions as polar plots with phase-dependent vectors.
+    
+    Parameters:
+    -----------
+    tuning_functions : np.ndarray
+        Array of shape (n_rois, n_directions, n_phases) containing tuning functions for each phase
+    directions_list : list of int/float
+        List of direction values in degrees
+    phase_num : int
+        Number of phases
+    rois : list of int or None
+        ROI indices to plot. If None, plots all ROIs
+    figsize : tuple
+        Figure size (width, height)
+    colors : list or None
+        Colors for each ROI. If None, uses default color cycle
+    ax : matplotlib.axes.Axes or None
+        Existing polar axes to plot on. If None, creates new figure and axes
+    show_title : bool
+        Whether to show the title on the plot (default True)
+    show_theta_labels : bool
+        Whether to show the theta (direction) labels on the plot (default True)
+    show_tuning : bool
+        Whether to show the tuning curve itself (default True). When False, only shows vectors.
+    show_mean_vector : bool
+        Whether to show mean direction vectors as overlays (default False)
+    mean_vector_color : str
+        Color for mean direction vector arrows (default 'red')
+    show_orientation_vector : bool
+        Whether to show mean orientation vectors as overlays (default False)
+    orientation_vector_color : str
+        Color for mean orientation vector arrows (default 'orange')
+    metric : str
+        Metric name for title display
+    
+    Returns:
+    --------
+    fig : matplotlib.figure.Figure
+        The figure object
+    ax : matplotlib.axes.Axes
+        The polar plot axes object
+    """
+    # Create figure if not provided
+    if ax is None:
+        fig = plt.figure(figsize=figsize)
+        ax = plt.subplot(projection='polar')
+        ax.set_theta_zero_location("E")  # 0° at right (90° north)
+    else:
+        fig = ax.figure
+    
+    # Set up ROI indices
+    if rois is None:
+        rois = list(range(tuning_functions.shape[0]))
+    elif isinstance(rois, int):
+        rois = [rois]
+    
+    # Set up colors for ROIs
+    if colors is None:
+        base_colors = plt.cm.nipy_spectral(np.linspace(0, 1, len(rois)))
+    else:
+        base_colors = colors
+    
+    # Sort by direction for proper polar plot connectivity
+    sort_order = np.argsort(directions_list)
+    degrees = np.deg2rad(directions_list)[sort_order]
+    
+    # Plot each phase for each ROI (only if show_tuning is True)
+    if show_tuning:
+        for roi_i, roi_idx in enumerate(rois):
+            base_color = base_colors[roi_i] if isinstance(base_colors, (list, np.ndarray)) else base_colors
+            
+            for phase_i in range(phase_num):
+                # Get tuning function for this ROI and phase
+                tuning_function = tuning_functions[roi_idx, sort_order, phase_i]
+                
+                # Close the loop
+                tuning_function_closed = np.concatenate((tuning_function, [tuning_function[0]]))
+                degrees_closed = np.concatenate((degrees, [degrees[0]]))
+                
+                # Create phase-specific styling
+                alpha = 0.7 + 0.3 * (phase_i / (phase_num - 1)) if phase_num > 1 else 1.0
+                linestyle = ['-', '--', '-.', ':'][phase_i % 4]
+                
+                # Plot phase
+                label = f'ROI {roi_idx} Phase {phase_i+1}' if len(rois) > 1 or phase_num > 1 else f'Phase {phase_i+1}'
+                ax.plot(degrees_closed, tuning_function_closed, marker='o', 
+                        color=base_color, alpha=alpha, linestyle=linestyle, label=label)
+    
+    # Add legend if multiple traces and tuning is shown, or if vectors are shown
+    if ((len(rois) > 1 or phase_num > 1) and show_tuning) or show_mean_vector or show_orientation_vector:
+        # Collect all handles and labels
+        handles, labels = ax.get_legend_handles_labels()
+        
+        # Create manual legend if no automatic handles found
+        if not handles and (show_mean_vector or show_orientation_vector):
+            from matplotlib.lines import Line2D
+            manual_handles = []
+            manual_labels = []
+            
+            if show_mean_vector:
+                for roi_i, roi_idx in enumerate(rois):
+                    base_color = base_colors[roi_i] if isinstance(base_colors, (list, np.ndarray)) else mean_vector_color
+                    for phase_i in range(phase_num):
+                        # Create phase-specific color
+                        if isinstance(base_color, str):
+                            import matplotlib.colors as mcolors
+                            base_rgb = mcolors.to_rgb(base_color)
+                            phase_factor = 0.8 + 0.2 * (phase_i / max(1, phase_num - 1))
+                            phase_color = tuple(min(1.0, c * phase_factor) for c in base_rgb)
+                        else:
+                            phase_color = base_color
+                        
+                        alpha = 0.7 + 0.3 * (phase_i / (phase_num - 1)) if phase_num > 1 else 1.0
+                        handle = Line2D([0], [0], color=phase_color, marker='>', markersize=8, 
+                                      alpha=alpha, linestyle='None')
+                        manual_handles.append(handle)
+                        manual_labels.append(f'ROI {roi_idx} Direction Vector P{phase_i+1}')
+            
+            if show_orientation_vector:
+                for roi_i, roi_idx in enumerate(rois):
+                    for phase_i in range(phase_num):
+                        # Create phase-specific color for orientation
+                        if isinstance(orientation_vector_color, str):
+                            import matplotlib.colors as mcolors
+                            base_rgb = mcolors.to_rgb(orientation_vector_color)
+                            phase_factor = 1.0 - 0.3 * (phase_i / max(1, phase_num - 1))
+                            phase_orient_color = tuple(max(0.0, c * phase_factor) for c in base_rgb)
+                        else:
+                            phase_orient_color = orientation_vector_color
+                        
+                        alpha = 0.7 + 0.3 * (phase_i / (phase_num - 1)) if phase_num > 1 else 1.0
+                        handle = Line2D([0], [0], color=phase_orient_color, marker='>', markersize=8, 
+                                      alpha=alpha, linestyle='None')
+                        manual_handles.append(handle)
+                        manual_labels.append(f'ROI {roi_idx} Orientation Vector P{phase_i+1}')
+            
+            ax.legend(manual_handles, manual_labels, loc='upper right', bbox_to_anchor=(1.3, 1.1))
+        else:
+            ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
+    
+    # Format title
+    if show_title:
+        metric_name = metric.replace('_', ' ').title()
+        ax.set_title(f'Directional tuning ({metric_name}) - {phase_num} phases', fontsize=12, pad=20)
+    
+    ax.grid(True, alpha=0.3)
+    
+    # Hide theta labels if requested
+    if not show_theta_labels:
+        ax.set_thetagrids([])
+    
+    # Add mean direction vectors if requested (phase-dependent)
+    if show_mean_vector:
+        from pygor.timeseries.moving_bars import tuning_metrics
+        import matplotlib.colors as mcolors
+        
+        
+        for roi_i, roi_idx in enumerate(rois):
+            base_color = base_colors[roi_i] if isinstance(base_colors, (list, np.ndarray)) else mean_vector_color
+            
+            for phase_i in range(phase_num):
+                # Get tuning function for this specific phase
+                roi_tuning_phase = tuning_functions[roi_idx, sort_order, phase_i]
+                directions_sorted = np.array(directions_list)[sort_order]
+                
+                # Compute mean direction vector for this phase
+                mean_vector = tuning_metrics.extract_mean_vector(roi_tuning_phase, directions_sorted)
+                
+                
+                if not np.isnan(mean_vector['angle']):
+                    # Convert to radians
+                    mean_angle_rad = np.deg2rad(mean_vector['angle'])
+                    
+                    # Scale magnitude for visibility
+                    mean_mag_scaled = mean_vector['magnitude'] * np.max(roi_tuning_phase)
+                    
+                    # Create phase-specific color variations
+                    if isinstance(base_color, str):
+                        # If base_color is a string, create variations
+                        base_rgb = mcolors.to_rgb(base_color)
+                        # Lighten for later phases
+                        phase_factor = 0.8 + 0.2 * (phase_i / max(1, phase_num - 1))
+                        phase_color = tuple(min(1.0, c * phase_factor) for c in base_rgb)
+                    else:
+                        phase_color = base_color
+                    
+                    alpha = 0.7 + 0.3 * (phase_i / (phase_num - 1)) if phase_num > 1 else 1.0
+                    arrow_width = 3 if phase_i == 0 else 2  # Make first phase thicker
+                    
+                    # Plot mean direction vector arrow
+                    ax.annotate('', xy=(mean_angle_rad, mean_mag_scaled), 
+                               xytext=(0, 0),
+                               arrowprops=dict(arrowstyle='->', color=phase_color, lw=arrow_width, alpha=alpha),
+                               zorder=10 + phase_i)
+                    
+                    # Legend will be created manually in the legend section
+    
+    # Add mean orientation vectors if requested (phase-dependent)
+    if show_orientation_vector:
+        from pygor.timeseries.moving_bars import tuning_metrics
+        import matplotlib.colors as mcolors
+        
+        for roi_i, roi_idx in enumerate(rois):
+            
+            for phase_i in range(phase_num):
+                # Get tuning function for this specific phase
+                roi_tuning_phase = tuning_functions[roi_idx, sort_order, phase_i]
+                directions_sorted = np.array(directions_list)[sort_order]
+                
+                # Compute mean orientation vector for this phase
+                orientation_vector = tuning_metrics.extract_orientation_vector(roi_tuning_phase, directions_sorted)
+                
+                
+                if not np.isnan(orientation_vector['angle']):
+                    # Convert to radians
+                    orient_angle_rad = np.deg2rad(orientation_vector['angle'])
+                    
+                    # Scale magnitude for visibility
+                    orient_mag_scaled = orientation_vector['magnitude'] * np.max(roi_tuning_phase)
+                    
+                    # Create phase-specific color variations for orientation vector
+                    if isinstance(orientation_vector_color, str):
+                        base_rgb = mcolors.to_rgb(orientation_vector_color)
+                        # Darken for later phases (opposite of direction vectors)
+                        phase_factor = 1.0 - 0.3 * (phase_i / max(1, phase_num - 1))
+                        phase_orient_color = tuple(max(0.0, c * phase_factor) for c in base_rgb)
+                    else:
+                        phase_orient_color = orientation_vector_color
+                    
+                    alpha = 0.7 + 0.3 * (phase_i / (phase_num - 1)) if phase_num > 1 else 1.0
+                    arrow_width = 3 if phase_i == 0 else 2  # Make first phase thicker
+                    
+                    # Plot mean orientation vector arrow
+                    ax.annotate('', xy=(orient_angle_rad, orient_mag_scaled), 
+                               xytext=(0, 0),
+                               arrowprops=dict(arrowstyle='->', color=phase_orient_color, lw=arrow_width, alpha=alpha),
+                               zorder=9 + phase_i)
+                    
+                    # Legend will be created manually in the legend section
+    
+    return fig, ax
+
+
+def plot_orientation_tuning_cartesian(responses, directions_deg, figsize=(8, 6), 
+                                     color='black', linewidth=2, marker='o', 
+                                     markersize=6, show_osi=True, osi_color='red',
+                                     title=None, xlabel='Orientation (degrees)', 
+                                     ylabel='Response', show_grid=True):
+    """
+    Plot orientation tuning curve in cartesian coordinates.
+    
+    Creates a standard cartesian plot of orientation tuning (0-180°) commonly 
+    used in vision research papers. Shows OSI calculation points if requested.
+    
+    Parameters:
+    -----------
+    responses : array-like
+        Response values for each direction
+    directions_deg : array-like
+        Direction values in degrees
+    figsize : tuple
+        Figure size (width, height)
+    color : str or tuple
+        Color for the main tuning curve
+    linewidth : float
+        Line width for the tuning curve
+    marker : str
+        Marker style for data points
+    markersize : float
+        Size of data point markers
+    show_osi : bool
+        Whether to show OSI calculation points
+    osi_color : str or tuple
+        Color for OSI calculation markers
+    title : str or None
+        Plot title
+    xlabel : str
+        X-axis label
+    ylabel : str
+        Y-axis label
+    show_grid : bool
+        Whether to show grid lines
+        
+    Returns:
+    --------
+    fig : matplotlib.figure.Figure
+        Figure object
+    ax : matplotlib.axes.Axes
+        Axes object
+    osi_info : dict
+        Dictionary containing OSI calculation results
+    """
+    from ...tuning_metrics import compute_orientation_tuning, compute_orientation_selectivity_index
+    
+    # Get orientation tuning
+    orientation_data = compute_orientation_tuning(responses, directions_deg)
+    orientations = orientation_data['orientations']
+    orientation_responses = orientation_data['responses']
+    
+    # Get OSI information
+    osi_info = compute_orientation_selectivity_index(responses, directions_deg)
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize, facecolor='white')
+    
+    # Sort orientations for smooth plotting
+    sort_indices = np.argsort(orientations)
+    sorted_orientations = orientations[sort_indices]
+    sorted_responses = orientation_responses[sort_indices]
+    
+    # Plot main tuning curve
+    ax.plot(sorted_orientations, sorted_responses, color=color, linewidth=linewidth, 
+            marker=marker, markersize=markersize, label='Orientation tuning')
+    
+    # Show OSI calculation points if requested
+    if show_osi and not np.isnan(osi_info['osi']):
+        # Mark preferred orientation
+        ax.scatter(osi_info['preferred_orientation'], osi_info['preferred_response'], 
+                  color=osi_color, s=markersize*15, marker='s', 
+                  label=f'Preferred ({osi_info["preferred_orientation"]:.0f}°)', 
+                  zorder=10, edgecolors='white', linewidth=1)
+        
+        # Mark orthogonal orientation
+        ax.scatter(osi_info['orthogonal_orientation'], osi_info['orthogonal_response'], 
+                  color=osi_color, s=markersize*15, marker='^', 
+                  label=f'Orthogonal ({osi_info["orthogonal_orientation"]:.0f}°)', 
+                  zorder=10, edgecolors='white', linewidth=1)
+        
+        # Add OSI text
+        ax.text(0.02, 0.98, f'OSI = {osi_info["osi"]:.3f}', 
+                transform=ax.transAxes, fontsize=12, fontweight='bold',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8),
+                verticalalignment='top')
+    
+    # Styling
+    ax.set_xlim(0, 180)
+    ax.set_ylim(0, max(orientation_responses) * 1.1 if max(orientation_responses) > 0 else 1)
+    ax.set_xlabel(xlabel, fontsize=12)
+    ax.set_ylabel(ylabel, fontsize=12)
+    
+    # Set x-axis ticks at common orientations
+    ax.set_xticks([0, 45, 90, 135, 180])
+    
+    if title:
+        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+    
+    if show_grid:
+        ax.grid(True, alpha=0.3, linestyle='--')
+    
+    # Add legend if showing OSI
+    if show_osi and not np.isnan(osi_info['osi']):
+        ax.legend(loc='upper right', fontsize=10)
+    
+    # Clean up spines
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(1)
+    ax.spines['bottom'].set_linewidth(1)
+    
+    plt.tight_layout()
+    
+    return fig, ax, osi_info
+
+
+def plot_orientation_tuning_comparison(responses, directions_deg, figsize=(12, 5)):
+    """
+    Plot side-by-side comparison of polar and cartesian orientation tuning.
+    
+    Creates a two-panel figure showing both polar and cartesian representations
+    of the same orientation tuning data for easy comparison.
+    
+    Parameters:
+    -----------
+    responses : array-like
+        Response values for each direction
+    directions_deg : array-like
+        Direction values in degrees
+    figsize : tuple
+        Figure size (width, height)
+        
+    Returns:
+    --------
+    fig : matplotlib.figure.Figure
+        Figure object
+    axes : list
+        List containing [polar_ax, cartesian_ax]
+    osi_info : dict
+        Dictionary containing OSI calculation results
+    """
+    from ...tuning_metrics import compute_orientation_tuning, extract_orientation_vector
+    
+    # Create figure with two subplots
+    fig = plt.figure(figsize=figsize, facecolor='white')
+    
+    # Polar plot (left)
+    ax_polar = fig.add_subplot(121, projection='polar')
+    
+    # Get orientation data
+    orientation_data = compute_orientation_tuning(responses, directions_deg)
+    orientations = orientation_data['orientations']
+    orientation_responses = orientation_data['responses']
+    
+    # Convert to radians and double for polar plot
+    orientations_rad = np.deg2rad(orientations * 2)  # Double for 0-360° display
+    
+    # Sort for smooth plotting
+    sort_indices = np.argsort(orientations)
+    sorted_orientations_rad = orientations_rad[sort_indices]
+    sorted_responses = orientation_responses[sort_indices]
+    
+    # Close the polar plot
+    sorted_orientations_rad = np.append(sorted_orientations_rad, sorted_orientations_rad[0])
+    sorted_responses = np.append(sorted_responses, sorted_responses[0])
+    
+    # Plot polar tuning curve
+    ax_polar.plot(sorted_orientations_rad, sorted_responses, 'b-', linewidth=2, marker='o', markersize=4)
+    ax_polar.fill(sorted_orientations_rad, sorted_responses, alpha=0.3, color='blue')
+    
+    # Add orientation vector
+    orient_vector = extract_orientation_vector(responses, directions_deg)
+    if not np.isnan(orient_vector['angle']):
+        vector_angle_rad = np.deg2rad(orient_vector['angle'] * 2)
+        vector_magnitude = orient_vector['magnitude'] * max(sorted_responses)
+        ax_polar.annotate('', xy=(vector_angle_rad, vector_magnitude), xytext=(0, 0),
+                         arrowprops=dict(arrowstyle='->', color='orange', lw=3),
+                         zorder=10)
+    
+    # Polar plot styling
+    ax_polar.set_ylim(0, max(sorted_responses) * 1.1)
+    ax_polar.set_title('Polar Representation', fontsize=14, fontweight='bold', pad=20)
+    ax_polar.set_theta_zero_location('E')
+    ax_polar.set_theta_direction(1)
+    
+    # Cartesian plot (right)
+    ax_cartesian = fig.add_subplot(122)
+    fig_temp, ax_temp, osi_info = plot_orientation_tuning_cartesian(
+        responses, directions_deg, figsize=(6, 5), show_osi=True
+    )
+    
+    # Copy cartesian plot to our subplot
+    for line in ax_temp.get_lines():
+        ax_cartesian.plot(line.get_xdata(), line.get_ydata(), 
+                         color=line.get_color(), linewidth=line.get_linewidth(),
+                         marker=line.get_marker(), markersize=line.get_markersize())
+    
+    for collection in ax_temp.collections:
+        ax_cartesian.scatter(collection.get_offsets()[:, 0], collection.get_offsets()[:, 1],
+                           c=collection.get_facecolors(), s=collection.get_sizes(),
+                           marker=collection.get_paths()[0] if collection.get_paths() else 'o')
+    
+    # Copy cartesian styling
+    ax_cartesian.set_xlim(ax_temp.get_xlim())
+    ax_cartesian.set_ylim(ax_temp.get_ylim())
+    ax_cartesian.set_xlabel(ax_temp.get_xlabel(), fontsize=12)
+    ax_cartesian.set_ylabel(ax_temp.get_ylabel(), fontsize=12)
+    ax_cartesian.set_title('Cartesian Representation', fontsize=14, fontweight='bold', pad=20)
+    ax_cartesian.set_xticks([0, 45, 90, 135, 180])
+    ax_cartesian.grid(True, alpha=0.3, linestyle='--')
+    
+    # Add OSI text
+    if not np.isnan(osi_info['osi']):
+        ax_cartesian.text(0.02, 0.98, f'OSI = {osi_info["osi"]:.3f}', 
+                         transform=ax_cartesian.transAxes, fontsize=12, fontweight='bold',
+                         bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8),
+                         verticalalignment='top')
+    
+    # Clean up spines
+    ax_cartesian.spines['top'].set_visible(False)
+    ax_cartesian.spines['right'].set_visible(False)
+    
+    plt.close(fig_temp)  # Close temporary figure
+    plt.tight_layout()
+    
+    return fig, [ax_polar, ax_cartesian], osi_info

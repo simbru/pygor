@@ -358,6 +358,78 @@ def extract_orientation_vector(responses, directions_deg):
     }
 
 
+def compute_orientation_selectivity_index(responses, directions_deg):
+    """
+    Compute standard orientation selectivity index (OSI).
+    
+    OSI = (R_preferred - R_orthogonal) / (R_preferred + R_orthogonal)
+    
+    Where R_orthogonal is the response 90° away from the preferred orientation.
+    OSI = 1 means perfectly orientation selective, OSI = 0 means no orientation preference.
+    
+    Parameters:
+    -----------
+    responses : array-like
+        Response values for each direction
+    directions_deg : array-like
+        Direction values in degrees
+        
+    Returns:
+    --------
+    dict : Dictionary containing:
+        - 'osi': Orientation selectivity index (0 ≤ OSI ≤ 1)
+        - 'preferred_orientation': Preferred orientation in degrees (0-180°)
+        - 'orthogonal_orientation': Orthogonal orientation in degrees (0-180°)
+        - 'preferred_response': Response at preferred orientation
+        - 'orthogonal_response': Response at orthogonal orientation
+    """
+    # Get orientation tuning
+    orientation_data = compute_orientation_tuning(responses, directions_deg)
+    orientations = orientation_data['orientations']
+    orientation_responses = orientation_data['responses']
+    
+    if len(orientation_responses) == 0:
+        return {
+            'osi': 0,
+            'preferred_orientation': np.nan,
+            'orthogonal_orientation': np.nan,
+            'preferred_response': 0,
+            'orthogonal_response': 0
+        }
+    
+    # Find preferred orientation
+    preferred_idx = np.argmax(orientation_responses)
+    preferred_orientation = orientations[preferred_idx]
+    preferred_response = orientation_responses[preferred_idx]
+    
+    # Find orthogonal orientation (90° away)
+    orthogonal_orientation = (preferred_orientation + 90) % 180
+    
+    # Find closest orientation to orthogonal
+    orientation_diffs = np.abs(orientations - orthogonal_orientation)
+    # Handle wrap-around for orientation space (0-180°)
+    orientation_diffs = np.minimum(orientation_diffs, 180 - orientation_diffs)
+    orthogonal_idx = np.argmin(orientation_diffs)
+    orthogonal_response = orientation_responses[orthogonal_idx]
+    
+    # Compute OSI
+    if preferred_response + orthogonal_response == 0:
+        osi = 0
+    else:
+        osi = (preferred_response - orthogonal_response) / (preferred_response + orthogonal_response)
+    
+    # Ensure OSI is between 0 and 1
+    osi = max(0, osi)
+    
+    return {
+        'osi': osi,
+        'preferred_orientation': preferred_orientation,
+        'orthogonal_orientation': orientations[orthogonal_idx],  # Use actual orientation, not target
+        'preferred_response': preferred_response,
+        'orthogonal_response': orthogonal_response
+    }
+
+
 
 def compute_all_tuning_metrics(moving_bars_obj, metric='peak', roi_indices=None):
     """
@@ -383,7 +455,9 @@ def compute_all_tuning_metrics(moving_bars_obj, metric='peak', roi_indices=None)
         - 'vector_magnitude': Vector magnitude (r) for each ROI
         - 'circular_variance': Circular variance (CV) for each ROI  
         - 'dsi': Directional selectivity index for each ROI
+        - 'osi': Orientation selectivity index for each ROI
         - 'preferred_direction': Preferred direction (degrees) for each ROI
+        - 'preferred_orientation': Preferred orientation (degrees) for each ROI
         - 'mean_direction': Mean direction from circular stats (degrees) for each ROI
         - 'roi_indices': ROI indices that were analyzed
     """
@@ -406,7 +480,9 @@ def compute_all_tuning_metrics(moving_bars_obj, metric='peak', roi_indices=None)
     vector_magnitudes = np.zeros(n_rois)
     circular_variances = np.zeros(n_rois)
     dsis = np.zeros(n_rois)
+    osis = np.zeros(n_rois)
     preferred_directions = np.zeros(n_rois)
+    preferred_orientations = np.zeros(n_rois)
     mean_directions = np.zeros(n_rois)
     
     # Compute metrics for each ROI
@@ -418,12 +494,19 @@ def compute_all_tuning_metrics(moving_bars_obj, metric='peak', roi_indices=None)
         dsis[i] = compute_directional_selectivity_index(responses, directions_deg)
         preferred_directions[i] = compute_preferred_direction(responses, directions_deg)
         mean_directions[i] = compute_mean_direction(responses, directions_deg)
+        
+        # Compute OSI and preferred orientation
+        osi_result = compute_orientation_selectivity_index(responses, directions_deg)
+        osis[i] = osi_result['osi']
+        preferred_orientations[i] = osi_result['preferred_orientation']
     
     return {
         'vector_magnitude': vector_magnitudes,
         'circular_variance': circular_variances,
         'dsi': dsis,
+        'osi': osis,
         'preferred_direction': preferred_directions,
+        'preferred_orientation': preferred_orientations,
         'mean_direction': mean_directions,
         'roi_indices': np.array(roi_indices)
     }
@@ -449,14 +532,16 @@ def plot_tuning_metrics_histograms(metrics_dict, figsize=(15, 10), bins=20):
     """
     import matplotlib.pyplot as plt
     
-    fig, axes = plt.subplots(2, 3, figsize=figsize)
+    fig, axes = plt.subplots(2, 4, figsize=figsize)
     axes = axes.flatten()
     
     metrics_to_plot = [
         ('vector_magnitude', 'Vector Magnitude (r)', (0, 1)),
         ('circular_variance', 'Circular Variance (CV)', (0, 1)),
         ('dsi', 'Directional Selectivity Index (DSI)', (-1, 1)),
+        ('osi', 'Orientation Selectivity Index (OSI)', (0, 1)),
         ('preferred_direction', 'Preferred Direction (°)', (0, 360)),
+        ('preferred_orientation', 'Preferred Orientation (°)', (0, 180)),
         ('mean_direction', 'Mean Direction (°)', (0, 360))
     ]
     
@@ -480,9 +565,9 @@ def plot_tuning_metrics_histograms(metrics_dict, figsize=(15, 10), bins=20):
                                label=f'Mean: {mean_val:.3f}')
                 axes[i].legend()
     
-    # Hide the last subplot if we have fewer than 6 metrics
-    if len(metrics_to_plot) < 6:
-        axes[-1].set_visible(False)
+    # Hide unused subplots (we have 7 metrics in 2x4 grid = 8 subplots)
+    for i in range(len(metrics_to_plot), len(axes)):
+        axes[i].set_visible(False)
     
     plt.tight_layout()
     return fig
