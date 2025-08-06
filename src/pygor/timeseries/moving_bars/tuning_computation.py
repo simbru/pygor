@@ -146,3 +146,4 @@ def compute_tuning_function(moving_bars_obj, roi_index=None, window=None, metric
             return tuning_values[roi_index, :]  # Shape: (n_directions,)
     else:
         return tuning_values
+

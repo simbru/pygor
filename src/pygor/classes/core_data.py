@@ -180,6 +180,7 @@ class Core:
         zcrop: tuple = None,
         xcrop: tuple = None,
         ycrop: tuple = None,
+        show_axes=False,
         **kwargs,
     ) -> None:
         """
@@ -230,6 +231,8 @@ class Core:
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
             plt.colorbar(scanv, ax=ax, cax=cax)
+        if show_axes == False:
+            ax.axis("off")
         return fig, ax
 
     def view_stack_rois(
@@ -300,11 +303,11 @@ class Core:
         # color = cm.get_cmap('jet_r', num_rois)
         color = matplotlib.colormaps["jet_r"]
         if func == "average_stack":
-            scanv = ax.imshow(self.average_stack, cmap = "Greys_r")
+            scanv = ax.imshow(self.average_stack, cmap = "Greys_r", origin = "lower", **kwargs)
         else:
-            scanv = ax.imshow(func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis = axis), cmap ="Greys_r")
+            scanv = ax.imshow(func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis = axis), cmap ="Greys_r", origin = "lower", **kwargs)
         rois_masked = np.ma.masked_where(self.rois == 1, self.rois)[ystart:ystop, xstart:xstop]
-        rois = ax.imshow(rois_masked, cmap = color, alpha = alpha)
+        rois = ax.imshow(rois_masked, cmap = color, alpha = alpha, origin = "lower", **kwargs)
         ax.grid(False)
         ax.axis("off")
         if cbar == True:
@@ -546,6 +549,22 @@ class Core:
 
     def get_average_markers(self):
         return pygor.core.methods.determine_epoch_markers_ms(self)
+    
+    def get_epoch_dur(self, rtol=1e-3, atol=1e-3):
+        # Differentiate the average markers to get the epoch durations
+        diff = np.diff(self.get_average_markers())
+        if diff.size == 0:
+            warnings.warn("No epochs found, returning 0")
+            return 0
+        # Calculate the average duration of the epochs
+        avg = np.average(diff)
+        # Check for unequal epochs
+        if np.allclose(diff, avg, rtol=rtol, atol=atol) is False:
+            # If unequal, raise error and ask user to manually set epoch durations
+            raise ValueError(
+                f"Epoch durations are not equal with tolerences {rtol}, {atol}, adjust tolerences or manually set epoch durations."
+            )
+        return np.floor(np.average(np.diff(self.get_average_markers()))).astype(int)
 
     def get_correlation_map(self):
         return pygor.core.methods.correlation_map(self.images)

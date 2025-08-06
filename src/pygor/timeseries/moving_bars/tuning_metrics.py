@@ -431,7 +431,7 @@ def compute_orientation_selectivity_index(responses, directions_deg):
 
 
 
-def compute_all_tuning_metrics(moving_bars_obj, metric='peak', roi_indices=None):
+def compute_all_tuning_metrics(moving_bars_obj, metric='peak', roi_indices=None, phase_ranges=None):
     """
     Compute all directional tuning metrics for ROIs in a MovingBars object.
     
@@ -448,59 +448,184 @@ def compute_all_tuning_metrics(moving_bars_obj, metric='peak', roi_indices=None)
         - callable: custom function
     roi_indices : list or None
         ROI indices to analyze. If None, analyzes all ROIs.
+    phase_ranges : list of tuples or None
+        List of (start_idx, end_idx) index ranges for each phase to analyze separately.
+        If None, analyzes entire response period as single phase.
+        Example: [(0, 60), (60, 120)] for two phases of 60 samples each
         
     Returns:
     --------
     dict : Dictionary containing arrays of metrics for each ROI:
-        - 'vector_magnitude': Vector magnitude (r) for each ROI
-        - 'circular_variance': Circular variance (CV) for each ROI  
-        - 'dsi': Directional selectivity index for each ROI
-        - 'osi': Orientation selectivity index for each ROI
-        - 'preferred_direction': Preferred direction (degrees) for each ROI
-        - 'preferred_orientation': Preferred orientation (degrees) for each ROI
-        - 'mean_direction': Mean direction from circular stats (degrees) for each ROI
+        When phase_ranges=None (backward compatibility):
+        - 'vector_magnitude': Vector magnitude (r) for each ROI (n_rois,)
+        - 'circular_variance': Circular variance (CV) for each ROI (n_rois,)
+        - 'dsi': Directional selectivity index for each ROI (n_rois,)
+        - 'osi': Orientation selectivity index for each ROI (n_rois,)
+        - 'preferred_direction': Preferred direction (degrees) for each ROI (n_rois,)
+        - 'preferred_orientation': Preferred orientation (degrees) for each ROI (n_rois,)
+        - 'mean_direction': Mean direction from circular stats (degrees) for each ROI (n_rois,)
         - 'roi_indices': ROI indices that were analyzed
+        
+        When phase_ranges is provided:
+        - 'vector_magnitude': Vector magnitude (r) for each phase and ROI (n_phases, n_rois)
+        - 'circular_variance': Circular variance (CV) for each phase and ROI (n_phases, n_rois)
+        - 'dsi': Directional selectivity index for each phase and ROI (n_phases, n_rois)
+        - 'osi': Orientation selectivity index for each phase and ROI (n_phases, n_rois)
+        - 'preferred_direction': Preferred direction (degrees) for each phase and ROI (n_phases, n_rois)
+        - 'preferred_orientation': Preferred orientation (degrees) for each phase and ROI (n_phases, n_rois)
+        - 'mean_direction': Mean direction from circular stats (degrees) for each phase and ROI (n_phases, n_rois)
+        - 'roi_indices': ROI indices that were analyzed
+        - 'phase_ranges': Phase ranges that were used
     """
-    # Get tuning functions for all or specified ROIs
+    # Handle ROI indices
     if roi_indices is None:
-        tuning_functions = moving_bars_obj.compute_tuning_function(metric=metric)  # Shape: (n_rois, n_directions)
-        roi_indices = list(range(tuning_functions.shape[0]))
-    else:
-        # Compute for specific ROIs
-        tuning_functions = []
-        for roi_idx in roi_indices:
-            roi_tuning = moving_bars_obj.compute_tuning_function(roi_index=roi_idx, metric=metric)
-            tuning_functions.append(roi_tuning)
-        tuning_functions = np.array(tuning_functions)  # Shape: (n_selected_rois, n_directions)
+        roi_indices = list(range(moving_bars_obj.num_rois))
     
     directions_deg = np.array(moving_bars_obj.directions_list)
     
-    # Initialize output arrays
+    # Handle phase ranges
+    if phase_ranges is None:
+        # Backward compatibility - single phase (original behavior)
+        phase_ranges = [None]  # None means entire response period
+    elif phase_ranges == "auto":
+        # Automatic phase splitting using get_epoch_dur() and dir_phase_num
+        epoch_dur = moving_bars_obj.get_epoch_dur()
+        n_phases = moving_bars_obj.dir_phase_num
+        phase_size = epoch_dur // n_phases
+        phase_ranges = []
+        for i in range(n_phases):
+            start = i * phase_size
+            end = (i + 1) * phase_size if i < n_phases - 1 else epoch_dur
+            phase_ranges.append((start, end))
+    
+    n_phases = len(phase_ranges)
     n_rois = len(roi_indices)
-    vector_magnitudes = np.zeros(n_rois)
-    circular_variances = np.zeros(n_rois)
-    dsis = np.zeros(n_rois)
-    osis = np.zeros(n_rois)
-    preferred_directions = np.zeros(n_rois)
-    preferred_orientations = np.zeros(n_rois)
-    mean_directions = np.zeros(n_rois)
     
-    # Compute metrics for each ROI
-    for i, roi_idx in enumerate(roi_indices):
-        responses = tuning_functions[i]
-        
-        vector_magnitudes[i] = compute_vector_magnitude(responses, directions_deg)
-        circular_variances[i] = compute_circular_variance(responses, directions_deg)
-        dsis[i] = compute_directional_selectivity_index(responses, directions_deg)
-        preferred_directions[i] = compute_preferred_direction(responses, directions_deg)
-        mean_directions[i] = compute_mean_direction(responses, directions_deg)
-        
-        # Compute OSI and preferred orientation
-        osi_result = compute_orientation_selectivity_index(responses, directions_deg)
-        osis[i] = osi_result['osi']
-        preferred_orientations[i] = osi_result['preferred_orientation']
+    # Get all tuning functions at once (vectorized)
+    all_tuning_functions = []
+    for phase_range in phase_ranges:
+        if phase_range is None:
+            # Entire response period
+            tuning_functions = moving_bars_obj.compute_tuning_function(metric=metric)
+            if roi_indices != list(range(moving_bars_obj.num_rois)):
+                tuning_functions = tuning_functions[roi_indices]
+        else:
+            # Specific phase window - vectorized computation
+            tuning_functions = moving_bars_obj.compute_tuning_function(metric=metric, window=phase_range)
+            if roi_indices != list(range(moving_bars_obj.num_rois)):
+                tuning_functions = tuning_functions[roi_indices]
+        all_tuning_functions.append(tuning_functions)
     
-    return {
+    # Stack to get (n_phases, n_rois, n_directions)
+    all_tuning_functions = np.array(all_tuning_functions)
+    
+    # Vectorized computation of all metrics
+    vector_magnitudes = np.zeros((n_phases, n_rois))
+    circular_variances = np.zeros((n_phases, n_rois))
+    dsis = np.zeros((n_phases, n_rois))
+    osis = np.zeros((n_phases, n_rois))
+    preferred_directions = np.zeros((n_phases, n_rois))
+    preferred_orientations = np.zeros((n_phases, n_rois))
+    mean_directions = np.zeros((n_phases, n_rois))
+    
+    # Vectorized computation of all metrics - no loops!
+    directions_rad = np.deg2rad(directions_deg)
+    
+    # Vectorized vector magnitude and circular variance
+    total_responses = np.sum(all_tuning_functions, axis=2)  # (n_phases, n_rois)
+    mean_x = np.sum(all_tuning_functions * np.cos(directions_rad), axis=2) / np.where(total_responses == 0, 1, total_responses)
+    mean_y = np.sum(all_tuning_functions * np.sin(directions_rad), axis=2) / np.where(total_responses == 0, 1, total_responses)
+    vector_magnitudes = np.sqrt(mean_x**2 + mean_y**2)
+    vector_magnitudes = np.where(total_responses == 0, 0, vector_magnitudes)
+    circular_variances = 1 - vector_magnitudes
+    
+    # Vectorized preferred direction (argmax across directions)
+    preferred_directions = directions_deg[np.argmax(all_tuning_functions, axis=2)]
+    
+    # Vectorized mean direction
+    mean_direction_rad = np.arctan2(mean_y, mean_x)
+    mean_directions = np.rad2deg(mean_direction_rad)
+    mean_directions = np.where(mean_directions < 0, mean_directions + 360, mean_directions)
+    mean_directions = np.where(total_responses == 0, np.nan, mean_directions)
+    
+    # Vectorized DSI computation
+    preferred_indices = np.argmax(all_tuning_functions, axis=2)  # (n_phases, n_rois)
+    preferred_responses = np.max(all_tuning_functions, axis=2)  # (n_phases, n_rois)
+    
+    # Find opposite directions (180° away)
+    preferred_dirs = directions_deg[preferred_indices]
+    opposite_dirs = (preferred_dirs + 180) % 360
+    
+    # Find closest direction indices to opposite directions
+    dir_diffs = np.abs(directions_deg[np.newaxis, np.newaxis, :] - opposite_dirs[:, :, np.newaxis])
+    dir_diffs = np.minimum(dir_diffs, 360 - dir_diffs)  # Handle wrap-around
+    opposite_indices = np.argmin(dir_diffs, axis=2)
+    
+    # Get opposite responses
+    opposite_responses = all_tuning_functions[np.arange(n_phases)[:, np.newaxis], 
+                                            np.arange(n_rois)[np.newaxis, :], 
+                                            opposite_indices]
+    
+    # Compute DSI
+    dsi_denominator = preferred_responses + opposite_responses
+    dsis = np.where(dsi_denominator == 0, 0, 
+                   (preferred_responses - opposite_responses) / dsi_denominator)
+    
+    # Vectorized OSI computation (simplified - compute for all at once)
+    # Convert to orientation space and compute OSI
+    orientations = directions_deg % 180
+    unique_orientations = np.unique(orientations)
+    
+    # For each phase and ROI, compute OSI
+    osis = np.zeros((n_phases, n_rois))
+    preferred_orientations = np.zeros((n_phases, n_rois))
+    
+    for phase_idx in range(n_phases):
+        for roi_idx in range(n_rois):
+            # Get orientation responses by averaging opposite directions
+            orientation_responses = []
+            for orient in unique_orientations:
+                matching_indices = np.where(orientations == orient)[0]
+                avg_response = np.mean(all_tuning_functions[phase_idx, roi_idx, matching_indices])
+                orientation_responses.append(avg_response)
+            
+            orientation_responses = np.array(orientation_responses)
+            
+            if len(orientation_responses) > 0:
+                preferred_idx = np.argmax(orientation_responses)
+                preferred_orientation = unique_orientations[preferred_idx]
+                preferred_response = orientation_responses[preferred_idx]
+                
+                # Find orthogonal orientation (90° away)
+                orthogonal_orientation = (preferred_orientation + 90) % 180
+                orientation_diffs = np.abs(unique_orientations - orthogonal_orientation)
+                orientation_diffs = np.minimum(orientation_diffs, 180 - orientation_diffs)
+                orthogonal_idx = np.argmin(orientation_diffs)
+                orthogonal_response = orientation_responses[orthogonal_idx]
+                
+                # Compute OSI
+                if preferred_response + orthogonal_response > 0:
+                    osis[phase_idx, roi_idx] = max(0, (preferred_response - orthogonal_response) / (preferred_response + orthogonal_response))
+                else:
+                    osis[phase_idx, roi_idx] = 0
+                
+                preferred_orientations[phase_idx, roi_idx] = preferred_orientation
+            else:
+                osis[phase_idx, roi_idx] = 0
+                preferred_orientations[phase_idx, roi_idx] = np.nan
+    
+    # Squeeze arrays if single phase for backward compatibility
+    if n_phases == 1:
+        vector_magnitudes = np.squeeze(vector_magnitudes, axis=0)
+        circular_variances = np.squeeze(circular_variances, axis=0)
+        dsis = np.squeeze(dsis, axis=0)
+        osis = np.squeeze(osis, axis=0)
+        preferred_directions = np.squeeze(preferred_directions, axis=0)
+        preferred_orientations = np.squeeze(preferred_orientations, axis=0)
+        mean_directions = np.squeeze(mean_directions, axis=0)
+    
+    # Build return dictionary
+    result = {
         'vector_magnitude': vector_magnitudes,
         'circular_variance': circular_variances,
         'dsi': dsis,
@@ -510,6 +635,12 @@ def compute_all_tuning_metrics(moving_bars_obj, metric='peak', roi_indices=None)
         'mean_direction': mean_directions,
         'roi_indices': np.array(roi_indices)
     }
+    
+    # Add phase_ranges to result if provided
+    if phase_ranges != [None]:
+        result['phase_ranges'] = phase_ranges
+    
+    return result
 
 
 def plot_tuning_metrics_histograms(metrics_dict, figsize=(15, 10), bins=20):

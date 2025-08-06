@@ -25,16 +25,27 @@ uv sync  # Builds and installs into local .venv
 
 ### Testing
 ```bash
-# Run all tests
-python -m unittest discover test
+# Run comprehensive test suite (recommended)
+python src/pygor/test/run_tests.py
+
+# Alternative: Run all tests with unittest
+PYTHONPATH=src python -m unittest discover src/pygor/test -v
 
 # Run specific test file
-python -m unittest test.test_STRF
-python -m unittest test.test_Core
+PYTHONPATH=src python -m unittest src.pygor.test.test_STRF -v
+PYTHONPATH=src python -m unittest src.pygor.test.test_Core -v
 
-# Run single test method
-python -m unittest test.test_STRF.TestSTRF.test_method_name
+# Run Windows batch file (from test directory)
+cd src/pygor/test && run_test.bat
 ```
+
+**Test Suite Features:**
+- Comprehensive validation of new STRF methods (extrema timing, spatial alignment)
+- Edge case testing (empty arrays, invalid inputs, boundary conditions)
+- Proper error handling validation (no more masked failures)
+- Mock data generation for consistent testing
+- Dependency checking and clear error reporting
+- Memory efficiency validation for large datasets
 
 ### Code Quality
 ```bash

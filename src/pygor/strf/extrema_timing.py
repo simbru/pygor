@@ -124,15 +124,23 @@ def compare_color_channel_timing_wrapper(strf_obj, roi, color_channels=(0, 1), t
     if not strf_obj.multicolour:
         raise ValueError("Color channel comparison requires multicolor STRF data")
     
-    # Get timing maps for both color channels
+    # Validate color channel indices
+    if max(color_channels) >= strf_obj.numcolour:
+        raise IndexError(f"Color channel index {max(color_channels)} exceeds available channels (0-{strf_obj.numcolour-1})")
+    
+    # Calculate STRF indices for the specific color channels
+    strf_idx1 = roi * strf_obj.numcolour + color_channels[0]
+    strf_idx2 = roi * strf_obj.numcolour + color_channels[1]
+    
+    # Get timing maps for each color channel
     timing1 = map_extrema_timing_wrapper(
-        strf_obj, roi=roi, color_channel=color_channels[0], threshold=threshold,
+        strf_obj, roi=strf_idx1, threshold=threshold,
         exclude_firstlast=exclude_firstlast, return_milliseconds=return_milliseconds,
         frame_rate_hz=frame_rate_hz
     )
     
     timing2 = map_extrema_timing_wrapper(
-        strf_obj, roi=roi, color_channel=color_channels[1], threshold=threshold,
+        strf_obj, roi=strf_idx2, threshold=threshold,
         exclude_firstlast=exclude_firstlast, return_milliseconds=return_milliseconds,
         frame_rate_hz=frame_rate_hz
     )
@@ -141,8 +149,8 @@ def compare_color_channel_timing_wrapper(strf_obj, roi, color_channels=(0, 1), t
     return timing2 - timing1
 
 
-def map_extrema_timing_wrapper(strf_obj, roi=None, color_channel=0, threshold=3.0, 
-                             exclude_firstlast=(1, 1), return_milliseconds=False, frame_rate_hz=60.0):
+def map_extrema_timing_wrapper(strf_obj, roi=None, threshold=3.0, 
+                             exclude_firstlast=(1, 1), return_milliseconds=False, frame_rate_hz=None):
     """
     Map the timing of extrema for each pixel in STRF.
     
@@ -151,9 +159,7 @@ def map_extrema_timing_wrapper(strf_obj, roi=None, color_channel=0, threshold=3.
     strf_obj : STRF object
         STRF object containing the data
     roi : int, optional
-        ROI index. If None, returns results for all ROIs.
-    color_channel : int, optional
-        Color channel index (for multicolor STRFs). Default is 0.
+        STRF index. If None, returns results for all STRFs.
     threshold : float, optional
         Threshold in standard deviations. Default is 3.0.
     exclude_firstlast : tuple of int, optional
@@ -166,22 +172,23 @@ def map_extrema_timing_wrapper(strf_obj, roi=None, color_channel=0, threshold=3.
     Returns
     -------
     timing_maps : ndarray
-        2D array (y, x) for single ROI or 3D array (n_rois, y, x) for all ROIs.
+        For single STRF: 2D array (y, x).
+        For all STRFs: 3D array (n_strfs, y, x).
         Values are time indices of extrema (or milliseconds if return_milliseconds=True).
         NaN indicates pixels below threshold.
+        
+    Notes
+    -----
+    For multicolor data, STRF indices are organized as [roi0_color0, roi0_color1, ..., roi1_color0, ...].
+    Use multicolour_reshape() or manual indexing to organize by color channels if needed.
     """
-    
+    frame_rate_hz = strf_obj.framerate_hz if hasattr(strf_obj, 'framerate_hz') else frame_rate_hz
     if roi is not None:
-        # Single ROI analysis
-        if strf_obj.multicolour:
-            strf_idx = roi * strf_obj.numcolour + color_channel
-            if strf_idx >= len(strf_obj.strfs):
-                raise IndexError(f"ROI {roi}, color {color_channel} exceeds available STRFs")
-            strf_3d = strf_obj.strfs[strf_idx]
-        else:
-            if roi >= len(strf_obj.strfs):
-                raise IndexError(f"ROI {roi} exceeds available STRFs")
-            strf_3d = strf_obj.strfs[roi]
+        # Single STRF analysis
+        if roi >= len(strf_obj.strfs):
+            raise IndexError(f"STRF index {roi} exceeds available STRFs (0-{len(strf_obj.strfs)-1})")
+        
+        strf_3d = strf_obj.strfs[roi]
         
         timing_map = map_extrema_timing(
             strf_3d, threshold=threshold, exclude_firstlast=exclude_firstlast
@@ -195,17 +202,9 @@ def map_extrema_timing_wrapper(strf_obj, roi=None, color_channel=0, threshold=3.
         return timing_map
     
     else:
-        # All ROIs analysis - vectorized
-        if strf_obj.multicolour:
-            # Extract specific color channel for all ROIs
-            n_rois = len(strf_obj.strfs) // strf_obj.numcolour
-            strf_indices = [i * strf_obj.numcolour + color_channel for i in range(n_rois)]
-            strfs_subset = strf_obj.strfs[strf_indices]
-        else:
-            strfs_subset = strf_obj.strfs
-        
+        # All STRFs analysis
         timing_maps = map_extrema_timing(
-            strfs_subset, threshold=threshold, exclude_firstlast=exclude_firstlast
+            strf_obj.strfs, threshold=threshold, exclude_firstlast=exclude_firstlast
         )
         
         if return_milliseconds:
@@ -214,3 +213,84 @@ def map_extrema_timing_wrapper(strf_obj, roi=None, color_channel=0, threshold=3.
             )
         
         return timing_maps
+    
+
+def map_spectral_centroid(strf_obj, roi=None, exclude_firstlast=(1, 1), return_milliseconds=False, frame_rate_hz=60.0):
+    """
+    Map the spectral centroid for each pixel in STRF.
+    
+    Parameters
+    ----------
+    strf_obj : STRF object
+        STRF object containing the data
+    roi : int, optional
+        STRF index. If None, returns results for all STRFs.
+    exclude_firstlast : tuple of int, optional
+        Number of time points to exclude from beginning and end. Default is (1, 1).
+    return_milliseconds : bool, optional
+        If True, convert timing to milliseconds. Default is False.
+    frame_rate_hz : float, optional
+        Frame rate for millisecond conversion. Default is 60.0.
+        
+    Returns
+    -------
+    spectral_centroid_maps : ndarray
+        For single STRF: 2D array (y, x).
+        For all STRFs: 3D array (n_strfs, y, x).
+        Values are spectral centroid indices.
+        
+    Notes
+    -----
+    The spectral centroid is calculated as the weighted average frequency across time.
+    """
+    
+    # Placeholder implementation; actual spectral centroid calculation would go here
+    # This is a simplified example assuming strf_obj has a method to get frequency data
+    
+    if roi is not None:
+        # Single STRF analysis
+        if roi >= len(strf_obj.strfs):
+            raise IndexError(f"STRF index {roi} exceeds available STRFs (0-{len(strf_obj.strfs)-1})")
+        
+        strf_3d = strf_obj.strfs[roi]
+        
+        # Calculate spectral centroid for this STRF
+        # spectral_centroid_map = np.mean(strf_3d, axis=1)  # Simplified example
+        
+    
+
+        return spectral_centroid_map
+    
+    else:
+        # All STRFs analysis
+        spectral_centroid_maps = np.mean(strf_obj.strfs, axis=1)  # Simplified example
+        
+
+        return spectral_centroid_maps
+    
+def map_spectral_centroid_wrapper(strf_obj, roi=None, exclude_firstlast=(1, 1), return_milliseconds=False, frame_rate_hz=60.0):
+    """
+    Wrapper for map_spectral_centroid to handle both single and multiple STRFs.
+    
+    Parameters
+    ----------
+    strf_obj : STRF object
+        STRF object containing the data
+    roi : int, optional
+        STRF index. If None, returns results for all STRFs.
+    exclude_firstlast : tuple of int, optional
+        Number of time points to exclude from beginning and end. Default is (1, 1).
+    return_milliseconds : bool, optional
+        If True, convert timing to milliseconds. Default is False.
+    frame_rate_hz : float, optional
+        Frame rate for millisecond conversion. Default is 60.0.
+        
+    Returns
+    -------
+    spectral_centroid_maps : ndarray
+        For single STRF: 2D array (y, x).
+        For all STRFs: 3D array (n_strfs, y, x).
+        Values are spectral centroid indices.
+    """
+    return map_spectral_centroid(strf_obj, roi=roi, exclude_firstlast=exclude_firstlast,
+                                  return_milliseconds=return_milliseconds, frame_rate_hz=frame_rate_hz)

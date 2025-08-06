@@ -293,6 +293,13 @@ def analyze_multicolor_spatial_alignment(strf_obj, roi, threshold=3.0,
     Returns
     -------
     dict : Dictionary containing comprehensive alignment analysis
+        - 'correlation_matrix': n_colors × n_colors correlation matrix
+        - 'overlap_matrix': n_colors × n_colors Jaccard index matrix  
+        - 'distance_matrix': n_colors × n_colors centroid distance matrix
+        - 'pairwise_metrics': Original pairwise dictionary (for backwards compatibility)
+        - 'summary_stats': Summary statistics
+        - 'channel_centroids': Centroids for each channel
+        - 'reference_channel': Reference channel used
         - 'spatial_maps': List of 2D spatial maps for each color channel
         - 'pairwise_overlaps': Matrix of overlap metrics between all channel pairs
         - 'offsets_from_reference': Offsets of each channel relative to reference
@@ -327,17 +334,35 @@ def analyze_multicolor_spatial_alignment(strf_obj, roi, threshold=3.0,
         
         spatial_maps.append(spatial_map)
     
-    # Compute pairwise overlaps
-    n_pairs = n_colors * (n_colors - 1) // 2
-    pairwise_overlaps = np.zeros((n_colors, n_colors), dtype=object)
+    # Initialize matrices for different metrics
+    correlation_matrix = np.full((n_colors, n_colors), np.nan)
+    overlap_matrix = np.full((n_colors, n_colors), np.nan)
+    distance_matrix = np.full((n_colors, n_colors), np.nan)
+    
+    # Compute pairwise overlaps and populate matrices
+    pairwise_overlaps = {}
     
     for i in range(n_colors):
-        for j in range(i + 1, n_colors):
-            overlap_metrics = compute_spatial_overlap_metrics(
-                spatial_maps[i], spatial_maps[j], threshold=threshold, method='all'
-            )
-            pairwise_overlaps[i, j] = overlap_metrics
-            pairwise_overlaps[j, i] = overlap_metrics  # Symmetric
+        for j in range(n_colors):
+            if i == j:
+                # Diagonal elements
+                correlation_matrix[i, j] = 1.0
+                overlap_matrix[i, j] = 1.0
+                distance_matrix[i, j] = 0.0
+            else:
+                # Off-diagonal elements
+                overlap_metrics = compute_spatial_overlap_metrics(
+                    spatial_maps[i], spatial_maps[j], threshold=threshold, method='all'
+                )
+                
+                # Store in pairwise dict (for backwards compatibility)
+                pair_key = f"{i}_vs_{j}"
+                pairwise_overlaps[pair_key] = overlap_metrics
+                
+                # Populate matrices
+                correlation_matrix[i, j] = overlap_metrics.get('spatial_correlation', np.nan)
+                overlap_matrix[i, j] = overlap_metrics.get('jaccard_index', np.nan)
+                distance_matrix[i, j] = overlap_metrics.get('centroid_distance', np.nan)
     
     # Compute offsets from reference channel
     offsets_from_reference = []
@@ -362,46 +387,67 @@ def analyze_multicolor_spatial_alignment(strf_obj, roi, threshold=3.0,
             )
             offsets_from_reference.append(offset_info)
     
-    # Compute alignment summary statistics
-    valid_centroids = [c for c in centroid_positions if not np.isnan(c).any()]
-    if len(valid_centroids) > 1:
-        # Pairwise distances between centroids
-        centroid_distances = cdist(valid_centroids, valid_centroids)
-        mean_centroid_distance = np.mean(centroid_distances[np.triu_indices_from(centroid_distances, k=1)])
-        max_centroid_distance = np.max(centroid_distances)
-        
-        # Mean spatial correlation across all pairs
-        correlations = []
-        for i in range(n_colors):
-            for j in range(i + 1, n_colors):
-                if pairwise_overlaps[i, j] is not None:
-                    corr = pairwise_overlaps[i, j]['spatial_correlation']
-                    if not np.isnan(corr):
-                        correlations.append(corr)
-        
-        mean_spatial_correlation = np.mean(correlations) if correlations else np.nan
-    else:
-        mean_centroid_distance = np.nan
-        max_centroid_distance = np.nan
-        mean_spatial_correlation = np.nan
+    # Compute alignment summary statistics from matrices
+    # Extract upper triangle (excluding diagonal) for pairwise statistics
+    triu_indices = np.triu_indices(n_colors, k=1)
     
-    alignment_summary = {
+    # Correlation statistics
+    corr_values = correlation_matrix[triu_indices]
+    corr_values = corr_values[~np.isnan(corr_values)]
+    mean_correlation = np.mean(corr_values) if len(corr_values) > 0 else np.nan
+    std_correlation = np.std(corr_values) if len(corr_values) > 0 else np.nan
+    
+    # Overlap statistics
+    overlap_values = overlap_matrix[triu_indices]
+    overlap_values = overlap_values[~np.isnan(overlap_values)]
+    mean_jaccard = np.mean(overlap_values) if len(overlap_values) > 0 else np.nan
+    std_jaccard = np.std(overlap_values) if len(overlap_values) > 0 else np.nan
+    
+    # Distance statistics
+    distance_values = distance_matrix[triu_indices]
+    distance_values = distance_values[~np.isnan(distance_values)]
+    mean_centroid_distance = np.mean(distance_values) if len(distance_values) > 0 else np.nan
+    std_centroid_distance = np.std(distance_values) if len(distance_values) > 0 else np.nan
+    max_centroid_distance = np.max(distance_values) if len(distance_values) > 0 else np.nan
+    
+    # Count valid centroids
+    valid_centroids = [c for c in centroid_positions if not np.isnan(c).any()]
+    
+    summary_stats = {
+        'mean_correlation': mean_correlation,
+        'std_correlation': std_correlation,
+        'mean_jaccard': mean_jaccard,
+        'std_jaccard': std_jaccard,
         'mean_centroid_distance': mean_centroid_distance,
+        'std_centroid_distance': std_centroid_distance,
         'max_centroid_distance': max_centroid_distance,
-        'mean_spatial_correlation': mean_spatial_correlation,
+        'n_comparisons': len(corr_values),
         'n_valid_channels': len(valid_centroids),
         'reference_channel': reference_channel
     }
     
     return {
-        'spatial_maps': spatial_maps,
-        'pairwise_overlaps': pairwise_overlaps,
+        # New matrix format (main feature)
+        'correlation_matrix': correlation_matrix,
+        'overlap_matrix': overlap_matrix,
+        'distance_matrix': distance_matrix,
+        
+        # Summary statistics
+        'summary_stats': summary_stats,
+        
+        # Channel information
+        'channel_centroids': centroid_positions,
         'offsets_from_reference': offsets_from_reference,
-        'centroid_positions': centroid_positions,
-        'alignment_summary': alignment_summary,
+        
+        # Spatial maps and metadata
+        'spatial_maps': spatial_maps,
+        'reference_channel': reference_channel,
         'roi_index': roi,
         'threshold': threshold,
-        'collapse_method': collapse_method
+        'collapse_method': collapse_method,
+        
+        # Backwards compatibility
+        'pairwise_metrics': pairwise_overlaps  # Renamed for clarity
     }
 
 

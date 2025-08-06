@@ -40,10 +40,12 @@ This document summarizes the new analysis methods added to the STRF module durin
 ## New STRF Class Methods
 
 ### Temporal Analysis
-1. **`map_extrema_timing(roi=None, color_channel=0, threshold=3.0, ...)`**
+1. **`map_extrema_timing(roi=None, threshold=3.0, ...)`**
    - Maps timing of extrema for each pixel
-   - Returns 2D array (single ROI) or 3D array (all ROIs)
+   - For single STRF: Returns 2D array (y, x)
+   - For all STRFs: Returns 3D array (n_strfs, y, x)
    - NaN indicates pixels below threshold
+   - For multicolor data, use manual indexing or multicolour_reshape() to organize by color channels
 
 2. **`compare_color_channel_timing(roi, color_channels=(0,1), ...)`**
    - Compares timing between two color channels
@@ -52,7 +54,8 @@ This document summarizes the new analysis methods added to the STRF module durin
 ### Spatial Analysis
 3. **`analyze_spatial_alignment(roi, threshold=3.0, reference_channel=0, ...)`**
    - Comprehensive spatial alignment analysis across all color channels
-   - Returns detailed alignment metrics and statistics
+   - Returns n_colors × n_colors matrices for correlation, overlap, and distance
+   - Holistic approach examining all channel pairs simultaneously
 
 4. **`compute_color_channel_overlap(roi, color_channels=(0,1), ...)`**
    - Computes overlap metrics between two specific color channels
@@ -127,15 +130,50 @@ import pygor.load
 strf_obj = pygor.load.STRF("strf_demo_data.h5")
 
 # Basic timing analysis
-timing_map = strf_obj.map_extrema_timing(roi=0)  # Single ROI
-all_timing = strf_obj.map_extrema_timing()       # All ROIs
+timing_map = strf_obj.map_extrema_timing(roi=0)  # Single STRF - 2D array (y, x)
+all_timing = strf_obj.map_extrema_timing()       # All STRFs - 3D array (n_strfs, y, x)
 timing_ms = strf_obj.map_extrema_timing(roi=0, return_milliseconds=True)
+
+# For multicolor data, organize by color channels manually:
+import pygor.utilities
+timing_reshaped = pygor.utilities.multicolour_reshape(all_timing, strf_obj.numcolour)
+# timing_reshaped will be (n_colors, n_rois, y, x)
 
 # Color channel comparison
 timing_diff = strf_obj.compare_color_channel_timing(roi=0, color_channels=(0,1))
 
-# Spatial alignment analysis
+# Spatial alignment analysis - NEW MATRIX FORMAT
 alignment = strf_obj.analyze_spatial_alignment(roi=0)
+
+# Access correlation matrix (n_colors × n_colors)
+corr_matrix = alignment['correlation_matrix']
+print(f"Red-Green correlation: {corr_matrix[0, 1]:.3f}")
+print(f"Red-Blue correlation: {corr_matrix[0, 2]:.3f}")
+
+# Access overlap matrix (Jaccard indices)
+overlap_matrix = alignment['overlap_matrix']
+print(f"Red-Green overlap: {overlap_matrix[0, 1]:.3f}")
+
+# Access distance matrix (centroid distances)
+distance_matrix = alignment['distance_matrix']
+print(f"Red-Green distance: {distance_matrix[0, 1]:.2f} pixels")
+
+# Visualize matrices
+import matplotlib.pyplot as plt
+fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+im1 = axes[0].imshow(corr_matrix, cmap='RdBu_r', vmin=-1, vmax=1)
+axes[0].set_title('Correlation Matrix')
+plt.colorbar(im1, ax=axes[0])
+
+im2 = axes[1].imshow(overlap_matrix, cmap='viridis', vmin=0, vmax=1)
+axes[1].set_title('Overlap Matrix')
+plt.colorbar(im2, ax=axes[1])
+
+im3 = axes[2].imshow(distance_matrix, cmap='plasma')
+axes[2].set_title('Distance Matrix')
+plt.colorbar(im3, ax=axes[2])
+
+# Individual channel pair analysis (still works)
 overlap = strf_obj.compute_color_channel_overlap(roi=0, color_channels=(0,1))
 offset = strf_obj.compute_spatial_offset_between_channels(roi=0)
 

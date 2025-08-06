@@ -1327,17 +1327,15 @@ class STRF(Core):
             raise ValueError("ROI must be supplied")
         return convolve.convolve_image(self, roi, img, plot = plot, auto_crop = auto_crop, auto_crop_thresh = auto_crop_thresh, xrange = xrange, yrange = yrange, **kwargs)
 
-    def map_extrema_timing(self, roi=None, color_channel=0, threshold=3.0, 
-                          exclude_firstlast=(1, 1), return_milliseconds=False, frame_rate_hz=60.0):
+    def map_extrema_timing(self, roi=None, threshold=3.0, 
+                          exclude_firstlast=(1, 1), return_milliseconds=False, frame_rate_hz=15.625):
         """
         Map the timing of extrema for each pixel in STRF.
         
         Parameters
         ----------
         roi : int, optional
-            ROI index. If None, returns results for all ROIs.
-        color_channel : int, optional
-            Color channel index (for multicolor STRFs). Default is 0.
+            STRF index. If None, returns results for all STRFs.
         threshold : float, optional
             Threshold in standard deviations. Default is 3.0.
         exclude_firstlast : tuple of int, optional
@@ -1350,16 +1348,21 @@ class STRF(Core):
         Returns
         -------
         timing_maps : ndarray
-            2D array (y, x) for single ROI or 3D array (n_rois, y, x) for all ROIs.
+            For single STRF: 2D array (y, x).
+            For all STRFs: 3D array (n_strfs, y, x).
             Values are time indices of extrema (or milliseconds if return_milliseconds=True).
             NaN indicates pixels below threshold.
+            
+        Notes
+        -----
+        For multicolor data, STRF indices are organized as [roi0_color0, roi0_color1, ..., roi1_color0, ...].
+        Use multicolour_reshape() or manual indexing to organize by color channels if needed.
         """
         import pygor.strf.extrema_timing as extrema_timing
         
-        return extrema_timing.map_extrema_timing_wrapper(
-            self, roi=roi, color_channel=color_channel, threshold=threshold,
-            exclude_firstlast=exclude_firstlast, return_milliseconds=return_milliseconds,
-            frame_rate_hz=frame_rate_hz
+        return extrema_timing.map_spectral_centroid_wrapper(
+            self, roi=roi, exclude_firstlast=exclude_firstlast,
+            return_milliseconds=return_milliseconds, frame_rate_hz=frame_rate_hz
         )
 
     def compare_color_channel_timing(self, roi, color_channels=(0, 1), threshold=3.0,
@@ -1416,6 +1419,13 @@ class STRF(Core):
         Returns
         -------
         dict : Dictionary containing comprehensive alignment analysis
+            - 'correlation_matrix': n_colors × n_colors spatial correlation matrix
+            - 'overlap_matrix': n_colors × n_colors Jaccard index matrix
+            - 'distance_matrix': n_colors × n_colors centroid distance matrix
+            - 'summary_stats': Summary statistics across all channel pairs
+            - 'channel_centroids': Centroids for each color channel
+            - 'spatial_maps': 2D spatial maps for each color channel
+            - 'pairwise_metrics': Detailed pairwise comparison dictionary
         """
         import pygor.strf.spatial_alignment as spatial_alignment
         

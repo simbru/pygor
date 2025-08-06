@@ -92,8 +92,20 @@ def chroma_overview(
             num_rows = len(specify_rois)
         figsize_scaler = 1
         if figsize is None:
-            figsize = (num_cols * 2 * figsize_scaler, num_rows * 1 * figsize_scaler)
-        fig, ax = plt.subplots(num_rows,num_cols,figsize=figsize,layout="constrained",)
+            # Improved sizing for better Jupyter notebook display
+            if num_rows == 1:
+                # Single ROI: use more reasonable aspect ratio
+                figsize = (num_cols * 2.5, 3)  # Fixed height, reasonable width
+            else:
+                # Multiple ROIs: use original scaling but with better proportions
+                figsize = (num_cols * 2 * figsize_scaler, num_rows * 2.5 * figsize_scaler)
+        # Use different layout for single vs multiple ROIs
+        if num_rows == 1:
+            fig, ax = plt.subplots(num_rows, num_cols, figsize=figsize, 
+                                 layout="constrained", squeeze=False)
+        else:
+            fig, ax = plt.subplots(num_rows, num_cols, figsize=figsize, 
+                                 layout="constrained")
     else:
         fig = plt.gcf()
     for n, roi in enumerate(rois_specified):
@@ -121,8 +133,7 @@ def chroma_overview(
         else:
             xcropper = (None, None)
         strfs_chroma = strfs_chroma[:, ycropper[0] : ycropper[1], xcropper[0] : xcropper[1]]
-        if num_rows == 1:
-            ax = np.array([ax])
+        # ax is already properly shaped from subplot creation with squeeze=False
         for i in range(numcolour):
             strf = ax[n, i].imshow(strfs_chroma[i], cmap=colour_maps[i], origin="lower")
             strf.set_clim(clim_vals)
