@@ -177,30 +177,48 @@ class Core:
         axis=0,
         cbar=False,
         ax=None,
+        figsize=(None, None),
+        figsize_scale=None,
         zcrop: tuple = None,
         xcrop: tuple = None,
         ycrop: tuple = None,
+        alpha=0.5,
         show_axes=False,
         **kwargs,
-    ) -> None:
+    ):
         """
         Display a projection of the image stack using the specified function.
 
         Parameters:
-        - func: Callable, optional, default: np.mean
-            The function used to compute the projection along the specified axis.
+        - func: Callable or str, optional, default: np.mean
+            The function used to compute the projection along the specified axis. 
+            If "average_stack", uses self.average_stack directly.
+            If pygor.core.methods.correlation_map, applies correlation mapping.
         - axis: int, optional, default: 0
             The axis along which the projection is computed.
         - cbar: bool, optional, default: False
             Whether to display a colorbar.
         - ax: matplotlib.axes.Axes, optional, default: None
             The matplotlib axes to use for the display. If None, the current axes will be used.
+        - figsize: tuple, optional, default: (None, None)
+            Figure size. If (None, None), defaults to (10, 10).
+        - figsize_scale: float, optional, default: None
+            Scale factor for figure size.
+        - alpha: float, optional, default: 0.5
+            Alpha transparency value (for consistency with view_stack_rois).
 
         Returns:
-        None
+        tuple
+            (fig, ax) - matplotlib figure and axes objects
         """
+        if figsize == (None, None):
+            figsize = (10, 10)
+        if figsize_scale is not None:
+            figsize = np.array(figsize) * np.array(figsize_scale)
+        else:
+            figsize_scale = 1
         if ax is None:
-            fig, ax = plt.subplots(1, 1)
+            fig, ax = plt.subplots(figsize=figsize)
         else:
             fig = plt.gcf()
         if zcrop is None:
@@ -221,12 +239,13 @@ class Core:
         else:
             ystart = ycrop[0]
             ystop = ycrop[1]
-        scanv = ax.imshow(
-            func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis=axis),
-            cmap="Greys_r",
-            origin="lower",
-            **kwargs,
-        )
+        if func == "average_stack":
+            scanv = ax.imshow(self.average_stack, cmap = "Greys_r", origin = "lower", **kwargs)
+        elif func == pygor.core.methods.correlation_map:
+            correlation_result = func(self.images[zstart:zstop, ystart:ystop, xstart:xstop])
+            scanv = ax.imshow(correlation_result, cmap ="Greys_r", origin = "lower", **kwargs)
+        else:
+            scanv = ax.imshow(func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis = axis), cmap ="Greys_r", origin = "lower", **kwargs)
         if cbar == True:
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
@@ -248,23 +267,39 @@ class Core:
         xcrop: tuple = None,
         ycrop: tuple = None,
         alpha=0.5,
+        outline=True,
+        outline_smooth=True,
+        outline_width=2,
+        roi_indices=None,
         **kwargs,
-    ) -> None:
+    ):
         """
         Display a projection of the image stack using the specified function.
 
         Parameters:
-        - func: Callable, optional, default: np.mean
+        - func: Callable or str, optional, default: np.mean
             The function used to compute the projection along the specified axis.
+            If "average_stack", uses self.average_stack directly.
+            If pygor.core.methods.correlation_map, applies correlation mapping.
         - axis: int, optional, default: 0
             The axis along which the projection is computed.
         - cbar: bool, optional, default: False
             Whether to display a colorbar.
         - ax: matplotlib.axes.Axes, optional, default: None
             The matplotlib axes to use for the display. If None, the current axes will be used.
+        - outline: bool, optional, default: False
+            Whether to show ROIs as outlines instead of filled regions.
+        - outline_smooth: bool, optional, default: True
+            Whether to smooth the ROI outlines when outline=True.
+        - outline_width: int, optional, default: 2
+            Line width for ROI outlines when outline=True.
+        - roi_indices: list or array-like, optional, default: None
+            Indices of specific ROIs to display using 0-based indexing (0, 1, 2, etc.).
+            If None, all ROIs are shown.
 
         Returns:
-        None
+        tuple
+            (fig, ax) - matplotlib figure and axes objects
         """
         if figsize == (None, None):
             figsize = (10, 10)
@@ -299,15 +334,88 @@ class Core:
             ystart = ycrop[0]
             ystop = ycrop[1]
 
-        num_rois = int(np.abs(np.min(self.rois)))
-        # color = cm.get_cmap('jet_r', num_rois)
+        # Use rois_alt for 0-based indexing
+        rois_to_use = self.rois_alt
+        
+        num_rois = int(np.nanmax(rois_to_use)) + 1  # +1 because 0-based indexing
         color = matplotlib.colormaps["jet_r"]
+        
         if func == "average_stack":
             scanv = ax.imshow(self.average_stack, cmap = "Greys_r", origin = "lower", **kwargs)
+        elif func == pygor.core.methods.correlation_map:
+            correlation_result = func(self.images[zstart:zstop, ystart:ystop, xstart:xstop])
+            scanv = ax.imshow(correlation_result, cmap ="Greys_r", origin = "lower", **kwargs)
         else:
             scanv = ax.imshow(func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis = axis), cmap ="Greys_r", origin = "lower", **kwargs)
-        rois_masked = np.ma.masked_where(self.rois == 1, self.rois)[ystart:ystop, xstart:xstop]
-        rois = ax.imshow(rois_masked, cmap = color, alpha = alpha, origin = "lower", **kwargs)
+        if outline:
+            # Extract ROI outlines instead of filled regions
+            from skimage import measure
+            
+            # Get unique ROI values from rois_alt (0-based indexing, background is NaN)
+            roi_values = np.unique(rois_to_use)
+            roi_values = roi_values[~np.isnan(roi_values)].astype(int)  # Remove NaN (background)
+            
+            # Filter by specific ROI indices if provided
+            if roi_indices is not None:
+                roi_indices = np.array(roi_indices)
+                roi_values = roi_values[np.isin(roi_values, roi_indices)]
+            
+            # Check if any ROIs remain after filtering
+            if len(roi_values) == 0:
+                print(f"Warning: No ROIs found with indices {roi_indices}")
+                # Create empty ScalarMappable for consistency
+                import matplotlib.cm as cm
+                norm = matplotlib.colors.Normalize(vmin=0, vmax=1)
+                rois = cm.ScalarMappable(norm=norm, cmap=color)
+            else:
+                # Apply cropping to ROIs
+                rois_cropped = rois_to_use[ystart:ystop, xstart:xstop]
+                
+                # Plot each ROI outline individually
+                for i, roi_val in enumerate(roi_values):
+                    # Create binary mask for current ROI
+                    roi_mask = (rois_cropped == roi_val).astype(int)
+                    
+                    if np.sum(roi_mask) == 0:  # Skip if ROI not in cropped region
+                        continue
+                    
+                    # Find contours
+                    contours = measure.find_contours(roi_mask, 0.5)
+                    
+                    # Get color for this ROI
+                    roi_color = color(i / len(roi_values))
+                    
+                    # Plot each contour
+                    for contour in contours:
+                        if outline_smooth:
+                            # Apply Gaussian smoothing to contour coordinates
+                            from scipy.ndimage import gaussian_filter1d
+                            contour[:, 0] = gaussian_filter1d(contour[:, 0], sigma=1.5)
+                            contour[:, 1] = gaussian_filter1d(contour[:, 1], sigma=1.5)
+                            
+                            # Close the contour by adding the first point to the end
+                            contour = np.vstack([contour, contour[0]])
+
+                        ax.plot(contour[:, 1], contour[:, 0], 
+                            color=roi_color, linewidth=outline_width, alpha=alpha)
+                
+                # Create dummy mappable for colorbar compatibility
+                import matplotlib.cm as cm
+                norm = matplotlib.colors.Normalize(vmin=np.min(roi_values), vmax=np.max(roi_values))
+                rois = cm.ScalarMappable(norm=norm, cmap=color)
+        else:
+            # Original filled region display using rois_alt
+            rois_display = rois_to_use.copy()
+            
+            # Filter by specific ROI indices if provided
+            if roi_indices is not None:
+                roi_indices = np.array(roi_indices)
+                # Create mask for ROIs not in roi_indices (set them to NaN)
+                mask = ~np.isin(rois_display, roi_indices) & ~np.isnan(rois_display)
+                rois_display[mask] = np.nan
+            
+            rois_masked = np.ma.masked_where(np.isnan(rois_display), rois_display)[ystart:ystop, xstart:xstop]
+            rois = ax.imshow(rois_masked, cmap = color, alpha = alpha, origin = "lower", **kwargs)
         ax.grid(False)
         ax.axis("off")
         if cbar == True:
@@ -315,10 +423,15 @@ class Core:
             cax = divider.append_axes("right", size="5%", pad=0.05)
             plt.colorbar(rois, ax=ax, cax=cax)
         if labels == True:
-            label_map = np.unique(self.rois)[:-1].astype(int)[
-                ::-1
-            ] # -1 to count forwards instead of backwards
-            #label_map = label_map - 1 # count from 0
+            # Get ROI values from rois_alt (0-based indexing)
+            label_map = np.unique(rois_to_use)
+            label_map = label_map[~np.isnan(label_map)].astype(int)  # Remove NaN (background)
+            label_map = np.sort(label_map)  # Sort in ascending order
+            
+            # Filter label_map by roi_indices if provided
+            if roi_indices is not None:
+                roi_indices = np.array(roi_indices)
+                label_map = label_map[np.isin(label_map, roi_indices)]
             if "label_by" in kwargs:
                 labels = self.__keyword_lables[kwargs["label_by"]]
                 if np.isnan(labels) is True:
@@ -326,9 +439,9 @@ class Core:
                         f"Attribute {kwargs['label_by']} not found in object."
                     )
             else:
-                labels = np.abs(label_map) - 1
+                labels = label_map  # Use 0-based indexing directly
             for label_loc, label in zip(label_map, labels):
-                curr_roi_mask = self.rois == label_loc
+                curr_roi_mask = rois_to_use == label_loc
                 curr_roi_centroid = np.mean(np.argwhere(curr_roi_mask == 1), axis=0)
                 ax.text(
                     curr_roi_centroid[1],
@@ -348,6 +461,8 @@ class Core:
                         path_effects.Normal(),
                     ],
                 )
+        
+        return fig, ax
 
     def view_drift(
         self, frame_num="auto", butterworth_factor=0.5, chan_vese_factor=0.01, ax=None
