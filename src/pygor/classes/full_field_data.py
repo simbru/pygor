@@ -13,7 +13,7 @@ class FullField(Core):
 
     def __post_init__(self):
         # Post initialise the contents of Data class to be inherited
-        super().__dict__["data_types"].append(self.type)
+        # super().__dict__["data_types"].append(self.type)
         super().__post_init__()
         # with h5py.File(self.filename) as HDF5_file:
         #     # Initilaise object properties

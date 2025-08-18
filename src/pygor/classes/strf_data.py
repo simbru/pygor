@@ -33,6 +33,9 @@ import pygor.strf.extrema_timing
 import pygor.strf.spatial_alignment
 import pygor.utils
 import pygor.strf.centsurr
+import pygor.strf.calculate
+import pygor.strf.calculate_optimized
+import pygor.strf.calculate_multicolor_optimized
 import pygor.utils.helpinfo
 import pygor.utils.unit_conversion as unit_conversion
 from pygor.classes.core_data import Core
@@ -1521,6 +1524,158 @@ class STRF(Core):
             self, roi=roi, threshold=threshold, reference_channel=reference_channel,
             collapse_method=collapse_method, figsize=figsize
         )
+
+    def calculate_strf(self, noise_array, sta_past_window=2.0, sta_future_window=2.0, 
+                    n_colours=1, n_triggers_per_colour=None, edge_crop=2,
+                    max_frames_per_trigger=8, event_sd_threshold=2.0, 
+                    use_znorm=True, adjust_by_polarity=True, 
+                    skip_first_triggers=0, skip_last_triggers=0,
+                    pre_smooth=0, roi=None, normalize_strfs=True, verbose=True, **kwargs):
+        """
+        Calculate spike-triggered averages (STRFs) for all ROIs and color channels.
+        
+        This method computes spatiotemporal receptive fields using spike-triggered 
+        averaging with multi-color noise stimuli, based on the Igor Pro implementation
+        by Tom Baden with Python optimizations.
+        
+        Parameters
+        ----------
+        noise_array : np.ndarray
+            3D noise stimulus array with shape (y, x, triggers) containing visual
+            noise patterns used during the experiment
+        sta_past_window : float, default 2.0
+            How far into the past to calculate STA (seconds)
+        sta_future_window : float, default 2.0  
+            How far into the future to calculate STA (seconds)
+        n_colours : int, default 1
+            Number of color channels in the stimulus (use 1 for single-color experiments)
+        n_triggers_per_colour : int or None, default None
+            Number of triggers per color channel. If None, will be auto-calculated
+            for single-color experiments or must be provided for multi-color.
+        edge_crop : int, default 2
+            Number of pixels to crop from stimulus edges
+        max_frames_per_trigger : int, default 8
+            Maximum frames between triggers allowed as noise frame
+        event_sd_threshold : float, default 2.0
+            Standard deviation threshold for event detection
+        use_znorm : bool, default True
+            Whether to use z-normalized traces
+        adjust_by_polarity : bool, default True
+            Whether to adjust results by detected polarity
+        skip_first_triggers : int, default 0
+            Number of first triggers to skip
+        skip_last_triggers : int, default 0
+            Number of last triggers to skip
+        pre_smooth : int, default 0
+            Pre-smoothing factor for SD projections
+        roi : int, list, array or None, default None
+            ROI indices to calculate STRFs for. If None, calculates for all ROIs.
+            Can be a single ROI index (int), a list of indices, or numpy array.
+        normalize_strfs : bool, default True
+            Whether to apply the same normalization used during H5 loading
+            (z-score based on first 1/5 of temporal frames). Set to False
+            to get raw calculated STRFs for comparison.
+        verbose : bool, default True
+            Whether to print progress information
+        **kwargs
+            Additional arguments passed to the calculation function
+            
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - 'strfs': STRF filters in Pygor format (n_rois*n_colours, time, y, x)
+            - 'strfs_raw': STRF filters in raw format (n_rois, n_colours, y, x, time)
+            - 'correlations': Spatial correlation maps (y, x*n_colours, n_rois)
+            - 'standard_deviations': SD projection maps (y, x*n_colours, n_rois)  
+            - 'polarities': Polarity maps (y, x*n_colours, n_rois)
+            - 'mean_stimulus': Mean stimulus for each color (y, x, n_colours)
+            - 'metadata': Processing metadata and parameters
+            
+        Examples
+        --------
+        >>> # Load noise array and calculate STRFs for all ROIs
+        >>> noise_array = np.load('noise_stimulus.npy')  # Shape: (y, x, triggers)
+        >>> results = strf_obj.calculate_sta(noise_array)
+        >>> 
+        >>> # Calculate STRFs for specific ROIs only (much faster!)
+        >>> results = strf_obj.calculate_sta(noise_array, roi=[0, 2, 5])  # ROIs 0, 2, and 5
+        >>> results = strf_obj.calculate_sta(noise_array, roi=3)         # Only ROI 3
+        >>>
+        >>> # Calculate with custom temporal window
+        >>> results = strf_obj.calculate_sta(noise_array, sta_past_window=1.5, sta_future_window=1.0)
+        >>>
+        >>> # Access individual components
+        >>> strfs = results['strfs']  # Shape: (n_rois, n_colours, x, y, time)
+        >>> correlations = results['correlations']
+        >>> metadata = results['metadata']
+        """
+        
+        # Auto-detect multi-color experiments if object has numcolour attribute
+        if n_colours == 1 and hasattr(self, 'numcolour') and self.numcolour > 1:
+            n_colours = self.numcolour
+            if verbose:
+                print(f"Multi-color experiment detected: using {n_colours} colors")
+        
+        # Use multi-color optimized version for better performance when n_colours > 1
+        if n_colours > 1:
+            if verbose:
+                print("Using multi-color optimized implementation for enhanced performance...")
+            results = pygor.strf.calculate_multicolor_optimized.calculate_calcium_correlated_average_multicolor_optimized(
+                self,
+                noise_array,
+                sta_past_window=sta_past_window,
+                sta_future_window=sta_future_window,
+                n_colours=n_colours,
+                n_triggers_per_colour=n_triggers_per_colour,
+                edge_crop=edge_crop,
+                max_frames_per_trigger=max_frames_per_trigger,
+                event_sd_threshold=event_sd_threshold,
+                use_znorm=use_znorm,
+                adjust_by_polarity=adjust_by_polarity,
+                skip_first_triggers=skip_first_triggers,
+                skip_last_triggers=skip_last_triggers,
+                pre_smooth=pre_smooth,
+                roi=roi,
+                verbose=verbose,
+                **kwargs
+            )
+        else:
+            # Use regular optimized version for single-color
+            results = pygor.strf.calculate_optimized.calculate_calcium_correlated_average_optimized(
+                self,
+                noise_array,
+                sta_past_window=sta_past_window,
+                sta_future_window=sta_future_window,
+                n_colours=n_colours,
+                n_triggers_per_colour=n_triggers_per_colour,
+                edge_crop=edge_crop,
+                max_frames_per_trigger=max_frames_per_trigger,
+                event_sd_threshold=event_sd_threshold,
+                use_znorm=use_znorm,
+                adjust_by_polarity=adjust_by_polarity,
+                skip_first_triggers=skip_first_triggers,
+                skip_last_triggers=skip_last_triggers,
+                pre_smooth=pre_smooth,
+                roi=roi,
+                verbose=verbose,
+                **kwargs
+            )
+        
+        # Apply the same normalization as used during H5 loading if requested
+        if normalize_strfs and 'strfs' in results:
+            if verbose:
+                print("Applying post-processing normalization (same as H5 loading)...")
+            
+            # Apply post_process_strf_all to the calculated STRFs
+            # The 'strfs' key contains the Pygor format: (n_rois*n_colours, time, y, x)
+            results['strfs_unnormalized'] = results['strfs'].copy()  # Keep original for comparison
+            results['strfs'] = pygor.data_helpers.post_process_strf_all(results['strfs'])
+            
+            if verbose:
+                print("Normalization applied. Original STRFs stored in 'strfs_unnormalized' key.")
+        
+        return results
 
     def napari_strfs(self, **kwargs):
         import pygor.strf.gui.methods as gui

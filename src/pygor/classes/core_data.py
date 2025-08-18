@@ -144,7 +144,12 @@ class Core:
     def __str__(self):
         # For pretty printing
         return f"{self.__class__}"
-
+    
+    @property
+    def frametime_ms(self):
+        time_arr = np.arange(self.traces_raw.shape[1]) / self.frame_hz
+        return time_arr
+    
     def get_help(self, hints=False, types=False) -> None:
         """
         Get help information for the object, including methods and attributes.
@@ -691,6 +696,48 @@ class Core:
         temp_rois *= -1
         temp_rois = temp_rois - 1
         return temp_rois
+    
+    @property
+    def traces_znorm_ms(self):
+        """
+        Get interpolated and upscaled traces_znorm in millisecond precision.
+        
+        Converts traces from frame precision to line precision (~500 Hz sampling)
+        using linear interpolation, matching IGOR Pro's OS_BasicAveraging behavior.
+        
+        Returns
+        -------
+        numpy.ndarray
+            Interpolated traces with shape (n_rois, n_timepoints_ms) where 
+            n_timepoints_ms corresponds to line precision sampling rate.
+        """
+        if self.traces_znorm is None:
+            return None
+            
+        # Get dimensions
+        n_rois, n_frames = self.traces_znorm.shape
+        
+        # Calculate frame duration and line duration
+        frame_duration_s = 1.0 / self.frame_hz  # Frame duration in seconds
+        line_duration_s = self.linedur_s  # Line duration in seconds (typically ~0.002s)
+        
+        # Calculate number of lines per frame (nY equivalent)
+        lines_per_frame = int(frame_duration_s / line_duration_s)
+        
+        # Total interpolated time points (line precision)
+        n_points_ms = n_frames * lines_per_frame
+        
+        # Use scipy.ndimage.zoom for fast interpolation
+        from scipy.ndimage import zoom
+        
+        # Calculate zoom factor for time axis
+        zoom_factor = lines_per_frame
+        
+        # Interpolate all ROI traces at once using zoom
+        # zoom applies along the last axis (time axis)
+        traces_ms = zoom(self.traces_znorm, (1, zoom_factor), order=1, mode='nearest')
+        
+        return traces_ms
     
     @property
     def roi_centroids(self, force = True):
