@@ -83,7 +83,7 @@ def plot_averages(
         )
         rois = rois[filter_result]
     if figsize == (None, None):
-        figsize = (5*2, len(rois)*2)
+        figsize = (5, len(rois))
     if figsize_scale is not None:
         figsize = np.array(figsize) * np.array(figsize_scale)
     if len(rois) < n_rois_raster:
@@ -165,6 +165,22 @@ def plot_averages(
         else:
             rois = rois[sort_order]
         # Generate raster plot
+        print(self.triggertimes.shape)
+        ## Work out closest triggertimes split for given trigger mode (in case of partial loops)
+        if self.trigger_mode == 1:
+            avg_epoch_dur = np.average(np.diff(self.triggertimes))
+            markers_arr = self.triggertimes * (1 / self.linedur_s)
+            markers_arr -= markers_arr[0]
+        else:
+            if self.triggertimes.shape[0] % self.trigger_mode != 0:
+                print(
+                    "WARNING: Trigger times are not evenly divisible by trigger mode"
+                )
+                # Determine amount of triggers to crop out to achieve loop alignment
+                num_triggers_to_crop = self.triggertimes.shape[0] % self.trigger_mode
+                self.triggertimes = self.triggertimes[:-num_triggers_to_crop]
+                print(f"WARNING: Cropped {num_triggers_to_crop} triggers to achieve loop alignment")
+
         avg_epoch_dur = np.average(np.diff(self.triggertimes.reshape(-1, self.trigger_mode)[:, 0]))
         epoch_reshape = self.triggertimes.reshape(-1, self.trigger_mode)
         temp_arr = np.empty(epoch_reshape.shape)
@@ -173,6 +189,7 @@ def plot_averages(
         avg_epoch_triggertimes = np.average(temp_arr, axis=0)
         markers_arr = avg_epoch_triggertimes * (1 / self.linedur_s)
         markers_arr -= markers_arr[0]
+        figsize = (5, 3)
         fig, ax = plt.subplots(1, figsize = figsize)
         # import sklearn.preprocessing
         # scaler = sklearn.preprocessing.MaxAbsScaler()
@@ -182,9 +199,9 @@ def plot_averages(
         if rois is not None:
             arr = arr[rois]
         if "clim" in kwargs:
-            img = ax.imshow(arr, aspect="auto", cmap = "Greys_r", clim = kwargs["clim"])
+            img = ax.imshow(arr, aspect="auto", cmap = "Greys_r", clim = kwargs["clim"], interpolation="None")
         else:
-            img = ax.imshow(arr, aspect="auto", cmap = "Greys_r")
+            img = ax.imshow(arr, aspect="auto", cmap = "Greys_r", interpolation="None")
         # ax.set_xticklabels(np.round(load.triggertimes, 3))
         for i in markers_arr:
             ax.axvline(x=i, color="r", alpha=0.5)

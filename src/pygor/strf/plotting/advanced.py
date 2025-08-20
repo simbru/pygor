@@ -37,6 +37,7 @@ def chroma_overview(
     with_rgb=True,
     time_setting="1d",
     time_dur=1.3,
+    scalebar=True,
     figsize = None,
 ):
     # Create iterators depneding on desired output
@@ -108,6 +109,11 @@ def chroma_overview(
                                  layout="constrained")
     else:
         fig = plt.gcf()
+    
+    # Ensure ax is always 2D for consistent indexing
+    if ax.ndim == 1:
+        ax = ax.reshape(1, -1)
+    
     for n, roi in enumerate(rois_specified):
         start_index = roi * data_strf_object.numcolour
         end_index = start_index + data_strf_object.numcolour
@@ -163,8 +169,10 @@ def chroma_overview(
             #             color=pygor.plotting.fish_palette[colour_num],
             #         )
         if with_times == True:
+            # Calculate the correct time axis column (next available after numcolour)
+            time_ax_col = numcolour
             times = np.squeeze(pygor.utilities.multicolour_reshape(
-                data_strf_object.get_timecourses(fetch_indices), numcolour
+                data_strf_object.get_timecourses(fetch_indices, method="segmentation"), numcolour
             ))
             # Hide data that is close to zero, does not contribute to the plot
             times = np.ma.masked_equal(times, 0)
@@ -173,12 +181,14 @@ def chroma_overview(
             times[close_to_zero] = np.nan
 
             for enum, plotme in enumerate(times):
-                ax[n, -1].plot(plotme.T, color=pygor.plotting.fish_palette[enum])
+                ax[n, time_ax_col].plot(plotme.T, color=pygor.plotting.fish_palette[enum])
         if with_rgb == True:
+            # Calculate the correct RGB axis columns
+            rgb_start_col = numcolour + (1 if with_times else 0)
             rgb_representation(
                 data_strf_object,
                 specify_rois=roi,
-                ax=ax[n, numcolour : numcolour + 2],
+                ax=ax[n, rgb_start_col : rgb_start_col + 2],
                 contours=False,
                 remove_border=remove_border,
                 x_crop=x_crop,
@@ -215,36 +225,40 @@ def chroma_overview(
     if with_times == True:
         # Calculate correction for axis stuff first
         ref_ax = ax[0, 0]
+        # Work out how many axes we already plotted over
+        time_ax = numcolour  # Use the correct time axis column
         asp = np.diff(ref_ax.get_ylim())[0] / np.diff(ref_ax.get_xlim())[0]
         # Get max abs
-        max_val = np.max(np.abs([ax.get_ylim() for ax in ax[:, -1].flat]))
+        max_val = np.max(np.abs([ax.get_ylim() for ax in ax[:, time_ax].flat]))
         # Loop over
-        for axis in ax[:, -1].flat:
+        for axis in ax[:, time_ax].flat:
             # Set ylim
             axis.set_ylim(-max_val, max_val)
             # Change the axis aspect
             axis.set_aspect(asp)
         # Add title
-        ax[0, -1].set_title("Timecourse")
+        # ax[0, -1].set_title("Timecourse")
         # Y scalebar
-        pygor.plotting.add_scalebar(
-            5,
-            ax=ax[-1, -1],
-            string="5 SD",
-            x=1.025,
+        if scalebar is True:
+            pygor.plotting.add_scalebar(
+                5,
+                ax=ax[-1, time_ax],
+                string="5 SD",
+                x=1.025,
             flip_text=True,
             y=0.5,
             line_width=3,
         )
         # X scalebar
-        time_frames = times.shape[-1]
-        ms_per_frame = time_dur / time_frames
-        scalebar_target = 0.3
-        scalebar_target_ms = np.round(scalebar_target * 1000, 0).astype(int)
-        timeunits = scalebar_target / ms_per_frame
+        if scalebar is True:
+            time_frames = times.shape[-1]
+            ms_per_frame = time_dur / time_frames
+            scalebar_target = 0.3
+            scalebar_target_ms = np.round(scalebar_target * 1000, 0).astype(int)
+            timeunits = scalebar_target / ms_per_frame
         pygor.plotting.add_scalebar(
             timeunits,
-            ax=ax[-1, -1],
+            ax=ax[-1, time_ax],
             string=f"{scalebar_target_ms} ms",
             line_width=3,
             orientation="h",
@@ -260,13 +274,14 @@ def chroma_overview(
     visang_to_space = pygor.strf.pixconverter.visang_to_pix(
         degrees, pixwidth=40, #block_size=data_strf_object.stim_size_arbitrary
     )
-    pygor.plotting.add_scalebar(
-        visang_to_space,
-        ax=ax[-1, 0],
-        string=f"{degrees}°",
-        orientation="h",
-        line_width=3,
-    )
+    if scalebar is True:
+        pygor.plotting.add_scalebar(
+            visang_to_space,
+            ax=ax[-1, 0],
+            string=f"{degrees}\u00b0",
+            orientation="h",
+            line_width=3,
+        )
     # fig.tight_layout(pad = 0, h_pad = .1, w_pad=0)
     # plt.tight_layout()
     return fig, ax

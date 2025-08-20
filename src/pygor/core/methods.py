@@ -12,15 +12,48 @@ def determine_epoch_markers_ms(self):
     markers_arr : np.ndarray
         An array of the time of each marker in seconds, relative to the first marker.
     """
-    # Figure out how long the average epoch is (epoch is defined by trigger mode)
-    # and represents one set of stimuli in a given stimulus loop.
-    avg_epoch_dur = np.average(np.diff(self.triggertimes.reshape(-1, self.trigger_mode)[:, 0]))
+    # Handle cases where stimulation was cut off mid-loop
+    total_triggers = len(self.triggertimes)
+    complete_epochs = total_triggers // self.trigger_mode
+    
+    if total_triggers % self.trigger_mode != 0:
+        # Incomplete final epoch - truncate to complete epochs only
+        valid_triggers = complete_epochs * self.trigger_mode
+        triggertimes_complete = self.triggertimes[:valid_triggers]
+        print(f"Warning: Stimulation appears to have been cut off mid-loop. "
+              f"Using {complete_epochs} complete epochs out of {total_triggers} total triggers.")
+    else:
+        triggertimes_complete = self.triggertimes
+    
     # Reshape trigger times into epochs
-    epoch_reshape = self.triggertimes.reshape(-1, self.trigger_mode)
-    # Loop through and subtract the average epoch duration, to get the time deltas in each epoch
-    temp_arr = np.empty(epoch_reshape.shape)
-    for n, i in enumerate(epoch_reshape):
-        temp_arr[n] = i - (avg_epoch_dur * n)
+    epoch_reshape = triggertimes_complete.reshape(-1, self.trigger_mode)
+    
+    # Check if epoch timing is even or uneven (with tolerance for timing jitter)
+    epoch_durations = np.diff(epoch_reshape[:, 0])
+    timing_tolerance_ms = 0.1  # 100 microseconds tolerance for timing jitter
+    max_deviation = np.max(epoch_durations) - np.min(epoch_durations)
+    is_even_timing = max_deviation <= timing_tolerance_ms
+    if is_even_timing:
+        # Even timing - use original efficient method
+        avg_epoch_dur = np.average(epoch_durations)
+        temp_arr = np.empty(epoch_reshape.shape)
+        for n, i in enumerate(epoch_reshape):
+            temp_arr[n] = i - (avg_epoch_dur * n)
+    else:
+        # Uneven timing - normalize each epoch to remove cumulative drift
+        print(f"Warning: Detected uneven epoch timing. Using epoch-by-epoch normalization.")
+        temp_arr = np.empty(epoch_reshape.shape)
+        cumulative_offset = 0
+        
+        for n, epoch_triggers in enumerate(epoch_reshape):
+            if n == 0:
+                # First epoch is the reference
+                temp_arr[n] = epoch_triggers - epoch_triggers[0]
+            else:
+                # For subsequent epochs, subtract cumulative time offset
+                epoch_start_offset = epoch_durations[:n].sum()
+                temp_arr[n] = epoch_triggers - epoch_reshape[0, 0] - epoch_start_offset
+    
     # Average the trigger times in each epoch, to generate the average epoch trigger times
     avg_epoch_triggertimes = np.average(temp_arr, axis=0)
     # Divide the average epoch trigger times by the line duration, to get the marker times in ms

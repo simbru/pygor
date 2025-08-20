@@ -526,12 +526,12 @@ def rf_mask3d(arr_3d, axis = 0, level = None, mode = collapse_3d, **kwargs):
     frames = arr_3d.shape[axis]
     arr_2d = mode(arr_3d, **kwargs)
     # get 2d masks
-    all_masks = np.array([pygor.strf.contouring.bipolar_mask(i) for i in arr_2d])
-    all_masks = np.repeat(np.expand_dims(all_masks, 2), self.strfs.shape[1], axis = 2)
+    all_masks = np.array(pygor.strf.contouring.bipolar_mask(arr_2d))
     # Apply mask to expanded and repeated strfs (to get negative and positive)
-    strfs_expanded = np.repeat(np.expand_dims(self.strfs, axis = 1), 2, axis = 1)
-    all_strfs_masked = np.ma.array(strfs_expanded, mask = all_masks, keep_mask=True)
-    return all_strfs_masked
+    strfs_expanded = np.repeat(np.expand_dims(all_masks, axis = 1), arr_3d.shape[0], axis = 1)
+    # all_strfs_masked = np.ma.array(strfs_expanded, mask = all_masks, keep_mask=True)
+    # return all_strfs_masked
+    return strfs_expanded
 
 def concat_masks(ma_list):
     """

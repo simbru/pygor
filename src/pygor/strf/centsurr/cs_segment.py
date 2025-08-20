@@ -616,6 +616,7 @@ def cs_segment_demo(inputdata_3d, **kwargs):
 def run(d3_arr, plot=False, 
         sort_strategy = "sorted_corr", #sorted was last tried in the fine noise
         exclude_sub = 2,
+        use_all_pixel_average = True,
         segmentation_params : dict = None, 
         merge_params : dict = None,
         plot_params : dict = None):
@@ -630,6 +631,10 @@ def run(d3_arr, plot=False,
         Whether to plot the output using seaborn. Defaults to False.
     sort_strategy : str, optional
         The strategy for sorting the extracted timecourses. Defaults to "corrcoef".
+    exclude_sub : int, optional
+        Threshold for excluding weak signals. Defaults to 2.
+    use_all_pixel_average : bool, optional
+        If True, when exclude_sub threshold is reached, use all-pixel average as center time course. Defaults to True.
     segmentation_params : dict, optional
         Parameters for the segmentation algorithm. Defaults to {}.
     extract_params : dict, optional
@@ -654,7 +659,7 @@ def run(d3_arr, plot=False,
         default_plot_params.update(plot_params)        
     plot_params = default_plot_params
 
-    default_segmnetation_params = {
+    default_segmentation_params = {
         "smooth_times"  : 2,   #2
         "smooth_space"  : 2,   
         "upscale_time"  : None,
@@ -666,8 +671,8 @@ def run(d3_arr, plot=False,
         "on_pcs"        : True,
     }
     if segmentation_params is not None:
-        default_segmnetation_params.update(segmentation_params)
-    segmentation_params = default_segmnetation_params
+        default_segmentation_params.update(segmentation_params)
+    segmentation_params = default_segmentation_params
 
     default_merge_params = {
         "var_thresh" : .6125,
@@ -737,7 +742,9 @@ def run(d3_arr, plot=False,
     if pass_bool is False:
         times_extracted = np.zeros((3,times_extracted.shape[-1]))
         # print(times_extracted.shape)
-        times_extracted[-1] = np.average(d3_arr, axis = (1,2))
+        if use_all_pixel_average:
+            times_extracted[0] = np.average(d3_arr, axis = (1,2))  # Put in center (index 0)
+        times_extracted[-1] = np.average(d3_arr, axis = (1,2))   # Keep existing behavior
         times_extracted = np.ma.masked_equal(times_extracted, 0)
         segmented_map = np.zeros(d3_arr[0].shape)
     #print("interemdiate run function times:", times_extracted.shape)

@@ -761,7 +761,7 @@ class STRF(Core):
         strf_shifted = np.ma.array([np.roll(arr, shift_by[i], axis = (1,2)) for i, arr in enumerate(self.strfs)])
         return strf_shifted
 
-    def collapse_times(self, roi = None, zscore : bool = False, spatial_centre : bool = False, border : bool = False, **kwargs) -> np.ma.masked_array:
+    def collapse_times(self, roi = None, zscore : bool = True, spatial_centre : bool = False, border : bool = False, **kwargs) -> np.ma.masked_array:
         if roi is not None:
             if isinstance(roi, int):
                 iterate_through = [roi]
