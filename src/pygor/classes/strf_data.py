@@ -1151,14 +1151,11 @@ class STRF(Core):
     def plot_strfs_space(self, roi = None, **kwargs): 
         return pygor.strf.plotting.simple.plot_collapsed_strfs(self, **kwargs)
 
-    def plot_chromatic_overview(self, roi = None, contours = False, with_times = False, **kwargs):
+    def plot_chromatic_overview(self, roi = None, contours = False, with_times = False, colour_idx=None, **kwargs):
         with warnings.catch_warnings(record=True) as w:
             # Cause all warnings to always be triggered.
             warnings.simplefilter("always")
-            if with_times == False:
-                return pygor.strf.plotting.advanced.chroma_overview(self, roi, contours=contours, **kwargs)
-            if with_times == True:
-                return pygor.strf.plotting.advanced.chroma_overview(self, roi, contours=contours, with_times=with_times, **kwargs)
+            return pygor.strf.plotting.advanced.chroma_overview(self, roi, contours=contours, with_times=with_times, colour_idx=colour_idx, **kwargs)
 
     def play_strf(self, roi, **kwargs):
         if isinstance(roi, tuple):

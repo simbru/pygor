@@ -23,7 +23,7 @@ def chroma_overview(
     ipl_sort=False,
     y_crop=(0, 0),
     x_crop=(0, 0),
-    column_titles=["588 nm", "478 nm", "422 nm", "375 nm", "Broad spectrum", "Full spectrum"],
+    column_titles=None,
     colour_maps=[red_map, green_map, blue_map, violet_map, "Greys_r", "Greys_r"],
     centre_dots = True,
     contours=False,
@@ -36,9 +36,10 @@ def chroma_overview(
     with_times=False,
     with_rgb=True,
     time_setting="1d",
-    time_dur=1.3,
+    time_dur_ms=None,
     scalebar=True,
     figsize = None,
+    colour_idx=None,
 ):
     # Create iterators depneding on desired output
     if isinstance(specify_rois, np.int64) or isinstance(specify_rois, np.int32):
@@ -73,7 +74,34 @@ def chroma_overview(
         # remove_border = False
     # else:
     numcolour = data_strf_object.numcolour
-    num_cols = numcolour
+    
+    # Handle colour index filtering
+    if colour_idx is None:
+        colour_idx = list(range(numcolour))
+    elif isinstance(colour_idx, int):
+        colour_idx = [colour_idx]
+    else:
+        colour_idx = list(colour_idx)
+    
+    # Filter colour maps to match selected indices
+    if isinstance(colour_maps, list) and len(colour_maps) >= numcolour:
+        colour_maps = [colour_maps[i] for i in colour_idx]
+    elif not isinstance(colour_maps, list):
+        colour_maps = [colour_maps] * len(colour_idx)
+    
+    # Filter column titles if provided
+    if column_titles is not None:
+        if len(column_titles) >= numcolour:
+            column_titles = [column_titles[i] for i in colour_idx]
+        else:
+            column_titles = None  # Fallback if titles don't match
+    
+    num_cols = len(colour_idx)
+    
+    # Handle time duration - use object's duration if not specified
+    if time_dur_ms is None:
+        time_dur_ms = data_strf_object.strf_dur_ms
+    
     # Handle colour limits
     if clim == "all":
         # Use the abs max of the entre input
@@ -83,6 +111,7 @@ def chroma_overview(
         # Otherwise use user input (two floats or ints)
         clim_vals = clim
     if ax is None:
+        external_axis = False
         if with_times == True:
             num_cols += 1
         if with_rgb == True:
@@ -109,6 +138,7 @@ def chroma_overview(
                                  layout="constrained")
     else:
         fig = plt.gcf()
+        external_axis = True
     
     # Ensure ax is always 2D for consistent indexing
     if ax.ndim == 1:
@@ -140,19 +170,18 @@ def chroma_overview(
             xcropper = (None, None)
         strfs_chroma = strfs_chroma[:, ycropper[0] : ycropper[1], xcropper[0] : xcropper[1]]
         # ax is already properly shaped from subplot creation with squeeze=False
-        for i in range(numcolour):
-            strf = ax[n, i].imshow(strfs_chroma[i], cmap=colour_maps[i], origin="lower")
+        for plot_idx, color_idx in enumerate(colour_idx):
+            strf = ax[n, plot_idx].imshow(strfs_chroma[color_idx], cmap=colour_maps[plot_idx], origin="lower")
             strf.set_clim(clim_vals)
-            if n == 0:
-                for j in range(numcolour):
-                    ax[n, j].set_title(column_titles[j])
+            if n == 0 and column_titles is not None:
+                ax[n, plot_idx].set_title(column_titles[plot_idx])
             # Handle contours optionally
             if contours == True:
                 _contours_plotter(
                     data_strf_object,
                     roi=roi,
-                    index=i,
-                    ax=ax[-n - 1, i],
+                    index=color_idx,
+                    ax=ax[-n - 1, plot_idx],
                     xy_offset=(-border_tup[0], -border_tup[2]),
                     high_contrast=high_contrast,
                 )
@@ -169,22 +198,29 @@ def chroma_overview(
             #             color=pygor.plotting.fish_palette[colour_num],
             #         )
         if with_times == True:
-            # Calculate the correct time axis column (next available after numcolour)
-            time_ax_col = numcolour
+            # Calculate the correct time axis column (next available after filtered colors)
+            time_ax_col = len(colour_idx)
             times = np.squeeze(pygor.utilities.multicolour_reshape(
                 data_strf_object.get_timecourses(fetch_indices, method="segmentation"), numcolour
             ))
+            # Filter times to match selected color indices
+            times = times[colour_idx]
             # Hide data that is close to zero, does not contribute to the plot
             times = np.ma.masked_equal(times, 0)
             deviation = np.std(times, axis = -1)
             close_to_zero = np.isclose(deviation, 0, rtol=.1, atol=.4)
             times[close_to_zero] = np.nan
 
+            # Create proper time axis in milliseconds
+            time_frames = times.shape[-1]
+            time_axis_ms = np.linspace(0, time_dur_ms, time_frames)
+            
             for enum, plotme in enumerate(times):
-                ax[n, time_ax_col].plot(plotme.T, color=pygor.plotting.fish_palette[enum])
+                original_color_idx = colour_idx[enum]
+                ax[n, time_ax_col].plot(time_axis_ms, plotme.T, color=pygor.plotting.fish_palette[original_color_idx])
         if with_rgb == True:
             # Calculate the correct RGB axis columns
-            rgb_start_col = numcolour + (1 if with_times else 0)
+            rgb_start_col = len(colour_idx) + (1 if with_times else 0)
             rgb_representation(
                 data_strf_object,
                 specify_rois=roi,
@@ -226,7 +262,7 @@ def chroma_overview(
         # Calculate correction for axis stuff first
         ref_ax = ax[0, 0]
         # Work out how many axes we already plotted over
-        time_ax = numcolour  # Use the correct time axis column
+        time_ax = len(colour_idx)  # Use the correct time axis column
         asp = np.diff(ref_ax.get_ylim())[0] / np.diff(ref_ax.get_xlim())[0]
         # Get max abs
         max_val = np.max(np.abs([ax.get_ylim() for ax in ax[:, time_ax].flat]))
@@ -234,8 +270,21 @@ def chroma_overview(
         for axis in ax[:, time_ax].flat:
             # Set ylim
             axis.set_ylim(-max_val, max_val)
-            # Change the axis aspect
-            axis.set_aspect(asp)
+            # Force time plots to have same physical dimensions as imshow panels
+            if external_axis is False:
+                # Use aspect that forces same physical panel size as imshow
+                # We want: data_height/data_width * physical_width/physical_height = constant
+                # For spatial: asp = spatial_height/spatial_width  
+                # For time: we want same physical aspect, so scale by data range ratio
+                time_data_range = 1 * max_val  # y-range of time data
+                spatial_data_height = ref_ax.get_ylim()[1] - ref_ax.get_ylim()[0]
+                spatial_data_width = ref_ax.get_xlim()[1] - ref_ax.get_xlim()[0] 
+                
+                # Scale aspect by the ratio of data ranges to maintain physical size
+                # We want to EXPAND the y-dimension relative to x, so invert the problematic ratios
+                time_asp = asp * (spatial_data_height / time_data_range) * (time_dur_ms / spatial_data_width)
+                axis.set_aspect(time_asp)
+            # axis.set_aspect(asp)
         # Add title
         # ax[0, -1].set_title("Timecourse")
         # Y scalebar
@@ -252,18 +301,17 @@ def chroma_overview(
         # X scalebar
         if scalebar is True:
             time_frames = times.shape[-1]
-            ms_per_frame = time_dur / time_frames
-            scalebar_target = 0.3
-            scalebar_target_ms = np.round(scalebar_target * 1000, 0).astype(int)
-            timeunits = scalebar_target / ms_per_frame
-        pygor.plotting.add_scalebar(
-            timeunits,
-            ax=ax[-1, time_ax],
-            string=f"{scalebar_target_ms} ms",
-            line_width=3,
-            orientation="h",
-            y=0,
-        )
+            ms_per_frame = time_dur_ms / time_frames
+            scalebar_target_ms = 300  # Target 300ms scalebar
+            timeunits_ms = scalebar_target_ms
+            pygor.plotting.add_scalebar(
+                timeunits_ms,
+                ax=ax[-1, time_ax],
+                string=f"{scalebar_target_ms} ms",
+                line_width=3,
+                orientation="h",
+                y=0,
+            )
         # if time_setting == "2d":
         """
         Would be cool to have a 2D space/time plot in RGBUV:D 

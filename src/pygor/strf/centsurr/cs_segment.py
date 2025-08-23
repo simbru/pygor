@@ -668,7 +668,7 @@ def run(d3_arr, plot=False,
         "plot_demo"     : False,
         "crop_time"     : (1, -1), 
         "amplitude_boost": False,
-        "on_pcs"        : True,
+        "on_pcs"        : False,
     }
     if segmentation_params is not None:
         default_segmentation_params.update(segmentation_params)
