@@ -1034,6 +1034,18 @@ class STRF(Core):
         else:
             raise AttributeError("Operation cannot be done since object property '.multicolour.' is False")
 
+    def bool_strf_signal(self, threshold = 2, multicolour = True, dimstr = "time") -> np.ndarray:
+        if multicolour is True:
+            # Get tuning amplitudes and check if at least one per ROI is above threshold
+            tuning_amps = self.calc_tunings_amplitude(dimstr = dimstr)
+            return np.any(np.abs(tuning_amps) > threshold, axis = 1)
+        if multicolour is False:
+            if dimstr == "time":
+                amps = self.get_time_amps()
+            elif dimstr == "space":
+                amps = self.get_space_amps()
+            return np.abs(amps) > threshold
+
     def calc_mean_absolute_deviation(self, dimstr = "space", **kwargs):
         tunings = self.calc_tunings_amplitude(dimstr = dimstr, **kwargs)
         mad = np.mean(np.abs(tunings - np.mean(tunings, axis = 1, keepdims=True)), axis = 1)
@@ -1277,6 +1289,69 @@ class STRF(Core):
 
     # def cs_seg(self, roi = None, plot = False, **kwargs):
     #     return pygor.strf.centsurr.run_object(self, roi, plot = plot, **kwargs)
+
+    def get_colour_coefvar(self, channels = None):
+        tunings = np.abs(self.calc_tunings_amplitude()[:, channels])
+        tunings = np.nan_to_num(tunings)
+        def coefficient_of_variation(arr):
+            arr = np.array(arr)
+            if np.all(arr == 0):
+                return 0
+            return np.std(arr) / (np.mean(arr) + 1e-10)
+        index = [coefficient_of_variation(i) for i in tunings]
+        return index
+
+    def get_colour_coefvar_raw(self, channels = None):
+        """
+        Crude coefficient of variation calculation that replicates the original validation script method.
+        Uses raw spatiotemporal data and takes max(abs(all_values)) per color per ROI.
+        This method is for comparison purposes to understand differences with the principled approach.
+        """
+        if channels is None:
+            channels = np.arange(self.numcolour)
+        
+        # Get the raw spatiotemporal data (similar to chroma_times in validation script)
+        chroma_times = pygor.utilities.multicolour_reshape(self.get_pix_times(), self.numcolour)
+        
+        cv_values = []
+        for roi in range(min(self.num_rois, chroma_times.shape[1])):
+            # Calculate max absolute response per color for this ROI (crude method)
+            roi_amplitudes = []
+            for c in channels:
+                if c < chroma_times.shape[0]:
+                    # Take max absolute value across all time and space for this color/ROI
+                    max_abs_response = np.max(np.abs(chroma_times[c, roi]))
+                    roi_amplitudes.append(max_abs_response)
+            
+            if len(roi_amplitudes) >= 2:
+                roi_amplitudes = np.array(roi_amplitudes)
+                if np.all(roi_amplitudes == 0):
+                    cv = 0.0
+                else:
+                    cv = np.std(roi_amplitudes) / (np.mean(roi_amplitudes) + 1e-10)
+                cv_values.append(cv)
+            else:
+                cv_values.append(0.0)
+                
+        return cv_values
+
+    def get_colour_sparseness_index(self, channels = None):
+        if channels is None:
+            channels = np.arange(self.numcolour)
+        tunings = np.abs(self.calc_tunings_amplitude()[:, channels])
+        tunings = np.nan_to_num(tunings)
+        def selectivity_sparseness(arr):
+            arr = np.array(arr)
+            if np.all(arr == 0):
+                return 0
+            mean_r = np.mean(arr)
+            mean_r2 = np.mean(arr**2)
+            n = len(arr)
+            if mean_r2 == 0:
+                return 0
+            return (1 - (mean_r**2 / mean_r2)) / (1 - 1/n)
+        index = [selectivity_sparseness(i) for i in tunings]
+        return index
 
     def cs_seg(self, roi = None, plot = False, force_recompute = False, **kwargs):
         if plot is False:

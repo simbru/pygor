@@ -103,7 +103,7 @@ def chroma_overview(
         time_dur_ms = data_strf_object.strf_dur_ms
     
     # Handle colour limits
-    if clim == "all":
+    if isinstance(clim, str) and clim == "all":
         # Use the abs max of the entre input
         abs_max = np.max(np.abs(data_strf_object.strfs_chroma))
         clim_vals = (-abs_max, abs_max)
@@ -205,19 +205,27 @@ def chroma_overview(
             ))
             # Filter times to match selected color indices
             times = times[colour_idx]
-            # Hide data that is close to zero, does not contribute to the plot
-            times = np.ma.masked_equal(times, 0)
+            # Check which data is close to zero for alpha adjustment (after filtering)
             deviation = np.std(times, axis = -1)
             close_to_zero = np.isclose(deviation, 0, rtol=.1, atol=.4)
-            times[close_to_zero] = np.nan
-
+            
             # Create proper time axis in milliseconds
             time_frames = times.shape[-1]
             time_axis_ms = np.linspace(0, time_dur_ms, time_frames)
             
             for enum, plotme in enumerate(times):
                 original_color_idx = colour_idx[enum]
-                ax[n, time_ax_col].plot(time_axis_ms, plotme.T, color=pygor.plotting.fish_palette[original_color_idx])
+                # Set alpha based on whether this specific color's data is close to zero
+                # Handle the case where close_to_zero[enum] might still be an array
+                close_val = close_to_zero[enum]
+                if hasattr(close_val, 'any'):  # It's an array
+                    is_close_to_zero = close_val.any()  # Use any() for array
+                else:
+                    is_close_to_zero = bool(close_val)  # It's already a scalar
+                alpha = 0.5 if is_close_to_zero else 1.0
+                ax[n, time_ax_col].plot(time_axis_ms, plotme.T, 
+                                    color=pygor.plotting.fish_palette[original_color_idx], 
+                                    alpha=alpha)
         if with_rgb == True:
             # Calculate the correct RGB axis columns
             rgb_start_col = len(colour_idx) + (1 if with_times else 0)
@@ -289,10 +297,14 @@ def chroma_overview(
         # ax[0, -1].set_title("Timecourse")
         # Y scalebar
         if scalebar is True:
+            # Check current y limits and use the limit if signal is < 5 SD
+            y_limits = ax[-1, time_ax].get_ylim()
+            value = 5 if y_limits[0] < -5 and y_limits[1] > 5 else y_limits[1]
+            value = np.round(value, 2)
             pygor.plotting.add_scalebar(
-                5,
+                value,
                 ax=ax[-1, time_ax],
-                string="5 SD",
+                string=f"{value} SD",
                 x=1.025,
             flip_text=True,
             y=0.5,
@@ -304,6 +316,7 @@ def chroma_overview(
             ms_per_frame = time_dur_ms / time_frames
             scalebar_target_ms = 300  # Target 300ms scalebar
             timeunits_ms = scalebar_target_ms
+            strf_dur_ms = data_strf_object.strf_dur_ms
             pygor.plotting.add_scalebar(
                 timeunits_ms,
                 ax=ax[-1, time_ax],

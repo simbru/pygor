@@ -276,3 +276,83 @@ def area_to_diameter(float):
 
     """
     return 2 * np.sqrt(float / 2)
+
+def visang_deg_to_retinal_projection_um(
+    visual_angle_deg, 
+    lens_to_retina_distance_um=50, 
+    method="precise"
+):
+    """
+    Convert visual angle in degrees to retinal projection size in micrometers
+    for zebrafish larvae.
+    
+    Parameters:
+    -----------
+    visual_angle_deg : float or array
+        Visual angle in degrees
+    lens_to_retina_distance_um : float, optional
+        Distance from lens to retina in micrometers (default: 50 µm for zebrafish larvae)
+    method : str, optional
+        Calculation method: "simple" (small angle approximation) or "precise" (exact trigonometry)
+        
+    Returns:
+    --------
+    retinal_projection_um : float or array
+        Size of projection on retina in micrometers
+    """
+    
+    # Convert degrees to radians
+    visual_angle_rad = np.deg2rad(visual_angle_deg)
+    
+    if method == "simple":
+        # Small angle approximation: retinal_size ≈ visual_angle_rad * lens_to_retina_distance
+        retinal_projection_um = visual_angle_rad * lens_to_retina_distance_um
+        
+    elif method == "precise":
+        # Exact trigonometry: retinal_size = 2 * lens_distance * tan(visual_angle/2)
+        retinal_projection_um = 2 * lens_to_retina_distance_um * np.tan(visual_angle_rad / 2)
+    
+    else:
+        raise ValueError("method must be 'simple' or 'precise'")
+    
+    return retinal_projection_um
+
+def retinal_projection_um_to_visang_deg(
+    retinal_projection_um, 
+    lens_to_retina_distance_um=50, 
+    method="precise"
+):
+    """
+    Convert retinal projection size in micrometers to visual angle in degrees
+    for zebrafish larvae (inverse function).
+    
+    Parameters:
+    -----------
+    retinal_projection_um : float or array
+        Size of projection on retina in micrometers
+    lens_to_retina_distance_um : float, optional
+        Distance from lens to retina in micrometers (default: 50 µm for zebrafish larvae)
+    method : str, optional
+        Calculation method: "simple" or "precise"
+        
+    Returns:
+    --------
+    visual_angle_deg : float or array
+        Visual angle in degrees
+    """
+    
+    if method == "simple":
+        # Inverse of small angle approximation
+        visual_angle_rad = retinal_projection_um / lens_to_retina_distance_um
+        
+    elif method == "precise":
+        # Inverse of exact trigonometry
+        visual_angle_rad = 2 * np.arctan(retinal_projection_um / (2 * lens_to_retina_distance_um))
+    
+    else:
+        raise ValueError("method must be 'simple' or 'precise'")
+    
+    # Convert radians to degrees
+    visual_angle_deg = np.rad2deg(visual_angle_rad)
+    
+    return visual_angle_deg
