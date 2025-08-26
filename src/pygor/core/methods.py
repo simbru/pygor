@@ -1,4 +1,6 @@
 import numpy as np
+import h5py
+import warnings
 
 def determine_epoch_markers_ms(self):
     """
@@ -93,3 +95,70 @@ def correlation_map(array_3d, border=0):
                 corr_values = [np.corrcoef(centre_pix, n)[0, 1] for n in neighbors]
                 correlation_map[x, y] = np.nanmean(corr_values)  # Handle NaNs if needed
     return correlation_map
+
+def update_h5_key(pygor_obj, key, value, overwrite=False):
+    """
+    Update a specific key in the H5 file with new data.
+    
+    This function provides a safe, modular way to update H5 files while maintaining
+    data integrity and following the existing pygor architecture.
+    
+    Parameters
+    ----------
+    pygor_obj : Core
+        The pygor data object containing filename and metadata
+    key : str
+        The H5 dataset key to update (e.g., 'Positions' for ipl_depths)
+    value : array-like
+        The new value to store
+    overwrite : bool, optional
+        Whether to overwrite existing data (default: False)
+        
+    Returns
+    -------
+    bool
+        True if update was successful, False otherwise
+        
+    Examples
+    --------
+    >>> # Update ipl_depths
+    >>> success = update_h5_key(strf_obj, 'Positions', depth_array, overwrite=True)
+    >>> 
+    >>> # Add new custom data
+    >>> success = update_h5_key(strf_obj, 'CustomAnalysis', analysis_results)
+    """
+    try:
+        # Convert value to numpy array for consistency
+        if not isinstance(value, np.ndarray):
+            value = np.array(value)
+            
+        # Validate input
+        if len(value) != pygor_obj.num_rois:
+            warnings.warn(f"Value length ({len(value)}) doesn't match number of ROIs ({pygor_obj.num_rois})")
+        
+        # Open H5 file for modification
+        with h5py.File(pygor_obj.filename, 'r+') as h5_file:
+            # Check if key already exists
+            if key in h5_file:
+                if not overwrite:
+                    print(f"Key '{key}' already exists in {pygor_obj.filename.name}")
+                    print("Use overwrite=True to replace existing data")
+                    return False
+                else:
+                    print(f"Overwriting existing key '{key}' in {pygor_obj.filename.name}")
+                    del h5_file[key]  # Delete existing dataset
+            
+            # Create new dataset
+            # Transpose to match IGOR convention (pygor transposes on read)
+            if value.ndim > 1:
+                value_to_store = value.T
+            else:
+                value_to_store = value
+                
+            h5_file.create_dataset(key, data=value_to_store)
+            print(f"Successfully updated '{key}' in {pygor_obj.filename.name}")
+            return True
+            
+    except Exception as e:
+        print(f"Error updating H5 file: {e}")
+        return False

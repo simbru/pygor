@@ -527,8 +527,56 @@ class Core:
         int
             The depth of the images in the stack.
         """
-        session = pygor.core.NapariDepthPrompt(self)
+        session = pygor.core.gui.methods.NapariDepthPrompt(self)
         return session.run()
+    
+    def update_h5_key(self, key, value, overwrite=False):
+        """
+        Update a specific key in the H5 file with new data.
+        
+        Parameters
+        ----------
+        key : str
+            The H5 dataset key to update (e.g., 'Positions' for ipl_depths)
+        value : array-like
+            The new value to store
+        overwrite : bool, optional
+            Whether to overwrite existing data (default: False)
+            
+        Returns
+        -------
+        bool
+            True if update was successful, False otherwise
+        """
+        return pygor.core.methods.update_h5_key(self, key, value, overwrite)
+    
+    def update_ipl_depths(self, depths=None, overwrite=False):
+        """
+        Update IPL depths in the H5 file, optionally using interactive depth selection.
+        
+        Parameters
+        ----------
+        depths : array-like, optional
+            Pre-calculated depths. If None, launches interactive depth selection.
+        overwrite : bool, optional
+            Whether to overwrite existing ipl_depths (default: False)
+            
+        Returns
+        -------
+        bool
+            True if update was successful, False otherwise
+        """
+        if depths is None:
+            depths = self.get_depth()
+            if depths is None:
+                print("Depth calculation was cancelled or failed.")
+                return False
+        
+        success = self.update_h5_key('Positions', depths, overwrite)
+        if success:
+            self.ipl_depths = depths  # Update the object attribute
+            print(f"Successfully updated ipl_depths for {len(depths)} ROIs")
+        return success
 
     def draw_rois(self, attribute = "calculate_image_average", style = "stacked",**kwargs):
         """

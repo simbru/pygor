@@ -892,29 +892,27 @@ class STRF(Core):
                         NaN for pairs where one/both channels lack signal or ROI has <2 signal channels.
                         For standard 4-channel data: Ch0=R, Ch1=G, Ch2=B, Ch3=UV.
         """
+        # throw error if object is not multichromatic
+        if not self.multicolour:
+            raise ValueError("Object is not multichromatic, method is invalid.")
         # Calculate across all ROIs
         spaces = self.collapse_times_chroma()
-    
         # Conditionally apply absolute value
         if abs_arrays:
             spaces_flat = np.abs(spaces.reshape(self.numcolour, self.num_rois, -1))
         else:
             spaces_flat = spaces.reshape(self.numcolour, self.num_rois, -1)
-    
         # Get signal mask if requested
         if signal_only:
             raw_signal = self.bool_strf_signal(multicolour=False)
             signal_mask_2d = pygor.utilities.multicolour_reshape(raw_signal, self.numcolour).T
         else:
             signal_mask_2d = np.ones((self.num_rois, self.numcolour), dtype=bool)
-    
         # Get all possible channel pairs
         pairs_indices = np.tril_indices(self.numcolour, k=-1)
         pair_names = [f"Ch{i}-Ch{j}" for i, j in zip(pairs_indices[0], pairs_indices[1])]
-        
         # Store results for ALL ROIs
         roi_results = []
-        
         for roi in range(self.num_rois):  # Process ALL ROIs
             # Get channels with signal for this ROI
             valid_channels = np.where(signal_mask_2d[roi])[0]
@@ -1134,9 +1132,35 @@ class STRF(Core):
         pols_out[pols == np.nan] = "NaN"
         return pols_out
 
-    def get_polarity_category_cell(self) -> str:
+    def get_polarity_category_cell(self, mask_by_channel=True, threshold=2, dimstr="time") -> str:
+        """
+        Get polarity category for each cell across color channels.
+        
+        Parameters
+        ----------
+        mask_by_channel : bool, optional
+            Whether to mask polarities using self.bool_by_channel (default: True)
+        threshold : float, optional
+            Threshold for bool_by_channel masking (default: 2)
+        dimstr : str, optional
+            Dimension for bool_by_channel ('time' or 'space', default: 'time')
+            
+        Returns
+        -------
+        list of str
+            Polarity categories for each cell: 'empty', 'on', 'off', 'opp', 'mix', 'other'
+        """
         result = []
-        arr = pygor.utilities.multicolour_reshape(self.get_polarities(), self.numcolour).T
+        polarities = self.get_polarities()
+        arr = pygor.utilities.multicolour_reshape(polarities, self.numcolour).T
+        
+        if mask_by_channel:
+            # Get boolean mask for significant channels
+            bool_mask = self.bool_by_channel(threshold=threshold, dimstr=dimstr)
+            # Apply mask to polarities - set insignificant channels to NaN
+            for i, (pol_row, mask_row) in enumerate(zip(arr, bool_mask)):
+                arr[i] = np.where(mask_row, pol_row, np.nan)
+        
         for i in arr:
             inner_no_nan = np.unique(i)[~np.isnan(np.unique(i))]
             inner_no_nan = inner_no_nan[inner_no_nan != 0]
@@ -1203,7 +1227,7 @@ class STRF(Core):
         else:
             raise AttributeError("Operation cannot be done since object property '.multicolour.' is False")
 
-    def bool_strf_signal(self, threshold = 2, multicolour = True, dimstr = "time") -> np.ndarray:
+    def bool_strf_signal(self, threshold = 1, multicolour = True, dimstr = "time") -> np.ndarray:
         if multicolour is True:
             # Get tuning amplitudes and check if at least one per ROI is above threshold
             tuning_amps = self.calc_tunings_amplitude(dimstr = dimstr)
@@ -1214,6 +1238,15 @@ class STRF(Core):
             elif dimstr == "space":
                 amps = self.get_space_amps()
             return np.abs(amps) > threshold
+
+    def bool_by_channel(self, threshold = 1, dimstr = "time") -> np.ndarray:
+        if dimstr == "time":
+            amps = self.get_time_amps()
+        elif dimstr == "space":
+            amps = self.get_space_amps()
+        else:
+            raise ValueError("dimstr must be 'time' or 'space'")
+        return pygor.utilities.multicolour_reshape(np.abs(amps), self.numcolour).T > threshold
 
     def calc_mean_absolute_deviation(self, dimstr = "space", **kwargs):
         tunings = self.calc_tunings_amplitude(dimstr = dimstr, **kwargs)
