@@ -810,7 +810,176 @@ class STRF(Core):
             #collapsed_strf_arr = shifted
         return collapsed_strf_arr # do not squeeze for more predictable output
         # spatial.collapse_3d(recording.strfs[strf_num])
+
+    def collapse_times_chroma(self, roi = None, zscore : bool = True, spatial_centre : bool = False, border : bool = False, **kwargs) -> np.ma.masked_array:
+        all_collapsed = self.collapse_times(None, zscore = zscore, spatial_centre = spatial_centre, border = border, **kwargs)
+        if roi is None:
+            return pygor.utilities.multicolour_reshape(all_collapsed, self.numcolour)
+        if roi is not None:
+            return pygor.utilities.multicolour_reshape(all_collapsed, self.numcolour)[:, roi]
+
+    def calc_spatial_correlations(self, abs_arrays=True, signal_only=True) -> tuple[pd.DataFrame, list[str]]:
+        """
+        Calculate spatial correlations between all channel pairs for all ROIs.
     
+        Args:
+            abs_arrays (bool): If True, take absolute value of arrays before correlation.
+                            If False, preserve original polarities. Default True.
+            signal_only (bool): If True, only include ROIs that are considered signal ROIs.
+                            If False, include all ROIs. Default True.
+    
+        Returns:
+            pd.DataFrame: Correlation values for ROIs and channel pairs.
+                        Columns are named as 'Ch{i}-Ch{j}' where i,j are channel indices.
+                        Index corresponds to signal ROI indices if signal_only=True.
+                        For standard 4-channel data: Ch0=R, Ch1=G, Ch2=B, Ch3=UV.
+        """
+        # Calculate across all ROIs
+        spaces = self.collapse_times_chroma()
+    
+        # Conditionally apply absolute value
+        if abs_arrays:
+            spaces_flat = np.abs(spaces.reshape(self.numcolour, self.num_rois, -1))
+        else:
+            spaces_flat = spaces.reshape(self.numcolour, self.num_rois, -1)
+    
+        # Get signal ROI mask if requested
+        if signal_only:
+            signal_mask = pygor.utilities.multicolour_reshape(
+                self.bool_strf_signal(multicolour=False), self.numcolour
+            ).T
+            # signal_mask shape should be (num_rois,) boolean array
+            signal_roi_indices = np.where(signal_mask)[0]
+            spaces_flat = spaces_flat[:, signal_mask, :]  # Filter ROIs
+            num_rois_to_process = len(signal_roi_indices)
+        else:
+            signal_roi_indices = np.arange(self.num_rois)
+            num_rois_to_process = self.num_rois
+    
+        # Compute correlation matrices for selected ROIs
+        correlations = np.zeros((num_rois_to_process, self.numcolour, self.numcolour))
+        for i in range(num_rois_to_process):
+            correlations[i] = np.corrcoef(spaces_flat[:, i, :])
+    
+        # Vectorized extraction of lower triangle pairs
+        pairs_indices = np.tril_indices(self.numcolour, k=-1)
+    
+        # Extract all pairs at once
+        all_corr_pairs = correlations[:, pairs_indices[0], pairs_indices[1]]
+    
+        # Create pair names using channel indices
+        pair_names = [f"Ch{i}-Ch{j}" for i, j in zip(pairs_indices[0], pairs_indices[1])]
+    
+        # Create DataFrame with original ROI indices if signal_only=True
+        full_df = pd.DataFrame(all_corr_pairs, columns=pair_names, index=signal_roi_indices)
+        
+        return full_df, pair_names
+
+    def calc_spatial_correlations(self, abs_arrays=True, signal_only=True) -> tuple[pd.DataFrame, list[str]]:
+        """
+        Calculate spatial correlations between all channel pairs for all ROIs.
+    
+        Args:
+            abs_arrays (bool): If True, take absolute value of arrays before correlation.
+                            If False, preserve original polarities. Default True.
+            signal_only (bool): If True, only include channels that have signal for each ROI.
+                            If False, include all channels. Default True.
+    
+        Returns:
+            pd.DataFrame: Correlation values for all ROIs and channel pairs.
+                        Columns are named as 'Ch{i}-Ch{j}' where i,j are channel indices.
+                        Index includes ALL ROIs (0 to num_rois-1).
+                        NaN for pairs where one/both channels lack signal or ROI has <2 signal channels.
+                        For standard 4-channel data: Ch0=R, Ch1=G, Ch2=B, Ch3=UV.
+        """
+        # Calculate across all ROIs
+        spaces = self.collapse_times_chroma()
+    
+        # Conditionally apply absolute value
+        if abs_arrays:
+            spaces_flat = np.abs(spaces.reshape(self.numcolour, self.num_rois, -1))
+        else:
+            spaces_flat = spaces.reshape(self.numcolour, self.num_rois, -1)
+    
+        # Get signal mask if requested
+        if signal_only:
+            raw_signal = self.bool_strf_signal(multicolour=False)
+            signal_mask_2d = pygor.utilities.multicolour_reshape(raw_signal, self.numcolour).T
+        else:
+            signal_mask_2d = np.ones((self.num_rois, self.numcolour), dtype=bool)
+    
+        # Get all possible channel pairs
+        pairs_indices = np.tril_indices(self.numcolour, k=-1)
+        pair_names = [f"Ch{i}-Ch{j}" for i, j in zip(pairs_indices[0], pairs_indices[1])]
+        
+        # Store results for ALL ROIs
+        roi_results = []
+        
+        for roi in range(self.num_rois):  # Process ALL ROIs
+            # Get channels with signal for this ROI
+            valid_channels = np.where(signal_mask_2d[roi])[0]
+            
+            # Initialize with NaN for this ROI
+            roi_correlations = np.full(len(pair_names), np.nan)
+            
+            if len(valid_channels) >= 2:
+                # Only compute correlations if we have at least 2 signal channels
+                roi_data = spaces_flat[valid_channels, roi, :]
+                corr_matrix = np.corrcoef(roi_data)
+                
+                # Fill in correlations for valid pairs
+                for pair_idx, (ch_i, ch_j) in enumerate(zip(pairs_indices[0], pairs_indices[1])):
+                    # Check if both channels have signal
+                    if ch_i in valid_channels and ch_j in valid_channels:
+                        # Get positions in the reduced correlation matrix
+                        pos_i = np.where(valid_channels == ch_i)[0][0]
+                        pos_j = np.where(valid_channels == ch_j)[0][0]
+                        roi_correlations[pair_idx] = corr_matrix[pos_i, pos_j]
+            
+            # Always append (even if all NaN)
+            roi_results.append(roi_correlations)
+        
+        # Create DataFrame with ALL ROI indices
+        full_df = pd.DataFrame(roi_results, columns=pair_names, index=range(self.num_rois))
+        
+        return full_df, pair_names
+
+    def spatial_offset_stats(self, abs_arrays=True, signal_only=True):
+        """
+        Calculate spatial correlation statistics for each ROI individually.
+    
+        Args:
+            abs_arrays (bool): If True, take absolute value of arrays before correlation.
+                            If False, preserve original polarities. Default True.
+            signal_only (bool): If True, only include ROIs that are considered signal ROIs.
+                            If False, include all ROIs. Default True.
+    
+        Returns:
+            pd.DataFrame: For each ROI, the mean and std of correlations across all channel pairs.
+                        Index is ROI number (original indices if signal_only=True).
+                        Columns are 'mean_corr' and 'std_corr'.
+                        For 4-channel data: Ch0=R, Ch1=G, Ch2=B, Ch3=UV.
+        """
+        all_corr_pairs, pair_names = self.calc_spatial_correlations(abs_arrays=abs_arrays, signal_only=signal_only)
+    
+        # Compute statistics for each ROI (across the channel pairs)
+        mean_corr_per_roi = np.mean(all_corr_pairs, axis=1)
+        std_corr_per_roi = np.std(all_corr_pairs, axis=1)
+    
+        # Create summary DataFrame - index already set from calc_spatial_correlations
+        summary_df = pd.DataFrame({
+            'mean_corr': mean_corr_per_roi,
+            'std_corr': std_corr_per_roi
+        }, index=all_corr_pairs.index)
+        
+        return summary_df
+
+    def spatial_offset_mean(self, abs_arrays=True, signal_only=True):
+        return self.spatial_offset_stats(abs_arrays=abs_arrays, signal_only=signal_only)["mean_corr"].to_numpy()
+
+    def spatial_offset_std(self, abs_arrays=True, signal_only=True):
+        return self.spatial_offset_stats(abs_arrays=abs_arrays, signal_only=signal_only)["std_corr"].to_numpy()
+
     def get_polarities(self, roi = None, exclude_FirstLast=(1,1), mode = "cs_pol", force_recompute = False) -> np.ndarray:
         if mode == "old":
             # Get the time as absolute values, then get the max value
