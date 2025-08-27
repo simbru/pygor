@@ -54,6 +54,8 @@ class STRF(Core):
     numcolour    : int = field(init=False) # gets interpreted from strf array shape
     strf_keys    : list = field(init=False)
     strf_ms      : int = field(init=False)
+    # Cache for spatial overlap index computations
+    _spatial_overlap_cache : dict = field(init=False, default_factory=dict)
     ## Attributes
     def __post_init__(self):
         # Post initialise the contents of Data class to be inherited
@@ -89,6 +91,95 @@ class STRF(Core):
         self.set_bootstrap_settings_default()
         if self.bs_settings["do_bootstrap"] == True:
             self.run_bootstrap()
+        
+        # Validate data consistency
+        self._validate_data_consistency()
+
+    def _validate_data_consistency(self):
+        """
+        Validate data consistency after loading.
+        
+        Checks:
+        1. num_rois matches expected STRF count (num_strfs / numcolour)
+        2. ipl_depths length matches num_rois
+        
+        Raises warnings for inconsistencies that could indicate data problems.
+        """
+        expected_rois = int(self.num_strfs / self.numcolour)
+        
+        # Check 1: num_rois vs STRF count consistency
+        if self.num_rois != expected_rois:
+            import warnings
+            warnings.warn(
+                f"Data inconsistency in {self.name}: "
+                f"num_rois ({self.num_rois}) != expected from STRFs ({expected_rois}). "
+                f"STRFs: {self.num_strfs}, Colors: {self.numcolour}",
+                UserWarning
+            )
+        
+        # Check 2: ipl_depths length vs num_rois consistency  
+        if hasattr(self, 'ipl_depths') and self.ipl_depths is not None:
+            if hasattr(self.ipl_depths, '__len__') and len(self.ipl_depths) != self.num_rois:
+                import warnings
+                warnings.warn(
+                    f"Data inconsistency in {self.name}: "
+                    f"ipl_depths length ({len(self.ipl_depths)}) != num_rois ({self.num_rois}). "
+                    f"This will cause issues in population analysis. "
+                    f"Please check the source H5 file and fix the 'Positions' array.",
+                    UserWarning
+                )
+                print(f"  -> ipl_depths shape: {getattr(self.ipl_depths, 'shape', 'no shape')}")
+                print(f"  -> Expected length: {self.num_rois}")
+                print(f"  -> Actual length: {len(self.ipl_depths)}")
+        
+        # Check 3: num_rois vs STRF shape consistency (definitive check)
+        try:
+            strfs_chroma = self.strfs_chroma()
+            actual_rois_from_strfs = strfs_chroma.shape[1]  # shape is [time, roi, y, x] or similar
+            if actual_rois_from_strfs != self.num_rois:
+                import warnings
+                warnings.warn(
+                    f"CRITICAL data inconsistency in {self.name}: "
+                    f"STRF array shows {actual_rois_from_strfs} ROIs but num_rois is {self.num_rois}. "
+                    f"This is the definitive ROI count - other arrays may be wrong. "
+                    f"STRF shape: {strfs_chroma.shape}",
+                    UserWarning
+                )
+                print(f"  -> STRF shape: {strfs_chroma.shape}")
+                print(f"  -> Actual ROIs from STRFs: {actual_rois_from_strfs}")
+                print(f"  -> num_rois setting: {self.num_rois}")
+                print(f"  -> This suggests the H5 file has inconsistent ROI counts")
+        except Exception as e:
+            import warnings
+            warnings.warn(
+                f"Data validation error in {self.name}: "
+                f"Could not check STRF shape consistency: {e}",
+                UserWarning
+            )
+        
+        # Check 4: category data consistency
+        try:
+            categories = self.get_polarity_category_cell()
+            if hasattr(categories, '__len__') and len(categories) != self.num_rois:
+                import warnings
+                warnings.warn(
+                    f"Data inconsistency in {self.name}: "
+                    f"get_polarity_category_cell() length ({len(categories)}) != num_rois ({self.num_rois}). "
+                    f"This will cause issues in population analysis. "
+                    f"Check polarity detection and category assignment.",
+                    UserWarning
+                )
+                print(f"  -> Categories returned: {len(categories)} items")
+                print(f"  -> Expected: {self.num_rois} items")
+                print(f"  -> Categories: {categories}")
+        except Exception as e:
+            import warnings
+            warnings.warn(
+                f"Data validation error in {self.name}: "
+                f"get_polarity_category_cell() failed with error: {e}. "
+                f"This method may be broken for this recording.",
+                UserWarning
+            )
 
     @property #
     def stim_size_arbitrary(self):
@@ -818,64 +909,7 @@ class STRF(Core):
         if roi is not None:
             return pygor.utilities.multicolour_reshape(all_collapsed, self.numcolour)[:, roi]
 
-    def calc_spatial_correlations(self, abs_arrays=True, signal_only=True) -> tuple[pd.DataFrame, list[str]]:
-        """
-        Calculate spatial correlations between all channel pairs for all ROIs.
-    
-        Args:
-            abs_arrays (bool): If True, take absolute value of arrays before correlation.
-                            If False, preserve original polarities. Default True.
-            signal_only (bool): If True, only include ROIs that are considered signal ROIs.
-                            If False, include all ROIs. Default True.
-    
-        Returns:
-            pd.DataFrame: Correlation values for ROIs and channel pairs.
-                        Columns are named as 'Ch{i}-Ch{j}' where i,j are channel indices.
-                        Index corresponds to signal ROI indices if signal_only=True.
-                        For standard 4-channel data: Ch0=R, Ch1=G, Ch2=B, Ch3=UV.
-        """
-        # Calculate across all ROIs
-        spaces = self.collapse_times_chroma()
-    
-        # Conditionally apply absolute value
-        if abs_arrays:
-            spaces_flat = np.abs(spaces.reshape(self.numcolour, self.num_rois, -1))
-        else:
-            spaces_flat = spaces.reshape(self.numcolour, self.num_rois, -1)
-    
-        # Get signal ROI mask if requested
-        if signal_only:
-            signal_mask = pygor.utilities.multicolour_reshape(
-                self.bool_strf_signal(multicolour=False), self.numcolour
-            ).T
-            # signal_mask shape should be (num_rois,) boolean array
-            signal_roi_indices = np.where(signal_mask)[0]
-            spaces_flat = spaces_flat[:, signal_mask, :]  # Filter ROIs
-            num_rois_to_process = len(signal_roi_indices)
-        else:
-            signal_roi_indices = np.arange(self.num_rois)
-            num_rois_to_process = self.num_rois
-    
-        # Compute correlation matrices for selected ROIs
-        correlations = np.zeros((num_rois_to_process, self.numcolour, self.numcolour))
-        for i in range(num_rois_to_process):
-            correlations[i] = np.corrcoef(spaces_flat[:, i, :])
-    
-        # Vectorized extraction of lower triangle pairs
-        pairs_indices = np.tril_indices(self.numcolour, k=-1)
-    
-        # Extract all pairs at once
-        all_corr_pairs = correlations[:, pairs_indices[0], pairs_indices[1]]
-    
-        # Create pair names using channel indices
-        pair_names = [f"Ch{i}-Ch{j}" for i, j in zip(pairs_indices[0], pairs_indices[1])]
-    
-        # Create DataFrame with original ROI indices if signal_only=True
-        full_df = pd.DataFrame(all_corr_pairs, columns=pair_names, index=signal_roi_indices)
-        
-        return full_df, pair_names
-
-    def calc_spatial_correlations(self, abs_arrays=True, signal_only=True) -> tuple[pd.DataFrame, list[str]]:
+    def calc_spatial_correlations(self, abs_arrays=True, signal_only=True, single_channel_value=np.nan) -> tuple[pd.DataFrame, list[str]]:
         """
         Calculate spatial correlations between all channel pairs for all ROIs.
     
@@ -884,12 +918,14 @@ class STRF(Core):
                             If False, preserve original polarities. Default True.
             signal_only (bool): If True, only include channels that have signal for each ROI.
                             If False, include all channels. Default True.
+            single_channel_value (float): Value to assign when ROI has <2 signal channels.
+                            Default np.nan. Common alternative: 1.0 for perfect correlation.
     
         Returns:
             pd.DataFrame: Correlation values for all ROIs and channel pairs.
                         Columns are named as 'Ch{i}-Ch{j}' where i,j are channel indices.
                         Index includes ALL ROIs (0 to num_rois-1).
-                        NaN for pairs where one/both channels lack signal or ROI has <2 signal channels.
+                        Uses single_channel_value for pairs where one/both channels lack signal or ROI has <2 signal channels.
                         For standard 4-channel data: Ch0=R, Ch1=G, Ch2=B, Ch3=UV.
         """
         # throw error if object is not multichromatic
@@ -917,8 +953,8 @@ class STRF(Core):
             # Get channels with signal for this ROI
             valid_channels = np.where(signal_mask_2d[roi])[0]
             
-            # Initialize with NaN for this ROI
-            roi_correlations = np.full(len(pair_names), np.nan)
+            # Initialize with specified value for this ROI (default NaN for missing data)
+            roi_correlations = np.full(len(pair_names), single_channel_value, dtype=float)
             
             if len(valid_channels) >= 2:
                 # Only compute correlations if we have at least 2 signal channels
@@ -936,13 +972,13 @@ class STRF(Core):
             
             # Always append (even if all NaN)
             roi_results.append(roi_correlations)
-        
+        assert len(roi_results) == self.num_rois
         # Create DataFrame with ALL ROI indices
         full_df = pd.DataFrame(roi_results, columns=pair_names, index=range(self.num_rois))
         
         return full_df, pair_names
 
-    def spatial_offset_stats(self, abs_arrays=True, signal_only=True):
+    def spatial_overlap_index_stats(self, abs_arrays=True, signal_only=True, force_recompute=False, single_channel_value=np.nan):
         """
         Calculate spatial correlation statistics for each ROI individually.
     
@@ -951,32 +987,79 @@ class STRF(Core):
                             If False, preserve original polarities. Default True.
             signal_only (bool): If True, only include ROIs that are considered signal ROIs.
                             If False, include all ROIs. Default True.
+            force_recompute (bool): If True, force recomputation even if cached. Default False.
+            single_channel_value (float): Value to assign when ROI has <2 signal channels.
+                            Default np.nan. Common alternative: 1.0 for perfect correlation.
     
         Returns:
-            pd.DataFrame: For each ROI, the mean and std of correlations across all channel pairs.
+            pd.DataFrame: For each ROI, the mean, std, and min of correlations across all channel pairs.
                         Index is ROI number (original indices if signal_only=True).
-                        Columns are 'mean_corr' and 'std_corr'.
+                        Columns are 'mean_corr', 'std_corr', 'min_corr'.
                         For 4-channel data: Ch0=R, Ch1=G, Ch2=B, Ch3=UV.
         """
-        all_corr_pairs, pair_names = self.calc_spatial_correlations(abs_arrays=abs_arrays, signal_only=signal_only)
+        # Create cache key
+        cache_key = (abs_arrays, signal_only, single_channel_value)
+        
+        # Check cache first (unless force recompute)
+        if not force_recompute and cache_key in self._spatial_overlap_cache:
+            return self._spatial_overlap_cache[cache_key]
+        
+        # Compute correlations
+        all_corr_pairs, pair_names = self.calc_spatial_correlations(abs_arrays=abs_arrays, signal_only=signal_only, single_channel_value=single_channel_value)
     
         # Compute statistics for each ROI (across the channel pairs)
         mean_corr_per_roi = np.mean(all_corr_pairs, axis=1)
+        var_corr_per_roi = np.var(all_corr_pairs, axis=1)
         std_corr_per_roi = np.std(all_corr_pairs, axis=1)
+        min_corr_per_roi = np.min(all_corr_pairs, axis=1)
     
         # Create summary DataFrame - index already set from calc_spatial_correlations
         summary_df = pd.DataFrame({
             'mean_corr': mean_corr_per_roi,
-            'std_corr': std_corr_per_roi
+            'std_corr': std_corr_per_roi,
+            'min_corr': min_corr_per_roi,
+            'var_corr': var_corr_per_roi
         }, index=all_corr_pairs.index)
+        
+        # Cache the result
+        self._spatial_overlap_cache[cache_key] = summary_df
         
         return summary_df
 
-    def spatial_offset_mean(self, abs_arrays=True, signal_only=True):
-        return self.spatial_offset_stats(abs_arrays=abs_arrays, signal_only=signal_only)["mean_corr"].to_numpy()
+    def spatial_overlap_index_mean(self, abs_arrays=True, signal_only=True, force_recompute=False, single_channel_value=np.nan):
+        return self.spatial_overlap_index_stats(abs_arrays=abs_arrays, signal_only=signal_only, force_recompute=force_recompute, single_channel_value=single_channel_value)["mean_corr"].to_numpy()
 
-    def spatial_offset_std(self, abs_arrays=True, signal_only=True):
-        return self.spatial_offset_stats(abs_arrays=abs_arrays, signal_only=signal_only)["std_corr"].to_numpy()
+    def spatial_overlap_index_std(self, abs_arrays=True, signal_only=True, force_recompute=False, single_channel_value=np.nan):
+        return self.spatial_overlap_index_stats(abs_arrays=abs_arrays, signal_only=signal_only, force_recompute=force_recompute, single_channel_value=single_channel_value)["std_corr"].to_numpy()
+
+    def spatial_overlap_index_min(self, abs_arrays=True, signal_only=True, force_recompute=False, single_channel_value=np.nan):
+        return self.spatial_overlap_index_stats(abs_arrays=abs_arrays, signal_only=signal_only, force_recompute=force_recompute, single_channel_value=single_channel_value)["min_corr"].to_numpy()
+    
+    def spatial_overlap_index_var(self, abs_arrays=True, signal_only=True, force_recompute=False, single_channel_value=np.nan):
+        return self.spatial_overlap_index_stats(abs_arrays=abs_arrays, signal_only=signal_only, force_recompute=force_recompute, single_channel_value=single_channel_value)["var_corr"].to_numpy()
+
+    def spatial_overlap_channel_pair(self, ch1, ch2, abs_arrays=True, 
+    signal_only=True, single_channel_value=np.nan):
+        """Get spatial overlap index for a specific channel pair."""
+        all_corr_pairs, pair_names  =  self.calc_spatial_correlations(abs_arrays=abs_arrays, signal_only=signal_only, single_channel_value=single_channel_value)
+        # Use the same naming convention as calc_spatial_correlations: larger index first
+        pair_name = f"Ch{max(ch1,ch2)}-Ch{min(ch1,ch2)}"
+        if pair_name not in all_corr_pairs.columns:
+            raise ValueError(f"Channel pair {pair_name} not found. Available: {list(all_corr_pairs.columns)}")
+        return all_corr_pairs[pair_name].to_numpy()
+
+    # Convenience methods for specific pairs
+    def spatial_overlap_red_uv(self, abs_arrays=True, signal_only=True, single_channel_value=np.nan):
+        """Red-UV spatial overlap (Ch0-Ch3) - strongest anti-correlation expected"""        
+        return self.spatial_overlap_channel_pair(0, 3, abs_arrays, signal_only, single_channel_value)
+
+    def spatial_overlap_green_blue(self, abs_arrays=True, signal_only=True, single_channel_value=np.nan):
+        """Green-Blue spatial overlap (Ch1-Ch2)"""
+        return self.spatial_overlap_channel_pair(1, 2, abs_arrays, signal_only, single_channel_value)
+
+    def spatial_overlap_red_green(self, abs_arrays=True, signal_only=True, single_channel_value=np.nan):
+        """Red-Green spatial overlap (Ch0-Ch1)"""
+        return self.spatial_overlap_channel_pair(0, 1, abs_arrays, signal_only, single_channel_value)
 
     def get_polarities(self, roi = None, exclude_FirstLast=(1,1), mode = "cs_pol", force_recompute = False) -> np.ndarray:
         if mode == "old":
@@ -1007,10 +1090,8 @@ class STRF(Core):
             covar_thresh = -.5
             var_thresh = .2
             S_absamp_thresh = 1.5
+            center_dominance_ratio = 2.0  # Center must be 2x stronger than surround for simple ON/OFF
 
-            length = prediction_times_ROIs.shape[-1]
-            # C_times = prediction_times_ROIs[:, 0, length//2:]
-            # S_times = prediction_times_ROIs[:, 1, length//2:]
             C_times = prediction_times_ROIs[:, 0, :]
             S_times = prediction_times_ROIs[:, 1, :]
             C_centered = C_times - C_times.mean(axis=1, keepdims=True)
@@ -1020,34 +1101,81 @@ class STRF(Core):
             CS_covariances = np.sum(C_centered * S_centered, axis=1) / (C_times.shape[1] - 1)
 
             # Get absolute max for each value of C and S
-            C_maxabs = pygor.np_ext.maxabs(C_times, axis=1)
-            S_maxabs = pygor.np_ext.maxabs(S_times, axis=1)
+            C_maxabs = np.abs(pygor.np_ext.maxabs(C_times, axis=1))
+            S_maxabs = np.abs(pygor.np_ext.maxabs(S_times, axis=1))
 
-            # Get signs for each value of C and S times
-            C_signs = np.sign(C_times.mean(axis=1))
-            #S_signs = np.sign(S_times.mean(axis=1))
-            #cat = np.empty(prediction_times_ROIs.shape[0], dtype="str")
-            # cat = np.where(C_signs > 0, "ON", "OFF")
+            # Get signs based on sustained response using single-pass adaptive approach
+            def get_sustained_polarity_single_pass(timecourse):
+                n = len(timecourse)
+                if n < 3:
+                    return 0  # Too short to analyze
+                
+                # Single pass: find max absolute value AND track when it occurs
+                max_abs_val = 0
+                max_abs_val_with_sign = 0
+                max_abs_idx = 0
+                
+                for i, val in enumerate(timecourse):
+                    abs_val = abs(val)
+                    if abs_val > max_abs_val:
+                        max_abs_val = abs_val
+                        max_abs_val_with_sign = val
+                        max_abs_idx = i
+                
+                # If max occurs early (first 25%), look for sustained response
+                if max_abs_idx < n // 4:
+                    # Find the strongest response in the remaining 75%
+                    sustained_max = 0
+                    sustained_max_with_sign = 0
+                    
+                    for i in range(n // 4, n):
+                        abs_val = abs(timecourse[i])
+                        if abs_val > sustained_max:
+                            sustained_max = abs_val
+                            sustained_max_with_sign = timecourse[i]
+                    
+                    # Use sustained response if it's substantial (>30% of peak)
+                    if sustained_max > 0.3 * max_abs_val:
+                        return sustained_max_with_sign
+                
+                # Otherwise use the global maximum
+                return max_abs_val_with_sign
+            
+            C_sustained_response = np.array([get_sustained_polarity_single_pass(c) for c in C_times])
+            C_signs = np.sign(C_sustained_response)
+            
+            # Initialize categories
             cat = np.where(C_signs > 0, 1, -1)
             cat = cat.astype("float")
-            zerovals = C_signs==0
+            zerovals = C_signs == 0
             cat[zerovals] = np.nan
-            amplitude_pass_idx = np.abs(S_maxabs) > S_absamp_thresh
+            
+            # Only classify as center-surround if ALL criteria are met AND center doesn't dominate
+            amplitude_pass_idx = S_maxabs > S_absamp_thresh
             var_pass_idx = np.var(S_times, axis=1) > var_thresh
             covariance_pass_idx = CS_covariances < covar_thresh
-            pass_bool = np.bitwise_and(amplitude_pass_idx, covariance_pass_idx) * var_pass_idx
-            # cat = np.where(pass_bool, cat + " CS", cat)
-            cat = np.where(pass_bool, 2, cat)
-            # Extra check to test if CS is weak or strong
+            center_not_dominant = C_maxabs <= center_dominance_ratio * S_maxabs
+            
+            # More stringent CS criteria - must pass all conditions
+            cs_pass_bool = (amplitude_pass_idx & var_pass_idx & 
+                           covariance_pass_idx & center_not_dominant)
+            
+            # Only assign center-surround if genuinely meets criteria
+            cat = np.where(cs_pass_bool, 2, cat)
+            
+            # Set to NaN if center amplitude is too weak for reliable classification
+            weak_center = C_maxabs < 1.0  # Minimum amplitude threshold
+            cat = np.where(weak_center, np.nan, cat)
+            
+            # Extra check for strong vs weak CS (if requested)
             if mode == "cs_pol_extra":
                 with np.errstate(divide='ignore', invalid='ignore'):
-                    # condition1 = np.isclose(np.abs(C_maxabs/S_maxabs), -1, atol=1e1)
                     lower_bound = .5
                     upper_bound = 2
                     condition1 = (np.abs(C_maxabs / S_maxabs) >= lower_bound) & (np.abs(C_maxabs / S_maxabs) <= upper_bound)                
-                condition2 = [True if "CS" in c else False for c in cat]
-                cat = np.where(np.bitwise_and(condition1, condition2), cat + " strong", cat)
-                # cat = np.where(, cat + " weak", cat)
+                cs_strong_mask = (cat == 2) & condition1
+                cat = np.where(cs_strong_mask, 3, cat)  # Use 3 for strong CS if needed
+            
             pols = cat
         elif mode == "on_off_gabor":
             # First separate out to ON and OFF
@@ -1227,7 +1355,7 @@ class STRF(Core):
         else:
             raise AttributeError("Operation cannot be done since object property '.multicolour.' is False")
 
-    def bool_strf_signal(self, threshold = 1, multicolour = True, dimstr = "time") -> np.ndarray:
+    def bool_strf_signal(self, threshold = 2, multicolour = True, dimstr = "time") -> np.ndarray:
         if multicolour is True:
             # Get tuning amplitudes and check if at least one per ROI is above threshold
             tuning_amps = self.calc_tunings_amplitude(dimstr = dimstr)
@@ -1239,7 +1367,7 @@ class STRF(Core):
                 amps = self.get_space_amps()
             return np.abs(amps) > threshold
 
-    def bool_by_channel(self, threshold = 1, dimstr = "time") -> np.ndarray:
+    def bool_by_channel(self, threshold = 2, dimstr = "time") -> np.ndarray:
         if dimstr == "time":
             amps = self.get_time_amps()
         elif dimstr == "space":

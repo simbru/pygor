@@ -161,6 +161,40 @@ class NapariDepthPrompt:
         percent_position = (roi_y_coords - closest_y_lower) / (closest_y_upper - closest_y_lower) * 100
         return percent_position
 
+    def calculate_depths_vertical_fixed(self, lower, upper, roi_centroids):
+        """
+        Calculate depths for vertical scans - match ROIs by Y coordinates, measure depth along X axis.
+        This is the corrected version that properly handles vertical scan geometry.
+        """
+        # For vertical scans: match by Y coordinates, measure depth along X axis
+        upper_y_coords = upper[:, 0]  # Y coordinates for matching
+        lower_y_coords = lower[:, 0]  # Y coordinates for matching
+        
+        # ROI coordinates (roi_centroids is in (y, x) format)
+        roi_y_coords = roi_centroids[:, 0]  # Y coordinates for matching
+        roi_x_coords = roi_centroids[:, 1]  # X coordinates for depth measurement
+        
+        # Find closest points on boundaries using Y coordinate matching
+        diff_upper = np.abs(upper_y_coords[:, None] - roi_y_coords)
+        diff_lower = np.abs(lower_y_coords[:, None] - roi_y_coords)
+        
+        closest_indices_upper = np.argmin(diff_upper, axis=0)
+        closest_indices_lower = np.argmin(diff_lower, axis=0)
+        
+        # Get the corresponding X coordinates for depth calculation
+        closest_x_upper = upper[closest_indices_upper, 1]  # X coords of upper boundary
+        closest_x_lower = lower[closest_indices_lower, 1]  # X coords of lower boundary
+        
+        # Calculate depth percentage along X axis
+        # Check if boundaries are reversed (0% on right, 100% on left)
+        if np.mean(closest_x_lower) > np.mean(closest_x_upper):
+            # Reversed case: 0% is on right (higher X), 100% is on left (lower X)
+            percent_position = (closest_x_lower - roi_x_coords) / (closest_x_lower - closest_x_upper) * 100
+        else:
+            # Normal case: 0% is on left (lower X), 100% is on right (higher X) 
+            percent_position = (roi_x_coords - closest_x_lower) / (closest_x_upper - closest_x_lower) * 100
+        return percent_position
+
 
     def process_data(self):
         """Calculates the depth of each ROI between the 0% and 100% boundaries."""
@@ -174,9 +208,8 @@ class NapariDepthPrompt:
             depths = self.calculate_depths(lower, upper, self.pygor_object.roi_centroids)
         else:
             logging.info("Vertical orientation detected")
-            lower = self.reorder(lower[:, 1], lower[:, 0])
-            upper = self.reorder(upper[:, 1], upper[:, 0])
-            depths = self.calculate_depths(lower, upper, self.pygor_object.roi_centroids)
+            # For vertical scans, use original coordinates directly (no reordering)
+            depths = self.calculate_depths_vertical_fixed(lower, upper, self.pygor_object.roi_centroids)
         self.result = depths
 
     def on_close(self):

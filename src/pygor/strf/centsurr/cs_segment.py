@@ -615,7 +615,7 @@ def cs_segment_demo(inputdata_3d, **kwargs):
 
 def run(d3_arr, plot=False, 
         sort_strategy = "sorted_corr", #sorted was last tried in the fine noise
-        exclude_sub = 1,
+        exclude_sub = 2,
         use_all_pixel_average = True,
         segmentation_params : dict = None, 
         merge_params : dict = None,
