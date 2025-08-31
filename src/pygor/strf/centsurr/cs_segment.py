@@ -290,7 +290,7 @@ def segmentation_algorithm(
 #         # new_map[map == similar_pairs_index[1]] = 0
 #     return new_times, new_map
 
-def merge_cs_var(arr_3d, prediction_times, prediction_map, var_threshold):
+def merge_cs_var(arr_3d, prediction_times, prediction_map, var_threshold, with_debug=False):
     # Keep track of original shape
     times_shape_org = prediction_times.shape
     with np.errstate(invalid='ignore'):
@@ -298,16 +298,22 @@ def merge_cs_var(arr_3d, prediction_times, prediction_map, var_threshold):
         variances = np.std(prediction_times, axis=1)
         # Identify indices of signals with variance below the threshold
         low_var_index = np.argwhere(variances < var_threshold).flatten()
+        if with_debug:
+            print(f"[merge_cs_var] Variances: {variances}, threshold: {var_threshold}")
+            print(f"[merge_cs_var] Low variance indices: {low_var_index}")
+        
         if low_var_index.size > 1:
-            #print("MERGE CS VAR")
+            if with_debug:
+                print(f"[merge_cs_var] Merging {low_var_index.size} low-variance signals")
             center_index = low_var_index[np.argmin(variances[low_var_index])]
             other_indices = low_var_index[low_var_index != center_index]
+            if with_debug:
+                print(f"[merge_cs_var] Center index: {center_index}, merging indices: {other_indices}")
+            
             # Update the prediction map
             for idx in other_indices:
                 prediction_map = np.where(prediction_map == idx, center_index, prediction_map)
-            # Normalise prediction map values to between 0 and 1
-            prediction_map = prediction_map / np.max(prediction_map)
-            prediction_map = prediction_map.astype(int)
+            
             times_extracted = extract_times(prediction_map, arr_3d)
             # Replaced merged traces with zeros
             if times_extracted.shape != times_shape_org:
@@ -315,8 +321,13 @@ def merge_cs_var(arr_3d, prediction_times, prediction_map, var_threshold):
                 num_traces_to_add = times_shape_org[0] - times_extracted.shape[0]
                 time_fill = np.zeros((num_traces_to_add, times_extracted.shape[1]))
                 times_extracted = np.append(times_extracted, time_fill, axis = 0)   
+                if with_debug:
+                    print(f"[merge_cs_var] Added {num_traces_to_add} zero traces to maintain shape")
             prediction_times = times_extracted
             prediction_times = np.ma.masked_equal(prediction_times, 0)
+        else:
+            if with_debug:
+                print(f"[merge_cs_var] No merge needed - only {low_var_index.size} signals below threshold")
     return prediction_times, prediction_map
 
 def merge_cs_corr(
@@ -324,6 +335,8 @@ def merge_cs_corr(
     times,
     map,
     similarity_thresh,
+    amplitude_ratio_threshold=3.0,
+    with_debug=False
 ):
     # # Sort times in ascending order (absolute value)
     # times_max_idx = np.max(np.abs(times), axis=1)
@@ -331,6 +344,9 @@ def merge_cs_corr(
     # times = times[times_max_idx] # times is now ranked by amplitude
     # Calculate correlation matrix
     traces_correlation = np.ma.corrcoef(times)
+    if with_debug:
+        print(f"[merge_cs_corr] Correlation matrix:\n{traces_correlation}")
+    
     # Identify pairs to merge
     # np.fill_diagonal(traces_correlation, np.nan) #inplace
     # Get indices of pairs exceeding the threshold
@@ -346,45 +362,74 @@ def merge_cs_corr(
         list(zip(row_indices[exceed_indices], col_indices[exceed_indices]))
     ).astype(int)
     correlations = traces_correlation[upper_triangle_indices]
-    #print(similar_pairs_index, correlations)
-    # print(correlations, similar_pairs_index)
+    if with_debug:
+        print(f"[merge_cs_corr] Correlation threshold: {similarity_thresh}")
+        print(f"[merge_cs_corr] Similar pairs exceeding threshold: {similar_pairs_index}")
+        print(f"[merge_cs_corr] Correlations: {correlations[exceed_indices]}")
+    
     if not similar_pairs_index.any():
+        if with_debug:
+            print(f"[merge_cs_corr] No pairs exceed threshold - no merge needed")
         # Exit function and return as-is
         return times, map
-    #else:
-    #    print("CS CORR")
     
-    # Find the most correlated pair of traces (out 3 possible pairs)
-    if len (similar_pairs_index) <= 1:
+    # Check amplitude differences before merging
+    amplitudes = np.max(np.abs(times), axis=1)
+    # Don't merge if one signal is >amplitude_ratio_threshold times stronger
+    
+    # Filter out pairs with large amplitude differences
+    valid_pairs = []
+    for pair_idx, (i, j) in enumerate(similar_pairs_index):
+        amp_ratio = max(amplitudes[i], amplitudes[j]) / min(amplitudes[i], amplitudes[j])
+        if amp_ratio <= amplitude_ratio_threshold:
+            valid_pairs.append(pair_idx)
+        elif with_debug:
+            print(f"[merge_cs_corr] Skipping pair ({i},{j}) - amplitude ratio {amp_ratio:.2f} > {amplitude_ratio_threshold}")
+    
+    if not valid_pairs:
+        if with_debug:
+            print(f"[merge_cs_corr] No valid pairs after amplitude filtering - no merge needed")
+        return times, map
+    
+    similar_pairs_index = similar_pairs_index[valid_pairs]
+    if with_debug:
+        print(f"[merge_cs_corr] Valid pairs after amplitude filtering: {similar_pairs_index}")
+    
+    # Find the most correlated pair of traces (out of valid pairs)
+    if len(similar_pairs_index) <= 1:
         most_similar_pair = 0
     else:
-        ## Determine peak amplitudes
-        amplitudes = np.max(np.abs(times), axis=1)
-        #print(amplitudes)
-        min = np.min(times, axis = 1)
-        max = np.max(times, axis = 1)
-        polarity = [1 if np.abs(i[0]) < i[1] else -1 for i in zip(min, max)]
-        #print(min, max, polarity)
-        # Get the two indices with the higest amplitudes
+        # Get the two indices with the highest amplitudes
         sorted_amplitudes = np.argsort(amplitudes)
         most_similar_pair = sorted_amplitudes[0]
-        if most_similar_pair == len(similar_pairs_index):
-            warnings.warn("Most similar pair fell outside of similar pairs index. Using -1")
-            most_similar_pair = -1
-        #print(most_similar_pair)
-#    if most_similar_pair == -1:
-#        raise ValueError("No similar pairs found")
+        if most_similar_pair >= len(similar_pairs_index):
+            warnings.warn("Most similar pair fell outside of similar pairs index. Using 0")
+            most_similar_pair = 0
+    
     chosen_pair = similar_pairs_index[most_similar_pair]
+    if with_debug:
+        print(f"[merge_cs_corr] Chosen pair for merging: {chosen_pair} (merging {chosen_pair[1]} into {chosen_pair[0]})")
+        print(f"[merge_cs_corr] Map before merge - unique values: {np.unique(map)}")
 
     new_map = np.where(map == chosen_pair[1], chosen_pair[0], map)
     
+    if with_debug:
+        print(f"[merge_cs_corr] Map after merge - unique values: {np.unique(new_map)}")
+    
     times_extracted = extract_times(new_map, d3_arr)
+    if with_debug:
+        print(f"[merge_cs_corr] After extract_times - times_extracted shape: {times_extracted.shape}")
+        print(f"[merge_cs_corr] After extract_times - new_map unique values: {np.unique(new_map)}")
+    
     # Replace merged traces with zeros
     if times_extracted.shape != times_shape_org:
         # Determine number of traces to add
         num_traces_to_add = times_shape_org[0] - times_extracted.shape[0]
         time_fill = np.zeros((num_traces_to_add, times_extracted.shape[1]))
-        times_extracted = np.append(times_extracted, time_fill, axis = 0)    
+        times_extracted = np.append(times_extracted, time_fill, axis = 0)
+        if with_debug:
+            print(f"[merge_cs_corr] Added {num_traces_to_add} zero traces to maintain shape")
+            print(f"[merge_cs_corr] Final new_map unique values after padding: {np.unique(new_map)}")
     new_times = times_extracted
     new_times = np.ma.masked_equal(new_times, 0)
     return new_times, new_map
@@ -484,6 +529,145 @@ def amplitude_criteria(prediction_times, map, abs_criteria = 3) -> tuple[np.ma.M
     else: #pass through
         return prediction_times, map, True
 
+def ensure_cluster_order(prediction_times, prediction_map, with_debug=False):
+    """
+    Ensure consistent cluster ordering: 0=center, 1=surround/other, 2=noise.
+    
+    Strategy:
+    - Cluster 0 (center): Strongest signal (highest absolute amplitude)
+    - Cluster 1 (surround): Second strongest OR residual if only 2 clusters after merging  
+    - Cluster 2 (noise): Weakest signal OR zero-filled if < 3 clusters
+    
+    Parameters
+    ----------
+    prediction_times : np.ndarray
+        Time courses for each cluster
+    prediction_map : np.ndarray  
+        Spatial cluster assignments
+    with_debug : bool
+        Enable debug output
+        
+    Returns
+    -------
+    tuple
+        (reordered_times, reordered_map)
+    """
+    if with_debug:
+        print(f"[ensure_cluster_order] Input times shape: {prediction_times.shape}")
+        print(f"[ensure_cluster_order] Input map unique values: {np.unique(prediction_map)}")
+    
+    # Safety check - if input is already broken, don't make it worse
+    if prediction_times.shape[0] == 0:
+        if with_debug:
+            print("[ensure_cluster_order] Empty times array - returning as-is")
+        return prediction_times, prediction_map
+    
+    # Calculate amplitude for each cluster
+    amplitudes = np.max(np.abs(prediction_times), axis=1)
+    
+    # Handle masked arrays properly
+    if np.ma.is_masked(prediction_times):
+        non_zero_mask = ~np.ma.getmask(prediction_times)[:, 0]  # Find non-masked clusters
+    else:
+        # For regular arrays, check for actual zero values
+        non_zero_mask = np.any(prediction_times != 0, axis=1)
+    
+    # Ensure non_zero_mask is at least 1D
+    non_zero_mask = np.atleast_1d(non_zero_mask)
+    
+    if with_debug:
+        print(f"[ensure_cluster_order] Amplitudes: {amplitudes}")
+        print(f"[ensure_cluster_order] Non-zero mask: {non_zero_mask}")
+        print(f"[ensure_cluster_order] Is masked array: {np.ma.is_masked(prediction_times)}")
+    
+    # Get indices of valid (non-masked/non-zero) clusters, sorted by amplitude (descending)
+    valid_indices = np.where(non_zero_mask)[0]
+    if len(valid_indices) == 0:
+        if with_debug:
+            print("[ensure_cluster_order] No valid clusters found - returning as-is")
+        return prediction_times, prediction_map
+    
+    # Check if reordering is actually needed
+    if len(valid_indices) == prediction_times.shape[0]:
+        # All clusters are valid, check if already in correct order
+        current_order = np.argsort(amplitudes[valid_indices])[::-1]
+        if np.array_equal(current_order, np.arange(len(valid_indices))):
+            if with_debug:
+                print("[ensure_cluster_order] Already in correct order - no changes needed")
+            return prediction_times, prediction_map
+        
+    sorted_valid_indices = valid_indices[np.argsort(amplitudes[valid_indices])[::-1]]
+    
+    if with_debug:
+        print(f"[ensure_cluster_order] Valid indices sorted by amplitude: {sorted_valid_indices}")
+    
+    # Create new times array with desired ordering
+    new_times = np.ma.zeros_like(prediction_times)
+    new_times.mask = True  # Start fully masked
+    
+    # Create mapping from old indices to new indices
+    old_to_new = {}
+    
+    # Assign strongest signal to cluster 0 (center)
+    if len(sorted_valid_indices) >= 1:
+        center_idx = sorted_valid_indices[0]
+        new_times[0] = prediction_times[center_idx]
+        if np.ma.is_masked(prediction_times):
+            new_times[0].mask = False
+        old_to_new[center_idx] = 0
+        if with_debug:
+            print(f"[ensure_cluster_order] Assigned cluster {center_idx} -> 0 (center)")
+    
+    # Assign second strongest to cluster 1 (surround/other)
+    if len(sorted_valid_indices) >= 2:
+        surround_idx = sorted_valid_indices[1]  
+        new_times[1] = prediction_times[surround_idx]
+        if np.ma.is_masked(prediction_times):
+            new_times[1].mask = False
+        old_to_new[surround_idx] = 1
+        if with_debug:
+            print(f"[ensure_cluster_order] Assigned cluster {surround_idx} -> 1 (surround)")
+    
+    # Assign third strongest to cluster 2 (noise), or leave as masked zeros
+    if len(sorted_valid_indices) >= 3:
+        noise_idx = sorted_valid_indices[2]
+        new_times[2] = prediction_times[noise_idx]
+        if np.ma.is_masked(prediction_times):
+            new_times[2].mask = False
+        old_to_new[noise_idx] = 2
+        if with_debug:
+            print(f"[ensure_cluster_order] Assigned cluster {noise_idx} -> 2 (noise)")
+    else:
+        if with_debug:
+            print("[ensure_cluster_order] No third cluster - cluster 2 remains masked (noise)")
+    
+    # Update the spatial map according to the new mapping
+    new_map = np.zeros_like(prediction_map)
+    map_unique_vals = np.unique(prediction_map)
+    
+    if with_debug:
+        print(f"[ensure_cluster_order] Map unique before remapping: {map_unique_vals}")
+        print(f"[ensure_cluster_order] Old to new mapping: {old_to_new}")
+    
+    # Only remap values that actually exist in the prediction map
+    for old_idx, new_idx in old_to_new.items():
+        if old_idx in map_unique_vals:
+            new_map[prediction_map == old_idx] = new_idx
+        elif with_debug:
+            print(f"[ensure_cluster_order] Warning: cluster {old_idx} not found in map")
+    
+    if with_debug:
+        print(f"[ensure_cluster_order] Output map unique values: {np.unique(new_map)}")
+        print(f"[ensure_cluster_order] Output times - masked: {np.ma.is_masked(new_times, axis=1)}")
+    
+    # Final sanity check
+    if np.unique(new_map).size == 1 and np.unique(new_map)[0] == 0:
+        if with_debug:
+            print("[ensure_cluster_order] Warning: Output map is all zeros - may indicate mapping problem")
+    
+    return new_times, new_map
+
+
 def sort_extracted(prediction_times, map, reorder_strategy = "corrcoef"):
     #Find index with no mask along 0 axis 
     nonzero_index = np.argwhere(np.all(prediction_times == 0, axis = 1) == False)
@@ -569,9 +753,13 @@ def sort_extracted(prediction_times, map, reorder_strategy = "corrcoef"):
 #     if 
 #     return new_times, new_map
 
-def covariance_merge(time, map, threshold = 1):
+def covariance_merge(time, map, threshold = 1, with_debug=False):
     # Calculate the covariance matrix
     cov_matrix = np.cov(time)
+    if with_debug:
+        print(f"[covariance_merge] Covariance matrix:\n{cov_matrix}")
+        print(f"[covariance_merge] Threshold: {threshold}")
+    
     # Number of signals
     num_signals = time.shape[0]
     # Initialize a list to keep track of which signals to merge
@@ -583,6 +771,8 @@ def covariance_merge(time, map, threshold = 1):
                 if cov_matrix[i, j] > threshold:
                     merge_indices.append(i)
                     merge_indices.append(j)
+                    if with_debug:
+                        print(f"[covariance_merge] Pair ({i},{j}) covariance {cov_matrix[i, j]:.4f} exceeds threshold")
 
         # Get unique indices of signals to merge
         merge_indices = list(set(merge_indices))
@@ -590,7 +780,14 @@ def covariance_merge(time, map, threshold = 1):
         # Use the mask to find indices of signals to merge
         high_cov_mask = cov_matrix > threshold
         merge_indices = np.unique(np.where(np.triu(high_cov_mask, k=1))[0])
+    
+    if with_debug:
+        print(f"[covariance_merge] Indices to merge: {merge_indices}")
+    
     if merge_indices:
+        if with_debug:
+            print(f"[covariance_merge] Merging {len(merge_indices)} signals into index {merge_indices[0]}")
+        
         # Combine the signals by averaging
         combined_signal = np.mean(time[merge_indices], axis=0)
 
@@ -604,6 +801,8 @@ def covariance_merge(time, map, threshold = 1):
         for idx in merge_indices[1:]:
             updated_map[map == idx] = merge_indices[0]
     else:
+        if with_debug:
+            print(f"[covariance_merge] No signals exceed covariance threshold - no merge needed")
         # If no signals have high covariance, keep the original signals and map
         output_time = time
         updated_map = map
@@ -619,7 +818,9 @@ def run(d3_arr, plot=False,
         use_all_pixel_average = True,
         segmentation_params : dict = None, 
         merge_params : dict = None,
-        plot_params : dict = None):
+        plot_params : dict = None,
+        amplitude_ratio_threshold = 3.0,
+        with_debug = False):
     """151, 155, 157, 167, 107, 104, 90, 88, 83, 77, 74
     The main function for running the CS segmentation pipeline on a given 3D array (time x space x space).
 
@@ -643,6 +844,12 @@ def run(d3_arr, plot=False,
         Parameters for merging the clusters. Defaults to {"var_thresh" : 0.5, "corr_thresh" : .9}.
     plot_params : dict, optional
         Parameters for plotting the output. Defaults to {"ms_dur" : 1300, "degree_visang" : 20, "block_size ": 200}.
+    amplitude_ratio_threshold : float, optional
+        Maximum amplitude ratio allowed for merging correlated signals. If one signal is more than 
+        this many times stronger than another, they won't be merged even if highly correlated. 
+        Prevents averaging strong signals with weak noise. Defaults to 3.0.
+    with_debug : bool, optional
+        Enable detailed debug output. Defaults to False.
     
     Returns
     -------
@@ -677,7 +884,7 @@ def run(d3_arr, plot=False,
     default_merge_params = {
         "var_thresh" : .6125,
         "corr_thresh" : .95,
-        "covar_merge" : 2,
+        "covar_merge" : 5,
     }
     # default_merge_params = {
     #     "var_thresh" : .33,
@@ -689,7 +896,18 @@ def run(d3_arr, plot=False,
     merge_params = default_merge_params
     # 1. Apply segmentation clustering algorithm on times and fetch the 
     # spatial locations of the resulting cluster labels (per pixel's timecourse)
+    if with_debug:
+        print(f"[cs_segment.run] Input to segmentation_algorithm: shape={d3_arr.shape}, absmax={np.max(np.abs(d3_arr))}")
+        print(f"[cs_segment.run] Segmentation params: {segmentation_params}")
+    
     segmented_map = segmentation_algorithm(d3_arr, **segmentation_params)
+    
+    if with_debug:
+        print(f"[cs_segment.run] Segmented map shape: {segmented_map.shape}")
+        print(f"[cs_segment.run] Segmented map unique values: {np.unique(segmented_map)}")
+        if np.unique(segmented_map).size == 1:
+            print("[cs_segment.run] CRITICAL: Segmentation returned single cluster - check segmentation_algorithm!")
+            print("  Possible causes: data centering removing all signal, PCA issues, or kick_surr_pix error")
     # 2. Extract the times from the given cluster label's spatial positions,
     # averaging them to get the temporal signal from the spatial positions
     times_extracted = extract_times(segmented_map, d3_arr)
@@ -724,18 +942,57 @@ def run(d3_arr, plot=False,
     # New and improved optional logic
     times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
     original_times_shape = times_extracted.shape
+    if with_debug:
+        print(f"[cs_segment.run] After sort_extracted: times_shape={times_extracted.shape}")
+    
     # if pass_bool is True:
     if merge_params["var_thresh"] is not None:
+        if with_debug:
+            print(f"[cs_segment.run] Starting merge_cs_var with threshold={merge_params['var_thresh']}")
         # times_extracted, segmented_map = merge_cs_var(times_extracted, segmented_map, merge_params["var_thresh"])
-        times_extracted, segmented_map = merge_cs_var(d3_arr, times_extracted, segmented_map, merge_params["var_thresh"])
+        times_extracted, segmented_map = merge_cs_var(d3_arr, times_extracted, segmented_map, merge_params["var_thresh"], with_debug=with_debug)
+        if with_debug:
+            print(f"[cs_segment.run] After merge_cs_var: times_shape={times_extracted.shape}")
+    
     if merge_params["corr_thresh"] is not None:
+        if with_debug:
+            print(f"[cs_segment.run] Starting merge_cs_corr with threshold={merge_params['corr_thresh']}")
         # times_extracted, segmented_map = merge_cs_corr(times_extracted, segmented_map, merge_params["corr_thresh"]) 
-        times_extracted, segmented_map = merge_cs_corr(d3_arr, times_extracted, segmented_map, merge_params["corr_thresh"]) 
+        times_extracted, segmented_map = merge_cs_corr(d3_arr, times_extracted, segmented_map, merge_params["corr_thresh"], amplitude_ratio_threshold=amplitude_ratio_threshold, with_debug=with_debug) 
+        if with_debug:
+            print(f"[cs_segment.run] After merge_cs_corr: times_shape={times_extracted.shape}")
+    
     if merge_params["covar_merge"] is not None:
-        times_extracted, segmented_map = covariance_merge(times_extracted, segmented_map, threshold = merge_params["covar_merge"])
+        if with_debug:
+            print(f"[cs_segment.run] Starting covariance_merge with threshold={merge_params['covar_merge']}")
+        times_extracted, segmented_map = covariance_merge(times_extracted, segmented_map, threshold = merge_params["covar_merge"], with_debug=with_debug)
+        if with_debug:
+            print(f"[cs_segment.run] After covariance_merge: times_shape={times_extracted.shape}")
+    
+    # Final step: ensure consecutive cluster numbering after all merging operations
+    unique_vals = np.unique(segmented_map)
+    if len(unique_vals) > 1:  # Only if we have multiple clusters
+        if with_debug:
+            print(f"[cs_segment.run] Renumbering clusters from {unique_vals} to consecutive")
+        consecutive_map = np.zeros_like(segmented_map)
+        for new_idx, old_val in enumerate(unique_vals):
+            consecutive_map[segmented_map == old_val] = new_idx
+        segmented_map = consecutive_map
+        
+        # Re-extract times to match the renumbered map
+        times_extracted = extract_times(segmented_map, d3_arr)
+        # Pad with zeros to maintain original shape if needed
+        if times_extracted.shape != original_times_shape:
+            num_traces_to_add = original_times_shape[0] - times_extracted.shape[0]
+            time_fill = np.zeros((num_traces_to_add, times_extracted.shape[1]))
+            times_extracted = np.append(times_extracted, time_fill, axis=0)
+            times_extracted = np.ma.masked_equal(times_extracted, 0)
+        if with_debug:
+            print(f"[cs_segment.run] After renumbering: map_vals={np.unique(segmented_map)}, times_shape={times_extracted.shape}")
+    
     #print("after var thresh times:", times_extracted.shape)
     #print("after corr thresh times:", times_extracted.shape)
-    if np.max(np.abs(times_extracted[0])) > exclude_sub:
+    if np.max(np.abs(times_extracted)) > exclude_sub:
         pass_bool = True
     else:
         pass_bool = False
@@ -747,10 +1004,23 @@ def run(d3_arr, plot=False,
         times_extracted[-1] = np.average(d3_arr, axis = (1,2))   # Keep existing behavior
         times_extracted = np.ma.masked_equal(times_extracted, 0)
         segmented_map = np.zeros(d3_arr[0].shape)
+    if with_debug:
+        print("Pass status:", pass_bool)
+        print("Absmax times:", np.max(np.abs(times_extracted)))
+        print("Segmented map labels:", np.unique(segmented_map))
+        print("Raw array absmax:", np.max(np.abs(d3_arr)))
+        print("Raw array shape:", d3_arr.shape)
+        if np.unique(segmented_map).size == 1:
+            print("WARNING: Segmentation failed - only one cluster found!")
+            print("This suggests clustering algorithm didn't find distinct spatial regions")
+            print("Check segmentation_algorithm parameters or input data preprocessing")
     #print("interemdiate run function times:", times_extracted.shape)
     if times_extracted.shape != original_times_shape:
         raise ValueError("times_extracted shape changed after merging, manual fix required. Previously this due to not checking how many traces had been merged (replace n)")
-    #times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
+    
+    # Final step: ensure consistent cluster ordering regardless of merging outcomes
+    # TODO: Fix ensure_cluster_order to handle post-merge map/times mismatches properly
+    # times_extracted, segmented_map = ensure_cluster_order(times_extracted, segmented_map, with_debug=with_debug)
         # if merge_params["peak_merge"] is True:
         #     times_extracted, segmented_map = merge_cs_pol(times_extracted, segmented_map)
 
@@ -762,6 +1032,9 @@ def run(d3_arr, plot=False,
     #     # times_extracted = np.roll(times_extracted, 2, axis = 0)
     #     segmented_map = np.zeros(segmented_map.shape)
     
+    # If complete merging occurred (only one cluster), reassign to noise label (2)
+    if len(np.unique(segmented_map)) == 1:
+        segmented_map = np.ones(segmented_map.shape) * 2
 
     # Optionally plot the output (these are pretty plots!)
     if plot is True:
@@ -830,8 +1103,6 @@ def run(d3_arr, plot=False,
             origin = "lower",
         )
         ax[0].set_axis_off()
-        if len(np.unique(segmented_map)) == 1:
-            segmented_map = np.ones(segmented_map.shape)*2
         seg = ax[0].imshow(
             segmented_map, cmap = cmap,
             clim = (0, 2),

@@ -36,7 +36,7 @@ class Experiment:
         self.__update_data__()
 
     @classmethod
-    def from_files(cls, file_paths, pygor_class_name):
+    def from_files(cls, file_paths, pygor_class_name, n_jobs=-1):
         """
         Initialize an Experiment from a list of file paths.
         
@@ -46,6 +46,8 @@ class Experiment:
             List of file paths to load, or single file path
         pygor_class_name : str
             Name of the pygor class to use for loading (e.g., 'STRF', 'MovingBars', 'FullField')
+        n_jobs : int, optional
+            Number of parallel jobs for loading files. -1 uses all cores, 1 disables parallelization (default: -1)
             
         Returns
         -------
@@ -54,11 +56,14 @@ class Experiment:
             
         Examples
         --------
-        >>> # Load multiple STRF files
+        >>> # Load multiple STRF files in parallel
         >>> exp = Experiment.from_files(['file1.h5', 'file2.h5'], 'STRF')
         
         >>> # Load single file  
         >>> exp = Experiment.from_files('single_file.h5', 'MovingBars')
+        
+        >>> # Load with 4 parallel workers
+        >>> exp = Experiment.from_files(file_list, 'STRF', n_jobs=4)
         """
         # Handle single file input
         if isinstance(file_paths, (str, pathlib.Path)):
@@ -71,18 +76,36 @@ class Experiment:
             available_classes = [name for name in dir(pygor.load) if not name.startswith('_')]
             raise ValueError(f"Unknown pygor class '{pygor_class_name}'. Available classes: {available_classes}")
         
-        # Load all files
+        def load_single_file(file_path):
+            """Helper function to load a single file"""
+            try:
+                recording = pygor_class(file_path)
+                return ('success', file_path, recording)
+            except Exception as e:
+                return ('failed', file_path, str(e))
+        
+        # Load files in parallel or sequential
+        if n_jobs == 1 or len(file_paths) == 1:
+            # Sequential loading for single file or when explicitly requested
+            results = [load_single_file(fp) for fp in file_paths]
+        else:
+            # Parallel loading
+            from joblib import Parallel, delayed
+            results = Parallel(n_jobs=n_jobs, verbose=1)(
+                delayed(load_single_file)(file_path) for file_path in file_paths
+            )
+        
+        # Process results
         recordings = []
         failed_files = []
         
-        for file_path in file_paths:
-            try:
-                recording = pygor_class(file_path)
-                recordings.append(recording)
+        for status, file_path, result in results:
+            if status == 'success':
+                recordings.append(result)
                 print(f"Loaded: {pathlib.Path(file_path).name}")
-            except Exception as e:
-                failed_files.append((file_path, str(e)))
-                print(f"Failed to load {pathlib.Path(file_path).name}: {e}")
+            else:
+                failed_files.append((file_path, result))
+                print(f"Failed to load {pathlib.Path(file_path).name}: {result}")
         
         if failed_files:
             print(f"\nWarning: {len(failed_files)} files failed to load:")
@@ -135,6 +158,9 @@ class Experiment:
             # Deal with id_dict
             for key in self.id_dict.keys():
                 del self.id_dict[key][index]
+        
+        # Reset recording_id indices to match new logical order
+        self.__update_data__()
 
     @property
     def recording_id(self):
@@ -148,13 +174,56 @@ class Experiment:
                 self.__exp_setter__(i)
         print(f"Attached data: {objects}")
 
-    def detach_data(self, indices: int or list(int) or str):
-        to_print = self.recording_id.iloc[indices]["name"]
-        if isinstance(to_print, str):
-            to_print = to_print
-        if isinstance(to_print, pd.Series) or isinstance(to_print, np.ndarray):
-            to_print = to_print.to_list()
-        print(f"Detaching data: {to_print}")
+    def detach_data(self, indices):
+        """
+        Detach recordings by index or name.
+        
+        Parameters
+        ----------
+        indices : int, list of int, str, or list of str
+            Recording indices or names to detach. If name not found, it's ignored.
+        """
+        # Handle string input (name-based detaching)
+        if isinstance(indices, str):
+            # Find recording index by name
+            recording_names = [pathlib.Path(rec.metadata["filename"]).stem for rec in self.recording]
+            try:
+                index = recording_names.index(indices)
+                indices = [index]
+                print(f"Detaching data by name: {indices}")
+            except ValueError:
+                print(f"Recording '{indices}' not found - skipping")
+                return
+        elif isinstance(indices, list) and len(indices) > 0 and isinstance(indices[0], str):
+            # Handle list of names
+            recording_names = [pathlib.Path(rec.metadata["filename"]).stem for rec in self.recording]
+            found_indices = []
+            not_found = []
+            for name in indices:
+                try:
+                    index = recording_names.index(name)
+                    found_indices.append(index)
+                except ValueError:
+                    not_found.append(name)
+            
+            if not_found:
+                print(f"Recordings not found (skipping): {not_found}")
+            if not found_indices:
+                print("No recordings found to detach")
+                return
+            
+            indices = found_indices
+            names_to_detach = [recording_names[i] for i in indices]
+            print(f"Detaching data by names: {names_to_detach}")
+        else:
+            # Handle index-based detaching (original behavior)
+            to_print = self.recording_id.iloc[indices]["name"]
+            if isinstance(to_print, str):
+                to_print = to_print
+            if isinstance(to_print, pd.Series) or isinstance(to_print, np.ndarray):
+                to_print = to_print.to_list()
+            print(f"Detaching data: {to_print}")
+        
         self.__exp_forgetter__(indices)
 
     def fetch_all(self, key: str, **kwargs):
@@ -287,10 +356,10 @@ class Experiment:
                     results[result_name].append(result)
                     
                 except AttributeError:
-                    print(f"Warning: {recording.type} object has no method/attribute '{method_name}'")
+                    print(f"Warning: {recording.type} object has no method/attribute '{method_name}' (recording_id: {rec_idx})")
                     results[result_name].append(None)
                 except Exception as e:
-                    print(f"Warning: Error calling {method_name} on {recording.name}: {e}")
+                    print(f"Warning: Error calling {method_name} on {recording.name} (recording_id: {rec_idx}): {e}")
                     results[result_name].append(None)
         
         # Return as requested format
@@ -420,8 +489,33 @@ class Experiment:
         else:
             return results
 
-    def pickle_store(self, save_path, filename):
+    def pickle_store(self, save_path, filename, compress=False, protocol=None):
+        """
+        Store experiment as compressed pickle file.
+        
+        Parameters
+        ----------
+        save_path : str or Path
+            Directory to save the file
+        filename : str
+            Base filename (extension will be added automatically)
+        compress : tuple or False, optional
+            Compression method. Options:
+            - 0 or False: No compression (fastest, largest files)
+            - ("lz4", 1): Fast compression
+            - ("zlib", 3): Good balance of speed/size
+            - ("zlib", 9): Maximum compression (slowest but smallest)
+        protocol : int, optional
+            Pickle protocol version. Higher versions are faster for numpy arrays.
+            None uses joblib default (usually optimal).
+        """
         final_path = pathlib.Path(save_path, filename).with_suffix(".pklexp")
         print("Storing as:", final_path, end="\r")
+        
+        # Use highest pickle protocol for speed with numpy arrays
+        if protocol is None:
+            import pickle
+            protocol = pickle.HIGHEST_PROTOCOL
+        
         with open(final_path, "wb") as outp:
-            joblib.dump(self, outp, compress=("zlib", 1))
+            joblib.dump(self, outp, compress=compress, protocol=protocol)

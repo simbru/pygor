@@ -35,7 +35,7 @@ import pygor.utils
 import pygor.strf.centsurr
 import pygor.strf.calculate
 import pygor.strf.calculate_optimized
-import pygor.strf.calculate_multicolor_optimized
+import pygor.strf.calculate_multicolour_optimized
 import pygor.utils.helpinfo
 import pygor.utils.unit_conversion as unit_conversion
 from pygor.classes.core_data import Core
@@ -48,6 +48,8 @@ class STRF(Core):
     # Params 
     multicolour  : bool = None
     bs_bool      : bool = False
+    # Help system configuration
+    _help_exclude_patterns = ['_by_channel']
     # Annotations
     strfs        : np.ndarray = field(init=False)
     ipl_depths   : np.ndarray = field(init=False)
@@ -765,12 +767,12 @@ class STRF(Core):
         Calculate the offset between average positions of reference and comparison LEDs.
 
         This method computes the offset between the average positions of reference and comparison
-        light-emitting diodes (LEDs) based on their indices in a multicolored setup.
+        light-emitting diodes (LEDs) based on their indices in a multicoloured setup.
 
         Parameters:
         ----------
         num_colours : int, optional
-            The number of colors or LED groups in the multicolored setup. Default is 4.
+            The number of colours or LED groups in the multicoloured setup. Default is 4.
         reference_LED_index : list of int, optional
             List of indices corresponding to the reference LEDs for which the average position
             will be calculated. Must be list, even if only one LED. Default is [0, 1, 2].
@@ -787,16 +789,16 @@ class STRF(Core):
         Raises:
         ------
         AttributeError
-            If the object is not a multicolored spatial-pygor.strf.temporal receptive field (STRF),
+            If the object is not a multicoloured spatial-pygor.strf.temporal receptive field (STRF),
             indicated by `self.multicolour` not being True.
 
         Notes:
         ------
         This method assumes that the class instance has attributes:
         - multicolour : bool
-            A flag indicating whether the STRF is multicolored.
+            A flag indicating whether the STRF is multicoloured.
         - contours_centres : list of numpy.ndarray
-            List containing the center positions of contours for each color in the multicolored setup.
+            List containing the center positions of contours for each colour in the multicoloured setup.
 
         Example:
         --------
@@ -852,7 +854,17 @@ class STRF(Core):
         strf_shifted = np.ma.array([np.roll(arr, shift_by[i], axis = (1,2)) for i, arr in enumerate(self.strfs)])
         return strf_shifted
 
-    def collapse_times(self, roi = None, zscore : bool = True, spatial_centre : bool = False, border : bool = False, **kwargs) -> np.ma.masked_array:
+    def collapse_times(self, roi = None, zscore : bool = True, spatial_centre : bool = False, border : bool = False, force_recompute : bool = False, **kwargs) -> np.ma.masked_array:
+        # Create cache key from parameters
+        roi_key = tuple(roi) if roi is not None and hasattr(roi, '__iter__') and not isinstance(roi, (str, int)) else roi
+        cache_key = (roi_key, zscore, spatial_centre, border, tuple(sorted(kwargs.items())))
+        
+        # Check cache unless force_recompute
+        if not hasattr(self, '_collapse_times_cache'):
+            self._collapse_times_cache = {}
+        
+        if not force_recompute and cache_key in self._collapse_times_cache:
+            return self._collapse_times_cache[cache_key]
         if roi is not None:
             if isinstance(roi, int):
                 iterate_through = [roi]
@@ -899,6 +911,8 @@ class STRF(Core):
             self._spatial_centered_collapse = shifted
             return self._spatial_centered_collapse
             #collapsed_strf_arr = shifted
+        # Cache result before returning
+        self._collapse_times_cache[cache_key] = collapsed_strf_arr
         return collapsed_strf_arr # do not squeeze for more predictable output
         # spatial.collapse_3d(recording.strfs[strf_num])
 
@@ -940,7 +954,7 @@ class STRF(Core):
             spaces_flat = spaces.reshape(self.numcolour, self.num_rois, -1)
         # Get signal mask if requested
         if signal_only:
-            raw_signal = self.bool_strf_signal(multicolour=False)
+            raw_signal = self.bool_strf_signal()
             signal_mask_2d = pygor.utilities.multicolour_reshape(raw_signal, self.numcolour).T
         else:
             signal_mask_2d = np.ones((self.num_rois, self.numcolour), dtype=bool)
@@ -999,6 +1013,10 @@ class STRF(Core):
         """
         # Create cache key
         cache_key = (abs_arrays, signal_only, single_channel_value)
+        
+        # Initialize cache if needed
+        if not hasattr(self, '_spatial_overlap_cache'):
+            self._spatial_overlap_cache = {}
         
         # Check cache first (unless force recompute)
         if not force_recompute and cache_key in self._spatial_overlap_cache:
@@ -1061,144 +1079,192 @@ class STRF(Core):
         """Red-Green spatial overlap (Ch0-Ch1)"""
         return self.spatial_overlap_channel_pair(0, 1, abs_arrays, signal_only, single_channel_value)
 
-    def get_polarities(self, roi = None, exclude_FirstLast=(1,1), mode = "cs_pol", force_recompute = False) -> np.ndarray:
-        if mode == "old":
-            # Get the time as absolute values, then get the max value
-            abs_time_max = np.max(np.abs(self.get_timecourses(mask_empty = True).data), axis = 2)
-            # First find the obvious polarities
-            pols = np.where(abs_time_max[:, 0] > abs_time_max[:, 1], -1, 1)
-            # Now we check if values are close
-            ## We reoder, becasue np.isclose(a, b) assumes b is the reference 
-            ## and we will use the largst value as the reference
-            abs_time_max_reordered = np.sort(abs_time_max, axis = 1)
-            outcome = np.isclose(abs_time_max_reordered[:, 0], abs_time_max_reordered[:, 1], rtol = .33, atol = .01)
-            # If values were close, we assign 2
-            pols = np.where(outcome, 2, pols)
-            # Now we need to set values to 0 where there is no signal
-            pols = pols * np.prod(np.where(abs_time_max == 0, 0, 1), axis = 1)
-        if mode == "new":
-            # Get the time as absolute values, then get the max value
-            abs_time_max = np.max(np.abs(self.get_timecourses(mask_empty = True).data), axis = 2)
-            times_peak = pygor.np_ext.maxabs(self.get_timecourses(mask_empty = True), axis = 2)
-            # First find the obvious polarities
-            pols = np.where(times_peak[:, 0] < 0, -1, 1)
-            # If values are 0, we assign 0
-            zero_bools = np.all(times_peak == 0, axis = 1)
-            pols = np.where(zero_bools == True, np.nan, pols)    
-        if mode =="cs_pol" or mode == "cs_pol_extra": 
-            _, prediction_times_ROIs = self.cs_seg(force_recompute = force_recompute)
-            covar_thresh = -.5
-            var_thresh = .2
-            S_absamp_thresh = 1.5
-            center_dominance_ratio = 2.0  # Center must be 2x stronger than surround for simple ON/OFF
-
-            C_times = prediction_times_ROIs[:, 0, :]
-            S_times = prediction_times_ROIs[:, 1, :]
-            C_centered = C_times - C_times.mean(axis=1, keepdims=True)
-            S_centered = S_times - S_times.mean(axis=1, keepdims=True)
-
-            # Compute covariance for each pair
-            CS_covariances = np.sum(C_centered * S_centered, axis=1) / (C_times.shape[1] - 1)
-
-            # Get absolute max for each value of C and S
-            C_maxabs = np.abs(pygor.np_ext.maxabs(C_times, axis=1))
-            S_maxabs = np.abs(pygor.np_ext.maxabs(S_times, axis=1))
-
-            # Get signs based on sustained response using single-pass adaptive approach
-            def get_sustained_polarity_single_pass(timecourse):
-                n = len(timecourse)
-                if n < 3:
-                    return 0  # Too short to analyze
+    def get_polarities(self, roi=None, exclude_FirstLast=(1,1), mode="spatial", force_recompute=False) -> np.ndarray:
+        """
+        Determine the polarity of STRF responses using various analysis methods.
+        
+        This method provides multiple approaches to classify cells based on their
+        temporal response characteristics, from simple peak detection to sophisticated
+        center-surround analysis with rebound-aware polarity detection.
+        
+        Parameters
+        ----------
+        roi : int, optional
+            Specific ROI to analyze. If None, analyzes all ROIs (default: None)
+        exclude_FirstLast : tuple, optional  
+            Number of timepoints to exclude from (start, end) of analysis (default: (1,1))
+        mode : str, optional
+            Analysis method to use:
+            - "old": Original absolute max comparison between colour channels
+            - "new": Improved signed peak detection  
+            - "cs_pol": Center-surround analysis with rebound-aware detection (default)
+            - "cs_pol_extra": Extended CS analysis with strong/weak classification
+            - "gabor": Spatial-based ON/OFF/Gabor classification
+            - "spatial": Spatial polarity index-based classification
+        force_recompute : bool, optional
+            Force recomputation of center-surround segmentation (default: False)
+            
+        Returns
+        -------
+        np.ndarray
+            Polarity classifications for each ROI:
+            - old/new modes: -1 (OFF), 1 (ON), 2 (bipolar), 0/NaN (no signal)
+            - cs_pol mode: -1 (OFF center), 1 (ON center), 2 (center-surround), NaN (weak signal)  
+            - cs_pol_extra: Same as cs_pol plus 3 (strong CS), 4 (weak CS)
+            - gabor: -1 (OFF), 1 (ON), 2 (Gabor), NaN (no signal)
+            - spatial: -1 (OFF), 1 (ON), 2 (opponent), NaN (no signal)
+            
+        Examples
+        --------
+        >>> # Standard center-surround polarity analysis
+        >>> polarities = strf_obj.get_polarities()
+        >>> 
+        >>> # Force fresh segmentation computation
+        >>> polarities = strf_obj.get_polarities(force_recompute=True)
+        >>> 
+        >>> # Extended analysis with CS strength classification
+        >>> detailed_pols = strf_obj.get_polarities(mode="cs_pol_extra")
+        >>>
+        >>> # Legacy absolute max method
+        >>> old_pols = strf_obj.get_polarities(mode="old")
+        
+        Notes
+        -----
+        The default "cs_pol" mode uses center-surround segmentation combined with 
+        rebound-aware polarity detection to handle complex temporal dynamics including
+        transients followed by sustained responses. This is particularly useful for
+        cells that show initial negative deflections followed by positive rebounds.
+        
+        The rebound-aware algorithm was specifically designed to handle edge cases
+        where correlation-based methods would incorrectly classify ON cells as OFF
+        due to early negative transients.
+        
+        See Also
+        --------
+        cs_seg : Center-surround segmentation method
+        get_timecourses : Extract temporal responses
+        """
+        if mode == "spatial":
+            # Get spatial polarity indices (now returns NaN for weak signals)
+            polarity_indices = self.spatial_polarity_index()
+            cat = np.full(len(polarity_indices), np.nan)
+            
+            # Apply thresholding to classify based on polarity index
+            valid_mask = ~np.isnan(polarity_indices)
+            opponent_threshold = 0.5  # Could be made a parameter
+            
+            # Classify based on polarity index values:
+            # - Strong positive (>0.5): ON cells
+            # - Strong negative (<-0.5): OFF cells  
+            # - Weak absolute value (±0.5): Opponent/balanced cells
+            # - NaN: Insufficient signal (remains NaN)
+            cat[valid_mask & (polarity_indices > opponent_threshold)] = 1    # ON
+            cat[valid_mask & (polarity_indices < -opponent_threshold)] = -1  # OFF
+            cat[valid_mask & (np.abs(polarity_indices) <= opponent_threshold)] = 2  # Opponent
+            return cat
+        else:
+            # Delegate to the polarity module for other modes
+            return pygor.strf.polarity.get_polarities(self, roi, exclude_FirstLast, mode, force_recompute)
+        # Handle on_off_gabor mode directly since it uses spatial analysis
+        # if mode == "gabor":
+        #     # First separate out to ON and OFF
+        #     spaces = self.collapse_times()
+        #     space_min = np.min(spaces, axis=(1, 2))
+        #     space_max = np.max(spaces, axis=(1, 2))
+        #     cat = np.where(np.abs(space_min) < space_max, 1, -1)
+        #     thresh = 2
+        #     min_below_thresh = np.abs(space_min) < thresh
+        #     max_below_thresh = np.abs(space_max) < thresh
+        #     no_signal = np.bitwise_and(min_below_thresh, max_below_thresh)
+        #     cat = cat.astype(float)
+        #     cat[no_signal] = np.nan
+        #     # Then separate out "gabor" cells 
+        #     condition2 = np.bitwise_and(space_min < -thresh, space_max > thresh)
+        #     cat = np.where(condition2, 2, cat)
+        #     return cat
+        
+        # elif mode == "spatial":
+        #     # Use spatial polarity index for classification
+        #     opponent_threshold = 0.5  # Could be made a parameter
+        #     indices = self.spatial_polarity_index(roi=roi, threshold=2, mask_by_channel=True, 
+        #                                         mask_threshold=2, dimstr="space")
+            
+        #     # Ensure we have an array for consistent processing
+        #     if np.isscalar(indices):
+        #         indices = np.array([indices])
                 
-                # Single pass: find max absolute value AND track when it occurs
-                max_abs_val = 0
-                max_abs_val_with_sign = 0
-                max_abs_idx = 0
-                
-                for i, val in enumerate(timecourse):
-                    abs_val = abs(val)
-                    if abs_val > max_abs_val:
-                        max_abs_val = abs_val
-                        max_abs_val_with_sign = val
-                        max_abs_idx = i
-                
-                # If max occurs early (first 25%), look for sustained response
-                if max_abs_idx < n // 4:
-                    # Find the strongest response in the remaining 75%
-                    sustained_max = 0
-                    sustained_max_with_sign = 0
-                    
-                    for i in range(n // 4, n):
-                        abs_val = abs(timecourse[i])
-                        if abs_val > sustained_max:
-                            sustained_max = abs_val
-                            sustained_max_with_sign = timecourse[i]
-                    
-                    # Use sustained response if it's substantial (>30% of peak)
-                    if sustained_max > 0.3 * max_abs_val:
-                        return sustained_max_with_sign
-                
-                # Otherwise use the global maximum
-                return max_abs_val_with_sign
+        #     # Convert spatial polarity indices to categories
+        #     cat = np.full(len(indices), np.nan)
+        #     valid_mask = ~np.isnan(indices)
             
-            C_sustained_response = np.array([get_sustained_polarity_single_pass(c) for c in C_times])
-            C_signs = np.sign(C_sustained_response)
+        #     # Apply thresholds to valid indices
+        #     cat[valid_mask & (indices > opponent_threshold)] = 1   # ON
+        #     cat[valid_mask & (indices < -opponent_threshold)] = -1  # OFF  
+        #     cat[valid_mask & (np.abs(indices) <= opponent_threshold)] = 2  # opponent
             
-            # Initialize categories
-            cat = np.where(C_signs > 0, 1, -1)
-            cat = cat.astype("float")
-            zerovals = C_signs == 0
-            cat[zerovals] = np.nan
+        #     return cat
+        
+        # # Use dedicated polarity module for other modes
+        # from pygor.strf.polarity import get_polarities
+        # return get_polarities(self, roi, exclude_FirstLast, mode, force_recompute)
+
+    def spatial_polarity_index(self, roi = None, ch_idx = None, threshold = 3, mask_by_channel = True, mask_threshold = 2, dimstr = "time") -> np.ndarray:
+        # Handle multicolour channel selection efficiently
+        if ch_idx is not None:
+            if not self.multicolour:
+                if ch_idx == -1 or ch_idx == 0:
+                    # Allow -1 (last) or 0 (first) for single channel compatibility
+                    spaces = self.collapse_times(roi=roi)
+                else:
+                    raise ValueError(f"ch_idx={ch_idx} specified but object is not multicolour (only has 1 channel, use 0 or -1)")
+            else:
+                spaces = self.collapse_times_chroma(roi=roi)[ch_idx]
+        else:
+            spaces = self.collapse_times(roi=roi)
+        spaces_flat = spaces.reshape(spaces.shape[0], -1)
+
+        # Create masks for each ROI
+        lowers_mask = spaces_flat < -threshold
+        uppers_mask = spaces_flat > threshold
+
+        # Sum across spatial pixels (axis=1) for each ROI
+        lowers_sum = np.sum(spaces_flat * lowers_mask, axis=1)
+        uppers_sum = np.sum(spaces_flat * uppers_mask, axis=1)
+
+        # Handle division by zero
+        denominator = uppers_sum - lowers_sum
+        indices = np.where(denominator != 0, 
+                        (uppers_sum + lowers_sum) / denominator, np.nan)
+        
+        # Apply bool_by_channel masking if requested
+        if mask_by_channel:
+            bool_mask = self.bool_by_channel(threshold=mask_threshold, dimstr=dimstr)
             
-            # Only classify as center-surround if ALL criteria are met AND center doesn't dominate
-            amplitude_pass_idx = S_maxabs > S_absamp_thresh
-            var_pass_idx = np.var(S_times, axis=1) > var_thresh
-            covariance_pass_idx = CS_covariances < covar_thresh
-            center_not_dominant = C_maxabs <= center_dominance_ratio * S_maxabs
+            # Handle channel-specific masking
+            if ch_idx is not None and self.multicolour:
+                # For specific channel, use that channel's mask
+                channel_mask = bool_mask[:, ch_idx]
+            elif not self.multicolour:
+                # For single colour, use first/only channel mask
+                channel_mask = bool_mask[:, 0] if bool_mask.ndim > 1 else bool_mask
+            else:
+                # No specific channel requested for multicolour - this is ambiguous
+                # The indices came from collapse_times (all channels combined)
+                # So we need to decide masking strategy - use ANY channel passes
+                channel_mask = np.any(bool_mask, axis=1)
             
-            # More stringent CS criteria - must pass all conditions
-            cs_pass_bool = (amplitude_pass_idx & var_pass_idx & 
-                           covariance_pass_idx & center_not_dominant)
-            
-            # Only assign center-surround if genuinely meets criteria
-            cat = np.where(cs_pass_bool, 2, cat)
-            
-            # Set to NaN if center amplitude is too weak for reliable classification
-            weak_center = C_maxabs < 1.0  # Minimum amplitude threshold
-            cat = np.where(weak_center, np.nan, cat)
-            
-            # Extra check for strong vs weak CS (if requested)
-            if mode == "cs_pol_extra":
-                with np.errstate(divide='ignore', invalid='ignore'):
-                    lower_bound = .5
-                    upper_bound = 2
-                    condition1 = (np.abs(C_maxabs / S_maxabs) >= lower_bound) & (np.abs(C_maxabs / S_maxabs) <= upper_bound)                
-                cs_strong_mask = (cat == 2) & condition1
-                cat = np.where(cs_strong_mask, 3, cat)  # Use 3 for strong CS if needed
-            
-            pols = cat
-        elif mode == "on_off_gabor":
-            # First separate out to ON and OFF
-            spaces = self.collapse_times()
-            space_min = np.min(spaces, axis=(1, 2))
-            space_max = np.max(spaces, axis=(1, 2))
-            cat = np.where(np.abs(space_min) < space_max, 1, -1)
-            thresh = 5
-            min_below_thresh = np.abs(space_min) < thresh
-            max_below_thresh = np.abs(space_max) < thresh
-            no_signal = np.bitwise_and(min_below_thresh, max_below_thresh)
-            cat = cat.astype(float)
-            cat[no_signal] = np.nan
-            # Then separate out "gabor" cells 
-            # with np.errstate(divide='ignore', invalid='ignore'):
-            #     # condition1 = np.isclose(np.abs(C_maxabs/S_maxabs), -1, atol=1e1)
-            #     lower_bound = .5
-            #     upper_bound = 3
-            #     condition1 = (np.abs(C_maxabs / S_maxabs) >= lower_bound) & (np.abs(C_maxabs / S_maxabs) <= upper_bound)                
-            condition2 =  np.bitwise_and(space_min < -thresh, space_max > thresh)
-            cat = np.where(condition2, 2, cat)
-            pols = cat
-        return pols
+            # Apply mask - ensure indices and channel_mask have compatible shapes
+            if len(channel_mask) == len(indices):
+                indices = np.where(channel_mask, indices, np.nan)
+            else:
+                # Shape mismatch - likely due to ROI filtering, skip masking
+                pass
+        
+        # Return scalar if single ROI requested, array otherwise
+        if roi is not None and np.isscalar(roi):
+            return indices[0] if len(indices) > 0 else 0
+        indices = np.where(indices == 0, np.nan, indices)
+        return indices
 
     def get_opponency_bool(self) -> bool:
         if self.multicolour == True:
@@ -1211,6 +1277,15 @@ class STRF(Core):
             return opponent_bool
         else:
             raise AttributeError("Operation cannot be done since object property '.multicolour' is False")
+
+    def check_strf_gabor(self, ampl_thresh = 2, ch_idx = None):
+        spaces = self.collapse_times_chroma()
+        spaces_ch = spaces[ch_idx]
+        maxes = np.max(spaces_ch, axis = (1, 2))
+        mins = np.min(spaces_ch, axis = (1, 2))
+        condition1 = maxes > ampl_thresh
+        condition2 = mins < -ampl_thresh
+        return np.bitwise_and(condition1, condition2)
 
     def compute_average_spaces(self):
         spaces = self.collapse_times()
@@ -1242,16 +1317,694 @@ class STRF(Core):
         
     def calc_centre_distances(self, mode = "cs_seg"):
         if mode == "cs_seg":
-            cell_centres = np.nanmean(self.get_seg_centres(), axis = 1, keepdims = True)
-            rf_centres = self.get_seg_centres()
-            euclidian_dist = np.sqrt(np.sum((cell_centres - rf_centres)**2, axis = 2))
+            rf_centres = self.get_seg_centres()  # Shape: (n_total_strfs, 2)
+            
+            # Calculate mean center across all STRFs
+            overall_center = np.nanmean(rf_centres, axis=0, keepdims=True)  # Shape: (1, 2)
+            
+            # Calculate distance of each STRF from overall center
+            euclidian_dist = np.sqrt(np.sum((rf_centres - overall_center)**2, axis=1))  # Shape: (n_total_strfs,)
             euclidian_dist = euclidian_dist * self.stim_size
-            # pygor.strf.unit_conversion
+            
             return euclidian_dist
         else:
             raise NotImplementedError
 
-    def get_polarity_labels(self, mode = "on_off_gabor"):
+    def calc_pca_rf_shape_analysis(self, roi=None, threshold_sd=2, plot=False, force_recompute=False, debug=False):
+        """
+        PCA-based RF shape analysis for quantifying elongation and eccentricity
+        
+        Parameters
+        ----------
+        roi : int or None, optional
+            ROI index to analyze, or None for all ROIs (default: None)
+        threshold_sd : float, optional
+            Threshold in standard deviations for significant pixels (default: 3.0)
+        plot : bool, optional
+            Whether to create demonstration plot for single ROI (default: False)
+        force_recompute : bool, optional
+            Force recomputation even if cached (default: False)
+            
+        Returns
+        -------
+        dict
+            Dictionary with keys containing arrays for each metric:
+            - 'major_axis_length': Major axis lengths (n_cells,) or scalar for single ROI
+            - 'minor_axis_length': Minor axis lengths (n_cells,) or scalar for single ROI
+            - 'eccentricity': Eccentricity values (n_cells,) or scalar for single ROI
+            - 'angle_degrees': Major axis angles in degrees (n_cells,) or scalar for single ROI
+            - 'angle_radians': Major axis angles in radians (n_cells,) or scalar for single ROI
+            - 'centroid_x': X coordinates of centroids (n_cells,) or scalar for single ROI
+            - 'centroid_y': Y coordinates of centroids (n_cells,) or scalar for single ROI
+            - 'significant_pixels': Number of significant pixels per ROI (n_cells,) or scalar for single ROI
+            
+        Notes
+        -----
+        Angle Direction Convention:
+        - 0° corresponds to East (positive x-direction)
+        - 90° corresponds to North (positive y-direction) 
+        - 180° corresponds to West (negative x-direction)
+        - 270° corresponds to South (negative y-direction)
+        
+        The angle represents the orientation of the major axis of the RF.
+        Calculated using np.arctan2(eigenvector_y, eigenvector_x) and converted to 0-360° range.
+        """
+        # Create cache key from parameters
+        roi_key = tuple(roi) if roi is not None and hasattr(roi, '__iter__') and not isinstance(roi, (str, int)) else roi
+        cache_key = (roi_key, threshold_sd, tuple(sorted({})))
+        
+        # Check cache unless force_recompute
+        if not hasattr(self, '_pca_rf_shape_cache'):
+            self._pca_rf_shape_cache = {}
+        
+        if not force_recompute and cache_key in self._pca_rf_shape_cache:
+            return self._pca_rf_shape_cache[cache_key]
+        
+        # Determine which STRFs to process - sequential indexing only
+        if roi is not None:
+            if isinstance(roi, (int, np.integer)):
+                strf_list = [roi]
+            else:
+                strf_list = roi
+        else:
+            # All STRFs
+            strf_list = range(len(self.strfs))
+        
+        if debug:
+            print(f"DEBUG: Processing strf_list = {strf_list} for roi = {roi}")
+        
+        # Initialize result arrays
+        major_axis_lengths = []
+        minor_axis_lengths = []
+        eccentricities = []
+        angles_degrees = []
+        angles_radians = []
+        centroid_xs = []
+        centroid_ys = []
+        significant_pixels_counts = []
+        
+        # Process each STRF sequentially - 1:1 correspondence between collapse_times and cs_seg
+        # Get all collapsed times and cs_seg results efficiently
+        all_collapsed = self.collapse_times()
+        all_cs_maps, _ = self.cs_seg()
+        
+        if debug:
+            print(f"DEBUG: Processing strf_list = {strf_list} for roi = {roi}")
+            print(f"DEBUG: all_collapsed shape = {all_collapsed.shape}, all_cs_maps shape = {all_cs_maps.shape}")
+            print(f"UNIQUE VALUES ARE : {np.unique(all_cs_maps[roi])}")
+
+        for i, strf_idx in enumerate(strf_list):
+            # Get RF data for this STRF
+            strf_data = np.squeeze(all_collapsed[strf_idx])
+            
+            # Get the corresponding cs_seg mask
+            currmap = np.squeeze(all_cs_maps[strf_idx])
+            
+            if debug:
+                print(f"DEBUG STRF {strf_idx}: Processing STRF {strf_idx}")
+                print(f"UNIQUE VALUES ARE : {np.unique(currmap)}")
+
+            label_mask = currmap == 0
+            # Check if there are any center pixels at all
+            center_pixel_count = np.sum(label_mask)
+            if center_pixel_count == 0:
+                # No center pixels found - skip this ROI
+                if debug:
+                    unique_mask_vals = np.unique(currmap)
+                    print(f"DEBUG STRF {strf_idx}: mask_unique_values={unique_mask_vals}, center_pixels={center_pixel_count}")
+                    print(f"DEBUG STRF {strf_idx}: No center pixels - returning NaN and continuing to next STRF")
+                major_axis_lengths.append(np.nan)
+                minor_axis_lengths.append(np.nan)
+                eccentricities.append(np.nan)
+                angles_degrees.append(np.nan)
+                angles_radians.append(np.nan)
+                centroid_xs.append(np.nan)
+                centroid_ys.append(np.nan)
+                significant_pixels_counts.append(0)
+                if debug:
+                    print(f"DEBUG STRF {strf_idx}: Added NaN values, about to continue...")
+                continue
+            
+            # Debug: Print mask information for problematic cases
+            if debug:
+                unique_mask_vals = np.unique(currmap)
+                print(f"DEBUG STRF {strf_idx}: mask_unique_values={unique_mask_vals}, center_pixels={center_pixel_count}")
+            
+            # Apply connected component labeling to get largest center region (suppress noise)
+            from scipy import ndimage
+            from skimage import measure
+            
+            # Get the largest connected component of center pixels to suppress noise
+            if np.sum(label_mask) > 0:
+                # Label connected components in the center region
+                labeled_center = measure.label(label_mask, connectivity=2)
+                if np.max(labeled_center) > 0:
+                    # Find the largest connected component
+                    component_sizes = np.bincount(labeled_center.flat)[1:]  # Exclude background (0)
+                    if len(component_sizes) > 0:
+                        largest_component = np.argmax(component_sizes) + 1
+                        largest_component_mask = (labeled_center == largest_component)
+                        if debug:
+                            print(f"DEBUG STRF {strf_idx}: Found {len(component_sizes)} connected components, using largest with {component_sizes[largest_component-1]} pixels")
+                        # Use only the largest connected component
+                        label_mask = largest_component_mask
+            
+            # Apply label mask to RF data
+            center_data = strf_data[label_mask]
+            
+            # Determine dominant polarity in center region
+            pos_pixels = np.sum(center_data > threshold_sd)
+            neg_pixels = np.sum(center_data < -threshold_sd)
+            if debug:
+                print(f"DEBUG STRF {strf_idx}: pos_pixels={pos_pixels}, neg_pixels={neg_pixels}")
+            
+            if pos_pixels >= neg_pixels:
+                # Use positive pixels
+                significant_mask = (strf_data > threshold_sd) & label_mask
+                if debug:
+                    print(f"DEBUG STRF {strf_idx}: using positive pixels, significant_count={np.sum(significant_mask)}")
+            else:
+                # Use negative pixels  
+                significant_mask = (strf_data < -threshold_sd) & label_mask
+                if debug:
+                    print(f"DEBUG STRF {strf_idx}: using negative pixels, significant_count={np.sum(significant_mask)}")
+            
+            if debug and np.sum(significant_mask) > 0:
+                unique_mask_vals = np.unique(currmap) if not debug else unique_mask_vals
+                if len(unique_mask_vals) == 1 and unique_mask_vals[0] != 0:
+                    print(f"DEBUG STRF {strf_idx}: CRITICAL ERROR - {np.sum(significant_mask)} pixels selected but mask has no center region!")
+            
+            if np.sum(significant_mask) < 3:
+                # Handle insufficient pixels
+                major_axis_lengths.append(np.nan)
+                minor_axis_lengths.append(np.nan)
+                eccentricities.append(np.nan)
+                angles_degrees.append(np.nan)
+                angles_radians.append(np.nan)
+                centroid_xs.append(np.nan)
+                centroid_ys.append(np.nan)
+                significant_pixels_counts.append(0)
+                continue
+            
+            # Get coordinates and weights of significant pixels
+            y_coords, x_coords = np.where(significant_mask)
+            weights = np.abs(strf_data[significant_mask])
+            
+            # Proper weighted PCA using covariance matrix
+            coords = np.column_stack([x_coords, y_coords])
+            
+            # Calculate weighted centroid
+            centroid = np.average(coords, weights=weights, axis=0)
+            
+            # Center coordinates
+            centered_coords = coords - centroid
+            
+            # Calculate weighted covariance matrix
+            cov_matrix = np.cov(centered_coords.T, aweights=weights)
+            
+            # Get eigenvalues and eigenvectors
+            eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
+            
+            # Sort by eigenvalue (largest first)
+            idx = np.argsort(eigenvalues)[::-1]
+            eigenvalues = eigenvalues[idx]
+            eigenvectors = eigenvectors[:, idx].T
+            
+            # Extract results
+            major_axis_length = 2 * np.sqrt(eigenvalues[0])
+            minor_axis_length = 2 * np.sqrt(eigenvalues[1])
+            eccentricity = 1 - (minor_axis_length / major_axis_length)
+            
+            # Angle calculation following pygor convention:
+            # 0° = East (positive x), 90° = North (positive y)
+            # arctan2(y, x) where y=eigenvector_y, x=eigenvector_x
+            angle_rad = np.arctan2(eigenvectors[0, 1], eigenvectors[0, 0])
+            angle_deg = np.degrees(angle_rad)
+            
+            # Convert to 0-360° range following pygor convention
+            if angle_deg < 0:
+                angle_deg = angle_deg + 360
+            
+            # Store results
+            major_axis_lengths.append(major_axis_length)
+            minor_axis_lengths.append(minor_axis_length)
+            eccentricities.append(eccentricity)
+            angles_degrees.append(angle_deg)
+            angles_radians.append(angle_rad)
+            centroid_xs.append(centroid[0])
+            centroid_ys.append(centroid[1])
+            significant_pixels_counts.append(np.sum(significant_mask))
+            
+            # Plot single STRF if requested
+            if plot and roi is not None and isinstance(roi, (int, np.integer)) and strf_idx == roi:
+                # Only plot for the first color channel of the requested ROI
+                roi_results = {
+                    'major_axis_length': major_axis_length,
+                    'minor_axis_length': minor_axis_length,
+                    'eccentricity': eccentricity,
+                    'angle_degrees': angle_deg,
+                    'angle_radians': angle_rad,
+                    'centroid': centroid,
+                    'eigenvalues': eigenvalues,
+                    'eigenvectors': eigenvectors,
+                    'significant_pixels': np.sum(significant_mask),
+                    '_strf_data': strf_data,
+                    '_significant_mask': significant_mask,
+                    '_coords': coords,
+                    '_weights': weights
+                }
+                self._plot_pca_results(roi_results, roi, threshold_sd)
+        
+        # Debug: Show what's actually in the result arrays
+        if debug:
+            print(f"DEBUG: Final result arrays before creating dictionary:")
+            print(f"  major_axis_lengths = {major_axis_lengths}")
+            print(f"  eccentricities = {eccentricities}")
+            print(f"  significant_pixels_counts = {significant_pixels_counts}")
+        
+        # Create results dictionary
+        results = {
+            'major_axis_length': np.array(major_axis_lengths),
+            'minor_axis_length': np.array(minor_axis_lengths),
+            'eccentricity': np.array(eccentricities),
+            'angle_degrees': np.array(angles_degrees),
+            'angle_radians': np.array(angles_radians),
+            'centroid_x': np.array(centroid_xs),
+            'centroid_y': np.array(centroid_ys),
+            'significant_pixels': np.array(significant_pixels_counts)
+        }
+        
+        # For single ROI, return arrays for all its color channels (not scalars)
+        # This maintains compatibility with _by_channel auto-generation
+                
+        # Cache result
+        self._pca_rf_shape_cache[cache_key] = results
+        
+        return results
+    
+    def _plot_pca_results(self, results, roi, threshold_sd):
+        """Helper method to plot PCA results"""
+        import matplotlib.pyplot as plt
+        
+        strf_data = results['_strf_data']
+        significant_mask = results['_significant_mask']
+        coords = results['_coords']
+        weights = results['_weights']
+        centroid = results['centroid']
+        eigenvectors = results['eigenvectors']
+        major_axis_length = results['major_axis_length']
+        minor_axis_length = results['minor_axis_length']
+        eccentricity = results['eccentricity']
+        
+        fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+        
+        # Plot 1: Original RF
+        im1 = axes[0].imshow(strf_data, cmap='Greys_r', origin='lower')
+        axes[0].set_title(f'Original RF (ROI {roi})')
+        axes[0].plot(centroid[0], centroid[1], 'k+', markersize=10, markeredgewidth=2)
+        plt.colorbar(im1, ax=axes[0])
+        
+        # Plot 2: Thresholded RF
+        threshold_display = np.where(significant_mask, strf_data, np.nan)
+        im2 = axes[1].imshow(threshold_display, cmap='Greys_r', origin='lower')
+        axes[1].set_title(f'Significant Pixels (±{threshold_sd}σ)')
+        axes[1].plot(centroid[0], centroid[1], 'k+', markersize=10, markeredgewidth=2)
+        plt.colorbar(im2, ax=axes[1])
+        
+        # Plot 3: PCA axes overlay
+        axes[2].imshow(strf_data, cmap='Greys_r', origin='lower', alpha=0.7)
+        y_coords, x_coords = coords[:, 1], coords[:, 0]
+        axes[2].scatter(x_coords, y_coords, c=weights, cmap='viridis', s=20, alpha=0.8)
+        
+        # Draw PCA axes
+        axis_scale = max(major_axis_length, minor_axis_length) / 2
+        
+        # Major axis (red)
+        major_vec = eigenvectors[0] * axis_scale
+        axes[2].arrow(centroid[0], centroid[1], major_vec[0], major_vec[1],
+                    color='red', width=0.2, head_width=0.8, alpha=0.8, label='Major axis')
+        axes[2].arrow(centroid[0], centroid[1], -major_vec[0], -major_vec[1],
+                    color='red', width=0.2, head_width=0.8, alpha=0.8)
+        
+        # Minor axis (blue)  
+        minor_vec = eigenvectors[1] * axis_scale
+        axes[2].arrow(centroid[0], centroid[1], minor_vec[0], minor_vec[1],
+                    color='blue', width=0.2, head_width=0.8, alpha=0.8, label='Minor axis')
+        axes[2].arrow(centroid[0], centroid[1], -minor_vec[0], -minor_vec[1],
+                    color='blue', width=0.2, head_width=0.8, alpha=0.8)
+        
+        axes[2].plot(centroid[0], centroid[1], 'k+', markersize=10, markeredgewidth=2)
+        axes[2].set_title(f'PCA Axes (Eccent: {eccentricity:.3f})')
+        axes[2].legend()
+        
+        plt.tight_layout()
+        plt.show()
+
+    def calc_colour_channel_offsets(self, roi=None, mode="cs_seg", label=0, weighted=True, threshold=4, angle_range_360=True, plot=False, minimal_plot=False):
+        """
+        Calculate direction and magnitude of each colour channel's offset from the cell's true center.
+        
+        For multicolour data, finds the mean center across all colour channels (true center),
+        then calculates offset vectors for each channel from this true center.
+        
+        Parameters
+        ----------
+        mode : str, optional
+            Method for finding channel centers:
+            - "cs_seg": Use center-surround segmentation (default)
+            - "minmax": Find spatial min/max positions across channels with threshold filtering
+            - "weighted": Find weighted centroids of thresholded positive/negative regions per channel
+        roi : int, optional
+            ROI indices to analyze, or which ROI to plot (if None, all ROIs)
+        label : int, optional
+            Segmentation label (0=center, 1=surround) - only used for cs_seg mode (default: 0)
+        weighted : bool, optional
+            Whether to use weighted centroids - only used for cs_seg mode (default: True)
+        threshold : float, optional
+            Minimum absolute value for minmax mode (default: 2.0)
+        angle_range_360 : bool, optional
+            If True, angles range 0-360°. If False, -180 to +180° (default: True)
+        plot : bool, optional
+            Whether to plot a demo visualization (default: False)
+        minimal_plot : bool, optional
+            If True, creates a minimal plot with just arrows on RGB background (default: False)
+        
+        Returns
+        -------
+        dict
+            Dictionary with keys:
+            - 'true_centers': Array of true centers for each cell (n_cells, 2)
+            - 'channel_centers': Array of channel centers (n_colours, n_cells, 2) 
+            - 'offsets': Offset vectors (n_colours, n_cells, 2)
+            - 'magnitudes': Offset magnitudes (n_colours, n_cells)
+            - 'angles': Offset angles in degrees (n_colours, n_cells)
+        """
+        if not self.multicolour:
+            raise ValueError("This method requires multicolour data (numcolour > 1)")
+        
+        if mode == "cs_seg":
+            # Get centers for each colour channel: shape (n_colours, n_cells, 2)
+            channel_centers = self.get_seg_centres_by_channel(label=label, weighted=weighted)
+            n_colours, n_cells, _ = channel_centers.shape
+            
+        elif mode == "minmax":
+            # Find spatial extrema across channels for each ROI
+            spaces = self.collapse_times_by_channel()  # shape: (n_colours, n_cells, height, width)
+            n_colours, n_cells, height, width = spaces.shape
+            
+            channel_centers = np.full((n_colours, n_cells, 2), np.nan)
+            
+            for colour_idx in range(n_colours):
+                for cell_idx in range(n_cells):
+                    space = spaces[colour_idx, cell_idx]  # (height, width)
+                    
+                    # Find min/max values and positions
+                    min_val = np.nanmin(space)
+                    max_val = np.nanmax(space)
+                    
+                    # Check if extrema meet threshold
+                    min_valid = np.abs(min_val) >= threshold
+                    max_valid = np.abs(max_val) >= threshold
+                    
+                    if min_valid or max_valid:
+                        # Choose the extremum with larger absolute value
+                        if min_valid and max_valid:
+                            if np.abs(min_val) >= np.abs(max_val):
+                                extremum_coords = np.unravel_index(np.nanargmin(space), space.shape)
+                            else:
+                                extremum_coords = np.unravel_index(np.nanargmax(space), space.shape)
+                        elif min_valid:
+                            extremum_coords = np.unravel_index(np.nanargmin(space), space.shape)
+                        else:  # max_valid
+                            extremum_coords = np.unravel_index(np.nanargmax(space), space.shape)
+                        
+                        channel_centers[colour_idx, cell_idx] = extremum_coords
+                    # If neither valid, remains NaN
+                    
+        elif mode == "weighted":
+            # Weighted centroid approach with bidirectional thresholding per channel
+            spaces = self.collapse_times_by_channel()  # shape: (n_colours, n_cells, height, width)
+            n_colours, n_cells, height, width = spaces.shape
+            
+            # Create coordinate grids for weighted centroid calculation
+            y_coords, x_coords = np.mgrid[0:height, 0:width]
+            
+            channel_centers = np.full((n_colours, n_cells, 2), np.nan)
+            
+            for colour_idx in range(n_colours):
+                for cell_idx in range(n_cells):
+                    space = spaces[colour_idx, cell_idx]  # (height, width)
+                    
+                    # Apply bidirectional thresholding
+                    pos_mask = space > threshold   # Positive pixels above threshold
+                    neg_mask = space < -threshold  # Negative pixels below threshold
+                    
+                    pos_pixels = space * pos_mask  # Positive values, others zero
+                    neg_pixels = space * neg_mask  # Negative values, others zero
+                    
+                    # Calculate weighted centroids for positive and negative regions
+                    pos_sum = np.sum(pos_pixels)
+                    neg_sum = np.sum(np.abs(neg_pixels))
+                    
+                    pos_centroid = np.array([np.nan, np.nan])
+                    neg_centroid = np.array([np.nan, np.nan])
+                    
+                    if pos_sum > 0:  # Valid positive region
+                        pos_weights = pos_pixels / pos_sum  # Normalize weights
+                        pos_centroid_y = np.sum(pos_weights * y_coords)
+                        pos_centroid_x = np.sum(pos_weights * x_coords)
+                        pos_centroid = np.array([pos_centroid_y, pos_centroid_x])
+                    
+                    if neg_sum > 0:  # Valid negative region
+                        neg_weights = np.abs(neg_pixels) / neg_sum  # Normalize weights
+                        neg_centroid_y = np.sum(neg_weights * y_coords)
+                        neg_centroid_x = np.sum(neg_weights * x_coords)
+                        neg_centroid = np.array([neg_centroid_y, neg_centroid_x])
+                    
+                    # Choose the centroid with the stronger signal
+                    if not np.isnan(neg_centroid).any() and not np.isnan(pos_centroid).any():
+                        # Both regions valid - choose stronger one
+                        if neg_sum >= pos_sum:
+                            channel_centers[colour_idx, cell_idx] = neg_centroid
+                        else:
+                            channel_centers[colour_idx, cell_idx] = pos_centroid
+                    elif not np.isnan(pos_centroid).any():
+                        # Only positive region
+                        channel_centers[colour_idx, cell_idx] = pos_centroid
+                    elif not np.isnan(neg_centroid).any():
+                        # Only negative region
+                        channel_centers[colour_idx, cell_idx] = neg_centroid
+                    # If neither valid, remains NaN
+                    
+        else:
+            raise ValueError(f"Unknown mode: {mode}. Use 'cs_seg', 'minmax', or 'weighted'")
+        
+        # Calculate true center as mean across colour channels for each cell
+        # Shape: (n_cells, 2)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            with np.errstate(all='ignore'):  # Suppress numpy warnings
+                true_centers = np.nanmean(channel_centers, axis=0)
+        
+        # Calculate offset vectors: channel_center - true_center
+        # Shape: (n_colours, n_cells, 2)
+        offsets = channel_centers - true_centers[np.newaxis, :, :]
+        
+        # Calculate magnitudes: sqrt(dx² + dy²)
+        # Shape: (n_colours, n_cells)
+        magnitudes = np.sqrt(np.sum(offsets**2, axis=2))
+        
+        # Calculate angles using arctan2(dy, dx)
+        # Shape: (n_colours, n_cells)
+        angles_rad = np.arctan2(offsets[:, :, 0], offsets[:, :, 1])  # dy, dx
+        angles_deg = np.degrees(angles_rad)
+        
+        # Set angles to NaN where magnitude is zero or centers are invalid
+        zero_magnitude_mask = magnitudes == 0
+        invalid_centers_mask = (np.isnan(channel_centers).any(axis=2) | 
+                               np.isnan(true_centers[np.newaxis, :, :]).any(axis=2))
+        
+        angles_deg[zero_magnitude_mask | invalid_centers_mask] = np.nan
+        
+        # Convert to 0-360° range if requested
+        if angle_range_360:
+            angles_deg = np.where(angles_deg < 0, angles_deg + 360, angles_deg)
+        
+        # Convert magnitudes to stimulus units
+        magnitudes = magnitudes * self.stim_size
+        
+        # Plot demo if requested
+        if plot or minimal_plot:
+            import matplotlib.pyplot as plt
+            
+            # Determine which ROI to plot
+            if roi is None:
+                roi = 0
+            
+            if roi >= n_cells:
+                raise ValueError(f"roi {roi} out of range [0, {n_cells-1}]")
+            
+            # Get RGB representation for the specified ROI using channels 0, 1, 3
+            rgb_channels = [0, 1, 3] if self.numcolour > 3 else list(range(min(3, self.numcolour)))
+            rgb_image = self.to_rgb(roi=roi, channel=rgb_channels)
+            
+            # Color scheme for channels
+            channel_colors = ['red', 'green', 'blue', 'violet', 'magenta', 'yellow']
+            channel_names = ['Ch0', 'Ch1', 'Ch2', 'Ch3', 'Ch4', 'Ch5']
+            
+            if minimal_plot:
+                # Minimal plot: just RGB background with arrows
+                plt.figure(figsize=(6, 6))
+                plt.imshow(rgb_image, origin='lower')
+                # plt.title(f'ROI {roi}', fontsize=12)
+                
+                # Plot true center (small white dot)
+                true_y, true_x = true_centers[roi]
+                if not np.isnan([true_y, true_x]).any():
+                    plt.plot(true_x, true_y, 'wo', markersize=5, markeredgecolor='black', markeredgewidth=2)
+                
+                # Plot arrows only
+                for ch_idx in range(n_colours):
+                    channel_y, channel_x = channel_centers[ch_idx, roi]
+                    
+                    if not np.isnan([channel_y, channel_x]).any():
+                        color = channel_colors[ch_idx % len(channel_colors)]
+                        
+                        # Draw arrow from channel center TO true center
+                        if not np.isnan([true_y, true_x]).any():
+                            plt.annotate('', xy=(true_x, true_y), xytext=(channel_x, channel_y),
+                                       arrowprops=dict(arrowstyle='->', lw=2, color=color, alpha=0.9))
+                
+                plt.axis('off')  # Remove axes for minimal look
+                plt.tight_layout()
+                # plt.show()
+                
+            else:
+                # Full plot with all details
+                plt.figure(figsize=(10, 8))
+                plt.imshow(rgb_image, origin='lower')
+                plt.title(f'Colour Channel Offsets - ROI {roi}')
+                
+                # Plot true center (white circle with black edge)
+                true_y, true_x = true_centers[roi]
+                if not np.isnan([true_y, true_x]).any():
+                    plt.plot(true_x, true_y, 'wo', markersize=15, markeredgecolor='black', 
+                            markeredgewidth=3, label=f'True center: ({true_x:.1f}, {true_y:.1f})')
+                
+                # Collect legend entries for plotting outside the image
+                legend_entries = []
+                
+                # Plot individual channel centers and arrows
+                for ch_idx in range(n_colours):
+                    channel_y, channel_x = channel_centers[ch_idx, roi]
+                    
+                    if not np.isnan([channel_y, channel_x]).any():
+                        color = channel_colors[ch_idx % len(channel_colors)]
+                        
+                        # Plot channel center
+                        plt.plot(channel_x, channel_y, 'o', color=color, markersize=10, 
+                                markeredgecolor='white', markeredgewidth=2)
+                        
+                        # Draw arrow from channel center TO true center
+                        if not np.isnan([true_y, true_x]).any():
+                            plt.annotate('', xy=(true_x, true_y), xytext=(channel_x, channel_y),
+                                       arrowprops=dict(arrowstyle='->', lw=2, color=color, alpha=0.8))
+                            
+                            # Store info for legend (displayed outside plot)
+                            mag = magnitudes[ch_idx, roi]
+                            angle = angles_deg[ch_idx, roi]
+                            legend_entries.append(f'{channel_names[ch_idx]}: ({channel_x:.1f}, {channel_y:.1f}) | {mag:.1f}μm, {angle:.0f}°')
+                
+                # Create custom legend with channel info outside the plot
+                legend_text = '\n'.join(legend_entries)
+                if legend_entries:
+                    plt.text(1.02, 0.98, legend_text, transform=plt.gca().transAxes, 
+                            fontsize=9, verticalalignment='top',
+                            bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgray', alpha=0.8))
+                plt.xlabel('X position (pixels)')
+                plt.ylabel('Y position (pixels)')
+                plt.tight_layout()
+                plt.show()
+        
+        # Filter results by ROI if specified
+        if roi is not None:
+            # Handle single ROI or array of ROIs
+            if hasattr(roi, '__iter__'):
+                roi_indices = roi
+            else:
+                roi_indices = [roi]
+            
+            # Validate ROI indices
+            for r in roi_indices:
+                if r >= n_cells or r < 0:
+                    raise ValueError(f"roi {r} out of range [0, {n_cells-1}]")
+            
+            return {
+                'true_centers': true_centers[roi_indices],
+                'channel_centers': channel_centers[:, roi_indices],
+                'offsets': offsets[:, roi_indices],
+                'magnitudes': magnitudes[:, roi_indices],
+                'angles': angles_deg[:, roi_indices]
+            }
+        else:
+            # Return all ROIs (default behavior)
+            return {
+                'true_centers': true_centers,
+                'channel_centers': channel_centers,
+                'offsets': offsets,
+                'magnitudes': magnitudes,
+                'angles': angles_deg
+            }
+
+    def get_colour_channel_offsets_true_centers(self, roi=None,**kwargs):
+        results = self.calc_colour_channel_offsets(roi=roi, **kwargs)
+        return results['true_centers']
+    
+    def get_colour_channel_offsets_magnitudes(self, roi=None,**kwargs):
+        results = self.calc_colour_channel_offsets(roi=roi, **kwargs)
+        return results['magnitudes']
+    
+    def get_colour_channel_offsets_angles(self, roi=None,**kwargs):
+        results = self.calc_colour_channel_offsets(roi=None, **kwargs)
+        return results['angles']
+    
+    def get_pca_major_axis_lengths(self, roi=None, **kwargs):
+        """Get major axis lengths from PCA analysis"""
+        results = self.calc_pca_rf_shape_analysis(roi=roi, **kwargs)
+        return results['major_axis_length']
+    
+    def get_pca_minor_axis_lengths(self, roi=None, **kwargs):
+        """Get minor axis lengths from PCA analysis"""
+        results = self.calc_pca_rf_shape_analysis(roi=roi, **kwargs)
+        return results['minor_axis_length']
+    
+    def get_pca_eccentricities(self, roi=None, **kwargs):
+        """Get eccentricity values from PCA analysis"""
+        results = self.calc_pca_rf_shape_analysis(roi=roi, **kwargs)
+        return results['eccentricity']
+    
+    def get_pca_orientations(self, roi=None, **kwargs):
+        """Get orientation angles from PCA analysis"""
+        results = self.calc_pca_rf_shape_analysis(roi=roi, **kwargs)
+        return results['angle_degrees']
+    
+    def get_pca_centroids(self, roi=None, **kwargs):
+        """Get centroid coordinates from PCA analysis"""
+        results = self.calc_pca_rf_shape_analysis(roi=roi, **kwargs)
+        return np.column_stack([results['centroid_x'], results['centroid_y']])
+    
+    def pca_rf_shape_analysis(self, roi, threshold_sd=3.0, plot=True, force_recompute=False):
+        """
+        Legacy method - single ROI PCA analysis with plotting
+        
+        For new code, use calc_pca_rf_shape_analysis() instead
+        """
+        results = self.calc_pca_rf_shape_analysis(roi=roi, threshold_sd=threshold_sd, 
+                                                 plot=plot, force_recompute=force_recompute)
+        return results
+    
+    def get_polarity_labels(self, mode = "spatial"):
         pols = self.get_polarities(mode = mode)
         pols_out = pols.astype(str)
         pols_out[pols == 1] = "ON"
@@ -1262,7 +2015,7 @@ class STRF(Core):
 
     def get_polarity_category_cell(self, mask_by_channel=True, threshold=2, dimstr="time") -> str:
         """
-        Get polarity category for each cell across color channels.
+        Get polarity category for each cell across colour channels.
         
         Parameters
         ----------
@@ -1312,6 +2065,11 @@ class STRF(Core):
         largest_mag = np.where(maxes > np.abs(mins), maxes, mins) # search and insert values to retain sign
         return largest_mag
 
+    def get_time_amps_by_ch(self, ch_idx, **kwargs) -> np.ndarray:
+        amps_raw = self.get_time_amps()
+        amps_raw_ch_reshape = pygor.utilities.multicolour_reshape(amps_raw, self.numcolour)
+        return amps_raw_ch_reshape[ch_idx]
+
     def get_space_amps(self) -> np.ndarray:
         maxes = np.max(self.collapse_times(), axis = (1, 2))
         mins =  np.min(self.collapse_times(), axis = (1, 2))
@@ -1355,17 +2113,60 @@ class STRF(Core):
         else:
             raise AttributeError("Operation cannot be done since object property '.multicolour.' is False")
 
-    def bool_strf_signal(self, threshold = 2, multicolour = True, dimstr = "time") -> np.ndarray:
-        if multicolour is True:
+    def bool_roi_signal(self, threshold=2, dimstr="time") -> np.ndarray:
+        """
+        Check if ROIs have signal above threshold, automatically handling multicolour data.
+        
+        Parameters
+        ----------
+        threshold : float, optional
+            Amplitude threshold for signal detection (default: 2)
+        dimstr : str, optional
+            Dimension for amplitude calculation: "time" or "space" (default: "time")
+            
+        Returns
+        -------
+        np.ndarray
+            Boolean array indicating which ROIs have signal above threshold
+        """
+        if self.multicolour:
             # Get tuning amplitudes and check if at least one per ROI is above threshold
-            tuning_amps = self.calc_tunings_amplitude(dimstr = dimstr)
-            return np.any(np.abs(tuning_amps) > threshold, axis = 1)
-        if multicolour is False:
+            tuning_amps = self.calc_tunings_amplitude(dimstr=dimstr)
+            return np.any(np.abs(tuning_amps) > threshold, axis=1)
+        else:
             if dimstr == "time":
                 amps = self.get_time_amps()
             elif dimstr == "space":
                 amps = self.get_space_amps()
             return np.abs(amps) > threshold
+    
+    def bool_strf_signal(self, threshold=2, dimstr="time") -> np.ndarray:
+        """
+        Legacy method - use bool_roi_signal instead.
+        
+        Check if STRFs have signal above threshold.
+        
+        Parameters
+        ----------
+        threshold : float, optional
+            Amplitude threshold for signal detection (default: 2)
+        multicolour : bool, optional
+            Whether to use multicolour logic (default: True) - IGNORED, uses object's multicolour attribute
+        dimstr : str, optional
+            Dimension for amplitude calculation: "time" or "space" (default: "time")
+            
+        Returns
+        -------
+        np.ndarray
+            Boolean array indicating which ROIs have signal above threshold
+        """
+        # Delegate to the new method, ignoring the multicolour parameter
+        # and using the object's actual multicolour attribute
+        if dimstr == "time":
+            amps = self.get_time_amps()
+        elif dimstr == "space":
+            amps = self.get_space_amps()
+        return np.abs(amps) > threshold
 
     def bool_by_channel(self, threshold = 2, dimstr = "time") -> np.ndarray:
         if dimstr == "time":
@@ -1512,9 +2313,9 @@ class STRF(Core):
     def play_multichrom_strf(self, roi = None, **kwargs):
         # anim = pygor.strf.plot.multi_chroma_movie(self, roi, **kwargs)
         if roi is None:
-            anim = pygor.plotting.play_movie_4d(self.strfs_chroma, cmap_list =  pygor.plotting.maps_concat, **kwargs)
+            anim = pygor.plotting.play_movie_4d(self.strfs_chroma(), cmap_list =  pygor.plotting.maps_concat, **kwargs)
         else:
-            anim = pygor.plotting.play_movie_4d(self.strfs_chroma[:, roi], cmap_list =  pygor.plotting.maps_concat, **kwargs)
+            anim = pygor.plotting.play_movie_4d(self.strfs_chroma()[:, roi], cmap_list =  pygor.plotting.maps_concat, **kwargs)
         return anim
     # def check_ipl_orientation(self):
     #     raise NotImplementedError("Current implementation does not yield sensible result")
@@ -1634,7 +2435,7 @@ class STRF(Core):
     def get_colour_coefvar_raw(self, channels = None):
         """
         Crude coefficient of variation calculation that replicates the original validation script method.
-        Uses raw spatiotemporal data and takes max(abs(all_values)) per color per ROI.
+        Uses raw spatiotemporal data and takes max(abs(all_values)) per colour per ROI.
         This method is for comparison purposes to understand differences with the principled approach.
         """
         if channels is None:
@@ -1645,11 +2446,11 @@ class STRF(Core):
         
         cv_values = []
         for roi in range(min(self.num_rois, chroma_times.shape[1])):
-            # Calculate max absolute response per color for this ROI (crude method)
+            # Calculate max absolute response per colour for this ROI (crude method)
             roi_amplitudes = []
             for c in channels:
                 if c < chroma_times.shape[0]:
-                    # Take max absolute value across all time and space for this color/ROI
+                    # Take max absolute value across all time and space for this colour/ROI
                     max_abs_response = np.max(np.abs(chroma_times[c, roi]))
                     roi_amplitudes.append(max_abs_response)
             
@@ -1701,26 +2502,494 @@ class STRF(Core):
             print(kwargs)
             return pygor.strf.centsurr.run_object(self, roi, plot = plot, **kwargs)
 
-    def get_seg_centres(self, roi = None, weighted = True, channel_reshape = True,**kwargs):
+    def get_centre_only_seg(self, border_value=1, min_area=5, include_border=False, use_largest_component=True):
+        """
+        Get cleaned segmentation areas for all ROIs efficiently.
+        
+        Uses vectorized operations to process center regions (value==0) from 
+        center-surround segmentation maps. Applies morphological cleaning,
+        connected component labeling for noise suppression, and sets border 
+        pixels to specified value.
+        
+        Parameters
+        ----------
+        border_value : int, optional
+            Value to assign to border pixels when include_border=True (default: 1)
+        min_area : int, optional
+            Minimum area for noise removal via erosion/dilation (default: 5)
+        include_border : bool, optional
+            Whether to set border pixels to border_value (default: False)
+        use_largest_component : bool, optional
+            Whether to keep only the largest connected component to suppress
+            scattered noise pixels (default: True)
+            
+        Returns
+        -------
+        np.ndarray
+            Cleaned binary masks with shape (n_rois, height, width)
+            Center regions = border_value, other regions = 0
+            
+        Examples
+        --------
+        >>> # Get cleaned center areas
+        >>> clean_masks = obj.get_seg_areas()
+        >>> areas = np.sum(clean_masks, axis=(1, 2))
+        
+        >>> # More aggressive cleaning with largest component selection
+        >>> clean_masks = obj.get_seg_areas(border_value=2, min_area=10, use_largest_component=True)
+        """
+        # Get center-surround segmentation maps
+        segmaps, _ = self.cs_seg()
+
+        # Binary mask for center regions (value == 0)
+        result = (segmaps == 0).astype(np.uint8)
+        
+        # Simple noise removal - erode then dilate (equivalent to opening)
+        if min_area > 1:
+            # Vectorized erosion/dilation
+            import scipy.ndimage as ndimage
+            structure = np.ones((1, 3, 3))
+            result = ndimage.binary_erosion(result, structure=structure).astype(np.uint8)
+            result = ndimage.binary_dilation(result, structure=structure).astype(np.uint8)
+        
+        # Apply connected component labeling to suppress noise (keep only largest component)
+        if use_largest_component:
+            from skimage import measure
+            
+            # Process each ROI individually
+            for roi_idx in range(result.shape[0]):
+                roi_mask = result[roi_idx]
+                
+                # Skip if no center pixels found
+                if np.sum(roi_mask) == 0:
+                    continue
+                    
+                # Label connected components
+                labeled_components = measure.label(roi_mask, connectivity=2)
+                
+                if np.max(labeled_components) > 0:
+                    # Find the largest connected component
+                    component_sizes = np.bincount(labeled_components.flat)[1:]  # Exclude background (0)
+                    if len(component_sizes) > 0:
+                        largest_component = np.argmax(component_sizes) + 1
+                        # Keep only the largest connected component
+                        result[roi_idx] = (labeled_components == largest_component).astype(np.uint8)
+        
+        # Restore border values after all processing (if borders requested)
+        if include_border:
+            result[:, 0, :] = border_value
+            result[:, -1, :] = border_value  
+            result[:, :, 0] = border_value
+            result[:, :, -1] = border_value
+        
+        return result        
+
+    def get_seg_areas(self, border_value=1, min_area=5, include_border=False):
+        
+        sums = np.sum(self.get_centre_only_seg(border_value=border_value, min_area=min_area, include_border=include_border), axis=(1, 2))
+        sums = np.where(sums == (self.strfs_no_border.shape[-1] * self.strfs_no_border.shape[-2]), np.nan, sums)
+        sums = np.where(sums == 0, np.nan, sums)
+        return sums
+
+    def get_seg_centres(self, roi = None, label = 0, weighted = True, weighting_exp = 3, channel_reshape = False,**kwargs):
         cmaps, _ = self.cs_seg(**kwargs)
         centres_list = []
         for n, segmap in enumerate(cmaps):
-            centre_coords = np.argwhere(segmap == 0)
-            # If empty, return nan
-            if len(np.unique(segmap)) == 1:
+            centre_coords = np.argwhere(segmap == label)
+            # If label not found in segmap or segmap is uniform, return nan
+            if len(centre_coords) == 0 or len(np.unique(segmap)) == 1:
                 centres_list.append(np.array([np.nan, np.nan]))
             else:
                 if weighted is True:
-                    weights = np.abs(np.squeeze(self.collapse_times(n))[centre_coords[:, 0], centre_coords[:, 1]])**2
+                    weights = np.abs(np.squeeze(self.collapse_times(n))[centre_coords[:, 0], centre_coords[:, 1]])**weighting_exp
+                    # Check if weights sum to zero (would cause ZeroDivisionError)
+                    if np.sum(weights) == 0:
+                        weights = None  # Fall back to unweighted average
                 else:
                     weights = None
                 centre = np.average(centre_coords, axis = 0, weights = weights)
                 centres_list.append(centre)
         centres = np.array(centres_list)
-        if channel_reshape is True:
+        if channel_reshape is True and self.multicolour:
             # print(centres.shape)
             centres = np.reshape(centres, (-1, self.numcolour, 2))
-        return np.squeeze(centres[roi])
+        if roi is None:
+            return centres
+        else:
+            return np.squeeze(centres[roi])
+    
+    def unravel_strf_indices(self, roi_index=None, colour_index=None, flat_index=None):
+        """
+        Convert between flat STRF indices and (ROI, colour) coordinates.
+        
+        STRF data is organized as: STRF0_{roi}_{colour}
+        where roi ranges from 0 to n_rois-1 and colour ranges from 0 to n_colours-1.
+        The flat index follows: flat_index = roi * n_colours + colour
+        
+        Parameters
+        ----------
+        flat_index : int, optional
+            Flat index to convert to (roi, colour) coordinates
+        roi_index : int, optional  
+            ROI index to convert (requires colour_index)
+        colour_index : int, optional
+            Colour index to convert (requires roi_index)
+        
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - If flat_index provided: {'roi': roi_idx, 'colour': colour_idx}
+            - If roi_index and colour_index provided: {'flat_index': flat_idx}
+            - If no parameters: {'n_rois': n_rois, 'n_colours': n_colours, 'total_strfs': total}
+        
+        Examples
+        --------
+        # Get ROI and colour for flat index 24 (assuming 1 colour channel)
+        obj.unravel_strf_indices(flat_index=24)  # {'roi': 24, 'colour': 0}
+        
+        # Get flat index for ROI 24, colour 2 (assuming 4 colour channels) 
+        obj.unravel_strf_indices(roi_index=24, colour_index=2)  # {'flat_index': 98}
+        
+        # Get dimensions info
+        obj.unravel_strf_indices()  # {'n_rois': 25, 'n_colours': 1, 'total_strfs': 25}
+        """
+        n_colours = getattr(self, 'numcolour', 1)
+        
+        # Try multiple ways to get total STRF count
+        if hasattr(self, 'strf') and self.strf is not None:
+            total_strfs = self.strf.shape[0]
+        elif hasattr(self, 'data_names') and self.data_names:
+            total_strfs = len(self.data_names)
+        elif hasattr(self, 'num_rois'):
+            total_strfs = self.num_rois * n_colours
+        else:
+            raise AttributeError("Cannot determine STRF dimensions. Object may not be properly initialized.")
+        
+        if total_strfs <= 0:
+            raise ValueError(f"Invalid total_strfs count: {total_strfs}")
+            
+        n_rois = total_strfs // n_colours
+        
+        # Return dimensions if no parameters provided
+        if flat_index is None and roi_index is None and colour_index is None:
+            return {
+                'n_rois': n_rois,
+                'n_colours': n_colours, 
+                'total_strfs': total_strfs
+            }
+        
+        # Convert flat index to (roi, colour)
+        if flat_index is not None:
+            if flat_index >= total_strfs or flat_index < 0:
+                raise ValueError(f"flat_index {flat_index} out of range [0, {total_strfs-1}]")
+            
+            roi_idx = flat_index // n_colours
+            colour_idx = flat_index % n_colours
+            return {'roi': roi_idx, 'colour': colour_idx}
+        
+        # Convert (roi, colour) to flat index
+        if roi_index is not None and colour_index is not None:
+            if roi_index >= n_rois or roi_index < 0:
+                raise ValueError(f"roi_index {roi_index} out of range [0, {n_rois-1}]")
+            if colour_index >= n_colours or colour_index < 0:
+                raise ValueError(f"colour_index {colour_index} out of range [0, {n_colours-1}]")
+            
+            flat_idx = roi_index * n_colours + colour_index
+            return {'flat_index': flat_idx}
+        
+        raise ValueError("Provide either flat_index, or both roi_index and colour_index")
+
+    def calc_centre_surr_vectors(self, roi=None, mode="weighted", angle_range_360=True, threshold=1, plot=False, plot_roi=None):
+        """
+        Calculate center-surround vector magnitudes and angles for ROIs.
+        
+        Parameters
+        ----------
+        mode : str, optional
+            Method for finding center and surround:
+            - "cs_seg": Use center-surround segmentation (default)
+            - "minmax": Find spatial min/max positions with threshold filtering
+            - "weighted": Find weighted centroids of thresholded positive/negative regions
+        roi : int, array-like, or None
+            ROI indices. If None, calculates for all ROIs.
+        angle_range_360 : bool, optional
+            If True, angles range from 0-360°. If False, angles range from -180 to +180° (default: True)
+        threshold : float, optional
+            Minimum absolute value for minmax mode (default: 2.0)
+        plot : bool, optional
+            Whether to plot a demo visualization (default: False)
+        plot_roi : int, optional
+            Which ROI to plot (if None, uses first ROI or roi[0] if roi specified)
+
+        Returns
+        -------
+        dict
+            Dictionary with 'magnitude' and 'angle_degrees' arrays
+            
+        Notes
+        -----
+        Angle Direction Convention:
+        - 0° corresponds to East (positive x-direction)
+        - 90° corresponds to North (positive y-direction) 
+        - 180° corresponds to West (negative x-direction)
+        - 270° corresponds to South (negative y-direction)
+        
+        The angle represents the direction from center to surround position.
+        Calculated using np.arctan2(dy, dx) where dy = surround_y - center_y
+        and dx = surround_x - center_x.
+        
+        Weighted Mode Assignment Logic:
+        - Center: Negative (OFF) region weighted centroid
+        - Surround: Positive (ON) region weighted centroid
+        - For cells with only one polarity, both center and surround are assigned 
+          the same location (resulting in zero magnitude and undefined angle)
+        """
+        if mode == "cs_seg":
+            # Get center and surround coordinates from segmentation
+            centers = self.get_seg_centres(label=0, weighted=True)  # shape: (n_rois, 2)
+            surrounds = self.get_seg_centres(label=1, weighted=True)  # shape: (n_rois, 2)
+            
+        elif mode == "minmax":
+            # Vectorized minmax approach for spatial opponency detection
+            spaces = self.collapse_times()  # shape: (n_rois, height, width)
+            n_rois, height, width = spaces.shape
+            
+            # Find min/max values and positions for all ROIs vectorized
+            spaces_flat = spaces.reshape(n_rois, -1)
+            min_vals = np.min(spaces_flat, axis=1)
+            max_vals = np.max(spaces_flat, axis=1)
+            min_indices = np.argmin(spaces_flat, axis=1)
+            max_indices = np.argmax(spaces_flat, axis=1)
+            
+            # Convert flat indices to 2D coordinates
+            min_coords = np.column_stack(np.unravel_index(min_indices, (height, width)))
+            max_coords = np.column_stack(np.unravel_index(max_indices, (height, width)))
+            
+            # Check threshold validity
+            min_valid = np.abs(min_vals) >= threshold
+            max_valid = np.abs(max_vals) >= threshold
+            both_valid = min_valid & max_valid
+            
+            # Initialize with NaN
+            centers = np.full((n_rois, 2), np.nan)
+            surrounds = np.full((n_rois, 2), np.nan)
+            
+            # Case 1: Both valid (spatial opponency) - OFF center, ON surround
+            centers[both_valid] = min_coords[both_valid]
+            surrounds[both_valid] = max_coords[both_valid]
+            
+            # Case 2: Only max valid (ON cells) - same position for both
+            max_only = max_valid & ~min_valid
+            centers[max_only] = max_coords[max_only]
+            surrounds[max_only] = max_coords[max_only]
+            
+            # Case 3: Only min valid (OFF cells) - same position for both
+            min_only = min_valid & ~max_valid
+            centers[min_only] = min_coords[min_only]
+            surrounds[min_only] = min_coords[min_only]
+            
+        elif mode == "weighted":
+            # Weighted centroid approach with bidirectional thresholding
+            spaces = self.collapse_times()  # shape: (n_rois, height, width)
+            n_rois, height, width = spaces.shape
+            
+            # Create coordinate grids for weighted centroid calculation
+            y_coords, x_coords = np.mgrid[0:height, 0:width]
+            
+            centers = np.full((n_rois, 2), np.nan)
+            surrounds = np.full((n_rois, 2), np.nan)
+            
+            for i in range(n_rois):
+                space = spaces[i]
+                
+                # Apply bidirectional thresholding
+                pos_mask = space > threshold   # Positive pixels above threshold
+                neg_mask = space < -threshold  # Negative pixels below threshold
+                
+                pos_pixels = space * pos_mask  # Positive values, others zero
+                neg_pixels = space * neg_mask  # Negative values, others zero
+                
+                # Calculate weighted centroids for positive region (ON/surround)
+                pos_sum = np.sum(pos_pixels)
+                if pos_sum > 0:  # Valid positive region
+                    pos_weights = pos_pixels / pos_sum  # Normalize weights
+                    pos_centroid_y = np.sum(pos_weights * y_coords)
+                    pos_centroid_x = np.sum(pos_weights * x_coords)
+                    pos_centroid = np.array([pos_centroid_y, pos_centroid_x])
+                else:
+                    pos_centroid = np.array([np.nan, np.nan])
+                
+                # Calculate weighted centroids for negative region (OFF/center)
+                neg_sum = np.sum(np.abs(neg_pixels))  # Use absolute values for weighting
+                if neg_sum > 0:  # Valid negative region
+                    neg_weights = np.abs(neg_pixels) / neg_sum  # Normalize weights
+                    neg_centroid_y = np.sum(neg_weights * y_coords)
+                    neg_centroid_x = np.sum(neg_weights * x_coords)
+                    neg_centroid = np.array([neg_centroid_y, neg_centroid_x])
+                else:
+                    neg_centroid = np.array([np.nan, np.nan])
+                
+                # Assign centroids based on what's available
+                if not np.isnan(neg_centroid).any() and not np.isnan(pos_centroid).any():
+                    # Both regions valid - spatial opponency
+                    centers[i] = neg_centroid   # OFF center
+                    surrounds[i] = pos_centroid # ON surround
+                elif not np.isnan(pos_centroid).any():
+                    # Only positive region - ON cell
+                    centers[i] = pos_centroid
+                    surrounds[i] = pos_centroid  # Same position
+                elif not np.isnan(neg_centroid).any():
+                    # Only negative region - OFF cell
+                    centers[i] = neg_centroid
+                    surrounds[i] = neg_centroid  # Same position
+                # If neither valid, both remain NaN
+            
+        else:
+            raise ValueError(f"Unknown mode '{mode}'. Available: 'cs_seg', 'minmax', 'weighted'")
+
+        # Store unfiltered coordinates for plotting
+        plot_centers = centers.copy() if plot else None
+        plot_surrounds = surrounds.copy() if plot else None
+
+        # Calculate displacement vectors (surround - center)
+        # Note: switching y,x to x,y for conventional cartesian coordinates
+        dx = surrounds[:, 1] - centers[:, 1]  # x-component (column direction)
+        dy = surrounds[:, 0] - centers[:, 0]  # y-component (row direction)
+
+        # Vectorized magnitude calculation
+        magnitudes = np.sqrt(dx**2 + dy**2)
+
+        # Vectorized angle calculation
+        angles_rad = np.arctan2(dy, dx)
+        if angle_range_360:
+            angles_deg = (np.degrees(angles_rad) + 360) % 360  # 0-360 degrees
+        else:
+            angles_deg = np.degrees(angles_rad)  # -180 to +180 degrees
+
+        # Handle roi selection
+        if roi is not None:
+            roi = np.atleast_1d(roi)
+            magnitudes = magnitudes[roi]
+            angles_deg = angles_deg[roi]
+            dx = dx[roi]
+            dy = dy[roi]
+
+        # Optional plotting for demonstration
+        if plot:
+            import matplotlib.pyplot as plt
+            
+            # Determine which ROI to plot and handle indexing correctly
+            original_plot_roi = plot_roi
+            if plot_roi is None:
+                if roi is not None:
+                    original_plot_roi = roi[0] if hasattr(roi, '__iter__') else roi
+                else:
+                    original_plot_roi = 0
+            
+            # Get spatial representation for the specified ROI (always from original data)
+            space = self.collapse_times()[original_plot_roi]
+            
+            # Center colormap on zero using symmetric limits
+            abs_max = np.nanmax(np.abs(space))
+            
+            plt.figure(figsize=(8, 6))
+            plt.imshow(space, cmap='RdBu', origin='lower', vmin=-abs_max, vmax=abs_max)
+            plt.colorbar(label='Response amplitude')
+            
+            # Handle indexing for filtered arrays
+            if roi is not None:
+                # Arrays are filtered, so use index 0 for single ROI
+                array_index = 0
+            else:
+                # No roi filtering, use original_plot_roi directly  
+                array_index = original_plot_roi
+            
+            # Plot center and surround points if valid (use unfiltered coordinates)
+            if mode == "weighted":
+                # Use polarity-based labels for weighted mode
+                center_coords_text = "OFF (center): NaN"
+                surround_coords_text = "ON (surround): NaN"
+            else:
+                # Use generic center/surround labels for other modes
+                center_coords_text = "Center: NaN"
+                surround_coords_text = "Surround: NaN"
+            
+            if not np.isnan(plot_centers[original_plot_roi]).any():
+                center_y, center_x = plot_centers[original_plot_roi]
+                if mode == "weighted":
+                    center_coords_text = f"OFF (center): ({center_x:.1f}, {center_y:.1f})"
+                else:
+                    center_coords_text = f"Center: ({center_x:.1f}, {center_y:.1f})"
+                plt.plot(center_x, center_y, 'wo', markersize=12, markeredgecolor='black', 
+                        markeredgewidth=2, label=center_coords_text)
+            
+            if not np.isnan(plot_surrounds[original_plot_roi]).any():
+                surround_y, surround_x = plot_surrounds[original_plot_roi]
+                if mode == "weighted":
+                    surround_coords_text = f"ON (surround): ({surround_x:.1f}, {surround_y:.1f})"
+                else:
+                    surround_coords_text = f"Surround: ({surround_x:.1f}, {surround_y:.1f})"
+                plt.plot(surround_x, surround_y, 'ko', markersize=12, markeredgecolor='white',
+                        markeredgewidth=2, label=surround_coords_text)
+            
+            # Draw vector if both points are valid
+            if (not np.isnan(plot_centers[original_plot_roi]).any() and 
+                not np.isnan(plot_surrounds[original_plot_roi]).any()):
+                center_y, center_x = plot_centers[original_plot_roi]
+                surround_y, surround_x = plot_surrounds[original_plot_roi]
+                
+                plt.annotate('', xy=(surround_x, surround_y), xytext=(center_x, center_y),
+                            arrowprops=dict(arrowstyle='->', lw=3, color='red'))
+                
+                # Add vector info
+                mag = magnitudes[array_index] if hasattr(magnitudes, '__len__') else magnitudes
+                angle = angles_deg[array_index] if hasattr(angles_deg, '__len__') else angles_deg
+                plt.text(0.02, 0.98, f'ROI {original_plot_roi}\nMagnitude: {mag:.2f}\nAngle: {angle:.1f}deg\nMode: {mode}',
+                        transform=plt.gca().transAxes, verticalalignment='top',
+                        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            else:
+                plt.text(0.02, 0.98, f'ROI {original_plot_roi}\nNo valid vector\nMode: {mode}',
+                        transform=plt.gca().transAxes, verticalalignment='top',
+                        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            
+            plt.title(f'Center-Surround Vector Analysis (ROI {original_plot_roi})')
+            plt.legend()
+            plt.tight_layout()
+            plt.show()
+
+        return {
+            'magnitude': np.squeeze(magnitudes),
+            'angle_degrees': np.squeeze(angles_deg), 
+            'dx': np.squeeze(dx),  # bonus: cartesian components
+            'dy': np.squeeze(dy)
+        }
+
+    def get_centre_surr_angles(self, roi = None, mask_singlepol = False):
+        vectors = self.calc_centre_surr_vectors(roi=roi, mode = "weighted")
+        if mask_singlepol is True:
+            all_labels = self.get_polarities()
+            masks = all_labels == 2
+            # Apply masking based on roi selection
+            if roi is not None:
+                mask_subset = masks[roi]
+            else:
+                mask_subset = masks
+            vectors['angle_degrees'] = np.where(mask_subset, vectors['angle_degrees'], np.nan)
+        return vectors['angle_degrees']
+    
+    def get_centre_surr_magnitudes(self, roi = None, mask_singlepol = False):
+        vectors = self.calc_centre_surr_vectors(roi=roi, mode = "weighted")
+        if mask_singlepol is True:
+            all_labels = self.get_polarities()
+            masks = all_labels == 2
+            # Apply masking based on roi selection
+            if roi is not None:
+                mask_subset = masks[roi]
+            else:
+                mask_subset = masks
+            vectors['magnitude'] = np.where(mask_subset, vectors['magnitude'], np.nan)
+        return vectors['magnitude']
 
     def demo_cs_seg(self, roi):
         _ = self.cs_seg(roi, plot = True, segmentation_params = {"plot_demo": True})
@@ -1760,8 +3029,8 @@ class STRF(Core):
             
         Notes
         -----
-        For multicolor data, STRF indices are organized as [roi0_color0, roi0_color1, ..., roi1_color0, ...].
-        Use multicolour_reshape() or manual indexing to organize by color channels if needed.
+        For multicolour data, STRF indices are organized as [roi0_colour0, roi0_colour1, ..., roi1_colour0, ...].
+        Use multicolour_reshape() or manual indexing to organize by colour channels if needed.
         """
         import pygor.strf.extrema_timing as extrema_timing
         
@@ -1770,45 +3039,45 @@ class STRF(Core):
             return_milliseconds=return_milliseconds, frame_rate_hz=frame_rate_hz
         )
 
-    def compare_color_channel_timing(self, roi, color_channels=(0, 1), threshold=3.0,
-                                   exclude_firstlast=(1, 1), return_milliseconds=False, 
-                                   frame_rate_hz=60.0):
-        """
-        Compare extrema timing between different color channels for a single ROI.
+    # def compare_colour_channel_timing(self, roi, colour_channels=(0, 1), threshold=3.0,
+    #                                exclude_firstlast=(1, 1), return_milliseconds=False, 
+    #                                frame_rate_hz=60.0):
+    #     """
+    #     Compare extrema timing between different colour channels for a single ROI.
         
-        Parameters
-        ----------
-        roi : int
-            ROI index to analyze
-        color_channels : tuple of int, optional
-            Two color channel indices to compare. Default is (0, 1).
-        threshold : float, optional
-            Threshold in standard deviations. Default is 3.0.
-        exclude_firstlast : tuple of int, optional
-            Number of time points to exclude from beginning and end. Default is (1, 1).
-        return_milliseconds : bool, optional
-            If True, convert timing to milliseconds. Default is False.
-        frame_rate_hz : float, optional
-            Frame rate for millisecond conversion. Default is 60.0.
+    #     Parameters
+    #     ----------
+    #     roi : int
+    #         ROI index to analyze
+    #     colour_channels : tuple of int, optional
+    #         Two colour channel indices to compare. Default is (0, 1).
+    #     threshold : float, optional
+    #         Threshold in standard deviations. Default is 3.0.
+    #     exclude_firstlast : tuple of int, optional
+    #         Number of time points to exclude from beginning and end. Default is (1, 1).
+    #     return_milliseconds : bool, optional
+    #         If True, convert timing to milliseconds. Default is False.
+    #     frame_rate_hz : float, optional
+    #         Frame rate for millisecond conversion. Default is 60.0.
             
-        Returns
-        -------
-        timing_difference : ndarray
-            2D array (y, x) of timing differences (channel2 - channel1).
-            NaN where either channel is below threshold.
-        """
-        import pygor.strf.extrema_timing as extrema_timing
+    #     Returns
+    #     -------
+    #     timing_difference : ndarray
+    #         2D array (y, x) of timing differences (channel2 - channel1).
+    #         NaN where either channel is below threshold.
+    #     """
+    #     import pygor.strf.extrema_timing as extrema_timing
         
-        return extrema_timing.compare_color_channel_timing_wrapper(
-            self, roi=roi, color_channels=color_channels, threshold=threshold,
-            exclude_firstlast=exclude_firstlast, return_milliseconds=return_milliseconds,
-            frame_rate_hz=frame_rate_hz
-        )
+    #     return extrema_timing.compare_colour_channel_timing_wrapper(
+    #         self, roi=roi, colour_channels=colour_channels, threshold=threshold,
+    #         exclude_firstlast=exclude_firstlast, return_milliseconds=return_milliseconds,
+    #         frame_rate_hz=frame_rate_hz
+    #     )
 
     def analyze_spatial_alignment(self, roi, threshold=3.0, reference_channel=0, 
                                 collapse_method='peak'):
         """
-        Analyze spatial alignment across all color channels for a single ROI.
+        Analyze spatial alignment across all colour channels for a single ROI.
         
         Parameters
         ----------
@@ -1824,32 +3093,32 @@ class STRF(Core):
         Returns
         -------
         dict : Dictionary containing comprehensive alignment analysis
-            - 'correlation_matrix': n_colors × n_colors spatial correlation matrix
-            - 'overlap_matrix': n_colors × n_colors Jaccard index matrix
-            - 'distance_matrix': n_colors × n_colors centroid distance matrix
+            - 'correlation_matrix': n_colours × n_colours spatial correlation matrix
+            - 'overlap_matrix': n_colours × n_colours Jaccard index matrix
+            - 'distance_matrix': n_colours × n_colours centroid distance matrix
             - 'summary_stats': Summary statistics across all channel pairs
-            - 'channel_centroids': Centroids for each color channel
-            - 'spatial_maps': 2D spatial maps for each color channel
+            - 'channel_centroids': Centroids for each colour channel
+            - 'spatial_maps': 2D spatial maps for each colour channel
             - 'pairwise_metrics': Detailed pairwise comparison dictionary
         """
         import pygor.strf.spatial_alignment as spatial_alignment
         
-        return spatial_alignment.analyze_multicolor_spatial_alignment(
+        return spatial_alignment.analyze_multicolour_spatial_alignment(
             self, roi=roi, threshold=threshold, reference_channel=reference_channel,
             collapse_method=collapse_method
         )
 
-    def compute_color_channel_overlap(self, roi, color_channels=(0, 1), threshold=3.0, 
+    def compute_colour_channel_overlap(self, roi, colour_channels=(0, 1), threshold=3.0, 
                                     collapse_method='peak'):
         """
-        Compute spatial overlap metrics between two specific color channels.
+        Compute spatial overlap metrics between two specific colour channels.
         
         Parameters
         ----------
         roi : int
             ROI index to analyze
-        color_channels : tuple of int, optional
-            Two color channel indices to compare. Default is (0, 1).
+        colour_channels : tuple of int, optional
+            Two colour channel indices to compare. Default is (0, 1).
         threshold : float, optional
             Threshold for defining active regions. Default is 3.0.
         collapse_method : str, optional
@@ -1861,23 +3130,23 @@ class STRF(Core):
         """
         import pygor.strf.spatial_alignment as spatial_alignment
         
-        return spatial_alignment.compute_color_channel_overlap_wrapper(
-            self, roi=roi, color_channels=color_channels, threshold=threshold,
+        return spatial_alignment.compute_colour_channel_overlap_wrapper(
+            self, roi=roi, colour_channels=colour_channels, threshold=threshold,
             collapse_method=collapse_method
         )
 
-    def compute_spatial_offset_between_channels(self, roi, color_channels=(0, 1), 
+    def compute_spatial_offset_between_channels(self, roi, colour_channels=(0, 1), 
                                               threshold=3.0, method='centroid', 
                                               collapse_method='peak'):
         """
-        Compute spatial offset between two color channels.
+        Compute spatial offset between two colour channels.
         
         Parameters
         ----------
         roi : int
             ROI index to analyze
-        color_channels : tuple of int, optional
-            Two color channel indices to compare. Default is (0, 1).
+        colour_channels : tuple of int, optional
+            Two colour channel indices to compare. Default is (0, 1).
         threshold : float, optional
             Threshold for defining active regions. Default is 3.0.
         method : str, optional
@@ -1893,7 +3162,7 @@ class STRF(Core):
         import pygor.strf.spatial_alignment as spatial_alignment
         
         return spatial_alignment.compute_spatial_offset_between_channels(
-            self, roi=roi, color_channels=color_channels, threshold=threshold,
+            self, roi=roi, colour_channels=colour_channels, threshold=threshold,
             method=method, collapse_method=collapse_method
         )
 
@@ -1934,10 +3203,10 @@ class STRF(Core):
                     skip_first_triggers=0, skip_last_triggers=0,
                     pre_smooth=0, roi=None, normalize_strfs=True, verbose=True, **kwargs):
         """
-        Calculate spike-triggered averages (STRFs) for all ROIs and color channels.
+        Calculate spike-triggered averages (STRFs) for all ROIs and colour channels.
         
         This method computes spatiotemporal receptive fields using spike-triggered 
-        averaging with multi-color noise stimuli, based on the Igor Pro implementation
+        averaging with multi-colour noise stimuli, based on the Igor Pro implementation
         by Tom Baden with Python optimizations.
         
         Parameters
@@ -1950,10 +3219,10 @@ class STRF(Core):
         sta_future_window : float, default 2.0  
             How far into the future to calculate STA (seconds)
         n_colours : int, default 1
-            Number of color channels in the stimulus (use 1 for single-color experiments)
+            Number of colour channels in the stimulus (use 1 for single-colour experiments)
         n_triggers_per_colour : int or None, default None
-            Number of triggers per color channel. If None, will be auto-calculated
-            for single-color experiments or must be provided for multi-color.
+            Number of triggers per colour channel. If None, will be auto-calculated
+            for single-colour experiments or must be provided for multi-colour.
         edge_crop : int, default 2
             Number of pixels to crop from stimulus edges
         max_frames_per_trigger : int, default 8
@@ -1991,7 +3260,7 @@ class STRF(Core):
             - 'correlations': Spatial correlation maps (y, x*n_colours, n_rois)
             - 'standard_deviations': SD projection maps (y, x*n_colours, n_rois)  
             - 'polarities': Polarity maps (y, x*n_colours, n_rois)
-            - 'mean_stimulus': Mean stimulus for each color (y, x, n_colours)
+            - 'mean_stimulus': Mean stimulus for each colour (y, x, n_colours)
             - 'metadata': Processing metadata and parameters
             
         Examples
@@ -2013,17 +3282,17 @@ class STRF(Core):
         >>> metadata = results['metadata']
         """
         
-        # Auto-detect multi-color experiments if object has numcolour attribute
+        # Auto-detect multi-colour experiments if object has numcolour attribute
         if n_colours == 1 and hasattr(self, 'numcolour') and self.numcolour > 1:
             n_colours = self.numcolour
             if verbose:
-                print(f"Multi-color experiment detected: using {n_colours} colors")
+                print(f"Multi-colour experiment detected: using {n_colours} colours")
         
-        # Use multi-color optimized version for better performance when n_colours > 1
+        # Use multi-colour optimized version for better performance when n_colours > 1
         if n_colours > 1:
             if verbose:
-                print("Using multi-color optimized implementation for enhanced performance...")
-            results = pygor.strf.calculate_multicolor_optimized.calculate_calcium_correlated_average_multicolor_optimized(
+                print("Using multi-colour optimized implementation for enhanced performance...")
+            results = pygor.strf.calculate_multicolour_optimized.calculate_calcium_correlated_average_multicolour_optimized(
                 self,
                 noise_array,
                 sta_past_window=sta_past_window,
@@ -2043,7 +3312,7 @@ class STRF(Core):
                 **kwargs
             )
         else:
-            # Use regular optimized version for single-color
+            # Use regular optimized version for single-colour
             results = pygor.strf.calculate_optimized.calculate_calcium_correlated_average_optimized(
                 self,
                 noise_array,
@@ -2083,6 +3352,59 @@ class STRF(Core):
         import pygor.strf.gui.methods as gui
         napari_session = gui.NapariSession(self)
         return napari_session.run()
+
+
+# Auto-generate _by_channel methods for all callable methods
+# This provides multicolour reshaping functionality for any method that returns array-like data
+
+def _create_by_channel_method(method_name):
+    """Create a _by_channel wrapper that applies multicolour reshaping."""
+    def by_channel_wrapper(self, ch_idx=None, **kwargs):
+        result = getattr(self, method_name)(**kwargs)
+        reshaped = pygor.utilities.multicolour_reshape(result, self.numcolour)
+        
+        # If ch_idx specified, return only that channel/channels
+        if ch_idx is not None:
+            if not self.multicolour:
+                # For single colour, validate the index/indices
+                if hasattr(ch_idx, '__iter__') and not isinstance(ch_idx, str):
+                    # Handle list/array of indices
+                    for idx in ch_idx:
+                        if idx != -1 and idx != 0:
+                            raise ValueError(f"ch_idx contains {idx} but object is not multicolour (only has 1 channel, use 0 or -1)")
+                    return reshaped[0]  # Always return the single channel for any valid indices
+                else:
+                    # Handle single index
+                    if ch_idx != -1 and ch_idx != 0:
+                        raise ValueError(f"ch_idx={ch_idx} specified but object is not multicolour (only has 1 channel, use 0 or -1)")
+                    return reshaped[0]  # Single channel case
+            else:
+                return reshaped[ch_idx]
+        
+        # Otherwise return all channels
+        return reshaped
+    
+    by_channel_wrapper.__name__ = f"{method_name}_by_channel"
+    by_channel_wrapper.__doc__ = f"Multicolour-reshaped version of {method_name}(). Returns shape (n_colours, n_rois_per_colour) instead of flattened (n_total_rois,). Use ch_idx parameter to get specific channel."
+    return by_channel_wrapper
+
+# Dynamically add _by_channel methods to ALL callable methods in STRF class
+_SKIP_METHODS = {
+    '__init__', '__new__', '__str__', '__repr__', '__getattr__', '__setattr__',
+    'napari_strfs',  # GUI method
+}
+
+for attr_name in dir(STRF):
+    # Skip private methods, already existing _by_channel methods, and special cases
+    if (not attr_name.startswith('_') and 
+        not attr_name.endswith('_by_channel') and 
+        attr_name not in _SKIP_METHODS):
+        
+        attr = getattr(STRF, attr_name)
+        if callable(attr):  # Only add to callable methods
+            setattr(STRF, f"{attr_name}_by_channel", _create_by_channel_method(attr_name))
+
+
 # class Clustering:
 #     def __init__(self):
 #         pass

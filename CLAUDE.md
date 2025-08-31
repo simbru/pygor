@@ -1,188 +1,63 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Essential architectural patterns for Claude Code when working with pygor.
 
-## Project Overview
+## Core Architecture
 
-Pygor is a Python framework for analyzing neurophysiology data originally processed in IGOR Pro. It provides data-object classes built on dataclasses that handle Baden-lab H5 file formats with structured analysis pipelines for retinal electrophysiology experiments.
-
-**Key Philosophy**: Pygor is designed to work alongside IGOR Pro workflows, providing complementary Python analysis capabilities. Analysis notebooks typically live in separate repositories to avoid GitHub file size issues.
-
-## Development Commands
-
-### Build and Installation
-```bash
-# Build package
-hatch build
-
-# Install in editable mode for development
-pip install -e .
-
-# Alternative: Use uv for package management
-uv sync  # Builds and installs into local .venv
-.venv/scripts/activate  # or source .venv/bin/activate
+**Import System**: Classes auto-discovered from `classes/` directory
+```python
+from pygor.load import STRF, MovingBars, Experiment  # etc.
 ```
 
-### Testing
-```bash
-# Run comprehensive test suite (recommended)
-python src/pygor/test/run_tests.py
+**Directory Structure**: 
+- `classes/`: Data class definitions 
+- `strf/`, `timeseries/`: Analysis modules
+- Complex methods live in submodules, class methods are simple wrappers
 
-# Alternative: Run all tests with unittest
-PYTHONPATH=src python -m unittest discover src/pygor/test -v
+## Critical Data Conventions
 
-# Run specific test file
-PYTHONPATH=src python -m unittest src.pygor.test.test_STRF -v
-PYTHONPATH=src python -m unittest src.pygor.test.test_Core -v
+**Array Axes**: Always `[cell, time, y, x]` (indices 0, 1, 2, 3)
 
-# Run Windows batch file (from test directory)
-cd src/pygor/test && run_test.bat
+**Multicolor Data**: Multiple STRFs per ROI (one per color channel)
+- **ROI-centric methods** (need reshaping): `get_time_amps()`, `spatial_overlap_index_mean()`, `collapse_times()`
+- **Already multicolor**: `get_polarities()`, `collapse_times_chroma()`, methods using `cs_seg()`
+
+**Auto-Generated `_by_channel` Methods**: All ROI-centric methods automatically get multicolor variants:
+```python
+obj.get_time_amps_by_channel()        # Instead of manual reshaping
+obj.spatial_overlap_index_mean_by_channel()
+# etc. - see _NEEDS_MULTICOLOR_RESHAPING list in strf_data.py
 ```
 
-**Test Suite Features:**
-- Comprehensive validation of new STRF methods (extrema timing, spatial alignment)
-- Edge case testing (empty arrays, invalid inputs, boundary conditions)
-- Proper error handling validation (no more masked failures)
-- Mock data generation for consistent testing
-- Dependency checking and clear error reporting
-- Memory efficiency validation for large datasets
+## Performance Pattern: Method Caching
 
-### Code Quality
-```bash
-# Format and lint code (ruff is included in dependencies)
-ruff check src/
-ruff format src/
+Standard template for expensive methods:
+```python
+def expensive_method(self, param1=None, param2=True, force_recompute=False, **kwargs):
+    # Create cache key from parameters
+    param1_key = tuple(param1) if param1 is not None and hasattr(param1, '__iter__') and not isinstance(param1, (str, int)) else param1
+    cache_key = (param1_key, param2, tuple(sorted(kwargs.items())))
+    
+    # Check cache unless force_recompute
+    if not hasattr(self, '_expensive_method_cache'):
+        self._expensive_method_cache = {}
+    
+    if not force_recompute and cache_key in self._expensive_method_cache:
+        return self._expensive_method_cache[cache_key]
+    
+    # Expensive computation here...
+    result = compute_expensive_result()
+    
+    # Cache result before returning
+    self._expensive_method_cache[cache_key] = result
+    return result
 ```
 
-## Architecture and Design Principles
+Applied to: `collapse_times()`, `spatial_overlap_index_stats()`, and should be applied to other expensive methods.
 
-### Core Architecture Pattern
-Pygor follows a **modular organization structure** where:
-- **Simple methods** live in the corresponding class file (`src/pygor/classes/`)
-- **Advanced functions** live in specialized directory structures
-- **Class methods act as simple wrappers** that call complex functions from submodules
+## Development Guidelines
 
-This design allows short-hand access to complex functionality while maintaining clean separation of concerns.
-
-### Data Object Structure
-- All data classes inherit from `pygor.classes.core_data.Core` 
-- Classes are automatically discovered and loaded by `pygor.load.py`
-- Classes are built using Python dataclasses with minimal configuration
-- The `Experiment` class allows collation of multiple data objects for batch analysis
-
-### Import System
-Classes are imported via `from pygor.load import ClassName` which handles automatic discovery of all classes in the `classes/` directory, removing the need to navigate complex directory structures.
-
-### Key Directory Structure
-- `src/pygor/classes/`: Data class definitions (STRF, MovingBars, etc.)
-- `src/pygor/strf/`: STRF-specific analysis modules (spatial, temporal, clustering, etc.)
-- `src/pygor/timeseries/`: Time-series analysis for different stimulus types
-- `src/pygor/plotting/`: Shared plotting utilities
-- `src/pygor/core/`: Core functionality and GUI components
-- `src/pygor/test/`: Unit tests for all classes
-
-## Module-Specific Implementation Details
-
-### STRF Module Critical Information
-- **Array axes are always: [cell, time, y, x]** (indices 0, 1, 2, 3)
-- **Multicolor data**: Multiple receptive fields belong to the same cell (denoted by `obj.numcolour`)
-- **multidimensional_reshape function is crucial** for multicolor operations
-- Complex analysis lives in submodules:
-  - `strf/spatial.py`: Spatial analysis (balance ratio, opponency, centroids)
-  - `strf/temporal.py`: Temporal analysis (time courses, spectral analysis)  
-  - `strf/extrema_timing.py`: Pixel-wise timing analysis
-  - `strf/spatial_alignment.py`: Color channel alignment analysis
-  - `strf/clustering/`: Cell type classification
-  - `strf/centsurr/`: Center-surround analysis
-
-### Moving Bars Module
-- Located in `timeseries/moving_bars/`
-- `tuning_metrics.py`: Directional/orientation selectivity calculations
-- Array structure follows standard conventions for directional tuning analysis
-
-### Data Loading and File Conventions
-Pygor maps IGOR wave names to Python attributes:
-
-| IGOR Wave | Pygor Attribute |
-|-----------|----------------|
-| wDataCh0_detrended | images |
-| Traces0_raw | traces_raw |
-| traces_znorm | Traces0_znorm |
-| ROIs | rois |
-| Averages0 | averages |
-| OS_Parameters[58] | frame_hz |
-| Triggertimes | triggertimes |
-| Positions | ipl_depths |
-
-## Typical Analysis Workflow
-
-### Standard Pipeline
-1. **Data Processing in IGOR Pro**: Run OS_scripts pipeline with desired settings for data extraction and pre-processing
-2. **Export to H5**: When satisfied with IGOR processing, export to H5 format
-3. **Load in Pygor**: 
-   ```python
-   import pygor.load  # Shows available classes
-   from pygor.load import STRF  # or other class names
-   strf_obj = STRF("data_file.h5")
-   ```
-4. **Analysis**: Use object methods for further processing, statistics, and plotting
-5. **No common recipes**: Users typically just load objects at the top of notebooks
-
-### Class Discovery System
-When importing `pygor.load`, it prints:
-```
-Found 7 custom classes in C:\Users\...\classes
-Class names: ['CenterSurround', 'Core', 'Experiment', 'FullField', 'MovingBars', 'StaticBars', 'STRF']
-Access custom classes using 'from pygor.load import ClassName'
-```
-
-## Important Implementation Guidelines
-
-### Development Philosophy
-- **Analysis organized by stimulus type**: New experimental stimulus methods should get new analysis objects
-- **Extend existing functionality freely**: Users can extend existing classes and reuse functions across modules
-- **Cross-module function reuse encouraged**: Functions can be shared between modules when appropriate
-- **Methods should accept Pygor objects as inputs**: Complex methods work best when they can take Pygor objects directly
-
-### Adding New Analysis Methods
-1. Place complex logic in appropriate submodule (e.g., `strf/new_analysis.py`)
-2. Create simple wrapper method in the corresponding class file
-3. Follow the pattern: class method calls `submodule.function_name(self, ...)`
-4. Maintain consistent parameter naming and return types
-5. Use vectorized numpy operations for performance with large datasets
-
-### Performance Considerations
-- **Memory usage can be significant**: STRF data (x*y*time*roi*colour) commonly uses 32GB+ RAM
-- **Always favor vectorization**: Both for performance and code elegance
-- **Large datasets are common**: Design with scalability in mind
-
-### STRF-Specific Development
-- Always respect the [cell, time, y, x] axis convention
-- For multicolor analysis, handle color channel indexing via `roi * numcolour + color_channel`
-- Use threshold masking (typically ±3 SD) for significance testing
-- Return simple arrays when possible, avoid complex nested dictionaries
-- Include NaN masking for below-threshold pixels
-
-### IGOR-Python Integration
-- **Data validation against IGOR**: Not typically done (analysis extends beyond IGOR capabilities)
-- **File format compatibility critical**: IGOR wave naming must be preserved (see core_data.py try_fetch functions)
-- **Complementary workflow**: Pygor extends IGOR's OS_scripts functionality with Python's advanced analysis ecosystem
-
-### Collaboration and Branching
-- **Active branching**: Multiple branches actively worked on
-- **Methods designed for convenience**: Both general-use and experiment-specific methods are acceptable
-- **Documentation currently limited**: Small, intimate user base but expanding
-
-### Testing Strategy
-- Each class has corresponding test file in `test/` directory
-- Tests should verify both single-object and batch processing functionality
-- Include edge cases (no signal, multicolor vs single color, invalid indices)
-- Use example data from `examples/` directory for testing
-
-### Interactive Analysis Status
-- **Currently limited**: Interactive analysis mostly done in IGOR/ImageJ
-- **Napari integration exists**: But primarily for future interactive capabilities
-- **Current focus**: Batch processing and visualization (plotting)
-- **Future goal**: All-in-one platform with Napari as interactive layer
-
-The framework is designed for extensibility while maintaining simple user interfaces for complex neurophysiology analysis pipelines.
+- **Always prefer editing existing files** over creating new ones
+- **Use vectorized numpy operations** for performance
+- **Memory usage can be significant** (32GB+ common for STRF data)
+- **Follow existing patterns** in the codebase for consistency

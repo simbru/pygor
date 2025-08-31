@@ -1,11 +1,11 @@
 """
-Multi-color optimized STRF calculation - Further optimization for n_colours > 1
-Builds on calculate_optimized.py with specific improvements for multi-color processing
+Multi-colour optimized STRF calculation - Further optimization for n_colours > 1
+Builds on calculate_optimized.py with specific improvements for multi-colour processing
 
-Key optimizations for multi-color:
-1. Shared noise mapping computation across colors  
-2. Batch memory allocation for all colors
-3. Vectorized color-independent operations
+Key optimizations for multi-colour:
+1. Shared noise mapping computation across colours  
+2. Batch memory allocation for all colours
+3. Vectorized colour-independent operations
 4. Reduced redundant computations
 
 Expected performance improvement: 15-25% for n_colours > 1
@@ -18,14 +18,14 @@ from scipy import ndimage
 from .calculate_optimized import igor_correlate_nodc_optimized
 
 
-def calculate_calcium_correlated_average_multicolor_optimized(strf_obj, noise_array, sta_past_window=2.0, sta_future_window=2.0, 
+def calculate_calcium_correlated_average_multicolour_optimized(strf_obj, noise_array, sta_past_window=2.0, sta_future_window=2.0, 
                                                            n_colours=1, n_triggers_per_colour=None, edge_crop=2,
                                                            max_frames_per_trigger=8, event_sd_threshold=2.0, 
                                                            use_znorm=True, adjust_by_polarity=True, 
                                                            skip_first_triggers=0, skip_last_triggers=0,
                                                            pre_smooth=0, roi=None, verbose=True, **kwargs):
     """
-    Multi-color optimized STRF calculation.
+    Multi-colour optimized STRF calculation.
     
     Key improvements for n_colours > 1:
     - Shared noise mapping: Compute once per ROI, reuse for all colors

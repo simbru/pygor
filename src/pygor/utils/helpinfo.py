@@ -10,7 +10,7 @@ pp = pprint.PrettyPrinter(width=110, indent=2, compact=True)
 md = pprint.PrettyPrinter(width=110, indent=2, compact=True)
 
 
-def get_methods_list(obj, with_returns=True) -> list:
+def get_methods_list(obj, with_returns=True, exclude_patterns=None) -> list:
     """
     Get a list of methods of a given object.
 
@@ -21,6 +21,9 @@ def get_methods_list(obj, with_returns=True) -> list:
     with_returns : bool, optional
         If True, include the return type of each method in the list.
         Default is True.
+    exclude_patterns : list, optional
+        Patterns to exclude from method names (e.g., ['_by_channel']).
+        Default is None.
 
     Returns
     -------
@@ -30,10 +33,14 @@ def get_methods_list(obj, with_returns=True) -> list:
 
     """
     import inspect
+    exclude_patterns = exclude_patterns or []
+    
     method_list = [
         func
         for func in dir(obj)
-        if callable(inspect.getattr_static(obj, func)) and "__" not in func
+        if (callable(inspect.getattr_static(obj, func)) and 
+            "__" not in func and
+            not any(func.endswith(pattern) for pattern in exclude_patterns))
     ]
     """
     TODO Sort the methods list alphabetically by the 

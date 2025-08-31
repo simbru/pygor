@@ -165,7 +165,9 @@ class Core:
         -------
         None
         """
-        method_list = pygor.utils.helpinfo.get_methods_list(self, with_returns=types)
+        # Check if this class has patterns to exclude from help
+        exclude_patterns = getattr(self, '_help_exclude_patterns', None)
+        method_list = pygor.utils.helpinfo.get_methods_list(self, with_returns=types, exclude_patterns=exclude_patterns)
         attribute_list = pygor.utils.helpinfo.get_attribute_list(self, with_types=types)
         welcome = pygor.utils.helpinfo.welcome_help(
             self.type, self.metadata, hints=hints
