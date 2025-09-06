@@ -89,16 +89,22 @@ def plot_averages(
     if len(rois) < n_rois_raster:
         # Generate matplotlib plot
         colormap = plt.cm.jet_r(np.linspace(1, 0, len(rois)))
+        # Handle axis input first
+        provided_axs = axs is not None
+        
         if axs is None:
             fig, axs = plt.subplots(
                 len(rois), figsize=figsize, sharey=True, sharex=True
             )
         else:
-            fig = plt.gcf()
-        # Loop through and plot wwithin axes
-        if len(
-            rois == 1
-        ):  # This takes care of passing just 1 roi, not breaking axs.flat in the next line
+            # Convert single axis to array format FIRST
+            if not hasattr(axs, 'flat'):
+                axs = np.array([axs])
+            # Get figure from provided axis
+            fig = axs.flat[0].figure
+            
+        # Handle single ROI case for internally created axes
+        if not provided_axs and len(rois) == 1:
             axs = np.array([axs])
         sd_ratio_scalebar = 0.5
         phase_dur = self.ms_dur / self.trigger_mode * phase_dur_mod
@@ -189,8 +195,13 @@ def plot_averages(
         avg_epoch_triggertimes = np.average(temp_arr, axis=0)
         markers_arr = avg_epoch_triggertimes * (1 / self.linedur_s)
         markers_arr -= markers_arr[0]
-        figsize = (5, 3)
-        fig, ax = plt.subplots(1, figsize = figsize)
+        # Use the passed figsize parameter instead of hardcoded (5, 3)
+        if axs is None:
+            fig, ax = plt.subplots(1, figsize=figsize)
+        else:
+            # Use provided axis
+            ax = axs if not hasattr(axs, 'flat') else axs.flat[0]
+            fig = ax.figure
         # import sklearn.preprocessing
         # scaler = sklearn.preprocessing.MaxAbsScaler()
         arr = self.averages

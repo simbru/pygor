@@ -33,6 +33,7 @@ import pygor.strf.extrema_timing
 import pygor.strf.spatial_alignment
 import pygor.utils
 import pygor.strf.centsurr
+import pygor.strf.polarity
 import pygor.strf.calculate
 import pygor.strf.calculate_optimized
 import pygor.strf.calculate_multicolour_optimized
@@ -670,6 +671,8 @@ class STRF(Core):
         else:
             timecourses_centred = timecourses
         __timecourses = timecourses_centred
+        if mask_empty:
+            __timecourses = np.ma.masked_equal(__timecourses, 0)
         return __timecourses
             # self.__timecourses = timecourses_centred
             # return self.__timecourses
@@ -1079,6 +1082,19 @@ class STRF(Core):
         """Red-Green spatial overlap (Ch0-Ch1)"""
         return self.spatial_overlap_channel_pair(0, 1, abs_arrays, signal_only, single_channel_value)
 
+    def spatial_overlap_blue_uv(self, abs_arrays=True, signal_only=True, single_channel_value=np.nan):
+        """Blue-UV spatial overlap (Ch2-Ch3)"""
+        return self.spatial_overlap_channel_pair(2, 3, abs_arrays, signal_only, single_channel_value)
+
+    def spatial_overlap_green_uv(self, abs_arrays=True, signal_only=True, single_channel_value=np.nan):
+        """Green-UV spatial overlap (Ch1-Ch3)"""
+        return self.spatial_overlap_channel_pair(1, 3, abs_arrays, signal_only, single_channel_value)
+    
+    def spatial_overlap_red_blue(self, abs_arrays=True, signal_only=True, single_channel_value=np.nan):
+        """Red-Blue spatial overlap (Ch0-Ch2)"""
+        return self.spatial_overlap_channel_pair(0, 2, abs_arrays, signal_only, single_channel_value)
+
+
     def get_polarities(self, roi=None, exclude_FirstLast=(1,1), mode="spatial", force_recompute=False) -> np.ndarray:
         """
         Determine the polarity of STRF responses using various analysis methods.
@@ -1151,7 +1167,7 @@ class STRF(Core):
             
             # Apply thresholding to classify based on polarity index
             valid_mask = ~np.isnan(polarity_indices)
-            opponent_threshold = 0.5  # Could be made a parameter
+            opponent_threshold = .8  # Could be made a parameter
             
             # Classify based on polarity index values:
             # - Strong positive (>0.5): ON cells
@@ -1162,26 +1178,27 @@ class STRF(Core):
             cat[valid_mask & (polarity_indices < -opponent_threshold)] = -1  # OFF
             cat[valid_mask & (np.abs(polarity_indices) <= opponent_threshold)] = 2  # Opponent
             return cat
+        elif mode == "gabor":
+            # First separate out to ON and OFF
+            spaces = self.collapse_times()
+            space_min = np.min(spaces, axis=(1, 2))
+            space_max = np.max(spaces, axis=(1, 2))
+            cat = np.where(np.abs(space_min) < space_max, 1, -1)
+            thresh = 2
+            min_below_thresh = np.abs(space_min) < thresh
+            max_below_thresh = np.abs(space_max) < thresh
+            no_signal = np.bitwise_and(min_below_thresh, max_below_thresh)
+            cat = cat.astype(float)
+            cat[no_signal] = np.nan
+            # Then separate out "gabor" cells 
+            condition2 = np.bitwise_and(space_min < -thresh, space_max > thresh)
+            cat = np.where(condition2, 2, cat)
+            return cat
+
         else:
             # Delegate to the polarity module for other modes
             return pygor.strf.polarity.get_polarities(self, roi, exclude_FirstLast, mode, force_recompute)
         # Handle on_off_gabor mode directly since it uses spatial analysis
-        # if mode == "gabor":
-        #     # First separate out to ON and OFF
-        #     spaces = self.collapse_times()
-        #     space_min = np.min(spaces, axis=(1, 2))
-        #     space_max = np.max(spaces, axis=(1, 2))
-        #     cat = np.where(np.abs(space_min) < space_max, 1, -1)
-        #     thresh = 2
-        #     min_below_thresh = np.abs(space_min) < thresh
-        #     max_below_thresh = np.abs(space_max) < thresh
-        #     no_signal = np.bitwise_and(min_below_thresh, max_below_thresh)
-        #     cat = cat.astype(float)
-        #     cat[no_signal] = np.nan
-        #     # Then separate out "gabor" cells 
-        #     condition2 = np.bitwise_and(space_min < -thresh, space_max > thresh)
-        #     cat = np.where(condition2, 2, cat)
-        #     return cat
         
         # elif mode == "spatial":
         #     # Use spatial polarity index for classification
@@ -1300,13 +1317,6 @@ class STRF(Core):
         condition1 = maxes > ampl_thresh
         condition2 = mins < -ampl_thresh
         return np.bitwise_and(condition1, condition2)
-    
-    def calc_balance_ratio(self, mode = None):
-        if mode == None or mode == "all":
-            arrs = self.collapse_times()    
-        if mode == "white":
-            arrs = self.compute_average_spaces()
-        return pygor.strf.spatial.snr_gated_balance_ratio(arrs)
         
     def calc_spatial_opponency(self, mode = None):
         if mode == None or mode == "all":
@@ -1330,7 +1340,7 @@ class STRF(Core):
         else:
             raise NotImplementedError
 
-    def calc_pca_rf_shape_analysis(self, roi=None, threshold_sd=2, plot=False, force_recompute=False, debug=False):
+    def calc_pca_rf_shape_analysis(self, roi=None, threshold_sd=1, plot=False, force_recompute=False, debug=False):
         """
         PCA-based RF shape analysis for quantifying elongation and eccentricity
         
@@ -1659,6 +1669,197 @@ class STRF(Core):
         
         plt.tight_layout()
         plt.show()
+
+    def calc_centre_surround_metrics(self, roi=None, force_recompute=False, debug=False):
+        """
+        Smart center-surround analysis for cs_seg segmented STRFs.
+        Always assigns stronger region as 'dominant', weaker as 'secondary'.
+        
+        Parameters
+        ----------
+        roi : int or None, optional
+            ROI index to analyze, or None for all ROIs (default: None)
+        force_recompute : bool, optional
+            Force recomputation even if cached (default: False)
+        debug : bool, optional
+            Print debug information (default: False)
+            
+        Returns
+        -------
+        dict
+            Dictionary with arrays for each metric:
+            - 'dominant_response': Dominant region responses (n_cells,) or scalar
+            - 'secondary_response': Secondary region responses (n_cells,) or scalar  
+            - 'noise_response': Noise region responses (n_cells,) or scalar
+            - 'dominant_is_region_a': Boolean indicating if region A is dominant (n_cells,) or scalar
+            - 'dominance_ratio': Strength ratios (n_cells,) or scalar
+            - 'secondary_percentage': Secondary as % of dominant (n_cells,) or scalar
+            - 'opponency_index': Spatial balance indices (n_cells,) or scalar
+            - 'opposite_polarity': Antagonistic relationship flags (n_cells,) or scalar
+            - 'net_response': Combined responses (n_cells,) or scalar
+            - 'total_magnitude': Total activity (n_cells,) or scalar
+        """
+        # Create cache key from parameters
+        roi_key = tuple(roi) if roi is not None and hasattr(roi, '__iter__') and not isinstance(roi, (str, int)) else roi
+        cache_key = (roi_key, tuple(sorted({})))
+        
+        # Check cache unless force_recompute
+        if not hasattr(self, '_centre_surround_metrics_cache'):
+            self._centre_surround_metrics_cache = {}
+        
+        if not force_recompute and cache_key in self._centre_surround_metrics_cache:
+            return self._centre_surround_metrics_cache[cache_key]
+        
+        # Determine which STRFs to process
+        if roi is not None:
+            if isinstance(roi, (int, np.integer)):
+                strf_list = [roi]
+            else:
+                strf_list = roi
+        else:
+            strf_list = range(len(self.strfs))
+        
+        # Get all collapsed times and cs_seg results efficiently
+        all_collapsed = self.collapse_times()
+        all_cs_maps, _ = self.cs_seg()
+        
+        # Initialize result arrays
+        results = {
+            'dominant_response': [],
+            'secondary_response': [],
+            'noise_response': [],
+            'dominant_is_region_a': [],
+            'dominance_ratio': [],
+            'secondary_percentage': [],
+            'opponency_index': [],
+            'opposite_polarity': [],
+            'net_response': [],
+            'total_magnitude': []
+        }
+        
+        for strf_idx in strf_list:
+            # Get RF data and segmentation map
+            strf_data = np.squeeze(all_collapsed[strf_idx])
+            currmap = np.squeeze(all_cs_maps[strf_idx])
+            
+            # Create region masks
+            region_a_map = currmap == 0
+            region_b_map = currmap == 1  
+            noise_map = currmap == 2
+            
+            # Calculate responses (normalized by area), return NaN for empty masks
+            region_a_sum = np.sum(strf_data[region_a_map]) / region_a_map.sum() if region_a_map.sum() > 0 else np.nan
+            region_b_sum = np.sum(strf_data[region_b_map]) / region_b_map.sum() if region_b_map.sum() > 0 else np.nan
+            noise_sum = np.sum(strf_data[noise_map]) / noise_map.sum() if noise_map.sum() > 0 else np.nan
+            
+            # Check for invalid responses (NaN or both regions are zero)
+            if (np.isnan(region_a_sum) or np.isnan(region_b_sum) or 
+                (abs(region_a_sum) == 0 and abs(region_b_sum) == 0)):
+                # Return all NaNs for this ROI
+                dominant_response = np.nan
+                secondary_response = np.nan
+                dominant_is_region_a = np.nan
+                dominance_ratio = np.nan
+                secondary_percentage = np.nan
+                opponency_index = np.nan  # Include opponency_index in NaN handling
+                opposite_polarity = np.nan
+                net_response = np.nan
+                total_magnitude = np.nan
+            else:
+                # Determine dominant region
+                if abs(region_a_sum) >= abs(region_b_sum):
+                    dominant_response = region_a_sum
+                    secondary_response = region_b_sum
+                    dominant_is_region_a = True
+                else:
+                    dominant_response = region_b_sum
+                    secondary_response = region_a_sum
+                    dominant_is_region_a = False
+                
+                # Calculate metrics with NaN handling
+                if abs(secondary_response) == 0:
+                    dominance_ratio = np.nan  # Avoid inf for zero secondary
+                    secondary_percentage = np.nan
+                else:
+                    dominance_ratio = abs(dominant_response) / abs(secondary_response)
+                    secondary_percentage = abs(secondary_response) / abs(dominant_response) * 100
+                
+                if abs(dominant_response) == 0:
+                    opponency_index = np.nan
+                    opposite_polarity = np.nan
+                else:
+                    opposite_polarity = (dominant_response * secondary_response) < 0
+                    if opposite_polarity:
+                        # True opponency: different polarities
+                        opponency_index = (abs(dominant_response) - abs(secondary_response)) / (abs(dominant_response) + abs(secondary_response))
+                    else:
+                        # Same polarity: no true opponency, set to 1
+                        opponency_index = 1.0
+                
+                net_response = dominant_response + secondary_response
+                total_magnitude = abs(dominant_response) + abs(secondary_response)
+            
+            # Store results
+            results['dominant_response'].append(dominant_response)
+            results['secondary_response'].append(secondary_response)
+            results['noise_response'].append(noise_sum)
+            results['dominant_is_region_a'].append(dominant_is_region_a)
+            results['dominance_ratio'].append(dominance_ratio)
+            results['secondary_percentage'].append(secondary_percentage)
+            results['opponency_index'].append(opponency_index)
+            results['opposite_polarity'].append(opposite_polarity)
+            results['net_response'].append(net_response)
+            results['total_magnitude'].append(total_magnitude)
+        
+        # Convert to numpy arrays and handle single ROI case
+        for key in results:
+            results[key] = np.array(results[key])
+            if len(results[key]) == 1:
+                results[key] = results[key][0]  # Return scalar for single ROI
+        
+        # Cache result before returning
+        self._centre_surround_metrics_cache[cache_key] = results
+        return results
+
+    def get_dominance_ratio(self, roi=None, force_recompute=False):
+        """Get dominance ratio (how many times stronger dominant region is)."""
+        return self.calc_centre_surround_metrics(roi=roi, force_recompute=force_recompute)['dominance_ratio']
+    
+    def get_secondary_percentage(self, roi=None, force_recompute=False):
+        """Get secondary region strength as percentage of dominant."""
+        return self.calc_centre_surround_metrics(roi=roi, force_recompute=force_recompute)['secondary_percentage']
+    
+    def get_opponency_index(self, roi=None, force_recompute=False):
+        """Get spatial balance index (0=balanced, 1=one-sided)."""
+        return self.calc_centre_surround_metrics(roi=roi, force_recompute=force_recompute)['opponency_index']
+    
+    def get_opposite_polarity(self, roi=None, force_recompute=False):
+        """Get whether regions have antagonistic relationship (True/False)."""
+        return self.calc_centre_surround_metrics(roi=roi, force_recompute=force_recompute)['opposite_polarity']
+    
+    def get_net_response(self, roi=None, force_recompute=False):
+        """Get combined response after center-surround interaction."""
+        return self.calc_centre_surround_metrics(roi=roi, force_recompute=force_recompute)['net_response']
+    
+    def get_total_magnitude(self, roi=None, force_recompute=False):
+        """Get total activity before center-surround cancellation."""
+        return self.calc_centre_surround_metrics(roi=roi, force_recompute=force_recompute)['total_magnitude']
+    
+    def get_dominant_response(self, roi=None, force_recompute=False):
+        """Get raw response of the stronger region."""
+        return self.calc_centre_surround_metrics(roi=roi, force_recompute=force_recompute)['dominant_response']
+    
+    def get_secondary_response(self, roi=None, force_recompute=False):
+        """Get raw response of the weaker region."""
+        return self.calc_centre_surround_metrics(roi=roi, force_recompute=force_recompute)['secondary_response']
+    
+    def get_noise_response(self, roi=None, force_recompute=False):
+        """Get average response in noise regions."""
+        return self.calc_centre_surround_metrics(roi=roi, force_recompute=force_recompute)['noise_response']
+    
+    def is_region_a_dominant(self, roi=None, force_recompute=False):
+        """Check if cs_seg region A (labeled as 'center') is the dominant one."""
+        return self.calc_centre_surround_metrics(roi=roi, force_recompute=force_recompute)['dominant_is_region_a']
 
     def calc_colour_channel_offsets(self, roi=None, mode="cs_seg", label=0, weighted=True, threshold=4, angle_range_360=True, plot=False, minimal_plot=False):
         """
@@ -1989,11 +2190,16 @@ class STRF(Core):
         results = self.calc_pca_rf_shape_analysis(roi=roi, **kwargs)
         return results['angle_degrees']
     
-    def get_pca_centroids(self, roi=None, **kwargs):
+    def get_pca_centroidsX(self, roi=None, **kwargs):
         """Get centroid coordinates from PCA analysis"""
         results = self.calc_pca_rf_shape_analysis(roi=roi, **kwargs)
-        return np.column_stack([results['centroid_x'], results['centroid_y']])
+        return results['centroid_x']
     
+    def get_pca_centroidsY(self, roi=None, **kwargs):
+        """Get centroid coordinates from PCA analysis"""
+        results = self.calc_pca_rf_shape_analysis(roi=roi, **kwargs)
+        return results['centroid_y']
+
     def pca_rf_shape_analysis(self, roi, threshold_sd=3.0, plot=True, force_recompute=False):
         """
         Legacy method - single ROI PCA analysis with plotting
@@ -2295,6 +2501,39 @@ class STRF(Core):
         return pygor.strf.plotting.simple.plot_collapsed_strfs(self, **kwargs)
 
     def plot_chromatic_overview(self, roi = None, contours = False, with_times = False, colour_idx=None, **kwargs):
+        """
+        Plot comprehensive chromatic overview of STRFs showing spatial and temporal components.
+        
+        Parameters
+        ----------
+        roi : int, optional
+            ROI index to plot. If None, plots all ROIs
+        contours : bool, default False
+            Whether to add contour lines to spatial plots
+        with_times : bool, default False
+            Whether to include temporal component plots alongside spatial maps
+        colour_idx : int or list, optional
+            Which color channel(s) to plot (0=R, 1=G, 2=B, 3=UV). 
+            If None, plots all color channels
+        **kwargs
+            Additional keyword arguments passed to the plotting function
+            
+        Returns
+        -------
+        matplotlib figure and axes
+            The created figure and axes objects
+            
+        Examples
+        --------
+        Plot overview for all colors of ROI 0:
+        >>> strf_obj.plot_chromatic_overview(roi=0)
+        
+        Plot only red and green channels with contours:
+        >>> strf_obj.plot_chromatic_overview(roi=0, colour_idx=[0, 1], contours=True)
+        
+        Plot with temporal components included:
+        >>> strf_obj.plot_chromatic_overview(roi=0, with_times=True)
+        """
         with warnings.catch_warnings(record=True) as w:
             # Cause all warnings to always be triggered.
             warnings.simplefilter("always")
@@ -3347,6 +3586,131 @@ class STRF(Core):
                 print("Normalization applied. Original STRFs stored in 'strfs_unnormalized' key.")
         
         return results
+
+    def get_npercent_times(self, roi=None, percent=10, incl_borders=False, bidirectional=False, use_percentile=False):
+        """
+        Extract timecourses from the highest amplitude pixels in the collapsed STRF.
+        
+        Parameters:
+        -----------
+        roi : int
+            ROI index to analyze
+        percent : float
+            If use_percentile=False: Percentage of pixels to extract (default 10)
+            If use_percentile=True: Percentile threshold (e.g., 90 for 90th percentile, default 10)
+        incl_borders : bool
+            Whether to include borders in pixel times extraction (default False)
+        bidirectional : bool
+            If True, takes half from highest pixels and half from lowest pixels (default False)
+        use_percentile : bool
+            If True, uses percentile thresholding instead of percentage selection (default False)
+            
+        Returns:
+        --------
+        selected_timecourses : np.ndarray
+            Array of shape (n_timepoints, n_selected_pixels) containing timecourses
+        selected_indices : np.ndarray
+            Flat indices of the selected pixels (sorted by amplitude, highest first)
+        selected_amplitudes : np.ndarray
+            Amplitude values of the selected pixels (sorted descending)
+        """
+        if roi is None:
+            raise ValueError("ROI must be specified.")
+
+        # Get collapsed STRF - use raw values for bidirectional, abs for unidirectional
+        curr_map_raw = self.collapse_times()[roi]
+        
+        if use_percentile:
+            # Use percentile thresholding
+            if bidirectional:
+                # For bidirectional: use raw values to separate positive from negative
+                # Calculate percentile thresholds
+                high_threshold = np.percentile(curr_map_raw, percent)
+                low_threshold = np.percentile(curr_map_raw, 100 - percent)
+                
+                # Get pixels above/below thresholds
+                high_mask = curr_map_raw >= high_threshold
+                low_mask = curr_map_raw <= low_threshold
+                
+                # Get indices
+                high_indices = np.where(high_mask.ravel())[0]
+                low_indices = np.where(low_mask.ravel())[0]
+                
+                # Sort by amplitude within each group
+                high_vals = curr_map_raw.ravel()[high_indices]
+                low_vals = curr_map_raw.ravel()[low_indices]
+                
+                high_sort = np.argsort(high_vals)[::-1]  # Descending
+                low_sort = np.argsort(low_vals)  # Ascending (most negative first)
+                
+                # Combine indices: high first, then low
+                top_indices = np.concatenate([high_indices[high_sort], low_indices[low_sort]])
+                
+                # Get the raw amplitude values for selected pixels
+                selected_amplitudes = curr_map_raw.ravel()[top_indices]
+                
+            else:
+                # For unidirectional: use absolute values
+                curr_map = np.abs(curr_map_raw)
+                threshold = np.percentile(curr_map, percent)
+                
+                # Get pixels above threshold
+                mask = curr_map >= threshold
+                top_indices = np.where(mask.ravel())[0]
+                
+                # Sort by absolute amplitude (descending)
+                vals = curr_map.ravel()[top_indices]
+                sort_order = np.argsort(vals)[::-1]
+                top_indices = top_indices[sort_order]
+                
+                # Get the absolute amplitude values for selected pixels
+                selected_amplitudes = curr_map.ravel()[top_indices]
+                
+        else:
+            # Use percentage selection (original behavior)
+            total_pixels = curr_map_raw.size
+            n_pixels_to_select = max(1, int(total_pixels * percent / 100))
+            
+            if bidirectional:
+                # For bidirectional: use raw values to separate positive from negative
+                # Sort pixel coordinates by their raw amplitude (ascending order)
+                sorted_indices = np.argsort(curr_map_raw, axis=None)
+                
+                # Split selection between highest and lowest raw amplitude pixels
+                n_high = n_pixels_to_select // 2
+                n_low = n_pixels_to_select - n_high  # Handle odd numbers
+                
+                # Get lowest amplitude pixels (most negative - first n_low indices)
+                low_indices = sorted_indices[:n_low]
+                
+                # Get highest amplitude pixels (most positive - last n_high indices)  
+                high_indices = sorted_indices[-n_high:]
+                
+                # Combine indices: high first, then low
+                top_indices = np.concatenate([high_indices[::-1], low_indices])
+                
+                # Get the raw amplitude values for selected pixels
+                selected_amplitudes = curr_map_raw.ravel()[top_indices]
+                
+            else:
+                # For unidirectional: use absolute values to get strongest responses regardless of polarity
+                curr_map = np.abs(curr_map_raw)
+                sorted_indices = np.argsort(curr_map, axis=None)
+                
+                # Get the top n% pixels (highest amplitudes)
+                top_indices = sorted_indices[-n_pixels_to_select:]
+                
+                # Reverse indices to match descending amplitude order
+                top_indices = top_indices[::-1]
+                
+                # Get the absolute amplitude values for selected pixels
+                selected_amplitudes = curr_map.ravel()[top_indices]
+        
+        # Extract timecourses using get_pix_times
+        pix_times = self.get_pix_times(incl_borders=incl_borders)[roi]  # Shape: (n_timepoints, n_pixels)
+        selected_timecourses = pix_times[:, top_indices]  # Shape: (n_timepoints, n_selected_pixels)
+        
+        return selected_timecourses#, top_indices, selected_amplitudes
 
     def napari_strfs(self, **kwargs):
         import pygor.strf.gui.methods as gui
