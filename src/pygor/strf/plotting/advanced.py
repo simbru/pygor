@@ -128,7 +128,7 @@ def chroma_overview(
                 figsize = (num_cols * 2.5, 3)  # Fixed height, reasonable width
             else:
                 # Multiple ROIs: use original scaling but with better proportions
-                figsize = (num_cols * 2 * figsize_scaler, num_rows * 2.5 * figsize_scaler)
+                figsize = (num_cols * 2 * figsize_scaler, num_rows * figsize_scaler)
         # Use different layout for single vs multiple ROIs
         if num_rows == 1:
             fig, ax = plt.subplots(num_rows, num_cols, figsize=figsize, 
@@ -201,7 +201,7 @@ def chroma_overview(
             # Calculate the correct time axis column (next available after filtered colors)
             time_ax_col = len(colour_idx)
             times = np.squeeze(pygor.utilities.multicolour_reshape(
-                data_strf_object.get_timecourses(fetch_indices, method="segmentation"), numcolour
+                data_strf_object.get_timecourses(fetch_indices, method="segmentation", mask_empty = True), numcolour
             ))
             # Filter times to match selected color indices
             times = times[colour_idx]
@@ -223,21 +223,39 @@ def chroma_overview(
                 else:
                     is_close_to_zero = bool(close_val)  # It's already a scalar
                 alpha = 0.5 if is_close_to_zero else 1.0
+                
                 ax[n, time_ax_col].plot(time_axis_ms, plotme.T, 
                                     color=pygor.plotting.fish_palette[original_color_idx], 
                                     alpha=alpha)
         if with_rgb == True:
             # Calculate the correct RGB axis columns
             rgb_start_col = len(colour_idx) + (1 if with_times else 0)
-            rgb_representation(
-                data_strf_object,
-                specify_rois=roi,
-                ax=ax[n, rgb_start_col : rgb_start_col + 2],
-                contours=False,
-                remove_border=remove_border,
-                x_crop=x_crop,
-                y_crop=y_crop,
-            )
+            
+            # Use the same cropped data as main plots for consistency
+            # Create RGB representations from the already-cropped strfs_chroma
+            rgb_data = strfs_chroma[[0, 1, 2]]  # R, G, B channels
+            rgu_data = strfs_chroma[[0, 1, 3]]  # R, G, UV channels
+            
+            # Normalize to [0, 1] for RGB display
+            rgb_normalized = np.abs(rgb_data)
+            rgu_normalized = np.abs(rgu_data)
+            
+            # Scale each channel independently
+            for i in range(3):
+                if rgb_normalized[i].max() > 0:
+                    rgb_normalized[i] = rgb_normalized[i] / rgb_normalized[i].max()
+                if rgu_normalized[i].max() > 0:
+                    rgu_normalized[i] = rgu_normalized[i] / rgu_normalized[i].max()
+            
+            # Convert to (H, W, C) format for imshow
+            processed_rgb = np.transpose(rgb_normalized, (1, 2, 0))
+            processed_rgu = np.transpose(rgu_normalized, (1, 2, 0))
+            
+            # Display RGB plots with same cropping as main plots
+            ax[n, rgb_start_col].imshow(processed_rgb, origin="lower", interpolation="none")
+            ax[n, rgb_start_col + 1].imshow(processed_rgu, origin="lower", interpolation="none")
+            ax[n, rgb_start_col].axis(False)
+            ax[n, rgb_start_col + 1].axis(False)
     for n, axis in enumerate(ax.flat):
         axis.axis(False)
         if crosshairs == True:
@@ -246,13 +264,11 @@ def chroma_overview(
                 ylim = axis.get_ylim()
                 axis.axhline(
                     y=ylim[0] + (ylim[1] - ylim[0]) / 2,
-                    color="w",
-                    linewidth=1,
+                    color="w", alpha=0.7,
                 )
                 axis.axvline(
                     x=xlim[0] + (xlim[1] - xlim[0]) / 2,
-                    color="w",
-                    linewidth=1,
+                    color="w", alpha=0.7,
                 )
     if labels != None:
         if labels == "auto":

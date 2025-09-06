@@ -1,9 +1,11 @@
 from re import S
 import numpy as np
+from numpy import ma
 import seaborn as sns
 import matplotlib.pyplot as plt
 import scipy.signal
 import scipy.ndimage
+import scipy.ndimage as ndi
 import sklearn.cluster
 import warnings
 import skimage
@@ -165,42 +167,13 @@ def segmentation_algorithm(
     num_clusts = len(np.unique(initial_prediction_map))
 
     prediction_map = initial_prediction_map
+    
+    """
+    Surround refining and expansion/insertion of noise label
+    """
+    
     if kick_surr_pix is not None:
-        times_temp = extract_times(prediction_map, inputdata_3d, **kwargs)
-        max_index = np.unravel_index(np.argmax(np.abs(times_temp)), times_temp.shape)[0] # get max time index for each cluster
-        min_index = np.unravel_index(np.argmin(np.abs(times_temp)), times_temp.shape)[0]
-        possible_times = [0, 1, 2]
-        noise_index = np.setdiff1d(possible_times, [max_index, min_index])
-        # Fetch only the part of the prediction map that is the max time index
-        temp_signal_area_pre_erode = prediction_map == max_index
-        temp_noise_area_pre_erode = prediction_map == noise_index
-        # Erode the prediction map to remove surrounding pixels
-        temp_prediction_map_eroded = scipy.ndimage.binary_dilation(temp_signal_area_pre_erode, iterations = kick_surr_pix)
-        # Find intersection of signal area and eroded area
-        temp_signal_area = temp_prediction_map_eroded ^ temp_signal_area_pre_erode
-        # Put the intersection as noise area
-        temp_noise_map_applied = np.logical_not(temp_signal_area, temp_noise_area_pre_erode)
-        # Split out channels
-        channels = [(prediction_map == i).astype(np.uint8) for i in np.unique(prediction_map)]
-        channels = np.stack(channels, axis=0)  # Shape: (num_features, H, W)
-        # Apply noise border subtraction
-
-        """
-        What needs doing:
-        - First, correctly assign indices, and extract channels accordingly
-        - Then, in each channel except the one we want to make into noise (according to
-        erision/dialation), remove the noise border
-        - Then apply the noise border in the noise channel
-        - Then sum the channels such that we get the final prediction map
-        without having any overlap 
-        Sumasumarum: Allocate new indices and then move/remove them from other 
-        channels to accomodate the new indices
-        """
-        raise NotImplementedError("Implementation error, does not work yet")
-        # Merge back into original shape of prediction map
-        # prediction_map = np.sum(channels, axis=0)
-        plt.imshow(channels[min_index])
-        #print("LEFT OFF HERE")
+        raise NotImplementedError("kick_surr_pix functionality not yet implemented")
     if len(np.unique(prediction_map)) > num_clusts:
         raise ValueError(
             f"Some clusters have been merged incorrectly, causing num_clusts < {num_clusts}. Manual fix required. Consider lowering island_size_min for now."
@@ -480,6 +453,7 @@ def extract_noncentre(
     # ax[0].imshow(np.squeeze(mask[0]), origin = "lower")
     # ax[1].plot(time)
     return time
+
 
 def extract_times(
     prediction_map,
@@ -809,6 +783,35 @@ def covariance_merge(time, map, threshold = 1, with_debug=False):
 
     return output_time, updated_map
 
+def keep_largest_only(map):
+    # print(np.unique(map))
+    # Find the largest connected component
+    labeled_map, num_features = ndi.label(map==0)
+    sizes = np.bincount(labeled_map.ravel())
+    # print(num_features, sizes)
+    if len(sizes) < 1 or num_features == 0 or len(np.unique(map)) >= 3:
+        return map
+    largest_component = np.argmax(sizes[1:]) + 1
+    # print(largest_component)
+    # Keep only the largest component
+    #mapout = (labeled_map == largest_component).astype(int)
+    mapout = np.invert((labeled_map == largest_component)).astype(int)
+    return mapout
+
+def erode_noise_seg(map, iterations = 1, size_diff = 30):
+    # Dont erode if similar sized segmentations exist (to perserve balances)
+    sum0 = np.sum(map == 0)
+    sum1 = np.sum(map == 1)
+    # print(sum0, sum1)
+    if abs(sum0 - sum1) < size_diff:  # arbitrary threshold
+        return map
+    # Apply binary erosion to the map
+    eroded_map = ndi.binary_erosion(map, structure=ndi.generate_binary_structure(2, 1), iterations=iterations)
+    map_unique = np.sort(np.unique(map))
+    diff = eroded_map + map==map_unique[-1]
+    map[diff] = 2
+    return map
+
 def cs_segment_demo(inputdata_3d, **kwargs):
     segmentation_algorithm(inputdata_3d, plot_demo=True, **kwargs)
 
@@ -820,6 +823,8 @@ def run(d3_arr, plot=False,
         merge_params : dict = None,
         plot_params : dict = None,
         amplitude_ratio_threshold = 3.0,
+        erode_noise = 2,
+        largest_centre_only = True,
         with_debug = False):
     """151, 155, 157, 167, 107, 104, 90, 88, 83, 77, 74
     The main function for running the CS segmentation pipeline on a given 3D array (time x space x space).
@@ -875,6 +880,7 @@ def run(d3_arr, plot=False,
         "plot_demo"     : False,
         "crop_time"     : (1, -1), 
         "amplitude_boost": False,
+        "kick_surr_pix":  None,
         "on_pcs"        : False,
     }
     if segmentation_params is not None:
@@ -901,7 +907,7 @@ def run(d3_arr, plot=False,
         print(f"[cs_segment.run] Segmentation params: {segmentation_params}")
     
     segmented_map = segmentation_algorithm(d3_arr, **segmentation_params)
-    
+
     if with_debug:
         print(f"[cs_segment.run] Segmented map shape: {segmented_map.shape}")
         print(f"[cs_segment.run] Segmented map unique values: {np.unique(segmented_map)}")
@@ -913,34 +919,10 @@ def run(d3_arr, plot=False,
     times_extracted = extract_times(segmented_map, d3_arr)
     #print("run function times:", times_extracted.shape)
     # times_extracted_sd = np.ma.std(times_extracted, axis = 0)
-    # times_extracted = times_extracted * times_extracted_sd - np.ma.average(times_extracted_sd, axis = 0)
 
-    #prediction_times_std = np.ma.std(prediction_times, axis = 0)
-    #prediction_times = prediction_times * prediction_times_std - np.ma.average(prediction_times, axis = 0)
-
-
-    # ----The following is old logic and is only here for reference.--------
-    # 3.1 Merge the clusters that share a particularily high degree of correlation.
-    # This is needed becasue we always ask for 3 labels, but if signal is really 
-    # strong and there is no opponency, it will place 2 labels within the centre.
-
-    # if merge_params["corr_thresh"] is not None:
-    #     times_extracted, segmented_map = merge_cs_corr(times_extracted, segmented_map, merge_params["corr_thresh"]) 
-    # # 3.2 Sort the times, as the clustering labels will be arbitrary and not structured
-    # # in any meaningful order. Here, we ensure we get a predictable order (centre, surround, noise)
-    # times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
-
-    # # 3.3 Finally merge clusters label regions together if there is no detectable signal (low variance),
-    # # generate an accurate background label. If so, fills the "noise" label with masked zeros 
-    # if merge_params["var_thresh"] is not None:
-    #     times_extracted, segmented_map = merge_cs_var(times_extracted, segmented_map, merge_params["var_thresh"])
-
-    # 3.3 Finally merge clusters label regions together if there is no detectable signal (low variance),
-    # generate an accurate background label. If so, fills the "noise" label with masked zeros 
-    # times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
-    # ------- end of old logic --------------------------------------------
     # New and improved optional logic
     times_extracted, segmented_map = sort_extracted(times_extracted, segmented_map, sort_strategy)
+
     original_times_shape = times_extracted.shape
     if with_debug:
         print(f"[cs_segment.run] After sort_extracted: times_shape={times_extracted.shape}")
@@ -968,7 +950,17 @@ def run(d3_arr, plot=False,
         times_extracted, segmented_map = covariance_merge(times_extracted, segmented_map, threshold = merge_params["covar_merge"], with_debug=with_debug)
         if with_debug:
             print(f"[cs_segment.run] After covariance_merge: times_shape={times_extracted.shape}")
-    
+
+    #--- here before ---
+    # erosion needs to happen after all merging steps
+
+    # segmented_map = erode_noise_seg(segmented_map)
+    if largest_centre_only:
+        segmented_map = keep_largest_only(segmented_map)
+    if erode_noise is not None:
+        segmented_map = erode_noise_seg(segmented_map, iterations=erode_noise)
+
+
     # Final step: ensure consecutive cluster numbering after all merging operations
     unique_vals = np.unique(segmented_map)
     if len(unique_vals) > 1:  # Only if we have multiple clusters
@@ -984,12 +976,15 @@ def run(d3_arr, plot=False,
         # Pad with zeros to maintain original shape if needed
         if times_extracted.shape != original_times_shape:
             num_traces_to_add = original_times_shape[0] - times_extracted.shape[0]
+            num_traces_to_add = max(0, num_traces_to_add)
             time_fill = np.zeros((num_traces_to_add, times_extracted.shape[1]))
             times_extracted = np.append(times_extracted, time_fill, axis=0)
             times_extracted = np.ma.masked_equal(times_extracted, 0)
         if with_debug:
             print(f"[cs_segment.run] After renumbering: map_vals={np.unique(segmented_map)}, times_shape={times_extracted.shape}")
-    
+
+
+
     #print("after var thresh times:", times_extracted.shape)
     #print("after corr thresh times:", times_extracted.shape)
     if np.max(np.abs(times_extracted)) > exclude_sub:
@@ -1015,8 +1010,8 @@ def run(d3_arr, plot=False,
             print("This suggests clustering algorithm didn't find distinct spatial regions")
             print("Check segmentation_algorithm parameters or input data preprocessing")
     #print("interemdiate run function times:", times_extracted.shape)
-    if times_extracted.shape != original_times_shape:
-        raise ValueError("times_extracted shape changed after merging, manual fix required. Previously this due to not checking how many traces had been merged (replace n)")
+    # if times_extracted.shape != original_times_shape:
+    #     raise ValueError("times_extracted shape changed after merging, manual fix required. Previously this due to not checking how many traces had been merged (replace n)")
     
     # Final step: ensure consistent cluster ordering regardless of merging outcomes
     # TODO: Fix ensure_cluster_order to handle post-merge map/times mismatches properly

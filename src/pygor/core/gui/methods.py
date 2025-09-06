@@ -200,7 +200,7 @@ class NapariDepthPrompt:
         """Calculates the depth of each ROI between the 0% and 100% boundaries."""
         print("Processing user selection...")
         # Finally, do the calcluation
-        lower, upper = np.squeeze(self.viewer.layers["0% boundary"].data[0]), np.squeeze(self.viewer.layers["100% boundary"].data[0])
+        upper, lower = np.squeeze(self.viewer.layers["0% boundary"].data[0]), np.squeeze(self.viewer.layers["100% boundary"].data[0])
         orientation = self.determine_orientation(lower[:, 1], lower[:, 0])
         or_str = "Vertical" if orientation == 0 else "Horizontal"
         logging.info(f"Orientation is: {or_str}")
