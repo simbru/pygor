@@ -292,7 +292,7 @@ class MovingBars(Core):
                            show_theta_labels=True, show_tuning=True, show_mean_vector=False, 
                            mean_vector_color='red', show_orientation_vector=False, 
                            orientation_vector_color='orange', use_phases=None, 
-                           phase_colors=None, overlay_phases=True, **kwargs):
+                           phase_colors=None, overlay_phases=True, legend=True, minimal=False, **kwargs):
         """
         Plot tuning functions as polar plots.
         
@@ -328,6 +328,10 @@ class MovingBars(Core):
             Colors for each phase. If None, uses default colors
         overlay_phases : bool
             Whether to overlay phases on same plot (True) or create separate plots (False)
+        legend : bool
+            Whether to show the legend (default True)
+        minimal : bool
+            Whether to use minimal plotting (no titles, legends, or labels except axis ticks) (default False)
         **kwargs
             Additional arguments passed to compute_tuning_function.
         
@@ -346,8 +350,17 @@ class MovingBars(Core):
         if use_phases:
             kwargs['phase_num'] = self.dir_phase_num
         
+        # Handle minimal mode by overriding display options
+        if minimal:
+            show_title = False
+            legend = False
+        
+        # Extract parameters from kwargs before passing to compute_tuning_function
+        # (compute_tuning_function doesn't accept these parameters)
+        tuning_kwargs = {k: v for k, v in kwargs.items() if k not in ['legend', 'minimal']}
+        
         # Get tuning functions for all ROIs
-        tuning_functions = self.compute_tuning_function(**kwargs)
+        tuning_functions = self.compute_tuning_function(**tuning_kwargs)
         
         # Handle phase data
         if use_phases and len(tuning_functions.shape) == 3:  # (n_rois, n_directions, n_phases)
@@ -372,7 +385,9 @@ class MovingBars(Core):
                     mean_vector_color=mean_vector_color,
                     show_orientation_vector=show_orientation_vector,
                     orientation_vector_color=orientation_vector_color,
-                    metric=kwargs.get('metric', 'peak')
+                    metric=kwargs.get('metric', 'peak'),
+                    legend=legend,
+                    minimal=minimal
                 )
             else:
                 # Create separate plots for each phase
@@ -391,7 +406,9 @@ class MovingBars(Core):
                     mean_vector_color=mean_vector_color,
                     show_orientation_vector=show_orientation_vector,
                     orientation_vector_color=orientation_vector_color,
-                    metric=kwargs.get('metric', 'peak')
+                    metric=kwargs.get('metric', 'peak'),
+                    legend=legend,
+                    minimal=minimal
                 )
         else:
             # Regular single-phase plotting
@@ -409,7 +426,9 @@ class MovingBars(Core):
                 show_mean_vector=show_mean_vector,
                 mean_vector_color=mean_vector_color,
                 show_orientation_vector=show_orientation_vector,
-                orientation_vector_color=orientation_vector_color
+                orientation_vector_color=orientation_vector_color,
+                legend=legend,
+                minimal=minimal
             )
 
     def compute_tuning_metrics(self, roi_indices=None, metric='peak'):
@@ -797,5 +816,67 @@ class MovingBars(Core):
         
         return tuning_metrics.compute_all_tuning_metrics(
             self, metric=metric, roi_indices=roi_indices, phase_ranges=phase_ranges
+        )
+    
+    def plot_tuning_function_with_traces(self, roi_index, ax=None, show_trials=True, 
+                                       metric='peak', trace_scale=0.25, minimal=True, 
+                                       polar_color='#2E8B57', trace_alpha=0.7, use_phases=None, 
+                                       phase_colors=None, orbit_distance=0.5, trace_aspect_x=1.0, 
+                                       trace_aspect_y=1.0, separate_phase_axes=False, **kwargs):
+        """
+        Plot tuning function with floating trace snippets in external axes.
+        Optimized for poster presentations with clean, minimal styling.
+        
+        Parameters:
+        -----------
+        roi_index : int
+            ROI index to analyze
+        ax : matplotlib.axes.Axes, array/list of matplotlib.axes.Axes, or None
+            External axes to plot within. If separate_phase_axes=True, should be 
+            array/list with one axes per phase. If None, creates axes automatically.
+        show_trials : bool
+            Whether to show individual trial traces (default True)
+        metric : str
+            Summary metric ('peak', 'auc', 'mean', etc.)
+        trace_scale : float
+            Scale factor for trace subplot size (default 0.25)
+        minimal : bool
+            Use minimal styling (no titles, labels) (default True)
+        polar_color : str
+            Color for central polar plot (default '#2E8B57')
+        trace_alpha : float
+            Alpha for trace plots (default 0.7)
+        use_phases : bool or None
+            If None, uses self.dir_phase_num > 1 to decide
+            If True, forces phase analysis  
+            If False, forces single-phase analysis
+        phase_colors : list or None
+            Colors for each phase. If None, uses default colors
+        orbit_distance : float
+            Distance of trace orbit from polar plot center (default 0.5)
+        trace_aspect_x : float
+            Horizontal scaling factor for individual trace plots (default 1.0)
+        trace_aspect_y : float
+            Vertical scaling factor for individual trace plots (default 1.0)
+        separate_phase_axes : bool
+            If True, create separate polar + orbit plots for each phase.
+            If False, overlay all phases on single polar + orbit plots (default False)
+        **kwargs
+            Additional arguments (data_crop, etc.)
+            
+        Returns:
+        --------
+        fig : matplotlib.figure.Figure
+            The figure object
+        ax_polar : matplotlib.axes.Axes or list of matplotlib.axes.Axes
+            If separate_phase_axes=False: single polar plot axes
+            If separate_phase_axes=True: list of polar axes (one per phase)
+        """
+        return circular_directional_plots.plot_tuning_function_with_traces(
+            self, roi_index, ax, show_trials=show_trials, metric=metric, 
+            trace_scale=trace_scale, minimal=minimal, polar_color=polar_color, 
+            trace_alpha=trace_alpha, use_phases=use_phases, phase_colors=phase_colors,
+            orbit_distance=orbit_distance, trace_aspect_x=trace_aspect_x, 
+            trace_aspect_y=trace_aspect_y, separate_phase_axes=separate_phase_axes, **kwargs
         )
     
