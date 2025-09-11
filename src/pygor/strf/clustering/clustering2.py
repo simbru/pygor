@@ -3,8 +3,10 @@ Clean clustering module for RF analysis
 Integrates with the melting framework for flexible column selection
 """
 
+from matplotlib import rcParams
 import pandas as pd
 import numpy as np
+import warnings
 from sklearn.cluster import KMeans, AgglomerativeClustering
 from sklearn.mixture import GaussianMixture, BayesianGaussianMixture
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, MaxAbsScaler, RobustScaler, QuantileTransformer
@@ -341,7 +343,6 @@ def elbow_analysis(feature_data, max_k=30, random_state=42):
     plt.title('Elbow Analysis for K-Means Clustering')
     plt.xlabel('Number of Clusters (k)')
     plt.ylabel('Inertia (Within-cluster Sum of Squares)')
-    plt.grid(True, alpha=0.3)
     plt.show()
     
     return {'k_values': list(k_values), 'inertias': inertias}
@@ -568,10 +569,123 @@ def visualize_clusters_pca(clustered_data, feature_patterns, n_components=2,
     plt.xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)')
     plt.ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)')
     plt.title('Clusters in PCA Space')
-    plt.grid(True, alpha=0.3)
     plt.show()
     
     return pca, pca_data
+
+def visualize_clusters_umap(clustered_data, feature_patterns, n_components=2,
+                           color_col='cluster_id', figsize=(10, 8), **umap_kwargs):
+    """
+    Visualize clusters in UMAP space.
+    
+    Parameters:
+    -----------
+    clustered_data : pd.DataFrame
+        Data with cluster labels
+    feature_patterns : list
+        Feature patterns used for clustering
+    n_components : int
+        Number of UMAP components to plot
+    color_col : str
+        Column to use for coloring points
+    figsize : tuple
+        Figure size
+    **umap_kwargs
+        Additional UMAP parameters
+    """
+    
+    try:
+        import umap
+    except ImportError:
+        print("UMAP not installed. Install with: pip install umap-learn")
+        return None, None
+    
+    # Get feature columns
+    feature_cols = []
+    for pattern in feature_patterns:
+        cols = [col for col in clustered_data.columns if pattern in col]
+        feature_cols.extend(cols)
+    
+    feature_cols = list(dict.fromkeys(feature_cols))
+    feature_data = clustered_data[feature_cols].dropna()
+    
+    # Apply UMAP
+    umap_model = umap.UMAP(n_components=n_components, **umap_kwargs)
+    umap_data = umap_model.fit_transform(feature_data)
+    
+    # Create plot
+    plt.figure(figsize=figsize)
+    
+    if color_col in clustered_data.columns:
+        colors = clustered_data.loc[feature_data.index, color_col]
+        scatter = plt.scatter(umap_data[:, 0], umap_data[:, 1], 
+                            c=colors, cmap='hsv', alpha=0.6)
+        plt.colorbar(scatter, label=color_col)
+    else:
+        plt.scatter(umap_data[:, 0], umap_data[:, 1], alpha=0.6)
+    
+    plt.xlabel('UMAP1')
+    plt.ylabel('UMAP2')
+    plt.title('Clusters in UMAP Space')
+    plt.show()
+    
+    return umap_model, umap_data
+
+def visualize_clusters_tsne(clustered_data, feature_patterns, n_components=2,
+                           color_col='cluster_id', figsize=(10, 8), **tsne_kwargs):
+    """
+    Visualize clusters in t-SNE space.
+    
+    Parameters:
+    -----------
+    clustered_data : pd.DataFrame
+        Data with cluster labels
+    feature_patterns : list
+        Feature patterns used for clustering
+    n_components : int
+        Number of t-SNE components to plot
+    color_col : str
+        Column to use for coloring points
+    figsize : tuple
+        Figure size
+    **tsne_kwargs
+        Additional t-SNE parameters
+    """
+    
+    from sklearn.manifold import TSNE
+    
+    # Get feature columns
+    feature_cols = []
+    for pattern in feature_patterns:
+        cols = [col for col in clustered_data.columns if pattern in col]
+        feature_cols.extend(cols)
+    
+    feature_cols = list(dict.fromkeys(feature_cols))
+    feature_data = clustered_data[feature_cols].dropna()
+    
+    # Apply t-SNE
+    tsne_defaults = {'perplexity': 30, 'random_state': 42}
+    tsne_defaults.update(tsne_kwargs)
+    tsne_model = TSNE(n_components=n_components, **tsne_defaults)
+    tsne_data = tsne_model.fit_transform(feature_data)
+    
+    # Create plot
+    plt.figure(figsize=figsize)
+    
+    if color_col in clustered_data.columns:
+        colors = clustered_data.loc[feature_data.index, color_col]
+        scatter = plt.scatter(tsne_data[:, 0], tsne_data[:, 1], 
+                            c=colors, cmap='hsv', alpha=0.6)
+        plt.colorbar(scatter, label=color_col)
+    else:
+        plt.scatter(tsne_data[:, 0], tsne_data[:, 1], alpha=0.6)
+    
+    plt.xlabel('t-SNE1')
+    plt.ylabel('t-SNE2')
+    plt.title('Clusters in t-SNE Space')
+    plt.show()
+    
+    return tsne_model, tsne_data
 
 def merge_clusters_to_original(original_df, clustering_result, 
                               id_cols=['recording_id', 'roi_id']):
@@ -605,7 +719,7 @@ def merge_clusters_to_original(original_df, clustering_result,
     return result_df
 
 def create_cluster_averaged_rfs(df_with_clusters, experiment_obj, 
-                               cluster_col='cluster_id', max_shift=5):
+                               cluster_col='cluster_id', max_shift=5, verbose=True):
     """
     Create averaged RF representations for each cluster, aligned by centroids.
     
@@ -619,6 +733,8 @@ def create_cluster_averaged_rfs(df_with_clusters, experiment_obj,
         Name of cluster column
     max_shift : int
         Maximum pixels to shift for alignment
+    verbose : bool, default True
+        Whether to print progress messages
     
     Returns:
     --------
@@ -634,11 +750,13 @@ def create_cluster_averaged_rfs(df_with_clusters, experiment_obj,
     clusters = df_with_clusters[cluster_col].dropna().unique()
     
     for cluster_id in clusters:
-        print(f"\nProcessing cluster {cluster_id}...")
+        if verbose:
+            print(f"\nProcessing cluster {cluster_id}...")
         
         # Get ROIs in this cluster
         cluster_rois = df_with_clusters[df_with_clusters[cluster_col] == cluster_id]
-        print(f"  Found {len(cluster_rois)} ROIs in cluster")
+        if verbose:
+            print(f"  Found {len(cluster_rois)} ROIs in cluster")
         
         # Collect RF data and centroids for this cluster
         cluster_rfs = []
@@ -676,7 +794,8 @@ def create_cluster_averaged_rfs(df_with_clusters, experiment_obj,
         cluster_centroids_x = np.array(cluster_centroids_x)  # Shape: (n_rois, color)
         cluster_centroids_y = np.array(cluster_centroids_y)  # Shape: (n_rois, color)
         
-        print(f"  RF data shape: {cluster_rfs.shape}")
+        if verbose:
+            print(f"  RF data shape: {cluster_rfs.shape}")
         
         # Align RFs by centroids for each color channel
         n_rois, n_colors, height, width = cluster_rfs.shape
@@ -684,10 +803,13 @@ def create_cluster_averaged_rfs(df_with_clusters, experiment_obj,
         
         for color in range(n_colors):
             # Calculate reference centroid (mean of all ROIs for this color)
-            ref_cent_x = np.nanmean(cluster_centroids_x[:, color])
-            ref_cent_y = np.nanmean(cluster_centroids_y[:, color])
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=RuntimeWarning, message="Mean of empty slice")
+                ref_cent_x = np.nanmean(cluster_centroids_x[:, color])
+                ref_cent_y = np.nanmean(cluster_centroids_y[:, color])
             
-            print(f"    Color {color}: Reference centroid = ({ref_cent_x:.1f}, {ref_cent_y:.1f})")
+            if verbose:
+                print(f"    Color {color}: Reference centroid = ({ref_cent_x:.1f}, {ref_cent_y:.1f})")
             
             for roi in range(n_rois):
                 # Calculate shift needed to align to reference
@@ -712,18 +834,246 @@ def create_cluster_averaged_rfs(df_with_clusters, experiment_obj,
         avg_rf = np.nanmean(aligned_rfs, axis=0)  # Shape: (color, y, x)
         
         # Store result
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=RuntimeWarning, message="Mean of empty slice")
+            cluster_averages[cluster_id] = {
+                'averaged_rf': avg_rf,
+                'n_rois': n_rois,
+                'reference_centroids_x': [np.nanmean(cluster_centroids_x[:, c]) for c in range(n_colors)],
+                'reference_centroids_y': [np.nanmean(cluster_centroids_y[:, c]) for c in range(n_colors)],
+                'roi_info': cluster_rois[['recording_id', 'roi_id']].values
+            }
+        
+        if verbose:
+            print(f"    Created averaged RF with shape: {avg_rf.shape}")
+    
+    if verbose:
+        print(f"\nCompleted averaging for {len(cluster_averages)} clusters")
+    return cluster_averages
+
+
+def create_cluster_averaged_strfs(df_with_clusters, experiment_obj, 
+                                 cluster_col='cluster_id', max_shift=5):
+    """
+    Create averaged spacetime kernel (STRF) representations for each cluster, aligned by centroids.
+    
+    Parameters:
+    -----------
+    df_with_clusters : pd.DataFrame
+        Dataframe with cluster_id column
+    experiment_obj : Experiment
+        Experiment object containing recording data
+    cluster_col : str
+        Name of cluster column
+    max_shift : int
+        Maximum pixels to shift for alignment
+    
+    Returns:
+    --------
+    dict
+        Dictionary with cluster_id as keys, averaged STRFs as values
+    """
+    from scipy.ndimage import shift
+    import warnings
+    
+    cluster_averages = {}
+    
+    # Get unique clusters (excluding NaN)
+    clusters = df_with_clusters[cluster_col].dropna().unique()
+    
+    for cluster_id in clusters:
+        print(f"\nProcessing cluster {cluster_id} STRFs...")
+        
+        # Get ROIs in this cluster
+        cluster_rois = df_with_clusters[df_with_clusters[cluster_col] == cluster_id]
+        print(f"  Found {len(cluster_rois)} ROIs in cluster")
+        
+        # Collect STRF data and centroids for this cluster
+        cluster_strfs = []
+        cluster_centroids_x = []
+        cluster_centroids_y = []
+        
+        for _, roi_row in cluster_rois.iterrows():
+            recording_id = int(roi_row['recording_id'])
+            roi_id = int(roi_row['roi_id'])
+            
+            # Get the recording object
+            recording = experiment_obj.recording[recording_id]
+            
+            # Get STRF data for this ROI: shape depends on multicolor setup
+            # Typically: (color*time, y, x) or (time, y, x)
+            roi_strf = recording.strfs[roi_id]
+            
+            # Get centroids for alignment (using collapsed RF centroids)
+            rf_data = recording.collapse_times_by_channel()
+            centroids_x = recording.get_pca_centroidsX_by_channel()
+            centroids_y = recording.get_pca_centroidsY_by_channel()
+            
+            # Extract centroids for this specific ROI
+            roi_cent_x = centroids_x[:, roi_id]  # Shape: (color,)
+            roi_cent_y = centroids_y[:, roi_id]  # Shape: (color,)
+            
+            cluster_strfs.append(roi_strf)
+            cluster_centroids_x.append(roi_cent_x)
+            cluster_centroids_y.append(roi_cent_y)
+        
+        if not cluster_strfs:
+            continue
+            
+        # Convert to numpy arrays
+        cluster_strfs = np.array(cluster_strfs)  # Shape: (n_rois, time*color, y, x)
+        cluster_centroids_x = np.array(cluster_centroids_x)  # Shape: (n_rois, color)
+        cluster_centroids_y = np.array(cluster_centroids_y)  # Shape: (n_rois, color)
+        
+        print(f"  STRF data shape: {cluster_strfs.shape}")
+        
+        # Calculate reference centroid (mean of all ROIs)
+        # Use the first color channel for alignment reference
+        ref_cent_x = np.nanmean(cluster_centroids_x[:, 0])
+        ref_cent_y = np.nanmean(cluster_centroids_y[:, 0])
+        
+        print(f"  Reference centroid = ({ref_cent_x:.1f}, {ref_cent_y:.1f})")
+        
+        # Align STRFs by rolling the spatial dimensions
+        n_rois = cluster_strfs.shape[0]
+        aligned_strfs = np.zeros_like(cluster_strfs)
+        
+        for roi in range(n_rois):
+            # Calculate shift needed to align to reference (using first color)
+            shift_x = ref_cent_x - cluster_centroids_x[roi, 0]
+            shift_y = ref_cent_y - cluster_centroids_y[roi, 0]
+            
+            # Limit shifts to prevent excessive movement
+            shift_x = np.clip(shift_x, -max_shift, max_shift)
+            shift_y = np.clip(shift_y, -max_shift, max_shift)
+            
+            # Apply shift to entire spacetime kernel
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                aligned_strfs[roi] = shift(
+                    cluster_strfs[roi], 
+                    shift=[0, shift_y, shift_x],  # Don't shift time dimension
+                    mode='constant', 
+                    cval=0
+                )
+        
+        # Average aligned STRFs
+        avg_strf = np.nanmean(aligned_strfs, axis=0)
+        
+        # Store result
         cluster_averages[cluster_id] = {
-            'averaged_rf': avg_rf,
+            'averaged_strf': avg_strf,
             'n_rois': n_rois,
-            'reference_centroids_x': [np.nanmean(cluster_centroids_x[:, c]) for c in range(n_colors)],
-            'reference_centroids_y': [np.nanmean(cluster_centroids_y[:, c]) for c in range(n_colors)],
+            'reference_centroid_x': ref_cent_x,
+            'reference_centroid_y': ref_cent_y,
             'roi_info': cluster_rois[['recording_id', 'roi_id']].values
         }
         
-        print(f"    Created averaged RF with shape: {avg_rf.shape}")
+        print(f"    Created averaged STRF with shape: {avg_strf.shape}")
     
-    print(f"\nCompleted averaging for {len(cluster_averages)} clusters")
+    print(f"\nCompleted STRF averaging for {len(cluster_averages)} clusters")
     return cluster_averages
+
+
+def extract_cluster_timecourses(df_with_clusters, experiment_obj, verbose=True, **params):
+    """
+    Extract RGBU timecourses for each cluster using get_timecourses_dominant_by_channel().
+    
+    Parameters:
+    -----------
+    df_with_clusters : pd.DataFrame
+        DataFrame with cluster assignments
+    experiment_obj : Experiment
+        Experiment object containing recording data
+    verbose : bool, default True
+        Whether to print progress messages
+    **params
+        Additional parameters (for compatibility, but not used)
+    
+    Returns:
+    --------
+    dict
+        Dictionary with cluster_id as keys, containing:
+        - 'timecourses': RGBU timecourses (4, time) averaged across cluster
+        - 'n_rois': number of ROIs in cluster
+        - 'individual_timecourses': list of individual ROI timecourses for verification
+    """
+    cluster_timecourses = {}
+    
+    # Get unique cluster IDs
+    cluster_ids = sorted(df_with_clusters['cluster_id'].unique())
+    
+    for cluster_id in cluster_ids:
+        if verbose:
+            print(f"Extracting RGBU timecourses for cluster {cluster_id}...")
+        
+        # Get ROIs in this cluster
+        cluster_rois = df_with_clusters[df_with_clusters['cluster_id'] == cluster_id]
+        n_rois = len(cluster_rois)
+        
+        if n_rois == 0:
+            if verbose:
+                print(f"  Warning: No ROIs in cluster {cluster_id}")
+            continue
+        
+        # Collect timecourses by color channel for this cluster
+        color_timecourses = [[] for _ in range(4)]  # List for each color (R, G, B, UV)
+        individual_timecourses = []
+        
+        for _, roi_row in cluster_rois.iterrows():
+            recording_id = int(roi_row['recording_id'])
+            roi_id = int(roi_row['roi_id'])
+            
+            try:
+                recording = experiment_obj.recording[recording_id]
+                
+                # Use get_timecourses_dominant_by_channel()
+                # This returns (colour, roi, time) - exactly what we need!
+                timecourses_by_channel = recording.get_timecourses_dominant_by_channel()
+                
+                # Extract timecourses for this specific ROI across all colors
+                roi_rgbu = []
+                for color_idx in range(4):
+                    roi_timecourse = timecourses_by_channel[color_idx, roi_id, :]
+                    color_timecourses[color_idx].append(roi_timecourse)
+                    roi_rgbu.append(roi_timecourse)
+                
+                individual_timecourses.append(np.array(roi_rgbu))  # (4, time)
+                
+            except Exception as e:
+                if verbose:
+                    print(f"    Error processing ROI {roi_id} from recording {recording_id}: {e}")
+                continue
+        
+        if not any(color_timecourses):
+            if verbose:
+                print(f"  Warning: No valid timecourses for cluster {cluster_id}")
+            continue
+        
+        # Average timecourses within each color channel
+        avg_timecourses = []
+        for color_idx in range(4):
+            if color_timecourses[color_idx]:
+                color_array = np.array(color_timecourses[color_idx])  # (n_rois, time)
+                avg_timecourse = np.mean(color_array, axis=0)  # (time,)
+                avg_timecourses.append(avg_timecourse)
+            else:
+                # No data for this color - create zeros
+                n_timepoints = len(color_timecourses[0][0]) if color_timecourses[0] else 400
+                avg_timecourses.append(np.zeros(n_timepoints))
+        
+        avg_timecourses = np.array(avg_timecourses)  # (4, time)
+        
+        cluster_timecourses[cluster_id] = {
+            'timecourses': avg_timecourses,
+            'n_rois': n_rois,
+            'individual_timecourses': individual_timecourses
+        }
+        
+        if verbose:
+            print(f"  Extracted RGBU timecourses shape: {avg_timecourses.shape} from {n_rois} ROIs")
+    
+    return cluster_timecourses
 
 
 def verify_rf_averaging(df_with_clusters, experiment_obj, cluster_averages, cluster_col='cluster_id', 
@@ -1069,8 +1419,8 @@ def plot_all_cluster_averages(cluster_averages,
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"Saved cluster averages plot to {save_path}")
-
-    plt.show()
+ 
+    # plt.show()
 
     # Print summary
     print(f"\nDisplayed {n_clusters} clusters:")
@@ -1117,9 +1467,485 @@ def _create_rgb_composite_old(curr_clust_avgs, channel_indices):
     
     return rgb_composite
 
+from pygor.plotting.scalebar import add_scalebar
+
+def plot_all_cluster_averages_enhanced(df_with_clusters, experiment_obj, cluster_averages,
+                                    cluster_timecourses=None, 
+                                    metrics_to_plot=None,
+                                    metrics_like=None,
+                                    figsize_per_cluster=None,
+                                    use_color_mapping=True,
+                                    rgb_mode='new',
+                                    save_path=None,
+                                    show_ipl_distribution=True,
+                                    verbose=False) -> tuple[plt.Figure, np.ndarray]:
+    """
+    Enhanced plot showing cluster averages with timecourses, IPL distributions, and metrics.
+
+    Parameters:
+    -----------
+    df_with_clusters : pd.DataFrame
+        Dataframe with cluster assignments
+    experiment_obj : Experiment
+        Experiment object containing recording data
+    cluster_averages : dict
+        Result from create_cluster_averaged_rfs()
+    cluster_timecourses : dict, optional
+        Result from extract_cluster_timecourses()
+    metrics_to_plot : list, optional
+        List of metric column names to plot (e.g., ['space_amps_0', 'areas_0'])
+    metrics_like : list, optional
+        List of metric prefixes to group and plot (e.g., ['areas', 'space_amps'])
+        Each prefix will create a separate column showing all matching metrics
+    figsize_per_cluster : tuple
+        Size per cluster row in inches
+    use_color_mapping : bool
+        Whether to apply color mapping to channels
+    rgb_mode : str
+        RGB visualization mode: 'new' or 'old'
+    save_path : str, optional
+        Path to save the figure
+    show_ipl_distribution : bool
+        Whether to show IPL distribution plots
+    verbose : bool
+        Whether to print debug information
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    n_clusters = len(cluster_averages)
+    if n_clusters == 0:
+        print("No clusters to plot!")
+        return
+
+    # Calculate number of columns needed
+    n_spatial_cols = 6  # Red, Green, Blue, UV, RGB, RGU
+    n_extra_cols = 0
+    
+    if cluster_timecourses is not None:
+        n_extra_cols += 1  # Timecourses column
+    if show_ipl_distribution:
+        n_extra_cols += 1  # IPL distribution column
+    if metrics_to_plot is not None and len(metrics_to_plot) > 0:
+        n_extra_cols += 1  # Single metrics column
+    if metrics_like is not None and len(metrics_like) > 0:
+        n_extra_cols += len(metrics_like)  # One column per metric group
+    
+    n_total_cols = n_spatial_cols + n_extra_cols
+
+    # Calculate figure size
+    if figsize_per_cluster is None:
+        # Automatic scaling to maintain good aspect ratios
+        # Target: Make spatial RF subplots roughly square
+        
+        # The spatial RF images are the limiting factor for aspect ratio
+        # Assume RF images are roughly square, so we want square subplots for them
+        base_height_per_cluster = 1.0  # Base height per cluster
+        
+        # Calculate width needed for spatial columns (first 6) to be square
+        spatial_width_per_col = base_height_per_cluster  # Square aspect for RF images
+        spatial_total_width = n_spatial_cols * spatial_width_per_col
+        
+        # Extra columns can be wider since they're line plots/histograms
+        extra_width_per_col = base_height_per_cluster * 1.5  # Slightly wider for line plots
+        extra_total_width = n_extra_cols * extra_width_per_col
+        
+        fig_width = spatial_total_width + extra_total_width
+        fig_height = max(1.0, n_clusters * base_height_per_cluster)
+        
+        # Add some padding for titles and labels
+        fig_width *= 1.1  # 10% padding
+        fig_height *= 1.1
+    else:
+        fig_width = figsize_per_cluster[0]
+        fig_height = figsize_per_cluster[1] * n_clusters
+
+    fig, axes = plt.subplots(n_clusters, n_total_cols, figsize=(fig_width, fig_height),
+                        sharex="col", layout = "constrained")
+
+    # Keep track of column indices for sharing x-axes
+    timecourse_col_idx = None
+    ipl_col_idx = None  
+    metrics_col_idx = None
+    metrics_like_col_indices = []
+
+    # Handle single cluster case
+    if n_clusters == 1:
+        axes = axes.reshape(1, -1)
+
+    # Sort clusters by ID for consistent ordering
+    sorted_clusters = sorted(cluster_averages.keys())
+
+    # Define color maps for individual channels
+    if use_color_mapping:
+        try:
+            from pygor.plotting.custom import maps_concat
+            if isinstance(maps_concat, list):
+                colormaps = maps_concat[:4]
+            else:
+                colormaps = ['Reds', 'Greens', 'Blues', 'Purples']
+        except ImportError:
+            colormaps = ['Reds', 'Greens', 'Blues', 'Purples']
+    else:
+        colormaps = ['gray'] * 4
+
+    # Column headers
+    spatial_names = ['Red', 'Green', 'Blue', 'UV', 'RGB', 'RGU']
+    extra_names = []
+    if cluster_timecourses is not None:
+        extra_names.append('Timecourses')
+    if show_ipl_distribution:
+        extra_names.append('IPL')
+    if metrics_to_plot is not None and len(metrics_to_plot) > 0:
+        extra_names.append('Metrics')
+    if metrics_like is not None and len(metrics_like) > 0:
+        for metric_prefix in metrics_like:
+            extra_names.append(f'{metric_prefix.title()} Metrics')
+    
+    all_names = spatial_names + extra_names
+
+    for row, cluster_id in enumerate(sorted_clusters):
+        curr_clust_avgs = cluster_averages[cluster_id]["averaged_rf"]
+        n_rois = cluster_averages[cluster_id]["n_rois"]
+        cluster_rois = df_with_clusters[df_with_clusters['cluster_id'] == cluster_id]
+        
+        # DEBUG: Check what data we're actually using
+        if verbose and row == 0:  # Only print for first cluster
+            print(f"\n=== CLUSTER {cluster_id} DATA CHECK ===")
+            areas_cols = [col for col in cluster_rois.columns if 'areas_' in col]
+            if areas_cols:
+                sample_areas = cluster_rois[areas_cols[0]].dropna().head(3).tolist()
+                print(f"cluster_rois sample areas: {sample_areas}")
+                print(f"cluster_rois areas range: {cluster_rois[areas_cols[0]].min():.3f} to {cluster_rois[areas_cols[0]].max():.3f}")
+            time_cols = [col for col in cluster_rois.columns if 'time_amps_' in col]
+            if time_cols:
+                sample_time = cluster_rois[time_cols[0]].dropna().head(3).tolist()
+                print(f"cluster_rois sample time_amps: {sample_time}")
+                print(f"cluster_rois time_amps range: {cluster_rois[time_cols[0]].min():.3f} to {cluster_rois[time_cols[0]].max():.3f}")
+
+        col_idx = 0
+        
+        # Plot spatial RF components (columns 0-5)
+        for spatial_col in range(n_spatial_cols):
+            ax = axes[row, col_idx] if n_clusters > 1 else axes[col_idx]
+            curr_clim = np.max(np.abs(curr_clust_avgs)) if use_color_mapping else None
+            
+            if spatial_col < 4:  # Individual channels
+                cmap = colormaps[spatial_col] if use_color_mapping else 'gray'
+                ax.imshow(curr_clust_avgs[spatial_col], cmap=cmap,
+                        vmin=-curr_clim, vmax=curr_clim, origin="lower")
+                
+                # Add crosshairs
+                centre = (curr_clust_avgs.shape[1] // 2, curr_clust_avgs.shape[2] // 2)
+                ax.axhline(centre[0], color='white', lw=0.5)
+                ax.axvline(centre[1], color='white', lw=0.5)
+
+            elif spatial_col == 4:  # RGB composite
+                if rgb_mode == 'new':
+                    rgb_composite = create_rgb_composite(curr_clust_avgs, [0, 1, 2])
+                    ax.imshow(rgb_composite, origin="lower")
+                else:
+                    rgb_composite = _create_rgb_composite_old(curr_clust_avgs, [0, 1, 2])
+                    ax.imshow(rgb_composite, origin="lower")
+
+            elif spatial_col == 5:  # RGU composite
+                if rgb_mode == 'new':
+                    rgu_composite = create_rgb_composite(curr_clust_avgs, [0, 1, 3])
+                    ax.imshow(rgu_composite, origin="lower")
+                else:
+                    rgu_composite = _create_rgb_composite_old(curr_clust_avgs, [0, 1, 3])
+                    ax.imshow(rgu_composite, origin="lower")
+
+            # Add titles only to top row
+            if row == 0:
+                ax.set_title(spatial_names[spatial_col], fontsize=8)
+
+            # Add cluster info to leftmost column
+            if spatial_col == 0:
+                ax.set_ylabel(f'Cluster {cluster_id}\n(n={n_rois})', fontsize=8)
+
+            ax.axis('off')
+            col_idx += 1
+
+        # Plot timecourses if available
+        if cluster_timecourses is not None:
+            if row == 0:  # Track column index on first row
+                timecourse_col_idx = col_idx
+            ax = axes[row, col_idx] if n_clusters > 1 else axes[col_idx]
+            
+            if cluster_id in cluster_timecourses:
+                timecourses = cluster_timecourses[cluster_id]['timecourses']
+                # plt.plot(timecourses.T) 
+                # Plot center/surround timecourses
+                time_axis = np.arange(timecourses.shape[-1])
+                
+                # Typically: index 0=center, 1=surround, 2=noise
+                # labels = ['Center', 'Surround', 'Noise', 'Non-center']
+                from pygor.plotting.custom import fish_palette
+                colors = fish_palette
+
+                for i, color in enumerate(colors):
+                    if i < timecourses.shape[0]:
+                        if np.ma.is_masked(timecourses) and np.ma.is_masked(timecourses[i]):
+                            ax.plot(time_axis, timecourses[i].data, '--', 
+                                color=color, alpha=0.5)
+                        else:
+                            ax.plot(time_axis, timecourses[i], '-', 
+                                color=color)
+
+                ax.axhline(0, color='black', linestyle='-', alpha=0.3, linewidth=0.5)
+                # ax.set_xlabel('Time')
+                ax.set_ylabel('')
+                # ax.set_xticks([])
+                
+            else:
+                ax.text(0.5, 0.5, 'No timecourse\ndata', ha='center', va='center',
+                    transform=ax.transAxes)
+                ax.axis('off')
+            ax.set_yticks([])
+            if row == 0:
+                ax.set_title('Timecourses', fontsize=8)
+            col_idx += 1
+            
+        # Plot IPL distribution if requested
+        if show_ipl_distribution:
+            if row == 0:  # Track column index on first row
+                ipl_col_idx = col_idx
+            ax = axes[row, col_idx] if n_clusters > 1 else axes[col_idx]
+            
+            # Get IPL depths for ROIs in this cluster
+            ipl_depths = []
+            for _, roi_row in cluster_rois.iterrows():
+                recording_id = int(roi_row['recording_id'])
+                roi_id = int(roi_row['roi_id'])
+                recording = experiment_obj.recording[recording_id]
+                
+                if hasattr(recording, 'ipl_depths') and recording.ipl_depths is not None:
+                    if roi_id < len(recording.ipl_depths):
+                        ipl_depth = recording.ipl_depths[roi_id]
+                        if not np.isnan(ipl_depth):
+                            ipl_depths.append(ipl_depth)
+            
+            if ipl_depths:
+                sns.histplot(y = ipl_depths, binwidth=10, alpha=0.7, 
+                            color='steelblue', edgecolor='black', 
+                            ax=ax)
+                ax.set_ylim(0, 100)
+                # ax.set_xlabel('IPL Depth')
+                ax.set_ylabel('')
+                ax.set_xlabel('')
+                ax.set_yticks([])
+                ax.axhline(45, color='black', linestyle='-', alpha=0.1)
+                # ax.margins(x=0.9)
+                # ax.grid(True, alpha=0.3)
+
+                # Add statistics
+            #     mean_ipl = np.mean(ipl_depths)
+            #     std_ipl = np.std(ipl_depths)
+            #     ax.axvline(mean_ipl, color='red', linestyle='--', 
+            #               label=f'Mean: {mean_ipl:.2f}±{std_ipl:.2f}')
+            #     ax.legend(fontsize=6)
+            # else:
+            #     ax.text(0.5, 0.5, 'No IPL\ndata', ha='center', va='center',
+            #            transform=ax.transAxes)
+            #     ax.axis('off')
+            
+            if row == 0:
+                ax.set_title('IPL', fontsize=8)
+                # share y-axis
+            col_idx += 1
+
+        # # Plot metrics if requested
+        if metrics_to_plot is not None and len(metrics_to_plot) > 0:
+            if row == 0:  # Track column index on first row
+                metrics_col_idx = col_idx
+            ax = axes[row, col_idx] if n_clusters > 1 else axes[col_idx]
+            
+            # Calculate mean and std for each metric in this cluster
+            metric_means = []
+            metric_stds = []
+            metric_labels = []
+            
+            for metric in metrics_to_plot:
+                if metric in cluster_rois.columns:
+                    values = cluster_rois[metric].dropna()
+                    if len(values) > 0:
+                        metric_means.append(values.mean())
+                        metric_stds.append(values.std())
+                        metric_labels.append(metric.replace('_', ' ').title())
+            
+            if metric_means:
+                x_pos = np.arange(len(metric_means))
+                ax.errorbar(x_pos, metric_means, yerr=metric_stds, 
+                           fmt='o-', capsize=3, capthick=1)
+                ax.set_xticks(x_pos)
+                ax.set_xticklabels(metric_labels, rotation=45, ha='right', fontsize=6)
+                ax.set_ylabel('Value')
+            else:
+                ax.text(0.5, 0.5, 'No metrics\ndata', ha='center', va='center',
+                       transform=ax.transAxes)
+                ax.axis('off')
+            
+            if row == 0:
+                ax.set_title('Metrics', fontsize=8)
+            col_idx += 1
+
+        # Plot metrics_like if requested - one column per metric prefix
+        if metrics_like is not None and len(metrics_like) > 0:
+            for i, metric_prefix in enumerate(metrics_like):
+                if row == 0:  # Track column indices on first row
+                    metrics_like_col_indices.append(col_idx)
+                ax = axes[row, col_idx] if n_clusters > 1 else axes[col_idx]
+                
+                # Find all columns that match the pattern: prefix or prefix_*
+                # This handles cases like "areas_0", "biphasic_index_0", etc.
+                matching_metrics = [col for col in cluster_rois.columns 
+                                  if col == metric_prefix or 
+                                     (col.startswith(metric_prefix) and 
+                                      len(col) > len(metric_prefix) and 
+                                      col[len(metric_prefix)] == '_')]
+                
+                if verbose:
+                    print(f"    Metric prefix: '{metric_prefix}'")
+                    print(f"    Available columns: {list(cluster_rois.columns)}")
+                    print(f"    Matching columns: {matching_metrics}")
+                    if matching_metrics:
+                        sample_values = cluster_rois[matching_metrics[0]].head(3).tolist()
+                        print(f"    Sample values from {matching_metrics[0]}: {sample_values}")
+                
+                # Calculate mean and std for each matching metric
+                metric_means = []
+                metric_stds = []
+                metric_labels = []
+                
+                for metric in sorted(matching_metrics):  # Sort to get consistent order
+                    values = cluster_rois[metric].dropna()
+                    if len(values) > 0:
+                        metric_means.append(values.mean())
+                        metric_stds.append(values.std())
+                        # Extract the suffix (e.g., "0" from "areas_0", "0" from "biphasic_index_0")
+                        if metric == metric_prefix:
+                            suffix = metric  # Use the full name if exact match
+                        else:
+                            # Get everything after the prefix and first underscore
+                            suffix = metric[len(metric_prefix)+1:]
+                        metric_labels.append(suffix)
+                
+                if metric_means:
+                    # sns.boxplot(data=cluster_rois[matching_metrics], 
+                    #             ax=ax, palette=fish_palette, fliersize = 0,
+                    #             orient='h')
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", category=UserWarning, message="The palette list has more values")
+                        sns.stripplot(data=cluster_rois[matching_metrics], 
+                            ax=ax, alpha=0.1, 
+                            orient='h',
+                            # palette="dark:k",
+                            palette = fish_palette,
+                            edgecolor = "k",
+                        size=rcParams['lines.markersize']/2,
+                        linewidth=0.3,
+                        # size=3,
+                        jitter=True)
+                    ax.set_yticks([])
+                    
+                    # Set x-axis limits to 99th percentile to handle outliers
+                    all_values = cluster_rois[matching_metrics].values.flatten()
+                    all_values = all_values[~np.isnan(all_values)]  # Remove NaN values
+                    if len(all_values) > 0:
+                        p1, p99 = np.percentile(all_values, [0, 99.9])
+                        # all_values_min = np.min(all_values)
+                        # min_offset = all_values_min * 0.01
+                        # if all_values_min <= 0:
+                        ax.set_xlim(None, p99)
+                        # else:
+                            # ax.set_xlim(p1 + min_offset, p99)
+
+                    if verbose:
+                        print(f"    Data range: min={cluster_rois[matching_metrics].min().min():.3f}, max={cluster_rois[matching_metrics].max().max():.3f}")
+                else:
+                    ax.text(0.5, 0.5, 'No data', ha='center', va='center',
+                           transform=ax.transAxes)
+                    ax.axis('off')
+                
+                if row == 0:
+                    ax.set_title(f'{metric_prefix.title()} Metrics', fontsize=8)
+                col_idx += 1
+
+    # Share x- and y-axes within each metric column type for easier comparison
+    # Only relevant when we have multiple rows
+    # if n_clusters > 1:
+    #     # Share axes for metrics_like columns
+    #     for metric_col_idx in metrics_like_col_indices:
+    #         try:
+    #             column_axes = [axes[row, metric_col_idx] for row in range(n_clusters)]
+    #         except Exception:
+    #             # Defensive: if axes layout unexpected, skip
+    #             continue
+
+    #         # Share x and y with the top row axis
+    #         ref_ax = column_axes[0]
+    #         for ax_shared in column_axes[1:]:
+    #             try:
+    #                 ax_shared.sharex(ref_ax)
+    #                 ax_shared.sharey(ref_ax)
+    #             except Exception:
+    #                 pass
+
+            # Align y-limits across the column for consistent scaling
+            # try:
+            #     ymins = [ax.get_ylim()[0] for ax in column_axes]
+            #     ymaxs = [ax.get_ylim()[1] for ax in column_axes]
+            #     ymin = np.nanmin(ymins)
+            #     ymax = np.nanmax(ymaxs)
+            #     for ax_shared in column_axes:
+            #         ax_shared.set_ylim(ymin, ymax)
+            # except Exception:
+            #     pass
+
+        # # Also share axes for the single metrics column if present
+        # if metrics_col_idx is not None:
+        #     try:
+        #         column_axes = [axes[row, metrics_col_idx] for row in range(n_clusters)]
+        #         ref_ax = column_axes[0]
+        #         for ax_shared in column_axes[1:]:
+        #             try:
+        #                 ax_shared.sharex(ref_ax)
+        #                 ax_shared.sharey(ref_ax)
+        #             except Exception:
+        #                 pass
+
+        #         # Align y-limits
+        #         ymins = [ax.get_ylim()[0] for ax in column_axes]
+        #         ymaxs = [ax.get_ylim()[1] for ax in column_axes]
+        #         ymin = np.nanmin(ymins)
+        #         ymax = np.nanmax(ymaxs)
+        #         for ax_shared in column_axes:
+        #             ax_shared.set_ylim(ymin, ymax)
+        #     except Exception:
+        #         pass
+    sns.despine(left=False, bottom=False)
+    # plt.tight_layout(constrained_layout=True, padding=0.4)
+
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Saved enhanced cluster averages plot to {save_path}")
+
+
+
+    # plt.show()
+
+    # Print summary
+    print(f"\nDisplayed {n_clusters} clusters:")
+    for cluster_id in sorted_clusters:
+        n_rois = cluster_averages[cluster_id]["n_rois"]
+        print(f"  Cluster {cluster_id}: {n_rois} ROIs")
+    return fig, axes
+
 # Convenience function that combines everything
 def cluster_rf_data(df, feature_patterns, method='kmeans', n_clusters=5, 
-                   id_vars=None, scale=True, scaling_method='standard', show_elbow=True, **kwargs):
+                   id_vars=None, scale=True, scaling_method='standard', show_elbow=True, 
+                   show_embedding=None, **kwargs):
     """
     Complete clustering workflow for RF data.
     
@@ -1141,13 +1967,15 @@ def cluster_rf_data(df, feature_patterns, method='kmeans', n_clusters=5,
         Scaling method: 'standard', 'custom', 'rank', 'l2'
     show_elbow : bool
         Whether to show elbow plot for kmeans
+    show_embedding : str or None, default None
+        Embedding visualization: None (no plot), 'pca', 'umap', or 'tsne'
     **kwargs
         Additional clustering parameters
     
     Returns:
     --------
     dict
-        Dictionary containing clustered_data, summary_stats, scaler, and pca results
+        Dictionary containing clustered_data, summary_stats, scaler, and embedding results
     """
     
     print(f"Clustering RF data using {method} with {n_clusters} clusters")
@@ -1184,15 +2012,27 @@ def cluster_rf_data(df, feature_patterns, method='kmeans', n_clusters=5,
     # Generate summary statistics
     summary_stats = cluster_summary_stats(clustered_data, feature_patterns, id_vars)
     
-    # PCA visualization
-    pca, pca_data = visualize_clusters_pca(clustered_data, feature_patterns)
+    # Conditional embedding visualization
+    embedding_obj = None
+    embedding_data = None
+    
+    if show_embedding is not None:
+        if show_embedding.lower() == 'pca':
+            embedding_obj, embedding_data = visualize_clusters_pca(clustered_data, feature_patterns)
+        elif show_embedding.lower() == 'umap':
+            embedding_obj, embedding_data = visualize_clusters_umap(clustered_data, feature_patterns)
+        elif show_embedding.lower() == 'tsne':
+            embedding_obj, embedding_data = visualize_clusters_tsne(clustered_data, feature_patterns)
+        else:
+            print(f"Warning: Unknown embedding method '{show_embedding}'. Skipping visualization.")
     
     return {
         'clustered_data': clustered_data,
         'summary_stats': summary_stats,
         'scaler': scaler,
-        'pca': pca,
-        'pca_data': pca_data,
+        'embedding': embedding_obj,
+        'embedding_data': embedding_data,
+        'embedding_method': show_embedding,
         'elbow_results': elbow_results,
         'clustering_pca': clustering_result.get('pca_obj'),  # PCA used for clustering
         'clusterer': clustering_result.get('clusterer')
@@ -1250,3 +2090,233 @@ If it were just showing single examples, you'd see:
 - Large correlation standard deviation > 0.3
 - Average intensity profiles that match exactly one individual
 """
+
+
+# def cluster_and_analyze_comprehensive(df, experiment_obj, feature_patterns, 
+#                                      method='kmeans', n_clusters=5, 
+#                                      id_vars=['recording_id', 'roi_id'],
+#                                      metrics_to_plot=None,
+#                                      include_timecourses=True,
+#                                      cs_params=None,
+#                                      **clustering_kwargs):
+#     """
+#     Complete workflow: cluster RFs, create averages, extract timecourses, and plot everything.
+    
+#     Parameters:
+#     -----------
+#     df : pd.DataFrame
+#         Input dataframe with RF metrics
+#     experiment_obj : Experiment
+#         Experiment object containing recording data
+#     feature_patterns : list
+#         Feature patterns for clustering (e.g., ['space_amps', 'areas'])
+#     method : str
+#         Clustering method ('kmeans', 'gmm', 'hierarchical')
+#     n_clusters : int
+#         Number of clusters
+#     id_vars : list
+#         ID variables for merging back to original data
+#     metrics_to_plot : list, optional
+#         Metric column names to plot (e.g., ['space_amps_0', 'areas_0'])
+#     include_timecourses : bool
+#         Whether to extract and plot timecourses
+#     cs_params : dict, optional
+#         Parameters for cs_segment.run()
+#     **clustering_kwargs
+#         Additional parameters for clustering
+    
+#     Returns:
+#     --------
+#     dict
+#         Comprehensive results containing:
+#         - clustering_result: clustering analysis results
+#         - df_with_clusters: dataframe with cluster assignments
+#         - cluster_averages: averaged RFs per cluster
+#         - cluster_averaged_strfs: averaged STRFs per cluster (if timecourses)
+#         - cluster_timecourses: extracted timecourses (if timecourses)
+#     """
+#     print("=== COMPREHENSIVE CLUSTER ANALYSIS ===")
+    
+#     # Step 1: Perform clustering
+#     print("\n1. Performing clustering...")
+#     clustering_result = cluster_rf_data(
+#         df, feature_patterns, method=method, n_clusters=n_clusters, 
+#         id_vars=id_vars, **clustering_kwargs
+#     )
+    
+#     # Step 2: Merge clusters back to original data
+#     print("\n2. Merging cluster assignments...")
+#     df_with_clusters = merge_clusters_to_original(df, clustering_result, id_cols=id_vars)
+    
+#     # Step 3: Create averaged RFs
+#     print("\n3. Creating averaged RFs...")
+#     cluster_averages = create_cluster_averaged_rfs(df_with_clusters, experiment_obj)
+    
+#     results = {
+#         'clustering_result': clustering_result,
+#         'df_with_clusters': df_with_clusters,
+#         'cluster_averages': cluster_averages,
+#     }
+    
+#     # Step 4: Extract RGBU timecourses if requested
+#     cluster_timecourses = None
+#     if include_timecourses:
+#         print("\n4. Extracting RGBU timecourses per cluster...")
+        
+#         # Extract timecourses directly from individual ROI data using get_timecourses_dominant_by_channel
+#         cluster_timecourses = extract_cluster_timecourses(df_with_clusters, experiment_obj)
+        
+#         results['cluster_timecourses'] = cluster_timecourses
+    
+#     # Step 5: Create comprehensive plot
+#     print("\n5. Creating comprehensive visualization...")
+#     plot_all_cluster_averages_enhanced(
+#         df_with_clusters, experiment_obj, cluster_averages,
+#         cluster_timecourses=cluster_timecourses,
+#         metrics_to_plot=metrics_to_plot,
+#         figsize_per_cluster=(12, 2),
+#         show_ipl_distribution=True
+#     )
+    
+#     print("\n=== ANALYSIS COMPLETE ===")
+#     print(f"Results available in returned dictionary with keys: {list(results.keys())}")
+    
+#     return results
+
+
+def plot_cluster_results(clustering_result, experiment_obj, 
+                        original_data=None,
+                        metrics_to_plot=None,
+                        metrics_like=None,
+                        include_timecourses=True,
+                        figsize_per_cluster=None,
+                        show_ipl_distribution=True,
+                        save_path=None,
+                        verbose=False):
+    """
+    Plot comprehensive cluster analysis results from cluster_rf_data().
+    
+    This function takes the output of cluster_rf_data() and creates enhanced 
+    visualizations with RF averages, timecourses, IPL distributions, and metrics.
+    
+    Parameters:
+    -----------
+    clustering_result : dict
+        Output from cluster_rf_data() containing 'clustered_data' key
+    experiment_obj : Experiment
+        Experiment object containing recording data
+    original_data : pd.DataFrame, optional
+        Original unscaled dataframe to use for plotting metrics.
+        If None, will use scaled values from clustering_result
+    metrics_to_plot : list, optional
+        Metric column names to plot (e.g., ['space_amps_0', 'areas_0'])
+    metrics_like : list, optional
+        Metric prefixes to group and plot (e.g., ['areas', 'space_amps'])
+        Each creates a separate column with all matching metrics (e.g., areas_0, areas_1, etc.)
+    include_timecourses : bool
+        Whether to extract and plot timecourses
+    figsize_per_cluster : tuple or None
+        Size per cluster row in inches. If None, automatically scales based on number of columns
+    show_ipl_distribution : bool
+        Whether to show IPL distribution plots
+    save_path : str, optional
+        Path to save the figure
+    verbose : bool, default True
+        Whether to print progress messages
+    
+    Returns:
+    --------
+    dict
+        Dictionary containing:
+        - cluster_averages: averaged RFs per cluster
+        - cluster_timecourses: extracted timecourses (if requested)
+    """
+    if verbose:
+        print("=== PLOTTING CLUSTER RESULTS ===")
+    
+    # Extract clustered data
+    df_with_clusters = clustering_result['clustered_data']
+    
+    # Step 3: Create comprehensive plot
+    if verbose:
+        print("\n3. Creating comprehensive visualization...")
+    # Use original data for metrics if provided
+    data_for_metrics = df_with_clusters
+    if verbose:
+        print(f"\n=== DEBUGGING DATA MERGE ===")
+        print(f"original_data is None: {original_data is None}")
+        if original_data is not None:
+            print(f"original_data type: {type(original_data)}")
+            print(f"original_data shape: {original_data.shape}")
+    
+    if original_data is not None:
+        if verbose:
+            print(f"Starting merge process...")
+        # Merge cluster assignments with original data using index
+        cluster_assignments = df_with_clusters[['cluster_id']].copy()
+        if verbose:
+            print(f"cluster_assignments shape: {cluster_assignments.shape}")
+            print(f"cluster_assignments columns: {cluster_assignments.columns.tolist()}")
+        clusters = df_with_clusters['cluster_id']
+        data_for_metrics = original_data
+        data_for_metrics['cluster_id'] = clusters
+        # data_for_metrics = original_data.join(cluster_assignments, how='left')
+    
+    # Step 1: Create averaged RFs (using the final data_for_metrics)
+    if verbose:
+        print("\n1. Creating averaged RFs...")
+    cluster_averages = create_cluster_averaged_rfs(data_for_metrics, experiment_obj, verbose=verbose)
+    
+    results = {
+        'cluster_averages': cluster_averages,
+    }
+    
+    # Step 2: Extract RGBU timecourses if requested (using the final data_for_metrics)
+    cluster_timecourses = None
+    if include_timecourses:
+        if verbose:
+            print("\n2. Extracting RGBU timecourses per cluster...")
+        cluster_timecourses = extract_cluster_timecourses(data_for_metrics, experiment_obj, verbose=verbose)
+        results['cluster_timecourses'] = cluster_timecourses
+        
+        if verbose:
+            print(f"  Clustered data shape: {df_with_clusters.shape}")
+            print(f"  Original data shape: {original_data.shape}")
+            print(f"  Merged data shape: {data_for_metrics.shape}")
+            print(f"  Non-null cluster assignments: {data_for_metrics['cluster_id'].notna().sum()}")
+            
+            # Check if areas columns exist
+            areas_cols = [col for col in data_for_metrics.columns if col.startswith('areas_')]
+            time_amps_cols = [col for col in data_for_metrics.columns if col.startswith('time_amps_')]
+            print(f"  Areas columns in merged data: {areas_cols}")
+            print(f"  Time_amps columns in merged data: {time_amps_cols}")
+            if areas_cols:
+                sample_areas = data_for_metrics[data_for_metrics['cluster_id'].notna()][areas_cols[0]].head(3).tolist()
+                print(f"  Sample areas values (from clustered ROIs): {sample_areas}")
+            if time_amps_cols:
+                sample_time_amps = data_for_metrics[data_for_metrics['cluster_id'].notna()][time_amps_cols[0]].head(3).tolist()
+                print(f"  Sample time_amps values (from clustered ROIs): {sample_time_amps}")
+    else:
+        if verbose:
+            print(f"Using clustered data directly (no original_data merge)")
+            areas_cols = [col for col in data_for_metrics.columns if col.startswith('areas_')]
+            time_amps_cols = [col for col in data_for_metrics.columns if col.startswith('time_amps_')]
+            print(f"  Areas columns in clustered data: {areas_cols}")
+            print(f"  Time_amps columns in clustered data: {time_amps_cols}")
+    
+    fig, ax = plot_all_cluster_averages_enhanced(
+        data_for_metrics, experiment_obj, cluster_averages,
+        cluster_timecourses=cluster_timecourses,
+        metrics_to_plot=metrics_to_plot,
+        metrics_like=metrics_like,
+        figsize_per_cluster=figsize_per_cluster,
+        show_ipl_distribution=show_ipl_distribution,
+        save_path=save_path,
+        verbose=verbose
+    )
+    
+    if verbose:
+        print("\n=== PLOTTING COMPLETE ===")
+        print(f"Plot results available with keys: {list(results.keys())}")
+    
+    return fig, ax

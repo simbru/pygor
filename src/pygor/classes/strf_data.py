@@ -1095,7 +1095,7 @@ class STRF(Core):
         return self.spatial_overlap_channel_pair(0, 2, abs_arrays, signal_only, single_channel_value)
 
 
-    def get_polarities(self, roi=None, exclude_FirstLast=(1,1), mode="spatial", force_recompute=False) -> np.ndarray:
+    def get_polarities(self, roi=None, exclude_FirstLast=(1,1), mode="spatiotemporal", force_recompute=False) -> np.ndarray:
         """
         Determine the polarity of STRF responses using various analysis methods.
         
@@ -1178,6 +1178,38 @@ class STRF(Core):
             cat[valid_mask & (polarity_indices < -opponent_threshold)] = -1  # OFF
             cat[valid_mask & (np.abs(polarity_indices) <= opponent_threshold)] = 2  # Opponent
             return cat
+            
+        elif mode == "spatiotemporal":
+            # Hybrid approach: spatial analysis first, temporal fallback for NaNs
+            # Get spatial polarity indices (keeps high threshold for accuracy)
+            polarity_indices = self.spatial_polarity_index()
+            cat = np.full(len(polarity_indices), np.nan)
+            
+            # Apply spatial classification first (this takes priority)
+            valid_mask = ~np.isnan(polarity_indices)
+            opponent_threshold = .8  # Could be made a parameter
+            
+            cat[valid_mask & (polarity_indices > opponent_threshold)] = 1    # ON
+            cat[valid_mask & (polarity_indices < -opponent_threshold)] = -1  # OFF
+            cat[valid_mask & (np.abs(polarity_indices) <= opponent_threshold)] = 2  # Opponent
+            
+            # For remaining NaNs, use temporal analysis as fallback
+            nan_mask = np.isnan(cat)
+            if np.any(nan_mask):
+                # Get dominant timecourses for cells that couldn't be classified spatially
+                timecourses = self.get_timecourses_dominant(mask_empty=True)
+                
+                # Simple temporal polarity: sign of peak absolute response
+                for i in np.where(nan_mask)[0]:
+                    tc = timecourses[i]
+                    if np.any(np.abs(tc) > 0.5):  # Minimum signal threshold
+                        # Find peak absolute response and use its sign
+                        peak_idx = np.argmax(np.abs(tc))
+                        peak_val = tc[peak_idx]
+                        cat[i] = 1 if peak_val > 0 else -1
+                
+            return cat
+            
         elif mode == "gabor":
             # First separate out to ON and OFF
             spaces = self.collapse_times()
@@ -1225,6 +1257,13 @@ class STRF(Core):
         # from pygor.strf.polarity import get_polarities
         # return get_polarities(self, roi, exclude_FirstLast, mode, force_recompute)
 
+    def check_cs_pass(self):
+        # if a label exists from self.get_polarities
+        maps, _ = self.cs_seg()
+        # where maps is not all zeros, give True otherwise False
+        # print([np.unique(m) for m in maps])
+        return np.array([len(np.unique(m)) > 1 for m in maps])
+
     def spatial_polarity_index(self, roi = None, ch_idx = None, threshold = 3, mask_by_channel = True, mask_threshold = 2, dimstr = "time") -> np.ndarray:
         # Handle multicolour channel selection efficiently
         if ch_idx is not None:
@@ -1252,7 +1291,6 @@ class STRF(Core):
         denominator = uppers_sum - lowers_sum
         indices = np.where(denominator != 0, 
                         (uppers_sum + lowers_sum) / denominator, np.nan)
-        
         # Apply bool_by_channel masking if requested
         if mask_by_channel:
             bool_mask = self.bool_by_channel(threshold=mask_threshold, dimstr=dimstr)
@@ -1554,7 +1592,9 @@ class STRF(Core):
             # Convert to 0-360° range following pygor convention
             if angle_deg < 0:
                 angle_deg = angle_deg + 360
-            
+            # Limit data to 180 degree format
+            if angle_deg > 180:
+                angle_deg -= 180
             # Store results
             major_axis_lengths.append(major_axis_length)
             minor_axis_lengths.append(minor_axis_length)
@@ -2219,7 +2259,7 @@ class STRF(Core):
         pols_out[pols == np.nan] = "NaN"
         return pols_out
 
-    def get_polarity_category_cell(self, mask_by_channel=True, threshold=2, dimstr="time") -> str:
+    def get_polarity_category_cell(self, mask_by_channel=False, threshold=2, dimstr="spatiotemporal") -> str:
         """
         Get polarity category for each cell across colour channels.
         
@@ -2450,6 +2490,30 @@ class STRF(Core):
         spectroids_neg = np.apply_along_axis(pygor.strf.temporal.only_centroid, 1, self.get_timecourses()[:, 0])
         spectroids_pos = np.apply_along_axis(pygor.strf.temporal.only_centroid, 1, self.get_timecourses()[:, 1])
         return spectroids_neg, spectroids_pos
+
+    def get_spectral_centroid_centre(self) -> np.ndarray:
+        vals = np.apply_along_axis(pygor.strf.temporal.only_centroid, 1, self.get_timecourses()[:, 0])
+        pass_bool = self.check_cs_pass()
+        # nan where pass bools is False
+        return np.where(pass_bool, vals, np.nan)
+
+    def get_biphasic_index(self) -> np.ndarray:
+        vals = np.apply_along_axis(pygor.strf.temporal.biphasic_index, 1, self.get_timecourses()[:, 0])
+        pass_bool = self.check_cs_pass()
+        # nan where pass bools is False
+        return np.where(pass_bool, vals, np.nan)
+
+    def get_peaktimes(self) -> np.ndarray:
+        # times = self.get_timecourses_dominant()
+        # strf_dur = self.strf_dur_ms
+        # strf_len = self.strfs.shape[1]
+        # peak_times_indices = np.array([pygor.strf.temporal.find_peaktime(t) for t in times])
+        # scale_factor = strf_dur / strf_len
+        # vals = peak_times_indices * scale_factor
+        # pass_bool = self.check_cs_pass()
+        # # nan where pass bools is False
+        # return np.where(pass_bool, vals, np.nan)
+        return pygor.strf.temporal.find_peaktime_obj(self)
 
     def calc_spectrums(self, roibyroi = False) -> tuple[np.ndarray, np.ndarray]:
         spectrum_neg = np.array([pygor.strf.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 0]])

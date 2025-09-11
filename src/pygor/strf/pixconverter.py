@@ -277,7 +277,7 @@ def area_to_diameter(float):
     """
     return 2 * np.sqrt(float / 2)
 
-def visang_deg_to_retinal_projection_um(
+def visang_deg_to_um(
     visual_angle_deg, 
     lens_to_retina_distance_um=50, 
     method="precise"

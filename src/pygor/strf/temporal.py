@@ -1,5 +1,6 @@
 import numpy as np
 import warnings
+from scipy.interpolate import interp1d
 
 # Local imports
 import pygor.strf.spatial
@@ -187,7 +188,7 @@ def biphasic_index(timeseries, axis=-1):
         a = np.abs(a)
         b = np.abs(b)
         # Calculate
-        return (b - a) / (a + b)  # Polarity index, zeros in divider will cause trouble
+        return 1 - np.abs((b - a) / (a + b))  # Polarity index, zeros in divider will cause trouble
 
     if timeseries.ndim == 1:
         return index(timeseries)
@@ -244,6 +245,89 @@ def only_spectrum(timecourse_1d, sampling_rate=15.625):
     return spectral_centroid(timecourse_1d, sampling_rate=sampling_rate)[1]
     # return spectral_centroid(timecourse_1d, sampling_rate = 15.625)[1]
 
+def find_peaktime(arr):
+    """
+    Return index(es) of the last local extremum (max or min).
+    Accepts 1D (T,) or 2D (N, T) arrays. Returns int or ndarray (N,).
+    """
+    x = np.asarray(arr)
+
+    def last_extremum_1d(y):
+        y = np.asarray(y)
+        if y.size < 3:
+            return int(np.nanargmax(np.abs(y))) if np.any(~np.isnan(y)) else 0
+
+        d = np.diff(y)
+        s = np.sign(d)
+
+        # Handle flat regions: fill zeros by forward then backward fill
+        if np.any(s == 0):
+            # forward fill
+            for i in range(1, s.size):
+                if s[i] == 0:
+                    s[i] = s[i - 1]
+            # backward fill
+            for i in range(s.size - 2, -1, -1):
+                if s[i] == 0:
+                    s[i] = s[i + 1]
+
+        # Turning points: maxima ( + to - ) or minima ( - to + )
+        tp = np.flatnonzero(((s[:-1] > 0) & (s[1:] <= 0)) | ((s[:-1] < 0) & (s[1:] >= 0))) + 1
+        if tp.size:
+            return int(tp[-1])
+
+        # Fallback: global strongest response by magnitude
+        if np.any(~np.isnan(y)):
+            return int(np.nanargmax(np.abs(y)))
+        return 0
+
+    if x.ndim == 1:
+        return last_extremum_1d(x)
+    if x.ndim == 2:
+        return np.apply_along_axis(last_extremum_1d, 1, x)
+    raise ValueError("arr must be 1D or 2D")
+
+
+def find_peaktime_obj(strf_obj, interp_factor=1000):
+    times = strf_obj.get_timecourses_dominant()
+    strf_dur = strf_obj.strf_dur_ms
+    strf_len = strf_obj.strfs.shape[1]
+    
+    # Interpolate timecourses for higher temporal precision
+    interpolated_times = []
+    for t in times:
+        if np.all(np.isnan(t)) or len(t) < 2:
+            # Handle edge cases where interpolation isn't possible
+            interpolated_times.append(t)
+        else:
+            x_original = np.arange(len(t))
+            x_interp = np.linspace(0, len(t)-1, len(t) * interp_factor)
+            f = interp1d(x_original, t, kind='linear', bounds_error=False, fill_value=np.nan)
+            interpolated_times.append(f(x_interp))
+    
+    # Find peak times on interpolated data
+    peak_times_indices = np.array([pygor.strf.temporal.find_peaktime(t) for t in interpolated_times])
+    
+    # Update scale factor to account for interpolation
+    scale_factor = strf_dur / (strf_len * interp_factor)
+    vals = peak_times_indices * scale_factor
+    
+    pass_bool = strf_obj.check_cs_pass()
+    # nan where pass bools is False
+    vals = np.where(pass_bool, vals, np.nan)
+    # convert to time lag 
+    window = strf_obj.strf_dur_ms
+    vals = window - vals
+    return vals
+
+    # strf_dur = strf_obj.strf_dur_ms
+    # strf_len = strf_obj.strfs.shape[1]
+    # peak_times_indices = np.array([pygor.strf.temporal.find_peaktime(t) for t in times])
+    # scale_factor = strf_dur / strf_len
+    # vals = peak_times_indices * scale_factor
+    # pass_bool = strf_obj.check_cs_pass()
+    # # nan where pass bools is False
+    # return np.where(pass_bool, vals, np.nan)
 
 # def
 

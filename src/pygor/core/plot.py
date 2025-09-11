@@ -161,7 +161,7 @@ def plot_averages(
         # ax.set_xlabel("Time (ms)")
         fig.subplots_adjust(hspace=0)
         cax = axs.flat[-1]
-        cax.set_xticks(np.ceil(ax.xaxis.get_majorticklocs()), np.ceil(ax.xaxis.get_majorticklocs() / 1000))
+        cax.set_xticks(np.ceil(cax.xaxis.get_majorticklocs()), np.ceil(cax.xaxis.get_majorticklocs() / 1000))
         cax.set_xlim(0, len(self.averages[0]))
         cax.set_xlabel("Time (s)")
         return fig, axs
@@ -197,11 +197,14 @@ def plot_averages(
         markers_arr -= markers_arr[0]
         # Use the passed figsize parameter instead of hardcoded (5, 3)
         if axs is None:
-            fig, ax = plt.subplots(1, figsize=figsize)
+            fig, axs = plt.subplots(1, figsize=figsize)
+            axs = np.array([axs])  # Make it consistent with the other branch
         else:
-            # Use provided axis
-            ax = axs if not hasattr(axs, 'flat') else axs.flat[0]
-            fig = ax.figure
+            # Use provided axis - ensure it's in array format
+            if not hasattr(axs, 'flat'):
+                axs = np.array([axs])
+            fig = axs.flat[0].figure
+        ax = axs.flat[0]  # Get the axis for plotting
         # import sklearn.preprocessing
         # scaler = sklearn.preprocessing.MaxAbsScaler()
         arr = self.averages
@@ -221,7 +224,7 @@ def plot_averages(
         ax.set_xticks(np.ceil(ax.xaxis.get_majorticklocs()), np.ceil(ax.xaxis.get_majorticklocs() / 1000))
         ax.set_xlim(0, len(self.averages[0]))
         ax.set_xlabel("Time (s)")
-        return fig, ax
+        return fig, axs
     # plt.tight_layout()
     
     
