@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
 
-def create_rgb_composite(curr_clust_avgs, channel_indices):
+def create_rgb_composite(curr_clust_avgs, channel_indices, mode='proportional'):
     """
     Create RGB composite from selected channels.
 
@@ -28,30 +28,62 @@ def create_rgb_composite(curr_clust_avgs, channel_indices):
         Shape: (color, y, x)
     channel_indices : list
         List of 3 channel indices for R, G, B
+    mode : str, default 'proportional'
+        'proportional': Standard proportional normalization (current default)
+        'grey_baseline': Grey baseline with ON adding color and OFF subtracting color
 
     Returns:
     --------
     np.array
         RGB composite image (y, x, 3)
     """
-    # Create RGB composite - let it auto-equalize
-    rgb_composite = np.zeros((*curr_clust_avgs.shape[1:], 3))       
-
-    for i, channel_idx in enumerate(channel_indices):
-        if channel_idx < curr_clust_avgs.shape[0]:  # Check if channel exists
-            channel_data = curr_clust_avgs[channel_idx]
-            # Normalize each channel independently to 0-1 for RGB display
-            if np.max(np.abs(channel_data)) > 0:
-                # Use absolute values and normalize to full 0-1 range
-                normalized = np.abs(channel_data) / np.max(np.abs(channel_data))
-            else:
-                normalized = np.zeros_like(channel_data)
+    # Extract channels
+    channels = []
+    for channel_idx in channel_indices:
+        if channel_idx < curr_clust_avgs.shape[0]:
+            channels.append(curr_clust_avgs[channel_idx])
         else:
-            # Channel doesn't exist, use zeros
-            normalized = np.zeros(curr_clust_avgs.shape[1:])
-
-        rgb_composite[:, :, i] = normalized
-
+            channels.append(np.zeros(curr_clust_avgs.shape[1:]))
+    
+    # Find global maximum across all channels for scaling
+    global_max = max(np.max(np.abs(channel)) for channel in channels) if len(channels) > 0 else 1.0
+    
+    if mode == 'grey_baseline':
+        # Enhanced grey baseline mode with perceptual improvements
+        # 1. Start with darker baseline (0.35) for more dynamic range
+        rgb_composite = np.full((*curr_clust_avgs.shape[1:], 3), 0.35)
+        
+        if global_max > 0:
+            # 2. Perceptually-uniform scaling based on ITU-R BT.709 luminance sensitivity
+            # Green appears brightest (reduce), Blue appears dimmest (boost most), Red intermediate
+            saturation_scalars = [1,.75,2]  # [Red, Green, Blue]
+            
+            for i, channel in enumerate(channels):
+                # Use channel-specific saturation scaling with higher range for darker baseline
+                scalar = saturation_scalars[i] if i < len(saturation_scalars) else 0.55
+                scaled_channel = (channel / global_max) * scalar
+                
+                # Add scaled values to darker baseline
+                # ON responses (positive) make that color channel brighter
+                # OFF responses (negative) make that color channel darker
+                rgb_composite[:, :, i] += scaled_channel
+            
+            # Clip to valid range [0, 1]
+            rgb_composite = np.clip(rgb_composite, 0.0, 1.0)
+            
+            # 3. Apply gamma correction for more punchy, saturated colors
+            rgb_composite = np.power(rgb_composite, 0.33)  # Gamma < 1 = more contrast/saturation
+    
+    else:  # 'proportional' mode (default)
+        # Standard proportional normalization
+        rgb_composite = np.zeros((*curr_clust_avgs.shape[1:], 3))
+        
+        if global_max > 0:
+            for i, channel in enumerate(channels):
+                # Proportional normalization - all channels use the same global max
+                rgb_composite[:, :, i] = np.abs(channel) / global_max
+        # If global_max == 0, rgb_composite remains zeros (black)
+    
     return rgb_composite
 
 def prepare_clustering_data(df, feature_patterns, id_vars=None, 
@@ -91,8 +123,13 @@ def prepare_clustering_data(df, feature_patterns, id_vars=None,
     # Select feature columns
     feature_cols = []
     for pattern in feature_patterns:
-        cols = [col for col in df.columns if pattern in col]
-        feature_cols.extend(cols)
+        # First try exact match for singular features
+        if pattern in df.columns:
+            feature_cols.append(pattern)
+        # Then try pattern matching for multi-column features  
+        else:
+            cols = [col for col in df.columns if pattern in col and col != pattern]
+            feature_cols.extend(cols)
     
     # Remove duplicates while preserving order
     feature_cols = list(dict.fromkeys(feature_cols))
@@ -200,94 +237,24 @@ def prepare_clustering_data(df, feature_patterns, id_vars=None,
             print("Applied rank-based scaling")
             
         elif scaling_method == 'robust':
-            # Robust scaling for all feature types (like your Strategy 1)
-            transformers = []
-            
-            space_amps_cols = [col for col in feature_cols if 'space_amps' in col]
-            areas_cols = [col for col in feature_cols if 'areas' in col]
-            magnitudes_cols = [col for col in feature_cols if 'magnitudes' in col]
-            opponency_cols = [col for col in feature_cols if 'opponency_index' in col]
-            eccentricity_cols = [col for col in feature_cols if 'eccentricity' in col]
-            angles_cols = [col for col in feature_cols if 'angles' in col]
-            orientation_cols = [col for col in feature_cols if 'orientation' in col]
-            
-            # Use RobustScaler for most features, MaxAbsScaler for angles/orientation
-            if space_amps_cols:
-                transformers.append(('space_amps', Pipeline([('robust', RobustScaler())]), space_amps_cols))
-            if areas_cols:
-                transformers.append(('areas', Pipeline([('robust', RobustScaler())]), areas_cols))
-            if magnitudes_cols:
-                transformers.append(('magnitudes', Pipeline([('robust', RobustScaler())]), magnitudes_cols))
-            if opponency_cols:
-                transformers.append(('opponency', Pipeline([('robust', RobustScaler())]), opponency_cols))
-            if eccentricity_cols:
-                transformers.append(('eccentricity', Pipeline([('robust', RobustScaler())]), eccentricity_cols))
-            if angles_cols:
-                transformers.append(('angles', Pipeline([('maxabs', MaxAbsScaler())]), angles_cols))
-            if orientation_cols:
-                transformers.append(('orientation', Pipeline([('maxabs', MaxAbsScaler())]), orientation_cols))
-            
-            if transformers:
-                scaler = ColumnTransformer(transformers=transformers, remainder='drop')
-                feature_data = pd.DataFrame(
-                    scaler.fit_transform(feature_data),
-                    index=feature_data.index,
-                    columns=feature_cols
-                )
-                print(f"Applied robust scaling to {len(transformers)} feature types")
-            else:
-                scaler = RobustScaler()
-                feature_data = pd.DataFrame(
-                    scaler.fit_transform(feature_data),
-                    index=feature_data.index,
-                    columns=feature_data.columns
-                )
-                print("Applied RobustScaler to all features")
+            # Robust scaling - apply to all features uniformly
+            scaler = RobustScaler()
+            feature_data = pd.DataFrame(
+                scaler.fit_transform(feature_data),
+                index=feature_data.index,
+                columns=feature_data.columns
+            )
+            print("Applied RobustScaler to all features")
                 
         elif scaling_method == 'quantile':
-            # Quantile uniform transformation (like your Strategy 2)
-            transformers = []
-            
-            space_amps_cols = [col for col in feature_cols if 'space_amps' in col]
-            areas_cols = [col for col in feature_cols if 'areas' in col]
-            magnitudes_cols = [col for col in feature_cols if 'magnitudes' in col]
-            opponency_cols = [col for col in feature_cols if 'opponency_index' in col]
-            eccentricity_cols = [col for col in feature_cols if 'eccentricity' in col]
-            angles_cols = [col for col in feature_cols if 'angles' in col]
-            orientation_cols = [col for col in feature_cols if 'orientation' in col]
-            
-            # Use QuantileTransformer for most, MaxAbsScaler for angles/orientation
-            if space_amps_cols:
-                transformers.append(('space_amps', Pipeline([('quantile', QuantileTransformer(output_distribution='uniform'))]), space_amps_cols))
-            if areas_cols:
-                transformers.append(('areas', Pipeline([('quantile', QuantileTransformer(output_distribution='uniform'))]), areas_cols))
-            if magnitudes_cols:
-                transformers.append(('magnitudes', Pipeline([('quantile', QuantileTransformer(output_distribution='uniform'))]), magnitudes_cols))
-            if opponency_cols:
-                transformers.append(('opponency', Pipeline([('quantile', QuantileTransformer(output_distribution='uniform'))]), opponency_cols))
-            if eccentricity_cols:
-                transformers.append(('eccentricity', Pipeline([('quantile', QuantileTransformer(output_distribution='uniform'))]), eccentricity_cols))
-            if angles_cols:
-                transformers.append(('angles', Pipeline([('maxabs', MaxAbsScaler())]), angles_cols))
-            if orientation_cols:
-                transformers.append(('orientation', Pipeline([('maxabs', MaxAbsScaler())]), orientation_cols))
-            
-            if transformers:
-                scaler = ColumnTransformer(transformers=transformers, remainder='drop')
-                feature_data = pd.DataFrame(
-                    scaler.fit_transform(feature_data),
-                    index=feature_data.index,
-                    columns=feature_cols
-                )
-                print(f"Applied quantile scaling to {len(transformers)} feature types")
-            else:
-                scaler = QuantileTransformer(output_distribution='uniform')
-                feature_data = pd.DataFrame(
-                    scaler.fit_transform(feature_data),
-                    index=feature_data.index,
-                    columns=feature_data.columns
-                )
-                print("Applied QuantileTransformer to all features")
+            # Quantile uniform transformation - apply to all features uniformly
+            scaler = QuantileTransformer(output_distribution='uniform')
+            feature_data = pd.DataFrame(
+                scaler.fit_transform(feature_data),
+                index=feature_data.index,
+                columns=feature_data.columns
+            )
+            print("Applied QuantileTransformer to all features")
         
         elif scaling_method == 'l2':
             # L2 normalization (row-wise)
@@ -300,7 +267,15 @@ def prepare_clustering_data(df, feature_patterns, id_vars=None,
             print("Applied L2 normalization (row-wise)")
             
         else:
-            raise ValueError(f"Unknown scaling method: {scaling_method}. Choose from: 'standard', 'custom', 'robust', 'quantile', 'rank', 'l2'")
+            available_methods = ['standard', 'custom', 'robust', 'quantile', 'rank', 'l2']
+            print(f"Available scaling methods:")
+            print(f"  - 'standard': StandardScaler (zero mean, unit variance)")
+            print(f"  - 'custom': Feature-specific scaling (MaxAbs for some, MinMax for others)")
+            print(f"  - 'robust': RobustScaler (median-based, outlier resistant)")
+            print(f"  - 'quantile': QuantileTransformer (uniform distribution)")
+            print(f"  - 'rank': Rank-based scaling (preserves ordinal relationships)")
+            print(f"  - 'l2': L2 normalization (unit norm per sample/ROI)")
+            raise ValueError(f"Unknown scaling method: '{scaling_method}'. Choose from: {available_methods}")
     
     # Recombine
     if id_data is not None:
@@ -451,7 +426,12 @@ def apply_clustering(data, method='kmeans', n_clusters=5, random_state=42,
         cluster_labels = clusterer.fit_predict(clustering_data)
         
     else:
-        raise ValueError(f"Unknown clustering method: {method}")
+        available_methods = ['kmeans', 'gmm', 'hierarchical']
+        print(f"Available clustering methods:")
+        print(f"  - 'kmeans': K-means clustering (spherical clusters, fast)")
+        print(f"  - 'gmm': Gaussian Mixture Model (flexible cluster shapes, probabilistic)")
+        print(f"  - 'hierarchical': Agglomerative clustering (tree-based, no centroid assumption)")
+        raise ValueError(f"Unknown clustering method: '{method}'. Choose from: {available_methods}")
     
     # Add cluster labels to original data
     result = data.copy()
@@ -492,8 +472,13 @@ def cluster_summary_stats(clustered_data, feature_patterns, id_cols=None):
     # Get feature columns
     feature_cols = []
     for pattern in feature_patterns:
-        cols = [col for col in clustered_data.columns if pattern in col]
-        feature_cols.extend(cols)
+        # First try exact match for singular features
+        if pattern in clustered_data.columns:
+            feature_cols.append(pattern)
+        # Then try pattern matching for multi-column features  
+        else:
+            cols = [col for col in clustered_data.columns if pattern in col and col != pattern]
+            feature_cols.extend(cols)
     
     feature_cols = list(dict.fromkeys(feature_cols))
     
@@ -508,7 +493,7 @@ def cluster_summary_stats(clustered_data, feature_patterns, id_cols=None):
         # Add ID column summaries if available
         for id_col in id_cols:
             if id_col in clustered_data.columns:
-                if clustered_data[id_col].dtype == 'object':
+                if cluster_data[id_col].dtype == 'object':
                     stats[f'{id_col}_mode'] = cluster_data[id_col].mode().iloc[0] if len(cluster_data[id_col].mode()) > 0 else 'None'
                 else:
                     stats[f'{id_col}_mean'] = cluster_data[id_col].mean()
@@ -524,6 +509,7 @@ def cluster_summary_stats(clustered_data, feature_patterns, id_cols=None):
     return pd.DataFrame(summary_stats)
 
 def visualize_clusters_pca(clustered_data, feature_patterns, n_components=2, 
+                          pca_dims = (0, 1),
                           color_col='cluster_id', figsize=(10, 8)):
     """
     Visualize clusters in PCA space.
@@ -545,8 +531,13 @@ def visualize_clusters_pca(clustered_data, feature_patterns, n_components=2,
     # Get feature columns
     feature_cols = []
     for pattern in feature_patterns:
-        cols = [col for col in clustered_data.columns if pattern in col]
-        feature_cols.extend(cols)
+        # First try exact match for singular features
+        if pattern in clustered_data.columns:
+            feature_cols.append(pattern)
+        # Then try pattern matching for multi-column features  
+        else:
+            cols = [col for col in clustered_data.columns if pattern in col and col != pattern]
+            feature_cols.extend(cols)
     
     feature_cols = list(dict.fromkeys(feature_cols))
     feature_data = clustered_data[feature_cols].dropna()
@@ -560,16 +551,18 @@ def visualize_clusters_pca(clustered_data, feature_patterns, n_components=2,
     
     if color_col in clustered_data.columns:
         colors = clustered_data.loc[feature_data.index, color_col]
-        scatter = plt.scatter(pca_data[:, 0], pca_data[:, 1], 
-                            c=colors, cmap='hsv', alpha=0.6)
-        plt.colorbar(scatter, label=color_col)
+        scatter = plt.scatter(pca_data[:, pca_dims[0]], pca_data[:, pca_dims[1]], 
+                            c=colors, cmap='nipy_spectral', alpha=0.6,
+                            s=rcParams['lines.markersize']/2)
+        # plt.colorbar(scatter, label=color_col)
     else:
-        plt.scatter(pca_data[:, 0], pca_data[:, 1], alpha=0.6)
-    
-    plt.xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)')
-    plt.ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)')
+        plt.scatter(pca_data[:, 0], pca_data[:, 1], alpha=0.6, 
+                            s=rcParams['lines.markersize']/2)
+
+    plt.xlabel(f'PC1 ({pca.explained_variance_ratio_[pca_dims[0]]:.1%} variance)')
+    plt.ylabel(f'PC2 ({pca.explained_variance_ratio_[pca_dims[1]]:.1%} variance)')
     plt.title('Clusters in PCA Space')
-    plt.show()
+    # plt.show()
     
     return pca, pca_data
 
@@ -603,8 +596,13 @@ def visualize_clusters_umap(clustered_data, feature_patterns, n_components=2,
     # Get feature columns
     feature_cols = []
     for pattern in feature_patterns:
-        cols = [col for col in clustered_data.columns if pattern in col]
-        feature_cols.extend(cols)
+        # First try exact match for singular features
+        if pattern in clustered_data.columns:
+            feature_cols.append(pattern)
+        # Then try pattern matching for multi-column features  
+        else:
+            cols = [col for col in clustered_data.columns if pattern in col and col != pattern]
+            feature_cols.extend(cols)
     
     feature_cols = list(dict.fromkeys(feature_cols))
     feature_data = clustered_data[feature_cols].dropna()
@@ -619,15 +617,17 @@ def visualize_clusters_umap(clustered_data, feature_patterns, n_components=2,
     if color_col in clustered_data.columns:
         colors = clustered_data.loc[feature_data.index, color_col]
         scatter = plt.scatter(umap_data[:, 0], umap_data[:, 1], 
-                            c=colors, cmap='hsv', alpha=0.6)
-        plt.colorbar(scatter, label=color_col)
+                            c=colors, cmap='nipy_spectral', alpha=0.6,
+                            s=rcParams['lines.markersize']/2)
+        # plt.colorbar(scatter, label=color_col)
     else:
-        plt.scatter(umap_data[:, 0], umap_data[:, 1], alpha=0.6)
-    
+        plt.scatter(umap_data[:, 0], umap_data[:, 1], alpha=0.6,
+                    s=rcParams['lines.markersize']/2)
+
     plt.xlabel('UMAP1')
     plt.ylabel('UMAP2')
     plt.title('Clusters in UMAP Space')
-    plt.show()
+    # plt.show()
     
     return umap_model, umap_data
 
@@ -657,8 +657,13 @@ def visualize_clusters_tsne(clustered_data, feature_patterns, n_components=2,
     # Get feature columns
     feature_cols = []
     for pattern in feature_patterns:
-        cols = [col for col in clustered_data.columns if pattern in col]
-        feature_cols.extend(cols)
+        # First try exact match for singular features
+        if pattern in clustered_data.columns:
+            feature_cols.append(pattern)
+        # Then try pattern matching for multi-column features  
+        else:
+            cols = [col for col in clustered_data.columns if pattern in col and col != pattern]
+            feature_cols.extend(cols)
     
     feature_cols = list(dict.fromkeys(feature_cols))
     feature_data = clustered_data[feature_cols].dropna()
@@ -675,15 +680,17 @@ def visualize_clusters_tsne(clustered_data, feature_patterns, n_components=2,
     if color_col in clustered_data.columns:
         colors = clustered_data.loc[feature_data.index, color_col]
         scatter = plt.scatter(tsne_data[:, 0], tsne_data[:, 1], 
-                            c=colors, cmap='hsv', alpha=0.6)
-        plt.colorbar(scatter, label=color_col)
+                            c=colors, cmap='nipy_spectral', alpha=0.6,
+                            s=rcParams['lines.markersize']/2)
+        # plt.colorbar(scatter, label=color_col)
     else:
-        plt.scatter(tsne_data[:, 0], tsne_data[:, 1], alpha=0.6)
+        plt.scatter(tsne_data[:, 0], tsne_data[:, 1], alpha=0.6,
+                    s=rcParams['lines.markersize']/2)
     
     plt.xlabel('t-SNE1')
     plt.ylabel('t-SNE2')
     plt.title('Clusters in t-SNE Space')
-    plt.show()
+    # plt.show()
     
     return tsne_model, tsne_data
 
@@ -1243,16 +1250,23 @@ def verify_rf_averaging(df_with_clusters, experiment_obj, cluster_averages, clus
                     b_channel = individual_rf[2, :, :] if 2 < individual_rf.shape[0] else np.zeros(individual_rf.shape[1:])
                     
                     # Normalize each channel to 0-1 range (old method)
-                    def normalize_channel_old(channel):
-                        channel_abs = np.abs(channel)
-                        if np.max(channel_abs) > 0:
-                            return (channel + np.max(channel_abs)) / (2 * np.max(channel_abs))
+                    def normalize_channels_proportional(r_channel, g_channel, b_channel):
+                        # Find global max across all channels to preserve relative magnitudes
+                        all_channels = [r_channel, g_channel, b_channel]
+                        global_max = max(np.max(np.abs(channel)) for channel in all_channels if channel is not None)
+                        
+                        if global_max > 0:
+                            r_norm = (r_channel + global_max) / (2 * global_max) if r_channel is not None else np.zeros_like(g_channel or b_channel)
+                            g_norm = (g_channel + global_max) / (2 * global_max) if g_channel is not None else np.zeros_like(r_channel or b_channel)
+                            b_norm = (b_channel + global_max) / (2 * global_max) if b_channel is not None else np.zeros_like(r_channel or g_channel)
                         else:
-                            return np.zeros_like(channel)
+                            r_norm = np.zeros_like(r_channel or g_channel or b_channel)
+                            g_norm = np.zeros_like(r_channel or g_channel or b_channel)
+                            b_norm = np.zeros_like(r_channel or g_channel or b_channel)
+                            
+                        return r_norm, g_norm, b_norm
                     
-                    r_norm = normalize_channel_old(r_channel)
-                    g_norm = normalize_channel_old(g_channel)
-                    b_norm = normalize_channel_old(b_channel)
+                    r_norm, g_norm, b_norm = normalize_channels_proportional(r_channel, g_channel, b_channel)
                     
                     individual_rgb = np.stack([r_norm, g_norm, b_norm], axis=2)
                     axes[0, i].imshow(individual_rgb, origin='lower')
@@ -1269,7 +1283,7 @@ def verify_rf_averaging(df_with_clusters, experiment_obj, cluster_averages, clus
         
         plt.suptitle(f'Cluster {cluster_id} Verification: Average vs Individuals\n(Individual RFs shown are UNALIGNED originals - spatial scatter is expected)')
         plt.tight_layout()
-        plt.show()
+        # plt.show()
         
         # Store verification results
         verification_results[cluster_id] = {
@@ -1311,122 +1325,122 @@ def verify_rf_averaging(df_with_clusters, experiment_obj, cluster_averages, clus
     return verification_results
 
 
-def plot_all_cluster_averages(cluster_averages,
-                            figsize_per_cluster=(6, 1),
-                            use_color_mapping=True,
-                            rgb_mode='new',
-                            save_path=None):
-    """
-    Plot averaged RFs for all clusters with RGB composites.
+# def plot_all_cluster_averages(cluster_averages,
+#                             figsize_per_cluster=(6, 1),
+#                             use_color_mapping=True,
+#                             rgb_mode='old',
+#                             save_path=None):
+#     """
+#     Plot averaged RFs for all clusters with RGB composites.
 
-    Parameters:
-    -----------
-    cluster_averages : dict
-        Result from create_cluster_averaged_rfs()
-    figsize_per_cluster : tuple
-        Size per cluster row in inches
-    use_color_mapping : bool
-        Whether to apply color mapping to channels
-    rgb_mode : str
-        RGB visualization mode: 'new' (your preferred method) or 'old' (bipolar method)
-    save_path : str, optional
-        Path to save the figure
-    """
-    import matplotlib.pyplot as plt
+#     Parameters:
+#     -----------
+#     cluster_averages : dict
+#         Result from create_cluster_averaged_rfs()
+#     figsize_per_cluster : tuple
+#         Size per cluster row in inches
+#     use_color_mapping : bool
+#         Whether to apply color mapping to channels
+#     rgb_mode : str
+#         RGB visualization mode: 'new' (my preferred method) or 'old' (bipolar method)
+#     save_path : str, optional
+#         Path to save the figure
+#     """
+#     import matplotlib.pyplot as plt
     
-    n_clusters = len(cluster_averages)
-    n_total_cols = 6  # Red, Green, Blue, UV, RGB, RGU
+#     n_clusters = len(cluster_averages)
+#     n_total_cols = 6  # Red, Green, Blue, UV, RGB, RGU
 
-    if n_clusters == 0:
-        print("No clusters to plot!")
-        return
+#     if n_clusters == 0:
+#         print("No clusters to plot!")
+#         return
 
-    # Calculate figure size and subplot grid
-    fig_width = figsize_per_cluster[0] * n_total_cols / 3
-    fig_height = figsize_per_cluster[1] * n_clusters
+#     # Calculate figure size and subplot grid
+#     fig_width = figsize_per_cluster[0] * n_total_cols / 3
+#     fig_height = figsize_per_cluster[1] * n_clusters
 
-    fig, axes = plt.subplots(n_clusters, n_total_cols,
-                            figsize=(fig_width, fig_height))
+#     fig, axes = plt.subplots(n_clusters, n_total_cols,
+#                             figsize=(fig_width, fig_height))
 
-    # Handle single cluster case
-    if n_clusters == 1:
-        axes = axes.reshape(1, -1)
+#     # Handle single cluster case
+#     if n_clusters == 1:
+#         axes = axes.reshape(1, -1)
 
-    # Sort clusters by ID for consistent ordering
-    sorted_clusters = sorted(cluster_averages.keys())
+#     # Sort clusters by ID for consistent ordering
+#     sorted_clusters = sorted(cluster_averages.keys())
 
-    # Define color maps for individual channels
-    if use_color_mapping:
-        try:
-            from pygor.plotting.custom import maps_concat
-            if isinstance(maps_concat, list):
-                colormaps = maps_concat[:4]  # First 4 for individual channels
-            else:
-                colormaps = ['Reds', 'Greens', 'Blues', 'Purples']
-        except ImportError:
-            colormaps = ['Reds', 'Greens', 'Blues', 'Purples']
-    else:
-        colormaps = ['gray'] * 4
+#     # Define color maps for individual channels
+#     if use_color_mapping:
+#         try:
+#             from pygor.plotting.custom import maps_concat
+#             if isinstance(maps_concat, list):
+#                 colormaps = maps_concat[:4]  # First 4 for individual channels
+#             else:
+#                 colormaps = ['Reds', 'Greens', 'Blues', 'Purples']
+#         except ImportError:
+#             colormaps = ['Reds', 'Greens', 'Blues', 'Purples']
+#     else:
+#         colormaps = ['gray'] * 4
 
-    channel_names = ['Red', 'Green', 'Blue', 'UV', 'RGB', 'RGU']
+#     channel_names = ['Red', 'Green', 'Blue', 'UV', 'RGB', 'RGU']
 
-    for row, cluster_id in enumerate(sorted_clusters):
-        curr_clust_avgs = cluster_averages[cluster_id]["averaged_rf"]
-        n_rois = cluster_averages[cluster_id]["n_rois"]
+#     for row, cluster_id in enumerate(sorted_clusters):
+#         curr_clust_avgs = cluster_averages[cluster_id]["averaged_rf"]
+#         n_rois = cluster_averages[cluster_id]["n_rois"]
 
-        for col in range(n_total_cols):
-            ax = axes[row, col] if n_clusters > 1 else axes[col]
-            curr_clim = np.max(np.abs(curr_clust_avgs)) if use_color_mapping else None
+#         for col in range(n_total_cols):
+#             ax = axes[row, col] if n_clusters > 1 else axes[col]
+#             curr_clim = np.max(np.abs(curr_clust_avgs)) if use_color_mapping else None
             
-            if col < 4:  # Individual channels (Red, Green, Blue, UV)
-                cmap = colormaps[col] if use_color_mapping else 'gray'
-                ax.imshow(curr_clust_avgs[col], cmap=cmap,
-                        vmin=-curr_clim, vmax=curr_clim, origin="lower")
+#             if col < 4:  # Individual channels (Red, Green, Blue, UV)
+#                 cmap = colormaps[col] if use_color_mapping else 'gray'
+#                 ax.imshow(curr_clust_avgs[col], cmap=cmap,
+#                         vmin=-curr_clim, vmax=curr_clim, origin="lower")
                 
-                # Add crosshairs
-                centre = (curr_clust_avgs.shape[1] // 2, curr_clust_avgs.shape[2] // 2)
-                ax.axhline(centre[0], color='white', lw=0.5)
-                ax.axvline(centre[1], color='white', lw=0.5)
+#                 # Add crosshairs
+#                 centre = (curr_clust_avgs.shape[1] // 2, curr_clust_avgs.shape[2] // 2)
+#                 ax.axhline(centre[0], color='white', lw=0.5)
+#                 ax.axvline(centre[1], color='white', lw=0.5)
 
-            elif col == 4:  # RGB composite [0,1,2]
-                if rgb_mode == 'new':
-                    rgb_composite = create_rgb_composite(curr_clust_avgs, [0, 1, 2])
-                    ax.imshow(rgb_composite, origin="lower")  # No clim - auto equalize
-                else:  # rgb_mode == 'old'
-                    rgb_composite = _create_rgb_composite_old(curr_clust_avgs, [0, 1, 2])
-                    ax.imshow(rgb_composite, origin="lower")
+#             elif col == 4:  # RGB composite [0,1,2]
+#                 if rgb_mode == 'new':
+#                     rgb_composite = create_rgb_composite(curr_clust_avgs, [0, 1, 2])
+#                     ax.imshow(rgb_composite, origin="lower")  # No clim - auto equalize
+#                 else:  # rgb_mode == 'old'
+#                     rgb_composite = _create_rgb_composite_old(curr_clust_avgs, [0, 1, 2])
+#                     ax.imshow(rgb_composite, origin="lower")
 
-            elif col == 5:  # RGU composite [0,1,3]
-                if rgb_mode == 'new':
-                    rgu_composite = create_rgb_composite(curr_clust_avgs, [0, 1, 3])
-                    ax.imshow(rgu_composite, origin="lower")  # No clim - auto equalize
-                else:  # rgb_mode == 'old'
-                    rgu_composite = _create_rgb_composite_old(curr_clust_avgs, [0, 1, 3])
-                    ax.imshow(rgu_composite, origin="lower")
+#             elif col == 5:  # RGU composite [0,1,3]
+#                 if rgb_mode == 'new':
+#                     rgu_composite = create_rgb_composite(curr_clust_avgs, [0, 1, 3])
+#                     ax.imshow(rgu_composite, origin="lower")  # No clim - auto equalize
+#                 else:  # rgb_mode == 'old'
+#                     rgu_composite = _create_rgb_composite_old(curr_clust_avgs, [0, 1, 3])
+#                     ax.imshow(rgu_composite, origin="lower")
 
-            # Add titles only to top row
-            if row == 0:
-                ax.set_title(channel_names[col], fontsize=8)
+#             # Add titles only to top row
+#             if row == 0:
+#                 ax.set_title(channel_names[col], fontsize=8)
 
-            # Add cluster info to leftmost column
-            if col == 0:
-                ax.set_ylabel(f'Cluster {cluster_id}\n(n={n_rois})', fontsize=8)
+#             # Add cluster info to leftmost column
+#             if col == 0:
+#                 ax.set_ylabel(f'Cluster {cluster_id}\n(n={n_rois})', fontsize=8)
 
-            ax.axis('off')
+#             ax.axis('off')
 
-    plt.tight_layout()
+#     plt.tight_layout()
 
-    if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"Saved cluster averages plot to {save_path}")
+#     if save_path:
+#         plt.savefig(save_path, dpi=300, bbox_inches='tight')
+#         print(f"Saved cluster averages plot to {save_path}")
  
-    # plt.show()
+#     # plt.show()
 
-    # Print summary
-    print(f"\nDisplayed {n_clusters} clusters:")
-    for cluster_id in sorted_clusters:
-        n_rois = cluster_averages[cluster_id]["n_rois"]
-        print(f"  Cluster {cluster_id}: {n_rois} ROIs")
+#     # Print summary
+#     print(f"\nDisplayed {n_clusters} clusters:")
+#     for cluster_id in sorted_clusters:
+#         n_rois = cluster_averages[cluster_id]["n_rois"]
+#         print(f"  Cluster {cluster_id}: {n_rois} ROIs")
 
 
 def _create_rgb_composite_old(curr_clust_avgs, channel_indices):
@@ -1451,16 +1465,23 @@ def _create_rgb_composite_old(curr_clust_avgs, channel_indices):
     b_channel = curr_clust_avgs[channel_indices[2], :, :] if channel_indices[2] < curr_clust_avgs.shape[0] else np.zeros(curr_clust_avgs.shape[1:])
     
     # Normalize each channel to 0-1 range (old bipolar method)
-    def normalize_channel_old(channel):
-        channel_abs = np.abs(channel)
-        if np.max(channel_abs) > 0:
-            return (channel + np.max(channel_abs)) / (2 * np.max(channel_abs))
+    def normalize_channels_proportional(r_channel, g_channel, b_channel):
+        # Find global max across all channels to preserve relative magnitudes
+        all_channels = [r_channel, g_channel, b_channel]
+        global_max = max(np.max(np.abs(channel)) for channel in all_channels if channel is not None)
+        
+        if global_max > 0:
+            r_norm = (r_channel + global_max) / (2 * global_max) if r_channel is not None else np.zeros_like(g_channel or b_channel)
+            g_norm = (g_channel + global_max) / (2 * global_max) if g_channel is not None else np.zeros_like(r_channel or b_channel)
+            b_norm = (b_channel + global_max) / (2 * global_max) if b_channel is not None else np.zeros_like(r_channel or g_channel)
         else:
-            return np.zeros_like(channel)
+            r_norm = np.zeros_like(r_channel or g_channel or b_channel)
+            g_norm = np.zeros_like(r_channel or g_channel or b_channel)
+            b_norm = np.zeros_like(r_channel or g_channel or b_channel)
+            
+        return r_norm, g_norm, b_norm
     
-    r_norm = normalize_channel_old(r_channel)
-    g_norm = normalize_channel_old(g_channel)
-    b_norm = normalize_channel_old(b_channel)
+    r_norm, g_norm, b_norm = normalize_channels_proportional(r_channel, g_channel, b_channel)
     
     # Stack into RGB
     rgb_composite = np.stack([r_norm, g_norm, b_norm], axis=2)
@@ -1478,6 +1499,10 @@ def plot_all_cluster_averages_enhanced(df_with_clusters, experiment_obj, cluster
                                     rgb_mode='new',
                                     save_path=None,
                                     show_ipl_distribution=True,
+                                    sort_by_ipl_depth=True,
+                                    hide_noise_clusters=False,
+                                    cluster_label_format="{cluster_id}, n = {n_rois}",
+                                    silhouette_scores=None,
                                     verbose=False) -> tuple[plt.Figure, np.ndarray]:
     """
     Enhanced plot showing cluster averages with timecourses, IPL distributions, and metrics.
@@ -1507,13 +1532,138 @@ def plot_all_cluster_averages_enhanced(df_with_clusters, experiment_obj, cluster
         Path to save the figure
     show_ipl_distribution : bool
         Whether to show IPL distribution plots
+    sort_by_ipl_depth : bool, default True
+        Whether to sort clusters by mean IPL depth (shallow to deep). If False, sorts by cluster ID.
+    hide_noise_clusters : bool, default False
+        Whether to hide clusters with low amplitude timecourses (likely noise clusters). These clusters are identified as having maximum timecourse amplitude < 1.0.
     verbose : bool
         Whether to print debug information
     """
     import matplotlib.pyplot as plt
     import numpy as np
     
-    n_clusters = len(cluster_averages)
+    # First, determine which clusters to show (filter noise clusters if requested)
+    all_clusters = list(cluster_averages.keys())
+    
+    # Sort clusters by IPL stratification pattern (shallow, bistratified, deep)
+    def get_cluster_ipl_stats(cluster_id):
+        """Calculate IPL depth statistics for a cluster to detect bistratification"""
+        cluster_rois = df_with_clusters[df_with_clusters['cluster_id'] == cluster_id]
+        ipl_depths = []
+        
+        for _, roi_row in cluster_rois.iterrows():
+            recording_id = int(roi_row['recording_id'])
+            roi_id = int(roi_row['roi_id'])
+            recording = experiment_obj.recording[recording_id]
+            
+            if hasattr(recording, 'ipl_depths') and recording.ipl_depths is not None:
+                if roi_id < len(recording.ipl_depths):
+                    ipl_depth = recording.ipl_depths[roi_id]
+                    if not np.isnan(ipl_depth):
+                        ipl_depths.append(ipl_depth)
+        
+        if not ipl_depths:
+            return {'mean': float('inf'), 'std': 0, 'is_bistratified': False, 'category': 'unknown'}
+        
+        ipl_depths = np.array(ipl_depths)
+        mean_depth = np.mean(ipl_depths)
+        std_depth = np.std(ipl_depths)
+        
+        # Use mean depth for sorting
+        # (modal and median calculations removed for simplicity)
+        
+        # Detect bistratified clusters: high std AND presence in both shallow and deep layers
+        is_bistratified = False
+        if len(ipl_depths) >= 3:  # Need enough data points
+            shallow_count = np.sum(ipl_depths < 35)  # Expanded shallow layer (OFF)
+            deep_count = np.sum(ipl_depths > 45)     # Expanded deep layer (ON)
+            total_count = len(ipl_depths)
+            
+            # More lenient bistratified detection for cases like 10% + 50% peaks
+            if (std_depth > 12 and  # Lower std threshold
+                shallow_count/total_count > 0.15 and  # Lower presence threshold
+                deep_count/total_count > 0.15):       # Lower presence threshold
+                is_bistratified = True
+        
+        # Categorize for sorting - use median depth instead of mean
+        # Order: deep → bistratified → shallow, with bistratified forced to middle
+        if is_bistratified:
+            category = 'bistratified'
+            # Force bistratified to middle by using a fixed middle position (45) plus small offset based on std
+            sort_key = (1, 45 + std_depth/10)  # Group bistratified in middle, sort by variability
+        elif mean_depth >= 45:  # Deep/ON-dominant
+            category = 'deep'  
+            sort_key = (0, -mean_depth)  # Deep first, then by descending mean depth
+        else:  # Shallow/OFF-dominant
+            category = 'shallow'
+            sort_key = (2, -mean_depth)  # Shallow last, then by descending mean depth
+            
+        return {
+            'mean': mean_depth, 
+            'std': std_depth,
+            'is_bistratified': is_bistratified,
+            'category': category,
+            'sort_key': sort_key
+        }
+    
+    # Get all cluster IDs and their IPL statistics
+    cluster_ipl_stats = {cid: get_cluster_ipl_stats(cid) for cid in all_clusters}
+    
+    # Filter out noise clusters if requested
+    if hide_noise_clusters and cluster_timecourses is not None:
+        # Keep only clusters with high amplitude timecourses (amplitude >= 1.0)
+        def is_noise_cluster(cluster_id):
+            """Check if cluster has low amplitude timecourses (< 1.0)"""
+            if cluster_id not in cluster_timecourses:
+                return True  # No timecourse data = noise
+            
+            timecourses = cluster_timecourses[cluster_id]['timecourses']
+            if timecourses is None or len(timecourses) == 0:
+                return True  # No timecourse data = noise
+            
+            # Get max amplitude across all channels/colors
+            max_amplitude = 0
+            if isinstance(timecourses, dict):
+                # Dictionary format: {color: array}
+                for color_timecourses in timecourses.values():
+                    if color_timecourses is not None and len(color_timecourses) > 0:
+                        max_amplitude = max(max_amplitude, np.max(np.abs(color_timecourses)))
+            else:
+                # Array format: direct numpy array
+                if isinstance(timecourses, np.ndarray):
+                    max_amplitude = np.max(np.abs(timecourses))
+                else:
+                    return True  # Unknown format = noise
+            
+            return max_amplitude < 1  # Low amplitude = noise
+        
+        filtered_clusters = [cid for cid in all_clusters if not is_noise_cluster(cid)]
+        noise_clusters = [cid for cid in all_clusters if is_noise_cluster(cid)]
+        
+        if noise_clusters:
+            print(f"\nHiding {len(noise_clusters)} noise clusters (low amplitude < 1.0):")
+            for cid in noise_clusters:
+                n_rois = cluster_averages[cid]["n_rois"]
+                print(f"  Cluster {cid}: {n_rois} ROIs")
+        else:
+            print("No noise clusters detected.")
+    else:
+        filtered_clusters = all_clusters
+    
+    # Sort the filtered clusters
+    if sort_by_ipl_depth:
+        # Sort by IPL stratification pattern: shallow -> bistratified -> deep
+        sorted_clusters = sorted(filtered_clusters, key=lambda cid: cluster_ipl_stats[cid]['sort_key'])
+        if verbose:
+            print("IPL sorting categories:")
+            for cid in sorted_clusters:
+                stats = cluster_ipl_stats[cid] 
+                print(f"  Cluster {cid}: {stats['category']} (mean={stats['mean']:.1f}, std={stats['std']:.1f})")
+    else:
+        # Sort by ID for consistent ordering
+        sorted_clusters = sorted(filtered_clusters)
+
+    n_clusters = len(sorted_clusters)
     if n_clusters == 0:
         print("No clusters to plot!")
         return
@@ -1573,9 +1723,6 @@ def plot_all_cluster_averages_enhanced(df_with_clusters, experiment_obj, cluster
     if n_clusters == 1:
         axes = axes.reshape(1, -1)
 
-    # Sort clusters by ID for consistent ordering
-    sorted_clusters = sorted(cluster_averages.keys())
-
     # Define color maps for individual channels
     if use_color_mapping:
         try:
@@ -1628,7 +1775,25 @@ def plot_all_cluster_averages_enhanced(df_with_clusters, experiment_obj, cluster
         # Plot spatial RF components (columns 0-5)
         for spatial_col in range(n_spatial_cols):
             ax = axes[row, col_idx] if n_clusters > 1 else axes[col_idx]
-            curr_clim = np.max(np.abs(curr_clust_avgs)) if use_color_mapping else None
+            # curr_clim = np.max(np.abs(curr_clust_avgs)) if use_color_mapping else None
+            curr_clim = np.percentile(np.abs(curr_clust_avgs), 99) if use_color_mapping else None
+            # Add cluster label on the leftmost column
+            if spatial_col == 0:
+                # Calculate percentage of total cells
+                total_cells = sum(cluster_averages[cid]["n_rois"] for cid in cluster_averages.keys())
+                percentage = (n_rois / total_cells) * 100 if total_cells > 0 else 0
+                
+                # Format the cluster label with available variables
+                silhouette_score = silhouette_scores.get(cluster_id, "N/A") if silhouette_scores else "N/A"
+                label_text = cluster_label_format.format(
+                    cluster_id=cluster_id, 
+                    n_rois=n_rois,
+                    percentage=f"{percentage:.1f}%",
+                    silhouette_score=f"{silhouette_score:.3f}" if isinstance(silhouette_score, (int, float)) else silhouette_score
+                )
+                ax.text(-0.15, 0.5, label_text, transform=ax.transAxes, 
+                       verticalalignment='center', horizontalalignment='right',
+                       fontsize=plt.rcParams['font.size'] * 0.8)
             
             if spatial_col < 4:  # Individual channels
                 cmap = colormaps[spatial_col] if use_color_mapping else 'gray'
@@ -1636,33 +1801,39 @@ def plot_all_cluster_averages_enhanced(df_with_clusters, experiment_obj, cluster
                         vmin=-curr_clim, vmax=curr_clim, origin="lower")
                 
                 # Add crosshairs
-                centre = (curr_clust_avgs.shape[1] // 2, curr_clust_avgs.shape[2] // 2)
-                ax.axhline(centre[0], color='white', lw=0.5)
-                ax.axvline(centre[1], color='white', lw=0.5)
+                # centre = (curr_clust_avgs.shape[1] // 2, curr_clust_avgs.shape[2] // 2)
+                # ax.axhline(centre[0], color='white', lw=0.5)
+                # ax.axvline(centre[1], color='white', lw=0.5)
 
             elif spatial_col == 4:  # RGB composite
                 if rgb_mode == 'new':
-                    rgb_composite = create_rgb_composite(curr_clust_avgs, [0, 1, 2])
+                    rgb_composite = create_rgb_composite(curr_clust_avgs, [0, 1, 2], mode='proportional')
                     ax.imshow(rgb_composite, origin="lower")
-                else:
+                elif rgb_mode == 'grey_baseline':
+                    rgb_composite = create_rgb_composite(curr_clust_avgs, [0, 1, 2], mode='grey_baseline')
+                    ax.imshow(rgb_composite, origin="lower")
+                else:  # 'old' mode
                     rgb_composite = _create_rgb_composite_old(curr_clust_avgs, [0, 1, 2])
                     ax.imshow(rgb_composite, origin="lower")
 
             elif spatial_col == 5:  # RGU composite
                 if rgb_mode == 'new':
-                    rgu_composite = create_rgb_composite(curr_clust_avgs, [0, 1, 3])
+                    rgu_composite = create_rgb_composite(curr_clust_avgs, [0, 1, 3], mode='proportional')
                     ax.imshow(rgu_composite, origin="lower")
-                else:
+                elif rgb_mode == 'grey_baseline':
+                    rgu_composite = create_rgb_composite(curr_clust_avgs, [0, 1, 3], mode='grey_baseline')
+                    ax.imshow(rgu_composite, origin="lower")
+                else:  # 'old' mode
                     rgu_composite = _create_rgb_composite_old(curr_clust_avgs, [0, 1, 3])
                     ax.imshow(rgu_composite, origin="lower")
 
             # Add titles only to top row
             if row == 0:
-                ax.set_title(spatial_names[spatial_col], fontsize=8)
+                ax.set_title(spatial_names[spatial_col], fontsize=rcParams['font.size']*0.8)
 
             # Add cluster info to leftmost column
             if spatial_col == 0:
-                ax.set_ylabel(f'Cluster {cluster_id}\n(n={n_rois})', fontsize=8)
+                ax.set_ylabel(f'Cluster {cluster_id}\n(n={n_rois})', fontsize=rcParams['font.size']*0.8)
 
             ax.axis('off')
             col_idx += 1
@@ -1704,7 +1875,7 @@ def plot_all_cluster_averages_enhanced(df_with_clusters, experiment_obj, cluster
                 ax.axis('off')
             ax.set_yticks([])
             if row == 0:
-                ax.set_title('Timecourses', fontsize=8)
+                ax.set_title('Times', fontsize=8)
             col_idx += 1
             
         # Plot IPL distribution if requested
@@ -1726,9 +1897,22 @@ def plot_all_cluster_averages_enhanced(df_with_clusters, experiment_obj, cluster
                         if not np.isnan(ipl_depth):
                             ipl_depths.append(ipl_depth)
             
-            if ipl_depths:
-                sns.histplot(y = ipl_depths, binwidth=10, alpha=0.7, 
+            if ipl_depths and len(ipl_depths) > 1:
+                # Calculate appropriate binwidth based on data range
+                # ipl_range = max(ipl_depths) - min(ipl_depths)
+                # if ipl_range > 0:
+                #     # Use adaptive binwidth, but ensure reasonable number of bins
+                #     binwidth = max(5, ipl_range / 8)  # Use 8 bins or 5-unit bins, whichever is larger
+                #     sns.histplot(y=ipl_depths, binwidth=binwidth, alpha=0.7, 
+                #             color='steelblue', edgecolor='black', 
+                #             stat="percent",
+                #             ax=ax)
+                # else:
+                    # All values are the same - just show a single bar
+                sns.histplot(y=ipl_depths, binwidth=10, alpha=0.7, 
+                            binrange=(0,90),
                             color='steelblue', edgecolor='black', 
+                            stat="percent",
                             ax=ax)
                 ax.set_ylim(0, 100)
                 # ax.set_xlabel('IPL Depth')
@@ -1843,26 +2027,25 @@ def plot_all_cluster_averages_enhanced(df_with_clusters, experiment_obj, cluster
                             # palette="dark:k",
                             palette = fish_palette,
                             edgecolor = "k",
-                        size=rcParams['lines.markersize']/2,
-                        linewidth=0.3,
+                        size=rcParams['lines.markersize']/3,
+                        linewidth=0.1,
                         # size=3,
-                        jitter=True)
+                        jitter=False)
                     ax.set_yticks([])
                     
-                    # Set x-axis limits to 99th percentile to handle outliers
-                    all_values = cluster_rois[matching_metrics].values.flatten()
-                    all_values = all_values[~np.isnan(all_values)]  # Remove NaN values
-                    if len(all_values) > 0:
-                        p1, p99 = np.percentile(all_values, [0, 99.9])
-                        # all_values_min = np.min(all_values)
-                        # min_offset = all_values_min * 0.01
-                        # if all_values_min <= 0:
-                        ax.set_xlim(None, p99)
-                        # else:
-                            # ax.set_xlim(p1 + min_offset, p99)
+                    # Use global axis limits across all clusters for this metric
+                    if matching_metrics:
+                        # Get global data range across ALL clusters for this metric
+                        global_values = df_with_clusters[matching_metrics].values.flatten()
+                        global_values = global_values[~np.isnan(global_values)]
+                        percentile = 99.5
+                        if len(global_values) > 0:
+                            vmin = np.percentile(global_values, 100-percentile)
+                            vmax = np.percentile(global_values, percentile)
+                            ax.set_xlim(vmin, vmax)
 
                     if verbose:
-                        print(f"    Data range: min={cluster_rois[matching_metrics].min().min():.3f}, max={cluster_rois[matching_metrics].max().max():.3f}")
+                        print(f"    Data range: min={df_with_clusters[matching_metrics].min().min():.3f}, max={df_with_clusters[matching_metrics].max().max():.3f}")
                 else:
                     ax.text(0.5, 0.5, 'No data', ha='center', va='center',
                            transform=ax.transAxes)
@@ -1942,10 +2125,1044 @@ def plot_all_cluster_averages_enhanced(df_with_clusters, experiment_obj, cluster
         print(f"  Cluster {cluster_id}: {n_rois} ROIs")
     return fig, axes
 
+
+def get_cluster_order_from_result(clustering_result, data, 
+                                 sort_by_ipl_depth=True, hide_noise_clusters=False, verbose=False):
+    """
+    Get the cluster ordering that plot_cluster_results would use.
+    
+    Parameters:
+    -----------
+    clustering_result : dict
+        Result from clustering function
+    data : pd.DataFrame
+        Data with 'depths' column for IPL depth information
+    sort_by_ipl_depth : bool
+        Whether to sort by IPL depth (same as plot_cluster_results)
+    hide_noise_clusters : bool
+        Whether to hide noise clusters (same as plot_cluster_results)
+    
+    Returns:
+    --------
+    list : Cluster IDs in the same order plot_cluster_results would use
+    """
+    clustered_data = clustering_result['clustered_data']
+    all_clusters = sorted(clustered_data['cluster_id'].unique())
+    
+    # Check for depths column in data
+    if 'depths' not in data.columns or not sort_by_ipl_depth:
+        # No depths data or not sorting - just return sorted cluster IDs
+        return all_clusters
+    
+    # Calculate IPL statistics (copied from plot_cluster_results logic)
+    cluster_ipl_stats = {}
+    
+    for cluster_id in all_clusters:
+        cluster_rois = clustered_data[clustered_data['cluster_id'] == cluster_id].index
+        
+        # Get depths directly from the data DataFrame using the cluster ROI indices
+        cluster_depths = data.loc[cluster_rois, 'depths'].dropna().values
+        
+        if len(cluster_depths) == 0:
+            continue
+            
+        mean_depth = cluster_depths.mean()
+        std_depth = cluster_depths.std()
+        
+        # Bistratified detection (same logic as plot_cluster_results)
+        depth_counts, depth_bins = np.histogram(cluster_depths, bins=20, range=(0, 90))
+        peak_indices = []
+        for i in range(1, len(depth_counts) - 1):
+            if depth_counts[i] > depth_counts[i-1] and depth_counts[i] > depth_counts[i+1]:
+                peak_indices.append(i)
+        
+        significant_peaks = [i for i in peak_indices if depth_counts[i] >= len(cluster_depths) * 0.1]
+        is_bistratified = len(significant_peaks) >= 2
+        
+        # Categorize for sorting (same logic as plot_cluster_results)
+        if is_bistratified:
+            category = 'bistratified'
+            sort_key = (1, 45 + std_depth/10)
+        elif mean_depth >= 45:
+            category = 'deep'  
+            sort_key = (0, -mean_depth)
+        else:
+            category = 'shallow'
+            sort_key = (2, -mean_depth)
+            
+        cluster_ipl_stats[cluster_id] = {
+            'mean': mean_depth,
+            'std': std_depth,
+            'category': category,
+            'sort_key': sort_key
+        }
+    
+    # Filter noise clusters if requested (same logic as plot_cluster_results)
+    if hide_noise_clusters:
+        # This would require access to timecourse data - skip for now
+        filtered_clusters = all_clusters
+    else:
+        filtered_clusters = all_clusters
+    
+    # Sort clusters - only include clusters that have IPL stats
+    if sort_by_ipl_depth:
+        clusters_with_stats = [cid for cid in filtered_clusters if cid in cluster_ipl_stats]
+        clusters_without_stats = [cid for cid in filtered_clusters if cid not in cluster_ipl_stats]
+        
+        sorted_clusters = sorted(clusters_with_stats, key=lambda cid: cluster_ipl_stats[cid]['sort_key'])
+        # Add clusters without stats at the end
+        sorted_clusters.extend(sorted(clusters_without_stats))
+        if verbose:
+            print("IPL sorting categories:")
+            for cid in sorted_clusters:
+                if cid in cluster_ipl_stats:
+                    stats = cluster_ipl_stats[cid] 
+                    print(f"  Cluster {cid}: {stats['category']} (mean={stats['mean']:.1f}, std={stats['std']:.1f})")
+                else:
+                    print(f"  Cluster {cid}: no IPL data")
+    else:
+        sorted_clusters = sorted(filtered_clusters)
+    
+    return sorted_clusters
+
+
+def plot_cluster_standardized_heatmap(clustered_data, feature_patterns=None,
+                                     cluster_order=None, figsize=(10, 8),
+                                     cmap='RdBu_r', center=0, verbose=True):
+    """
+    Create a heatmap showing standardized cluster profiles.
+    
+    Each cell shows (cluster_mean - global_mean) / global_std
+    Red = above average, Blue = below average, White = average
+    
+    Parameters:
+    -----------
+    clustered_data : pd.DataFrame
+        Data with cluster assignments and features
+    feature_patterns : list, optional
+        Feature patterns to include
+    cluster_order : list, optional
+        Custom order for clusters
+    figsize : tuple
+        Figure size
+    cmap : str
+        Colormap (default 'RdBu_r' for red-blue diverging)
+    center : float
+        Center value for colormap
+    
+    Returns:
+    --------
+    fig, ax : matplotlib objects
+    """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import numpy as np
+    import pandas as pd
+    
+    # Get features and clusters
+    if feature_patterns is None:
+        feature_cols = [col for col in clustered_data.select_dtypes(include=[np.number]).columns 
+                       if col != 'cluster_id' and not any(id_var in col.lower() 
+                       for id_var in ['recording', 'roi', 'condition', 'category'])]
+    else:
+        feature_cols = []
+        for pattern in feature_patterns:
+            if pattern in clustered_data.columns:
+                feature_cols.append(pattern)
+            else:
+                cols = [col for col in clustered_data.columns 
+                       if pattern in col and col != pattern]
+                feature_cols.extend(cols)
+        feature_cols = list(dict.fromkeys(feature_cols))
+    
+    if cluster_order is not None:
+        available_clusters = set(clustered_data['cluster_id'].unique())
+        cluster_ids = [cid for cid in cluster_order if cid in available_clusters]
+        missing_clusters = available_clusters - set(cluster_ids)
+        cluster_ids.extend(sorted(missing_clusters))
+    else:
+        cluster_ids = sorted(clustered_data['cluster_id'].unique())
+    
+    # Calculate standardized profiles
+    standardized_matrix = []
+    
+    for cluster_id in cluster_ids:
+        cluster_row = []
+        cluster_data = clustered_data[clustered_data['cluster_id'] == cluster_id]
+        
+        for feature in feature_cols:
+            if feature in clustered_data.columns:
+                cluster_mean = cluster_data[feature].mean()
+                global_mean = clustered_data[feature].mean()
+                global_std = clustered_data[feature].std()
+                
+                if global_std > 0:
+                    z_score = (cluster_mean - global_mean) / global_std
+                else:
+                    z_score = 0
+                
+                cluster_row.append(z_score)
+            else:
+                cluster_row.append(0)
+        
+        standardized_matrix.append(cluster_row)
+    
+    # Convert to DataFrame for easier plotting
+    heatmap_df = pd.DataFrame(standardized_matrix, 
+                             index=[f'Cluster {cid}' for cid in cluster_ids],
+                             columns=feature_cols)
+    
+    if verbose:
+        print(f"Standardized profile range: {heatmap_df.values.min():.2f} to {heatmap_df.values.max():.2f}")
+        print(f"Features: {len(feature_cols)}, Clusters: {len(cluster_ids)}")
+    
+    # Create heatmap
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    sns.heatmap(heatmap_df, 
+                cmap=cmap, 
+                center=center,
+                annot=False,
+                fmt='.1f',
+                cbar_kws={'label': 'Standard Deviations from Mean'},
+                ax=ax)
+    
+    plt.xticks(rotation=45, ha='right')
+    plt.yticks(rotation=0)
+    plt.title('Standardized Cluster Feature Profiles\n(Red = Above Average, Blue = Below Average)', fontsize=12)
+    plt.tight_layout()
+    
+    return fig, ax
+
+
+def plot_cluster_two_panel(clustered_data, feature_patterns=None,
+                          cluster_order=None, figsize=(15, 8), verbose=True):
+    """
+    Create a two-panel plot: Feature importance + Cluster means.
+    
+    Left panel: Which features distinguish clusters best (F-statistics)
+    Right panel: Raw cluster means for each feature
+    
+    Parameters:
+    -----------
+    clustered_data : pd.DataFrame
+        Data with cluster assignments and features
+    feature_patterns : list, optional
+        Feature patterns to include
+    cluster_order : list, optional
+        Custom order for clusters
+    figsize : tuple
+        Figure size
+    
+    Returns:
+    --------
+    fig, (ax1, ax2) : matplotlib objects
+    """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import numpy as np
+    import pandas as pd
+    from scipy import stats
+    
+    # Get features and clusters
+    if feature_patterns is None:
+        feature_cols = [col for col in clustered_data.select_dtypes(include=[np.number]).columns 
+                       if col != 'cluster_id' and not any(id_var in col.lower() 
+                       for id_var in ['recording', 'roi', 'condition', 'category'])]
+    else:
+        feature_cols = []
+        for pattern in feature_patterns:
+            if pattern in clustered_data.columns:
+                feature_cols.append(pattern)
+            else:
+                cols = [col for col in clustered_data.columns 
+                       if pattern in col and col != pattern]
+                feature_cols.extend(cols)
+        feature_cols = list(dict.fromkeys(feature_cols))
+    
+    if cluster_order is not None:
+        available_clusters = set(clustered_data['cluster_id'].unique())
+        cluster_ids = [cid for cid in cluster_order if cid in available_clusters]
+        missing_clusters = available_clusters - set(cluster_ids)
+        cluster_ids.extend(sorted(missing_clusters))
+    else:
+        cluster_ids = sorted(clustered_data['cluster_id'].unique())
+    
+    # Calculate F-statistics for feature importance
+    f_stats = {}
+    for feature in feature_cols:
+        if feature in clustered_data.columns:
+            groups = [clustered_data[clustered_data['cluster_id'] == cid][feature].dropna().values 
+                     for cid in cluster_ids]
+            groups = [g for g in groups if len(g) > 0]
+            if len(groups) > 1:
+                f_stat, _ = stats.f_oneway(*groups)
+                f_stats[feature] = f_stat if not np.isnan(f_stat) else 0
+            else:
+                f_stats[feature] = 0
+    
+    # Calculate cluster means matrix
+    means_matrix = []
+    for cluster_id in cluster_ids:
+        cluster_row = []
+        cluster_data = clustered_data[clustered_data['cluster_id'] == cluster_id]
+        
+        for feature in feature_cols:
+            if feature in clustered_data.columns:
+                cluster_mean = cluster_data[feature].mean()
+                cluster_row.append(cluster_mean)
+            else:
+                cluster_row.append(0)
+        
+        means_matrix.append(cluster_row)
+    
+    means_df = pd.DataFrame(means_matrix, 
+                           index=[f'Cluster {cid}' for cid in cluster_ids],
+                           columns=feature_cols)
+    
+    if verbose:
+        print(f"Feature F-statistics range: {min(f_stats.values()):.1f} to {max(f_stats.values()):.1f}")
+        print(f"Cluster means range: {means_df.values.min():.2f} to {means_df.values.max():.2f}")
+        print(f"Features: {len(feature_cols)}, Clusters: {len(cluster_ids)}")
+    
+    # Create two-panel plot
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+    
+    # Left panel: Feature importance (F-statistics)
+    f_values = [f_stats[feat] for feat in feature_cols]
+    y_pos = np.arange(len(feature_cols))
+    
+    ax1.barh(y_pos, f_values, alpha=0.7, color='steelblue')
+    ax1.set_yticks(y_pos)
+    ax1.set_yticklabels(feature_cols)
+    ax1.set_xlabel('F-statistic (Higher = More Discriminative)')
+    ax1.set_title('Feature Importance\n(Which features distinguish clusters?)')
+    ax1.invert_yaxis()
+    
+    # Right panel: Cluster means heatmap
+    sns.heatmap(means_df, 
+                annot=False,
+                fmt='.2f',
+                cmap='viridis',
+                cbar_kws={'label': 'Mean Value'},
+                ax=ax2)
+    
+    ax2.set_xlabel('Features')
+    ax2.set_ylabel('Clusters')
+    ax2.set_title('Cluster Mean Values\n(What values does each cluster have?)')
+    
+    plt.tight_layout()
+    return fig, (ax1, ax2)
+
+
+def generate_cluster_characterization_table(clustered_data, feature_patterns=None,
+                                           cluster_order=None, top_n_features=5, verbose=True):
+    """
+    Generate a table showing the top distinguishing features for each cluster.
+    
+    For each cluster, shows the features with highest effect sizes that make it unique.
+    
+    Parameters:
+    -----------
+    clustered_data : pd.DataFrame
+        Data with cluster assignments and features
+    feature_patterns : list, optional
+        Feature patterns to include
+    cluster_order : list, optional
+        Custom order for clusters
+    top_n_features : int
+        Number of top features to show per cluster
+    
+    Returns:
+    --------
+    characterization_df : pd.DataFrame
+        Table showing top features per cluster with effect sizes and values
+    """
+    import numpy as np
+    import pandas as pd
+    
+    # Get features and clusters
+    if feature_patterns is None:
+        feature_cols = [col for col in clustered_data.select_dtypes(include=[np.number]).columns 
+                       if col != 'cluster_id' and not any(id_var in col.lower() 
+                       for id_var in ['recording', 'roi', 'condition', 'category'])]
+    else:
+        feature_cols = []
+        for pattern in feature_patterns:
+            if pattern in clustered_data.columns:
+                feature_cols.append(pattern)
+            else:
+                cols = [col for col in clustered_data.columns 
+                       if pattern in col and col != pattern]
+                feature_cols.extend(cols)
+        feature_cols = list(dict.fromkeys(feature_cols))
+    
+    if cluster_order is not None:
+        available_clusters = set(clustered_data['cluster_id'].unique())
+        cluster_ids = [cid for cid in cluster_order if cid in available_clusters]
+        missing_clusters = available_clusters - set(cluster_ids)
+        cluster_ids.extend(sorted(missing_clusters))
+    else:
+        cluster_ids = sorted(clustered_data['cluster_id'].unique())
+    
+    # Calculate effect sizes for each cluster-feature pair
+    characterization_rows = []
+    
+    for cluster_id in cluster_ids:
+        cluster_data = clustered_data[clustered_data['cluster_id'] == cluster_id]
+        other_data = clustered_data[clustered_data['cluster_id'] != cluster_id]
+        
+        feature_effects = []
+        
+        for feature in feature_cols:
+            if feature in clustered_data.columns:
+                cluster_vals = cluster_data[feature].dropna()
+                other_vals = other_data[feature].dropna()
+                
+                if len(cluster_vals) > 0 and len(other_vals) > 0:
+                    # Calculate Cohen's d effect size
+                    pooled_std = np.sqrt(((len(cluster_vals)-1)*cluster_vals.var() + 
+                                        (len(other_vals)-1)*other_vals.var()) / 
+                                       (len(cluster_vals) + len(other_vals) - 2))
+                    
+                    if pooled_std > 0:
+                        cohens_d = (cluster_vals.mean() - other_vals.mean()) / pooled_std
+                        
+                        feature_effects.append({
+                            'feature': feature,
+                            'effect_size': cohens_d,
+                            'abs_effect_size': abs(cohens_d),
+                            'cluster_mean': cluster_vals.mean(),
+                            'other_mean': other_vals.mean(),
+                            'direction': 'Higher' if cohens_d > 0 else 'Lower'
+                        })
+        
+        # Sort by absolute effect size and take top N
+        feature_effects.sort(key=lambda x: x['abs_effect_size'], reverse=True)
+        top_features = feature_effects[:top_n_features]
+        
+        for i, feat_info in enumerate(top_features):
+            characterization_rows.append({
+                'Cluster': f'Cluster {cluster_id}',
+                'Rank': i + 1,
+                'Feature': feat_info['feature'],
+                'Direction': feat_info['direction'],
+                'Effect_Size': feat_info['effect_size'],
+                'Cluster_Mean': feat_info['cluster_mean'],
+                'Other_Mean': feat_info['other_mean'],
+                'Description': f"{feat_info['direction']} than other clusters (d={feat_info['effect_size']:.2f})"
+            })
+    
+    characterization_df = pd.DataFrame(characterization_rows)
+    
+    if verbose:
+        print(f"Generated characterization table for {len(cluster_ids)} clusters")
+        print(f"Top {top_n_features} features per cluster, {len(feature_cols)} total features analyzed")
+        print("\nExample characterizations:")
+        for cluster_id in cluster_ids[:3]:  # Show first 3 clusters
+            cluster_rows = characterization_df[characterization_df['Cluster'] == f'Cluster {cluster_id}']
+            if len(cluster_rows) > 0:
+                top_feature = cluster_rows.iloc[0]
+                print(f"  {top_feature['Cluster']}: Characterized by {top_feature['Feature']} ({top_feature['Description']})")
+    
+    return characterization_df
+
+
+def plot_cluster_feature_dotplot(clustered_data, feature_patterns=None, 
+                                threshold=0.1, figsize=(12, 8), 
+                                size_scale=50, alpha_range=(0.3, 1.0), 
+                                size_metric='variance', show_importance=True, 
+                                min_contribution=None, cluster_order=None, 
+                                minmax_scaling=None, transpose=False, verbose=True):
+    """
+    Create a dot plot showing cluster vs feature relationships.
+    
+    Parameters:
+    -----------
+    clustered_data : pd.DataFrame
+        Data with cluster assignments and features
+    feature_patterns : list, optional
+        Feature patterns to include. If None, uses all numeric columns except cluster_id
+    threshold : float, default 0.1
+        Threshold for considering a feature "expressed" (affects circle size)
+    figsize : tuple
+        Figure size
+    size_scale : float
+        Scaling factor for circle sizes
+    alpha_range : tuple
+        Min and max alpha values for color intensity
+    size_metric : str, default 'contribution_pct'
+        What to use for circle size: 'contribution_pct' or 'transcriptomic_style'
+    min_contribution : float, optional
+        When using contribution_pct, filter out features with max contribution below this threshold (0-100)
+    cluster_order : list, optional
+        Custom order for clusters (list of cluster IDs). If None, uses sorted cluster IDs.
+    minmax_scaling : str, optional
+        Apply min-max scaling to features: '0to1' scales to [0,1], '-1to1' scales to [-1,1], None for no scaling
+    transpose : bool, default False
+        If True, swap axes so clusters are on x-axis and features on y-axis
+    
+    Returns:
+    --------
+    fig, ax : matplotlib objects
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pandas as pd
+    from scipy import stats
+    
+    def calculate_feature_contributions(data, feature_cols, cluster_ids):
+        """Calculate feature contribution metrics across all clusters."""
+        contributions = {}
+        
+        # Calculate ANOVA F-statistics for each feature
+        f_stats = {}
+        for feature in feature_cols:
+            if feature in data.columns:
+                groups = [data[data['cluster_id'] == cid][feature].dropna().values 
+                         for cid in cluster_ids]
+                groups = [g for g in groups if len(g) > 0]  # Remove empty groups
+                if len(groups) > 1:
+                    f_stat, _ = stats.f_oneway(*groups)
+                    f_stats[feature] = f_stat if not np.isnan(f_stat) else 0
+                else:
+                    f_stats[feature] = 0
+        
+        # Calculate effect sizes and contributions for each cluster
+        for cluster_id in cluster_ids:
+            cluster_data = data[data['cluster_id'] == cluster_id]
+            other_data = data[data['cluster_id'] != cluster_id]
+            
+            cluster_contributions = {}
+            effect_sizes = {}
+            
+            for feature in feature_cols:
+                if feature in data.columns:
+                    cluster_vals = cluster_data[feature].dropna()
+                    other_vals = other_data[feature].dropna()
+                    
+                    if len(cluster_vals) > 0 and len(other_vals) > 0:
+                        # Cohen's d effect size
+                        pooled_std = np.sqrt(((len(cluster_vals)-1)*cluster_vals.var() + 
+                                            (len(other_vals)-1)*other_vals.var()) / 
+                                           (len(cluster_vals) + len(other_vals) - 2))
+                        
+                        if pooled_std > 0:
+                            cohens_d = abs(cluster_vals.mean() - other_vals.mean()) / pooled_std
+                            effect_sizes[feature] = cohens_d
+                        else:
+                            effect_sizes[feature] = 0
+                    else:
+                        effect_sizes[feature] = 0
+            
+            # Convert to contribution percentages
+            total_effect = sum(effect_sizes.values())
+            if total_effect > 0:
+                cluster_contributions = {f: (effect_sizes[f] / total_effect) * 100 
+                                       for f in feature_cols if f in effect_sizes}
+            else:
+                cluster_contributions = {f: 0 for f in feature_cols}
+            
+            contributions[cluster_id] = {
+                'effect_sizes': effect_sizes,
+                'contribution_pct': cluster_contributions,
+                'f_stats': f_stats
+            }
+        
+        # Calculate cluster purity/dominance for each feature
+        for feature in feature_cols:
+            if feature in data.columns:
+                feature_values = data[feature].dropna()
+                if len(feature_values) > 0:
+                    # Define "extreme" as top 20% of values for this feature
+                    threshold = np.percentile(feature_values, 80)
+                    extreme_indices = data[feature] > threshold
+                    
+                    for cluster_id in cluster_ids:
+                        cluster_mask = data['cluster_id'] == cluster_id
+                        
+                        # How many extreme values belong to this cluster?
+                        extreme_in_cluster = (extreme_indices & cluster_mask).sum()
+                        total_extreme = extreme_indices.sum()
+                        
+                        if total_extreme > 0:
+                            purity = extreme_in_cluster / total_extreme
+                        else:
+                            purity = 0
+                        
+                        if cluster_id not in contributions:
+                            contributions[cluster_id] = {'purity': {}}
+                        elif 'purity' not in contributions[cluster_id]:
+                            contributions[cluster_id]['purity'] = {}
+                        
+                        contributions[cluster_id]['purity'][feature] = purity
+        
+        return contributions
+    
+    # Get feature columns
+    if feature_patterns is None:
+        # Use all numeric columns except cluster_id and id columns
+        feature_cols = [col for col in clustered_data.select_dtypes(include=[np.number]).columns 
+                       if col != 'cluster_id' and not any(id_var in col.lower() for id_var in ['recording', 'roi', 'condition', 'category'])]
+    else:
+        # Match feature patterns
+        feature_cols = []
+        for pattern in feature_patterns:
+            if pattern in clustered_data.columns:
+                feature_cols.append(pattern)
+            else:
+                cols = [col for col in clustered_data.columns 
+                       if pattern in col and col != pattern]
+                feature_cols.extend(cols)
+        feature_cols = list(dict.fromkeys(feature_cols))
+    
+    # Get cluster IDs and order them
+    if cluster_order is not None:
+        # Use custom order, but filter to only include clusters that exist in data
+        available_clusters = set(clustered_data['cluster_id'].unique())
+        cluster_ids = [cid for cid in cluster_order if cid in available_clusters]
+        # Add any missing clusters at the end
+        missing_clusters = available_clusters - set(cluster_ids)
+        cluster_ids.extend(sorted(missing_clusters))
+    else:
+        cluster_ids = sorted(clustered_data['cluster_id'].unique())
+    
+    # Apply min-max scaling if requested
+    data_for_calc = clustered_data.copy()
+    if minmax_scaling == '0to1':
+        if verbose:
+            print("Applying 0-1 min-max scaling to features")
+        for feature in feature_cols:
+            if feature in data_for_calc.columns:
+                min_val = data_for_calc[feature].min()
+                max_val = data_for_calc[feature].max()
+                if max_val > min_val:  # Avoid division by zero
+                    data_for_calc[feature] = (data_for_calc[feature] - min_val) / (max_val - min_val)
+                else:
+                    data_for_calc[feature] = 0  # If all values are the same
+    elif minmax_scaling == '-1to1':
+        if verbose:
+            print("Applying smart -1 to 1 min-max scaling to features")
+        for feature in feature_cols:
+            if feature in data_for_calc.columns:
+                min_val = data_for_calc[feature].min()
+                max_val = data_for_calc[feature].max()
+                if max_val > min_val:  # Avoid division by zero
+                    if min_val < 0:
+                        # Feature has negative values - use true [-1,1] scaling
+                        normalized = (data_for_calc[feature] - min_val) / (max_val - min_val)
+                        data_for_calc[feature] = 2 * normalized - 1
+                        if verbose:
+                            print(f"  {feature}: scaled to [-1,1] (has negative values)")
+                    else:
+                        # Feature is all positive - use [0,1] scaling
+                        data_for_calc[feature] = (data_for_calc[feature] - min_val) / (max_val - min_val)
+                        if verbose:
+                            print(f"  {feature}: scaled to [0,1] (all positive values)")
+                else:
+                    data_for_calc[feature] = 0  # If all values are the same
+    
+    # Calculate contribution metrics if needed
+    contributions = None
+    if size_metric in ['f_statistic', 'effect_size', 'contribution_pct']:
+        contributions = calculate_feature_contributions(data_for_calc, feature_cols, cluster_ids)
+    
+    # Calculate metrics for each cluster-feature combination
+    plot_data = []
+    
+    for cluster_id in cluster_ids:
+        cluster_data = data_for_calc[data_for_calc['cluster_id'] == cluster_id]
+        
+        for feature in feature_cols:
+            if feature in cluster_data.columns:
+                values = cluster_data[feature].dropna()
+                
+                if len(values) > 0:
+                    # Multiple metrics for circle size
+                    pct_expressing = (np.abs(values) > threshold).mean() * 100
+                    variance = values.var()
+                    value_range = values.max() - values.min()
+                    
+                    # Average expression level (color intensity)
+                    avg_expression = values.mean()
+                    
+                    # Calculate additional metrics for new size options
+                    global_mean = data_for_calc[feature].mean()
+                    global_std = data_for_calc[feature].std()
+                    z_score = abs(avg_expression - global_mean) / global_std if global_std > 0 else 0
+                    consistency = 1 - (values.std() / abs(avg_expression)) if abs(avg_expression) > 0 else 0
+                    consistency = max(0, consistency)  # Ensure non-negative
+                    
+                    # Transcriptomic-style metrics
+                    # Define "active" threshold using absolute values to catch strong responses in either direction
+                    global_abs_mean = np.abs(data_for_calc[feature]).mean()
+                    global_abs_std = np.abs(data_for_calc[feature]).std()
+                    active_threshold = global_abs_mean + 0.5 * global_abs_std
+                    
+                    # Percentage of cells in this cluster that are "active" for this feature  
+                    # Use absolute values to detect strong responses regardless of sign
+                    active_cells = np.abs(values) > active_threshold
+                    pct_active = active_cells.mean() * 100
+                    
+                    # Average magnitude among active cells only (preserve original sign)
+                    active_values = values[active_cells]
+                    avg_active_magnitude = active_values.mean() if len(active_values) > 0 else 0
+                    
+                    # Add contribution metrics if calculated
+                    f_stat = 0
+                    effect_size = 0 
+                    contribution_pct = 0
+                    purity = 0
+                    
+                    if contributions is not None:
+                        f_stat = contributions[cluster_id]['f_stats'].get(feature, 0)
+                        effect_size = contributions[cluster_id]['effect_sizes'].get(feature, 0)
+                        contribution_pct = contributions[cluster_id]['contribution_pct'].get(feature, 0)
+                        purity = contributions[cluster_id]['purity'].get(feature, 0)
+                    
+                    plot_data.append({
+                        'cluster_id': cluster_id,
+                        'feature': feature,
+                        'pct_expressing': pct_expressing,
+                        'variance': variance,
+                        'range': value_range,
+                        'avg_expression': avg_expression,
+                        'abs_avg_expression': np.abs(avg_expression),
+                        'f_statistic': f_stat,
+                        'effect_size': effect_size,
+                        'contribution_pct': contribution_pct,
+                        'purity': purity,
+                        'z_score': z_score,
+                        'consistency': consistency,
+                        'pct_active': pct_active,
+                        'avg_active_magnitude': avg_active_magnitude
+                    })
+    
+    plot_df = pd.DataFrame(plot_data)
+    
+    # Filter out low-contribution features if specified
+    if size_metric == 'contribution_pct' and min_contribution is not None:
+        # Find features where max contribution across clusters is above threshold
+        feature_max_contrib = plot_df.groupby('feature')['contribution_pct'].max()
+        good_features = feature_max_contrib[feature_max_contrib >= min_contribution].index.tolist()
+        
+        if len(good_features) == 0:
+            print(f"No features with contribution >= {min_contribution}%. Showing all features.")
+        else:
+            plot_df = plot_df[plot_df['feature'].isin(good_features)]
+            feature_cols = good_features
+            if verbose:
+                print(f"Filtered to {len(good_features)} features with contribution >= {min_contribution}%")
+    
+    if len(plot_df) == 0:
+        print("No data to plot")
+        return None, None
+    
+    if verbose:
+        print(f"Percentage range: {plot_df['pct_expressing'].min():.1f}% - {plot_df['pct_expressing'].max():.1f}%")
+        print(f"Variance range: {plot_df['variance'].min():.3f} - {plot_df['variance'].max():.3f}")
+        print(f"Value range: {plot_df['range'].min():.3f} - {plot_df['range'].max():.3f}")
+        print(f"Expression range: {plot_df['avg_expression'].min():.3f} - {plot_df['avg_expression'].max():.3f}")
+        if size_metric in ['f_statistic', 'effect_size', 'contribution_pct']:
+            print(f"F-statistic range: {plot_df['f_statistic'].min():.3f} - {plot_df['f_statistic'].max():.3f}")
+            print(f"Effect size range: {plot_df['effect_size'].min():.3f} - {plot_df['effect_size'].max():.3f}")
+            print(f"Contribution % range: {plot_df['contribution_pct'].min():.1f}% - {plot_df['contribution_pct'].max():.1f}%")
+            print(f"Purity range: {plot_df['purity'].min():.3f} - {plot_df['purity'].max():.3f}")
+        print(f"Features: {len(feature_cols)}, Clusters: {len(cluster_ids)}")
+        print(f"Using '{size_metric}' for circle sizes")
+    
+    # Create the plot
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Normalize values for visualization
+    max_abs_expr = plot_df['abs_avg_expression'].max() if plot_df['abs_avg_expression'].max() > 0 else 1
+    
+    # Choose size metric and normalize
+    # Commented out unused metrics for cleaner interface
+    # if size_metric == 'percentage':
+    #     size_values = plot_df['pct_expressing'] / 100
+    # elif size_metric == 'variance':
+    #     max_var = plot_df['variance'].max()
+    #     size_values = plot_df['variance'] / max_var if max_var > 0 else plot_df['variance'] * 0
+    # elif size_metric == 'range':
+    #     max_range = plot_df['range'].max()
+    #     size_values = plot_df['range'] / max_range if max_range > 0 else plot_df['range'] * 0
+    # elif size_metric == 'f_statistic':
+    #     max_f = plot_df['f_statistic'].max()
+    #     size_values = plot_df['f_statistic'] / max_f if max_f > 0 else plot_df['f_statistic'] * 0
+    # elif size_metric == 'effect_size':
+    #     max_effect = plot_df['effect_size'].max()
+    #     size_values = plot_df['effect_size'] / max_effect if max_effect > 0 else plot_df['effect_size'] * 0
+    
+    if size_metric == 'contribution_pct':
+        # Use rank for size (where this cluster ranks for each feature)
+        size_values = []
+        
+        for i, row in plot_df.iterrows():
+            feature = row['feature']
+            cluster_value = row['avg_expression']
+            
+            # Calculate rank of this cluster for this feature
+            feature_data = plot_df[plot_df['feature'] == feature]
+            feature_values = feature_data['avg_expression'].values
+            
+            # Get rank (0=lowest, 1=highest)
+            rank = (feature_values < cluster_value).sum() / (len(feature_values) - 1) if len(feature_values) > 1 else 0.5
+            size_values.append(rank)
+        
+        size_values = np.array(size_values)
+    # Commented out experimental metrics
+    # elif size_metric == 'z_score':
+    #     # Use z-score (deviation from expected)
+    #     max_z = plot_df['z_score'].max()
+    #     size_values = plot_df['z_score'] / max_z if max_z > 0 else plot_df['z_score'] * 0
+    # elif size_metric == 'consistency_magnitude':
+    #     # Combine consistency and magnitude
+    #     consistency_vals = plot_df['consistency']
+    #     magnitude_vals = plot_df['abs_avg_expression']
+    #     
+    #     # Normalize both
+    #     max_consistency = consistency_vals.max() if consistency_vals.max() > 0 else 1
+    #     max_magnitude = magnitude_vals.max() if magnitude_vals.max() > 0 else 1
+    #     
+    #     normalized_consistency = consistency_vals / max_consistency
+    #     normalized_magnitude = magnitude_vals / max_magnitude
+    #     
+    #     # Combine (equal weight for now)
+    #     size_values = (normalized_consistency + normalized_magnitude) / 2
+    elif size_metric == 'transcriptomic_style':
+        # Use percentage active for size (like % expressed in transcriptomics)
+        size_values = plot_df['pct_active'] / 100  # Convert to 0-1 range
+    else:
+        # Default to contribution_pct if unknown metric
+        size_values = []        
+        for i, row in plot_df.iterrows():
+            feature = row['feature']
+            cluster_value = row['avg_expression']
+            
+            # Calculate rank of this cluster for this feature
+            feature_data = plot_df[plot_df['feature'] == feature]
+            feature_values = feature_data['avg_expression'].values
+            
+            # Get rank (0=lowest, 1=highest)
+            rank = (feature_values < cluster_value).sum() / (len(feature_values) - 1) if len(feature_values) > 1 else 0.5
+            size_values.append(rank)
+        
+        size_values = np.array(size_values)
+    
+    for i, row in plot_df.iterrows():
+        if transpose:
+            x_pos = cluster_ids.index(row['cluster_id'])
+            y_pos = feature_cols.index(row['feature'])
+        else:
+            x_pos = feature_cols.index(row['feature'])
+            y_pos = cluster_ids.index(row['cluster_id'])
+        
+        # Circle size with enhanced scaling for better contrast
+        normalized_size = size_values[i]
+        # Linear scaling - no power transformation
+        size = normalized_size * size_scale
+        
+        # Ensure minimum size for visibility
+        size = max(size, size_scale * 0.05)
+        
+        # Color and alpha logic
+        if size_metric == 'contribution_pct':
+            # Use black dots with purity-based alpha
+            color = 'black'
+            purity_val = row['purity']
+            
+            # Scale purity for alpha
+            max_purity = plot_df['purity'].max()
+            if max_purity > 0:
+                scaled_purity = purity_val / max_purity
+            else:
+                scaled_purity = 0
+            
+            alpha = alpha_range[0] + (alpha_range[1] - alpha_range[0]) * scaled_purity
+        elif size_metric == 'transcriptomic_style':
+            avg_active_mag = row['avg_active_magnitude']
+            
+            if minmax_scaling == '-1to1':
+                # Use diverging colormap for -1 to 1 scaled data (preserve sign)
+                import matplotlib.cm as cm
+                cmap = cm.get_cmap('RdBu_r')  # Red-Blue diverging colormap (reversed)
+                
+                # Normalize to [0,1] for colormap (0 = -1, 0.5 = 0, 1 = +1)
+                normalized_mag = (avg_active_mag + 1) / 2  # Map [-1,1] to [0,1]
+                normalized_mag = np.clip(normalized_mag, 0, 1)
+                color = cmap(normalized_mag)
+            else:
+                # Use greyscale based on absolute average active magnitude (0to1 scaling or no scaling)
+                # Use absolute values for color intensity to handle negative values
+                abs_avg_active_mag = abs(avg_active_mag)
+                max_abs_active_mag = plot_df['avg_active_magnitude'].abs().max()
+                
+                if max_abs_active_mag > 0:
+                    # Map to greyscale: 0 = white, max = black
+                    grey_intensity = abs_avg_active_mag / max_abs_active_mag
+                    # Ensure grey_intensity is in [0,1] range
+                    grey_intensity = np.clip(grey_intensity, 0, 1)
+                    color = (1 - grey_intensity, 1 - grey_intensity, 1 - grey_intensity)  # RGB greyscale
+                else:
+                    color = 'white'
+            
+            alpha = 1.0  # Full opacity
+        else:
+            # Original color scheme for other metrics
+            normalized_expr = row['abs_avg_expression'] / max_abs_expr
+            alpha = alpha_range[0] + (alpha_range[1] - alpha_range[0]) * normalized_expr
+            color = 'red' if row['avg_expression'] > 0 else 'blue'
+        
+        # Plot the circle
+        ax.scatter(x_pos, y_pos, s=size, c=color, alpha=alpha, 
+                  edgecolors='black', linewidth=0.1)
+    
+    # Customize the plot
+    if transpose:
+        ax.set_xticks(range(len(cluster_ids)))
+        ax.set_xticklabels([str(cid) for cid in cluster_ids])
+        ax.set_yticks(range(len(feature_cols)))
+        ax.set_yticklabels(feature_cols)
+        
+        # Flip y-axis to match normal reading order (features top to bottom)
+        ax.invert_yaxis()
+        
+        ax.set_xlabel('Cluster ID')
+        ax.set_ylabel('Features')
+    else:
+        ax.set_xticks(range(len(feature_cols)))
+        ax.set_xticklabels(feature_cols, rotation=45, ha='right')
+        ax.set_yticks(range(len(cluster_ids)))
+        ax.set_yticklabels([str(cid) for cid in cluster_ids])
+        
+        # Flip y-axis to match cluster average plot order
+        ax.invert_yaxis()
+        
+        ax.set_xlabel('Features')
+        ax.set_ylabel('Cluster ID')
+    ax.set_title('Cluster-Feature Expression Profile')
+    
+    # Add grid
+    # ax.grid(True, alpha=0.3)
+    
+    # Create legends based on size_metric
+    if size_metric == 'transcriptomic_style':
+        # Size legend for percentage active
+        sizes = [25, 50, 75, 100]
+        size_legend = []
+        for s in sizes:
+            size_legend.append(ax.scatter([], [], s=(s/100)*size_scale, c='gray', alpha=0.6, 
+                                        edgecolors='black', linewidth=0.5))
+        
+        legend1 = ax.legend(size_legend, [f'{s}%' for s in sizes], 
+                           title='% Above\nthreshold', loc='center left', bbox_to_anchor=(1, 0.7))
+        
+        # Colorbar for average magnitude
+        import matplotlib.cm as cm
+        import matplotlib.colors as mcolors
+        
+        if minmax_scaling == '-1to1':
+            # Check if we actually have negative values in the scaled data
+            min_active_mag = plot_df['avg_active_magnitude'].min()
+            has_negative_values = min_active_mag < 0
+            
+            if has_negative_values:
+                # Use diverging colormap for truly bipolar data
+                cmap = cm.get_cmap('RdBu_r')  # Red-Blue diverging colormap (reversed)
+                # Force colorbar to show full -1 to +1 range
+                norm = mcolors.Normalize(vmin=-1, vmax=1)
+            else:
+                # All features were positive, use greyscale for [0,1] range
+                cmap = cm.get_cmap('Greys')
+                norm = mcolors.Normalize(vmin=0, vmax=1)
+        else:
+            # Use greyscale colormap for 0to1 scaling or no scaling
+            cmap = cm.get_cmap('Greys')
+            
+            # Get the range of absolute average active magnitude values for normalization
+            max_abs_active_mag = plot_df['avg_active_magnitude'].abs().max()
+            min_abs_active_mag = 0  # Always start from 0 for absolute values
+            
+            # Create a ScalarMappable for the colorbar
+            norm = mcolors.Normalize(vmin=min_abs_active_mag, vmax=max_abs_active_mag)
+        sm = cm.ScalarMappable(norm=norm, cmap=cmap)
+        sm.set_array([])
+        
+        # Add colorbar - compact and positioned like the old legend
+        cbar = plt.colorbar(sm, ax=ax, shrink=0.25, aspect=10, pad=0.05, 
+                           anchor=(0, 0.1), panchor=(1.0, 0.1))
+        # Create dynamic colorbar title based on scaling and actual data
+        if size_metric == 'transcriptomic_style':
+            if minmax_scaling == '-1to1':
+                # Check if we actually have negative values in the final data
+                min_active_mag = plot_df['avg_active_magnitude'].min()
+                if min_active_mag < 0:
+                    colorbar_title = 'Avg.\nmagnitude'  # Preserves sign, no "abs."
+                else:
+                    colorbar_title = 'Avg.\nmagnitude'  # All positive after smart scaling
+            elif minmax_scaling == '0to1':
+                colorbar_title = 'Avg. abs.\nmagnitude'  # Uses absolute values
+            else:
+                colorbar_title = 'Avg. abs.\nmagnitude'  # Default: absolute values for raw data
+        else:
+            # For other size_metrics, keep a generic title
+            colorbar_title = 'Avg.\nmagnitude'
+        
+        # Position the label above the colorbar using text annotation
+        cbar.ax.text(0.5, 1.05, colorbar_title, transform=cbar.ax.transAxes, 
+                     ha='center', va='bottom')
+        
+        ax.add_artist(legend1)  # Add first legend back
+    elif size_metric == 'contribution_pct':
+        # Size legend for contribution percentages
+        sizes = [25, 50, 75, 100]
+        size_legend = []
+        for s in sizes:
+            size_legend.append(ax.scatter([], [], s=(s/100)*size_scale, c='gray', alpha=0.6, 
+                                        edgecolors='black', linewidth=0.5))
+        
+        legend1 = ax.legend(size_legend, ['Lowest', 'Low', 'High', 'Highest'], 
+                           title='Cluster\nRank', loc='center left', bbox_to_anchor=(1, 0.7))
+        
+        # Alpha legend for cluster dominance
+        alphas = [0.3, 0.5, 0.7, 0.9]
+        alpha_legend = []
+        for a in alphas:
+            alpha_legend.append(ax.scatter([], [], c='black', alpha=a, s=100, 
+                                         edgecolors='black', linewidth=0.5))
+        
+        legend2 = ax.legend(alpha_legend, ['Low', 'Medium', 'High', 'Very High'], 
+                           title='Cluster\nDominance', loc='center left', bbox_to_anchor=(1, 0.3))
+        
+        ax.add_artist(legend1)  # Add first legend back
+    else:
+        # Original legends for other metrics
+        sizes = [25, 50, 75, 100]
+        size_legend = []
+        for s in sizes:
+            size_legend.append(ax.scatter([], [], s=(s/100)*size_scale, c='gray', alpha=0.6, 
+                                        edgecolors='black', linewidth=0.5))
+        
+        legend1 = ax.legend(size_legend, [f'{s}%' for s in sizes], 
+                           title='% Cells\nExpressing', loc='center left', bbox_to_anchor=(1, 0.7))
+        
+        # Create legend for colors
+        red_patch = ax.scatter([], [], c='red', alpha=0.8, s=100, edgecolors='black', linewidth=0.5)
+        blue_patch = ax.scatter([], [], c='blue', alpha=0.8, s=100, edgecolors='black', linewidth=0.5)
+        legend2 = ax.legend([red_patch, blue_patch], ['Positive', 'Negative'], 
+                           title='Expression\nDirection', loc='center left', bbox_to_anchor=(1, 0.3))
+        
+        ax.add_artist(legend1)  # Add first legend back
+    
+    plt.tight_layout()
+    sns.despine()
+    return fig, ax
+
 # Convenience function that combines everything
 def cluster_rf_data(df, feature_patterns, method='kmeans', n_clusters=5, 
                    id_vars=None, scale=True, scaling_method='standard', show_elbow=True, 
-                   show_embedding=None, **kwargs):
+                   show_embedding=None, show_silhouette=False, **kwargs):
     """
     Complete clustering workflow for RF data.
     
@@ -1969,6 +3186,8 @@ def cluster_rf_data(df, feature_patterns, method='kmeans', n_clusters=5,
         Whether to show elbow plot for kmeans
     show_embedding : str or None, default None
         Embedding visualization: None (no plot), 'pca', 'umap', or 'tsne'
+    show_silhouette : bool, default False
+        Whether to compute and display silhouette analysis
     **kwargs
         Additional clustering parameters
     
@@ -2026,6 +3245,68 @@ def cluster_rf_data(df, feature_patterns, method='kmeans', n_clusters=5,
         else:
             print(f"Warning: Unknown embedding method '{show_embedding}'. Skipping visualization.")
     
+    # Silhouette analysis if requested
+    silhouette_results = None
+    if show_silhouette:
+        from sklearn.metrics import silhouette_score, silhouette_samples, calinski_harabasz_score
+        
+        # Get the actual feature columns that were used in clustering
+        feature_cols = []
+        for pattern in feature_patterns:
+            # First try exact match for singular features
+            if pattern in clustered_data.columns:
+                feature_cols.append(pattern)
+            # Then try pattern matching for multi-column features  
+            else:
+                cols = [col for col in clustered_data.columns 
+                       if pattern in col and col != pattern]
+                feature_cols.extend(cols)
+        
+        # Remove duplicates while preserving order
+        feature_cols = list(dict.fromkeys(feature_cols))
+        print(f"Using {len(feature_cols)} feature columns for silhouette analysis")
+        
+        # Calculate silhouette scores
+        feature_data = clustered_data[feature_cols].dropna()
+        if len(feature_data) > 0 and len(clustered_data.loc[feature_data.index, 'cluster_id'].unique()) > 1:
+            silhouette_avg = silhouette_score(
+                feature_data, 
+                clustered_data.loc[feature_data.index, 'cluster_id']
+            )
+            print(f"Average silhouette score: {silhouette_avg:.3f}")
+            
+            # Per-cluster silhouette scores
+            sample_silhouette_values = silhouette_samples(
+                feature_data,
+                clustered_data.loc[feature_data.index, 'cluster_id']
+            )
+            
+            cluster_silhouettes = {}
+            for cluster_id in clustered_data['cluster_id'].unique():
+                cluster_mask = clustered_data.loc[feature_data.index, 'cluster_id'] == cluster_id
+                cluster_silhouettes[cluster_id] = np.mean(sample_silhouette_values[cluster_mask])
+            
+            print("Per-cluster silhouette scores:")
+            for cid, score in sorted(cluster_silhouettes.items()):
+                print(f"  Cluster {cid}: {score:.3f}")
+            
+            # Calculate Calinski-Harabasz score (higher is better)
+            ch_score = calinski_harabasz_score(
+                feature_data,
+                clustered_data.loc[feature_data.index, 'cluster_id']
+            )
+            print(f"Calinski-Harabasz score: {ch_score:.3f} (higher is better)")
+            
+            silhouette_results = {
+                'average_score': silhouette_avg,
+                'cluster_scores': cluster_silhouettes,
+                'sample_scores': sample_silhouette_values,
+                'calinski_harabasz_score': ch_score,
+                'feature_columns': feature_cols
+            }
+        else:
+            print("Warning: Cannot compute silhouette scores - insufficient data or clusters")
+    
     return {
         'clustered_data': clustered_data,
         'summary_stats': summary_stats,
@@ -2035,7 +3316,8 @@ def cluster_rf_data(df, feature_patterns, method='kmeans', n_clusters=5,
         'embedding_method': show_embedding,
         'elbow_results': elbow_results,
         'clustering_pca': clustering_result.get('pca_obj'),  # PCA used for clustering
-        'clusterer': clustering_result.get('clusterer')
+        'clusterer': clustering_result.get('clusterer'),
+        'silhouette_results': silhouette_results
     }
 
 # Example usage for verification:
@@ -2191,6 +3473,10 @@ def plot_cluster_results(clustering_result, experiment_obj,
                         include_timecourses=True,
                         figsize_per_cluster=None,
                         show_ipl_distribution=True,
+                        sort_by_ipl_depth=True,
+                        hide_noise_clusters=False,
+                        cluster_label_format="{cluster_id}, n = {n_rois}",
+                        rgb_mode='new',
                         save_path=None,
                         verbose=False):
     """
@@ -2219,6 +3505,10 @@ def plot_cluster_results(clustering_result, experiment_obj,
         Size per cluster row in inches. If None, automatically scales based on number of columns
     show_ipl_distribution : bool
         Whether to show IPL distribution plots
+    sort_by_ipl_depth : bool, default True
+        Whether to sort clusters by mean IPL depth (shallow to deep). If False, sorts by cluster ID.
+    hide_noise_clusters : bool, default False
+        Whether to hide clusters with low amplitude timecourses (likely noise clusters). These clusters are identified as having maximum timecourse amplitude < 1.0.
     save_path : str, optional
         Path to save the figure
     verbose : bool, default True
@@ -2304,6 +3594,11 @@ def plot_cluster_results(clustering_result, experiment_obj,
             print(f"  Areas columns in clustered data: {areas_cols}")
             print(f"  Time_amps columns in clustered data: {time_amps_cols}")
     
+    # Extract silhouette scores if available
+    silhouette_scores = None
+    if 'silhouette_results' in clustering_result and clustering_result['silhouette_results']:
+        silhouette_scores = clustering_result['silhouette_results']['cluster_scores']
+
     fig, ax = plot_all_cluster_averages_enhanced(
         data_for_metrics, experiment_obj, cluster_averages,
         cluster_timecourses=cluster_timecourses,
@@ -2311,6 +3606,11 @@ def plot_cluster_results(clustering_result, experiment_obj,
         metrics_like=metrics_like,
         figsize_per_cluster=figsize_per_cluster,
         show_ipl_distribution=show_ipl_distribution,
+        sort_by_ipl_depth=sort_by_ipl_depth,
+        hide_noise_clusters=hide_noise_clusters,
+        cluster_label_format=cluster_label_format,
+        silhouette_scores=silhouette_scores,
+        rgb_mode=rgb_mode,
         save_path=save_path,
         verbose=verbose
     )

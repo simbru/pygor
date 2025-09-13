@@ -236,16 +236,20 @@ def chroma_overview(
             rgb_data = strfs_chroma[[0, 1, 2]]  # R, G, B channels
             rgu_data = strfs_chroma[[0, 1, 3]]  # R, G, UV channels
             
-            # Normalize to [0, 1] for RGB display
+            # Normalize to [0, 1] for RGB display with proportional scaling
             rgb_normalized = np.abs(rgb_data)
             rgu_normalized = np.abs(rgu_data)
             
-            # Scale each channel independently
-            for i in range(3):
-                if rgb_normalized[i].max() > 0:
-                    rgb_normalized[i] = rgb_normalized[i] / rgb_normalized[i].max()
-                if rgu_normalized[i].max() > 0:
-                    rgu_normalized[i] = rgu_normalized[i] / rgu_normalized[i].max()
+            # Proportional scaling - find global max across all channels to preserve relative magnitudes
+            rgb_global_max = np.max([rgb_normalized[i].max() for i in range(3)])
+            rgu_global_max = np.max([rgu_normalized[i].max() for i in range(3)])
+            
+            if rgb_global_max > 0:
+                for i in range(3):
+                    rgb_normalized[i] = rgb_normalized[i] / rgb_global_max
+            if rgu_global_max > 0:
+                for i in range(3):
+                    rgu_normalized[i] = rgu_normalized[i] / rgu_global_max
             
             # Convert to (H, W, C) format for imshow
             processed_rgb = np.transpose(rgb_normalized, (1, 2, 0))
@@ -517,9 +521,23 @@ def visualise_summary(
         data_strf_object.collapse_times(), 4
     )
     strfs_rgb = np.abs(np.rollaxis((np.delete(strfs_chroma, 3, 0)), 0, 4))
-    strfs_rgb = np.array([pygor.utilities.min_max_norm(i, 0, 1) for i in strfs_rgb])
     strfs_rgu = np.abs(np.rollaxis((np.delete(strfs_chroma, 2, 0)), 0, 4))
-    strfs_rgu = np.array([pygor.utilities.min_max_norm(i, 0, 1) for i in strfs_rgu])
+    
+    # Proportional normalization - preserve relative magnitudes between RGB channels
+    for roi_idx in range(strfs_rgb.shape[0]):
+        # RGB normalization
+        rgb_channels = [strfs_rgb[roi_idx, :, :, i] for i in range(3)]
+        rgb_global_max = max(channel.max() for channel in rgb_channels)
+        if rgb_global_max > 0:
+            for i in range(3):
+                strfs_rgb[roi_idx, :, :, i] = strfs_rgb[roi_idx, :, :, i] / rgb_global_max
+        
+        # RGU normalization  
+        rgu_channels = [strfs_rgu[roi_idx, :, :, i] for i in range(3)]
+        rgu_global_max = max(channel.max() for channel in rgu_channels)
+        if rgu_global_max > 0:
+            for i in range(3):
+                strfs_rgu[roi_idx, :, :, i] = strfs_rgu[roi_idx, :, :, i] / rgu_global_max
 
     # Create iterators depneding on desired output
     if isinstance(
