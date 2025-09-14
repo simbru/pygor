@@ -1831,10 +1831,10 @@ class STRF(Core):
                     opposite_polarity = (dominant_response * secondary_response) < 0
                     if opposite_polarity:
                         # True opponency: different polarities
-                        opponency_index = (abs(dominant_response) - abs(secondary_response)) / (abs(dominant_response) + abs(secondary_response))
+                        opponency_index = 1 - (abs(dominant_response) - abs(secondary_response)) / (abs(dominant_response) + abs(secondary_response))
                     else:
                         # Same polarity: no true opponency, set to 1
-                        opponency_index = 1.0
+                        opponency_index = 0
                 
                 net_response = dominant_response + secondary_response
                 total_magnitude = abs(dominant_response) + abs(secondary_response)

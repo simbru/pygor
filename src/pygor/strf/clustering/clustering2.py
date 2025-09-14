@@ -1579,10 +1579,11 @@ def plot_all_cluster_averages_enhanced(df_with_clusters, experiment_obj, cluster
             deep_count = np.sum(ipl_depths > 45)     # Expanded deep layer (ON)
             total_count = len(ipl_depths)
             
-            # More lenient bistratified detection for cases like 10% + 50% peaks
-            if (std_depth > 12 and  # Lower std threshold
-                shallow_count/total_count > 0.15 and  # Lower presence threshold
-                deep_count/total_count > 0.15):       # Lower presence threshold
+            # More stringent bistratified detection - require substantial presence in both layers
+            if (std_depth > 15 and  # Higher std threshold
+                shallow_count/total_count > 0.25 and  # Higher presence threshold (25%)
+                deep_count/total_count > 0.25 and     # Higher presence threshold (25%)
+                min(shallow_count, deep_count) >= 5): # Minimum absolute count in each layer
                 is_bistratified = True
         
         # Categorize for sorting - use median depth instead of mean
@@ -2731,13 +2732,15 @@ def plot_cluster_feature_dotplot(clustered_data, feature_patterns=None,
     data_for_calc = clustered_data.copy()
     if minmax_scaling == '0to1':
         if verbose:
-            print("Applying 0-1 min-max scaling to features")
+            print("Applying 0-1 min-max scaling to features (using absolute values)")
         for feature in feature_cols:
             if feature in data_for_calc.columns:
-                min_val = data_for_calc[feature].min()
-                max_val = data_for_calc[feature].max()
+                # Take absolute values first to scale by amplitude magnitude
+                abs_values = np.abs(data_for_calc[feature])
+                min_val = abs_values.min()
+                max_val = abs_values.max()
                 if max_val > min_val:  # Avoid division by zero
-                    data_for_calc[feature] = (data_for_calc[feature] - min_val) / (max_val - min_val)
+                    data_for_calc[feature] = (abs_values - min_val) / (max_val - min_val)
                 else:
                     data_for_calc[feature] = 0  # If all values are the same
     elif minmax_scaling == '-1to1':
@@ -3158,6 +3161,120 @@ def plot_cluster_feature_dotplot(clustered_data, feature_patterns=None,
     plt.tight_layout()
     sns.despine()
     return fig, ax
+
+
+def generate_clustering_quality_table(clustered_data, feature_patterns=None, cluster_col='cluster_id'):
+    """
+    Generate a summary table of clustering quality metrics for each cluster.
+
+    Parameters:
+    -----------
+    clustered_data : pd.DataFrame
+        Data with cluster assignments and features
+    feature_patterns : list, optional
+        Feature patterns to use for metrics. If None, uses all numeric columns except cluster_id
+    cluster_col : str, default 'cluster_id'
+        Name of cluster column
+
+    Returns:
+    --------
+    pd.DataFrame
+        Summary table with cluster quality metrics
+    """
+    from sklearn.metrics import silhouette_samples, calinski_harabasz_score, davies_bouldin_score
+    import pandas as pd
+    import numpy as np
+
+    # Get feature columns
+    if feature_patterns is None:
+        feature_cols = [col for col in clustered_data.select_dtypes(include=[np.number]).columns
+                       if col != cluster_col and not any(id_var in col.lower() for id_var in ['recording', 'roi', 'condition', 'category'])]
+    else:
+        # Match feature patterns
+        feature_cols = []
+        for pattern in feature_patterns:
+            if pattern in clustered_data.columns:
+                feature_cols.append(pattern)
+            else:
+                cols = [col for col in clustered_data.columns
+                       if pattern in col and col != pattern]
+                feature_cols.extend(cols)
+        feature_cols = list(dict.fromkeys(feature_cols))
+
+    # Prepare data for sklearn metrics
+    X = clustered_data[feature_cols].values
+    labels = clustered_data[cluster_col].values
+
+    # Calculate silhouette scores
+    silhouette_scores = silhouette_samples(X, labels)
+
+    # Calculate global metrics
+    calinski_harabasz = calinski_harabasz_score(X, labels)
+    davies_bouldin = davies_bouldin_score(X, labels)
+
+    # Calculate per-cluster metrics
+    cluster_metrics = []
+
+    for cluster_id in sorted(clustered_data[cluster_col].unique()):
+        cluster_mask = clustered_data[cluster_col] == cluster_id
+        cluster_silhouettes = silhouette_scores[cluster_mask]
+
+        # Basic cluster info
+        n_samples = cluster_mask.sum()
+        pct_total = (n_samples / len(clustered_data)) * 100
+
+        # Silhouette metrics
+        mean_silhouette = cluster_silhouettes.mean()
+        std_silhouette = cluster_silhouettes.std()
+        min_silhouette = cluster_silhouettes.min()
+
+        # Intra-cluster metrics (compactness)
+        cluster_data = clustered_data[cluster_mask][feature_cols]
+        cluster_centroid = cluster_data.mean()
+
+        # Average distance to centroid
+        distances_to_centroid = np.sqrt(((cluster_data - cluster_centroid) ** 2).sum(axis=1))
+        avg_distance_to_centroid = distances_to_centroid.mean()
+
+        # Coefficient of variation (relative spread)
+        feature_cvs = []
+        for col in feature_cols:
+            if cluster_data[col].std() > 0:
+                cv = cluster_data[col].std() / abs(cluster_data[col].mean()) if cluster_data[col].mean() != 0 else np.inf
+                feature_cvs.append(cv)
+        avg_cv = np.mean(feature_cvs) if feature_cvs else np.inf
+
+        cluster_metrics.append({
+            'cluster_id': cluster_id,
+            'n_samples': n_samples,
+            'pct_total': pct_total,
+            'silhouette_mean': mean_silhouette,
+            'silhouette_std': std_silhouette,
+            'silhouette_min': min_silhouette,
+            'compactness': avg_distance_to_centroid,
+            'avg_cv': avg_cv
+        })
+
+    # Create DataFrame
+    metrics_df = pd.DataFrame(cluster_metrics)
+
+    # Add overall quality assessment
+    metrics_df['quality_grade'] = metrics_df['silhouette_mean'].apply(
+        lambda x: 'Excellent' if x > 0.7 else
+                 'Good' if x > 0.5 else
+                 'Fair' if x > 0.25 else 'Poor'
+    )
+
+    # Sort by cluster ID for easy reference
+    metrics_df = metrics_df.sort_values('cluster_id', ascending=True)
+
+    # Add global metrics as attributes
+    metrics_df.attrs['global_calinski_harabasz'] = calinski_harabasz
+    metrics_df.attrs['global_davies_bouldin'] = davies_bouldin
+    metrics_df.attrs['global_silhouette'] = silhouette_scores.mean()
+
+    return metrics_df
+
 
 # Convenience function that combines everything
 def cluster_rf_data(df, feature_patterns, method='kmeans', n_clusters=5, 

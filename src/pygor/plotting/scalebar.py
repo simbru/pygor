@@ -107,7 +107,9 @@ def add_scalebar(
     # If axes object is not provided, use the current axes
     if ax is None:
         ax = plt.gca()
-    fig = ax.get_figure()
+        fig = ax.get_figure()
+    else:
+        fig = ax.get_figure()
 
     # If text size is not provided, set it to a default value
     if text_size is None:
