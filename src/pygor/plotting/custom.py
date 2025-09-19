@@ -18,7 +18,7 @@ nanometers = ["588", "478", "422", "375"]
 fish_palette = ["#ef8e00", "teal", "#5600fe", "fuchsia"]
 # polarity_palette = ["lightslategray", "k", "tab:olive", "snow"]  # [off, on, opp, mix]
 # polarity_palette = ["lightsteelblue", "lightcoral", "lightpink"]
-polarity_palette = {"on": "whitesmoke", "off": "dimgrey", "opp": "olive", "mix": "purple"}# {"on": "whitesmoke", "off": "dimgrey"}
+polarity_palette = {"on": "whitesmoke", "off": "dimgrey", "opp": "#97bbdd", "mix": "purple"}# {"on": "whitesmoke", "off": "dimgrey"}
 
 compare_conditions = {
     2: ["grey", "tomato"],

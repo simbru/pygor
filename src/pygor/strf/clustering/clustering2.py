@@ -1911,7 +1911,7 @@ def plot_all_cluster_averages_enhanced(df_with_clusters, experiment_obj, cluster
                 # else:
                     # All values are the same - just show a single bar
                 sns.histplot(y=ipl_depths, binwidth=10, alpha=0.7, 
-                            binrange=(0,90),
+                            binrange=(0,100),
                             color='steelblue', edgecolor='black', 
                             stat="percent",
                             ax=ax)
@@ -2032,8 +2032,16 @@ def plot_all_cluster_averages_enhanced(df_with_clusters, experiment_obj, cluster
                         linewidth=0.1,
                         # size=3,
                         jitter=False)
-                    ax.set_yticks([])
-                    
+                        sns.barplot(data=cluster_rois[matching_metrics], 
+                            ax=ax, alpha=0.5, 
+                            orient='h',
+                            # palette="dark:k",
+                            palette = fish_palette,
+                            errorbar='sd',
+                            capsize=.4,
+                            err_kws={"color": ".5",},
+                        )
+                        ax.set_yticks([])
                     # Use global axis limits across all clusters for this metric
                     if matching_metrics:
                         # Get global data range across ALL clusters for this metric

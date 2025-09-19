@@ -709,6 +709,16 @@ class STRF(Core):
         dominant_times = np.array(dominant_times)
         return dominant_times
 
+    def get_timecourses_secondary(self, **kwargs):
+        secondary_times = []
+        for arr in self.get_timecourses(**kwargs):
+            if np.max(np.abs(arr[0]) > np.max(np.abs(arr[1]))):
+                secondary_times.append(arr[1])
+            else:
+                secondary_times.append(arr[0])
+        secondary_times = np.array(secondary_times)
+        return secondary_times
+
     def get_pix_times(self, incl_borders = False):
         if incl_borders is True:
             return np.array([np.reshape(i, (i.shape[0], -1)) for i in self.strfs])
@@ -1095,7 +1105,7 @@ class STRF(Core):
         return self.spatial_overlap_channel_pair(0, 2, abs_arrays, signal_only, single_channel_value)
 
 
-    def get_polarities(self, roi=None, exclude_FirstLast=(1,1), mode="spatiotemporal", force_recompute=False) -> np.ndarray:
+    def get_polarities(self, roi=None, exclude_FirstLast=(1,1), mode="opponency_index", force_recompute=False) -> np.ndarray:
         """
         Determine the polarity of STRF responses using various analysis methods.
         
@@ -1177,6 +1187,20 @@ class STRF(Core):
             cat[valid_mask & (polarity_indices > opponent_threshold)] = 1    # ON
             cat[valid_mask & (polarity_indices < -opponent_threshold)] = -1  # OFF
             cat[valid_mask & (np.abs(polarity_indices) <= opponent_threshold)] = 2  # Opponent
+            return cat
+        
+        elif mode == "opponency_index":
+            threshold = 0.33
+            amplitudes = self.get_space_amps()
+            amp_signs = np.where(amplitudes > 0, 1, -1)
+            cat = amp_signs
+            # Apply amplitude check similar to spatiotemporal mode
+            bool_mask = self.bool_by_channel(dimstr="time").flatten()
+            cat = np.where(bool_mask, cat, np.nan)
+        
+            # opponency_indices = self.get_opponency_index()
+            opponency_indices = self.get_opponency_index_time()
+            cat = np.where((bool_mask) & (opponency_indices >= threshold), 2, cat)
             return cat
             
         elif mode == "spatiotemporal":
@@ -1340,7 +1364,7 @@ class STRF(Core):
         mins = np.min(spaces_ch, axis = (1, 2))
         condition1 = maxes > ampl_thresh
         condition2 = mins < -ampl_thresh
-        return np.bitwise_and(condition1, condition2)
+        return np.squeeze(np.bitwise_and(condition1, condition2))
 
     def compute_average_spaces(self):
         spaces = self.collapse_times()
@@ -1581,8 +1605,8 @@ class STRF(Core):
             # Extract results
             major_axis_length = 2 * np.sqrt(eigenvalues[0])
             minor_axis_length = 2 * np.sqrt(eigenvalues[1])
-            eccentricity = 1 - (minor_axis_length / major_axis_length)
-            
+            # eccentricity = 1 - (minor_axis_length / major_axis_length)
+            eccentricity = np.sqrt(1 - (eigenvalues[1] / eigenvalues[0])) if eigenvalues[0] > 0 else 0
             # Angle calculation following pygor convention:
             # 0° = East (positive x), 90° = North (positive y)
             # arctan2(y, x) where y=eigenvector_y, x=eigenvector_x
@@ -2310,6 +2334,19 @@ class STRF(Core):
         mins = np.min(self.get_timecourses_dominant(**kwargs).data, axis = (1))
         largest_mag = np.where(maxes > np.abs(mins), maxes, mins) # search and insert values to retain sign
         return largest_mag
+    
+    def get_time_amps_surr(self) -> np.ndarray:
+        maxes = np.max(self.get_timecourses_secondary().data, axis = (1))
+        mins = np.min(self.get_timecourses_secondary().data, axis = (1))
+        largest_mag = np.where(maxes > np.abs(mins), maxes, mins) # search and insert values to retain sign
+        return largest_mag
+
+    def get_opponency_index_time(self, **kwargs) -> np.ndarray:
+        # Get dominant and secondary timecourse amplitudes
+        dominant_amps = self.get_time_amps(**kwargs)
+        secondary_amps = self.get_time_amps_surr()
+        opponency_index = 1 - (abs(dominant_amps) - abs(secondary_amps)) / (abs(dominant_amps) + abs(secondary_amps))
+        return opponency_index
 
     def get_time_amps_by_ch(self, ch_idx, **kwargs) -> np.ndarray:
         amps_raw = self.get_time_amps()
@@ -2321,6 +2358,14 @@ class STRF(Core):
         mins =  np.min(self.collapse_times(), axis = (1, 2))
         largest_mag = np.where(maxes > np.abs(mins), maxes, mins) # search and insert values to retain sign
         return largest_mag
+    
+    def get_space_min(self) -> np.ndarray:
+        mins =  np.min(self.collapse_times(), axis = (1, 2))
+        return mins
+    
+    def get_space_max(self) -> np.ndarray:
+        maxes = np.max(self.collapse_times(), axis = (1, 2))
+        return maxes
 
     def get_time_to_peak(self, dur_s = 1.3) -> np.ndarray:
         # First get timecourses
@@ -3267,6 +3312,7 @@ class STRF(Core):
             'dx': np.squeeze(dx),  # bonus: cartesian components
             'dy': np.squeeze(dy)
         }
+    # Convenience functions to get just angles or magnitudes with optional masking
 
     def get_centre_surr_angles(self, roi = None, mask_singlepol = False):
         vectors = self.calc_centre_surr_vectors(roi=roi, mode = "weighted")
@@ -3293,6 +3339,13 @@ class STRF(Core):
                 mask_subset = masks
             vectors['magnitude'] = np.where(mask_subset, vectors['magnitude'], np.nan)
         return vectors['magnitude']
+
+    
+    def get_centre_surr_x(self, **kwargs):
+        return self.calc_centre_surr_vectors(**kwargs)['dx']
+    
+    def get_centre_surr_y(self, **kwargs):
+        return self.calc_centre_surr_vectors(**kwargs)['dy']
 
     def demo_cs_seg(self, roi):
         _ = self.cs_seg(roi, plot = True, segmentation_params = {"plot_demo": True})
