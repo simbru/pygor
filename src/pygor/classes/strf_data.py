@@ -1104,6 +1104,9 @@ class STRF(Core):
         """Red-Blue spatial overlap (Ch0-Ch2)"""
         return self.spatial_overlap_channel_pair(0, 2, abs_arrays, signal_only, single_channel_value)
 
+    def get_on_or_off(self, amplitude_threshold=0.1) -> np.ndarray:
+        signal = self.get_dominant_response()
+        return np.where(signal > 0, 1, -1)
 
     def get_polarities(self, roi=None, exclude_FirstLast=(1,1), mode="opponency_index", force_recompute=False) -> np.ndarray:
         """
@@ -1195,14 +1198,14 @@ class STRF(Core):
             amp_signs = np.where(amplitudes > 0, 1, -1)
             cat = amp_signs
             # Apply amplitude check similar to spatiotemporal mode
-            bool_mask = self.bool_by_channel(dimstr="time").flatten()
+            bool_mask = self.bool_by_channel(dimstr="space").flatten()
             cat = np.where(bool_mask, cat, np.nan)
         
             # opponency_indices = self.get_opponency_index()
             opponency_indices = self.get_opponency_index_time()
             cat = np.where((bool_mask) & (opponency_indices >= threshold), 2, cat)
             return cat
-            
+
         elif mode == "spatiotemporal":
             # Hybrid approach: spatial analysis first, temporal fallback for NaNs
             # Get spatial polarity indices (keeps high threshold for accuracy)
@@ -1280,6 +1283,15 @@ class STRF(Core):
         # # Use dedicated polarity module for other modes
         # from pygor.strf.polarity import get_polarities
         # return get_polarities(self, roi, exclude_FirstLast, mode, force_recompute)
+
+    def get_polarities_simple(self):
+        amplitudes = self.get_space_amps()
+        amp_signs = np.where(amplitudes > 0, 1, -1)
+        cat = amp_signs
+        # Apply amplitude check similar to spatiotemporal mode
+        bool_mask = self.bool_by_channel(dimstr="space").flatten()
+        cat = np.where(bool_mask, cat, np.nan)
+        return cat
 
     def check_cs_pass(self):
         # if a label exists from self.get_polarities
@@ -2329,6 +2341,58 @@ class STRF(Core):
                 result.append("other")
         return result
 
+    def get_polarity_category_cell_simple(self, mask_by_channel=False, threshold=2, dimstr="spatiotemporal") -> str:
+        """
+        Get simplified polarity category for each cell across colour channels.
+        Uses same logic as get_polarity_category_cell but only returns 'on', 'off', 'opp', or 'nan'.
+
+        Parameters
+        ----------
+        mask_by_channel : bool, optional
+            Whether to mask polarities using self.bool_by_channel (default: False)
+        threshold : float, optional
+            Threshold for bool_by_channel masking (default: 2)
+        dimstr : str, optional
+            Dimension for bool_by_channel ('time' or 'space', default: 'spatiotemporal')
+
+        Returns
+        -------
+        list of str
+            Simplified polarity categories for each cell: 'on', 'off', 'opp', or 'nan'
+        """
+        result = []
+        # Get polarities using same logic as original, then convert 2 → center identity
+        polarities = self.get_polarities()
+
+        # For cells marked as opponent (2), convert to center identity based on amplitude sign
+        amplitudes = self.get_space_amps()
+        amp_signs = np.where(amplitudes > 0, 1, -1)
+        polarities = np.where(polarities == 2, amp_signs, polarities)
+
+        arr = pygor.utilities.multicolour_reshape(polarities, self.numcolour).T
+
+        if mask_by_channel:
+            # Get boolean mask for significant channels
+            bool_mask = self.bool_by_channel(threshold=threshold, dimstr=dimstr)
+            # Apply mask to polarities - set insignificant channels to NaN
+            for i, (pol_row, mask_row) in enumerate(zip(arr, bool_mask)):
+                arr[i] = np.where(mask_row, pol_row, np.nan)
+
+        for i in arr:
+            inner_no_nan = np.unique(i)[~np.isnan(np.unique(i))]
+            if not any(inner_no_nan):
+                result.append('nan')
+            elif np.all(inner_no_nan == -1):
+                result.append("off")
+            elif np.all(inner_no_nan == 1):
+                result.append("on")
+            elif -1 in inner_no_nan and 1 in inner_no_nan:
+                result.append("opp")
+            else:
+                # Map everything else (mix, other, etc.) to 'nan'
+                result.append("nan")
+        return result
+
     def get_time_amps(self, **kwargs) -> np.ndarray:
         maxes = np.max(self.get_timecourses_dominant(**kwargs).data, axis = (1))
         mins = np.min(self.get_timecourses_dominant(**kwargs).data, axis = (1))
@@ -2345,8 +2409,17 @@ class STRF(Core):
         # Get dominant and secondary timecourse amplitudes
         dominant_amps = self.get_time_amps(**kwargs)
         secondary_amps = self.get_time_amps_surr()
-        opponency_index = 1 - (abs(dominant_amps) - abs(secondary_amps)) / (abs(dominant_amps) + abs(secondary_amps))
-        return opponency_index
+
+        # Check if regions have opposite polarities (signs)
+        opposite_polarity = (dominant_amps * secondary_amps) < 0
+
+        # Calculate antagonism index only for opposite polarities
+        antagonism_index = np.where(
+            opposite_polarity,
+            1 - (abs(dominant_amps) - abs(secondary_amps)) / (abs(dominant_amps) + abs(secondary_amps)),
+            0  # Same polarity: no true opponency
+        )
+        return antagonism_index
 
     def get_time_amps_by_ch(self, ch_idx, **kwargs) -> np.ndarray:
         amps_raw = self.get_time_amps()

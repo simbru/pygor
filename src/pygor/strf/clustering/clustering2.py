@@ -18,6 +18,21 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
 
+# Configuration for consistency across all plots
+sns.set_theme(style="whitegrid", rc={"grid.linewidth": 0.5, "grid.alpha": 0.0})
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.sans-serif'] = ['Helvetica', 'Arial', 'DejaVu Sans']
+plt.rcParams['axes.linewidth'] = 1.2
+plt.rcParams['xtick.major.width'] = 1.2
+plt.rcParams['ytick.major.width'] = 1.2
+plt.rcParams['legend.frameon'] = True
+plt.rcParams['legend.fancybox'] = True
+plt.rcParams['legend.shadow'] = False
+plt.rcParams['legend.framealpha'] = 0.9
+plt.rcParams['figure.facecolor'] = 'white'
+plt.rcParams['axes.facecolor'] = 'white'
+sns.set_context('paper', font_scale=0.8)
+
 def create_rgb_composite(curr_clust_avgs, channel_indices, mode='proportional'):
     """
     Create RGB composite from selected channels.
@@ -322,6 +337,100 @@ def elbow_analysis(feature_data, max_k=30, random_state=42):
     
     return {'k_values': list(k_values), 'inertias': inertias}
 
+def _relabel_clusters_by_ipl_depth(clustered_data, verbose=False):
+    """
+    Relabel clusters so that cluster IDs are ordered by IPL depth (shallow to deep).
+
+    Uses the same logic as the plotting functions to determine IPL-based ordering,
+    but applies it to the cluster IDs themselves rather than just for display.
+
+    Parameters:
+    -----------
+    clustered_data : pd.DataFrame
+        Data with cluster_id and depths columns
+    verbose : bool, default False
+        Whether to print relabeling information
+
+    Returns:
+    --------
+    pd.DataFrame
+        Data with relabeled cluster_id column (0=shallowest, n=deepest)
+    """
+    if 'depths' not in clustered_data.columns:
+        if verbose:
+            print("No 'depths' column found - skipping IPL-based relabeling")
+        return clustered_data
+
+    # Calculate IPL statistics for each cluster (same logic as plot_cluster_results)
+    original_clusters = sorted(clustered_data['cluster_id'].unique())
+    cluster_ipl_stats = {}
+
+    for cluster_id in original_clusters:
+        cluster_rois = clustered_data[clustered_data['cluster_id'] == cluster_id]
+        ipl_depths = cluster_rois['depths'].dropna().values
+
+        if len(ipl_depths) == 0:
+            # No depth data for this cluster - assign to middle
+            cluster_ipl_stats[cluster_id] = {
+                'mean': 45.0,  # Middle depth
+                'category': 'unknown',
+                'sort_key': (1.5, 45.0)  # Put unknowns after bistratified
+            }
+            continue
+
+        mean_depth = np.mean(ipl_depths)
+        median_depth = np.median(ipl_depths)  # More robust to outliers
+        std_depth = np.std(ipl_depths)
+
+        # Detect bistratified clusters (same logic as plot_cluster_results)
+        is_bistratified = False
+        if len(ipl_depths) >= 10:  # Need sufficient data points
+            # Count shallow vs deep ROIs
+            shallow_count = np.sum(ipl_depths < 35)
+            deep_count = np.sum(ipl_depths > 55)
+
+            # Bistratified if high variability AND presence in both layers
+            if (std_depth > 15 and
+                min(shallow_count, deep_count) >= 5):
+                is_bistratified = True
+
+        # Categorize for sorting - use median depth for robustness
+        if is_bistratified:
+            category = 'bistratified'
+            sort_key = (1, 45 + std_depth/10)  # Middle position
+        elif median_depth >= 45:  # Deep/ON-dominant (use median)
+            category = 'deep'
+            sort_key = (0, -median_depth)  # Deep first, sorted by descending median depth
+        else:  # Shallow/OFF-dominant (use median)
+            category = 'shallow'
+            sort_key = (2, -median_depth)  # Shallow last, sorted by descending median depth
+
+        cluster_ipl_stats[cluster_id] = {
+            'mean': mean_depth,
+            'median': median_depth,
+            'std': std_depth,
+            'category': category,
+            'sort_key': sort_key
+        }
+
+    # Sort clusters by IPL depth (shallow to deep)
+    sorted_original_clusters = sorted(original_clusters, key=lambda cid: cluster_ipl_stats[cid]['sort_key'])
+
+    # Create mapping from original cluster IDs to new IPL-ordered IDs
+    cluster_id_mapping = {orig_id: new_id for new_id, orig_id in enumerate(sorted_original_clusters)}
+
+    if verbose:
+        print("Relabeling clusters by IPL depth (using median for sorting):")
+        for new_id, orig_id in enumerate(sorted_original_clusters):
+            stats = cluster_ipl_stats[orig_id]
+            print(f"  Original cluster {orig_id} → New cluster {new_id} ({stats['category']}, median={stats.get('median', stats['mean']):.1f}, mean={stats['mean']:.1f})")
+
+    # Apply the relabeling
+    result = clustered_data.copy()
+    result['cluster_id'] = result['cluster_id'].map(cluster_id_mapping)
+
+    return result
+
 def apply_clustering(data, method='kmeans', n_clusters=5, random_state=42, 
                     use_pca=False, n_components=None, **kwargs):
     """
@@ -436,10 +545,14 @@ def apply_clustering(data, method='kmeans', n_clusters=5, random_state=42,
     # Add cluster labels to original data
     result = data.copy()
     result['cluster_id'] = cluster_labels
-    
-    print(f"Created {len(np.unique(cluster_labels))} clusters")
-    print(f"Cluster sizes: {np.bincount(cluster_labels)}")
-    
+
+    # Relabel clusters by IPL depth if depths column is available
+    if 'depths' in data.columns:
+        result = _relabel_clusters_by_ipl_depth(result, verbose=True)
+
+    print(f"Created {len(np.unique(result['cluster_id']))} clusters")
+    print(f"Final cluster sizes: {np.bincount(result['cluster_id'])}")
+
     return {
         'clustered_data': result,
         'pca_obj': pca_obj,
@@ -3285,7 +3398,7 @@ def generate_clustering_quality_table(clustered_data, feature_patterns=None, clu
 
 
 # Convenience function that combines everything
-def cluster_rf_data(df, feature_patterns, method='kmeans', n_clusters=5, 
+def cluster_rf_data(df, feature_patterns, method='kmeans', n_clusters=5, random_state=42,
                    id_vars=None, scale=True, scaling_method='standard', show_elbow=True, 
                    show_embedding=None, show_silhouette=False, **kwargs):
     """
@@ -3346,7 +3459,7 @@ def cluster_rf_data(df, feature_patterns, method='kmeans', n_clusters=5,
     
     # Apply clustering
     clustering_result = apply_clustering(
-        prepared_data, method=method, n_clusters=n_clusters, 
+        prepared_data, method=method, n_clusters=n_clusters, random_state=random_state,
         id_cols=id_vars, **kwargs
     )
     
