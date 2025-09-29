@@ -21,7 +21,7 @@ def plot_averages(
     phase_dur_mod = 1,
     kill_phase = None,
     include_snippets = True,
-    text_size = 10,
+    text_size = None,
     **kwargs,
 ):
     """
@@ -51,6 +51,8 @@ def plot_averages(
     -------
     None
     """
+    if text_size is None:
+        text_size = plt.rcParams['font.size']
     # Handle arguments, keywords, and exceptions
     if self.averages is None:
         raise AttributeError(
@@ -106,7 +108,7 @@ def plot_averages(
         # Handle single ROI case for internally created axes
         if not provided_axs and len(rois) == 1:
             axs = np.array([axs])
-        sd_ratio_scalebar = 0.5
+        sd_ratio_scalebar = 1
         phase_dur = self.ms_dur / self.trigger_mode * phase_dur_mod
         """
         TODO: Fix so it doesn't just put shading 
@@ -128,7 +130,7 @@ def plot_averages(
                 closest_sd = np.ceil(np.max(self.averages[roi])*sd_ratio_scalebar)
                 pygor.plotting.add_scalebar(closest_sd, string = f"{closest_sd.astype(int)} SD",ax=ax, flip_text=True, x=1.015, y = 0.1, text_size = text_size)
             ax.set_yticklabels([])
-            ax.set_ylabel(label, rotation=0, verticalalignment="center")
+            ax.set_ylabel(label, rotation=0, verticalalignment="center", fontsize=plt.rcParams['font.size'])
             ax.spines[["top", "bottom", "right"]].set_visible(False)
             # Now we need to add axvspans (don't think I can avoid for loops inside for loops...)
             if phase_dur_mod != 1:
@@ -143,7 +145,7 @@ def plot_averages(
 #               for i in self.get_average_markers():
 #                   ax.axvline(i, color="k", lw=2, alpha = 0.33, zorder = 0)
                 for interval in inner_loop[::2][::skip_trigger]:
-                    ax.axvline(interval*phase_dur, color="k", lw=2, alpha = 0.2, zorder = 0)
+                    # ax.axvline(interval*phase_dur, color="k", lw=2, alpha = 0.2, zorder = 0)
                     if interval in kill_phase:
                         continue
                     ax.axvspan(
@@ -156,14 +158,15 @@ def plot_averages(
 
             ax.grid(False)
         if independent_scale is False:
-            closest_sd = np.ceil(np.max(self.averages[rois])*sd_ratio_scalebar)
+            closest_sd = np.ceil(np.max(np.abs(self.averages[rois])*sd_ratio_scalebar))
             pygor.plotting.add_scalebar(closest_sd, string = f"{closest_sd.astype(int)} SD",ax=axs.flat[-1], flip_text=True, x=1.015, y = 0.1, text_size = text_size)
         # ax.set_xlabel("Time (ms)")
         fig.subplots_adjust(hspace=0)
         cax = axs.flat[-1]
         cax.set_xticks(np.ceil(cax.xaxis.get_majorticklocs()), np.ceil(cax.xaxis.get_majorticklocs() / 1000))
         cax.set_xlim(0, len(self.averages[0]))
-        cax.set_xlabel("Time (s)")
+        cax.set_xlabel("Time (s)", fontsize=plt.rcParams['font.size'])
+        cax.tick_params(labelsize=plt.rcParams['font.size'])
         return fig, axs
     else:
         if sort_order is None:
@@ -223,7 +226,7 @@ def plot_averages(
         plt.colorbar(img)
         ax.set_xticks(np.ceil(ax.xaxis.get_majorticklocs()), np.ceil(ax.xaxis.get_majorticklocs() / 1000))
         ax.set_xlim(0, len(self.averages[0]))
-        ax.set_xlabel("Time (s)")
+        ax.set_xlabel("Time (s)", fontsize=plt.rcParams['font.size'])
         return fig, axs
     # plt.tight_layout()
     

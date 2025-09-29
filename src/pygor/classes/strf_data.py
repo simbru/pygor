@@ -2854,11 +2854,6 @@ class STRF(Core):
         return index
 
     def get_colour_coefvar_raw(self, channels = None):
-        """
-        Crude coefficient of variation calculation that replicates the original validation script method.
-        Uses raw spatiotemporal data and takes max(abs(all_values)) per colour per ROI.
-        This method is for comparison purposes to understand differences with the principled approach.
-        """
         if channels is None:
             channels = np.arange(self.numcolour)
         
@@ -3396,7 +3391,7 @@ class STRF(Core):
             if roi is not None:
                 mask_subset = masks[roi]
             else:
-                mask_subset = masks
+                mask_subset = masks.flatten()
             vectors['angle_degrees'] = np.where(mask_subset, vectors['angle_degrees'], np.nan)
         return vectors['angle_degrees']
     

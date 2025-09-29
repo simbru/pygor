@@ -3180,7 +3180,7 @@ def plot_cluster_feature_dotplot(clustered_data, feature_patterns=None,
                                         edgecolors='black', linewidth=0.5))
         
         legend1 = ax.legend(size_legend, [f'{s}%' for s in sizes], 
-                           title='% Above\nthreshold', loc='center left', bbox_to_anchor=(1, 0.7))
+                           title='% Above\nmean', loc='center left', bbox_to_anchor=(1, 0.7))
         
         # Colorbar for average magnitude
         import matplotlib.cm as cm
