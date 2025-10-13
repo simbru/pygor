@@ -1,0 +1,147 @@
+# USED METHODS (38 methods, ranked by usage)
+map_extrema_timing (23 uses)
+get_timecourses (16 uses)
+collapse_times (12 uses)
+to_rgb (8 uses)
+get_polarities (7 uses)
+post_init (4 uses)
+fit_contours (4 uses)
+get_contours_area (4 uses)
+calc_tunings_centroids (2 uses)
+check_cs_pass (2 uses)
+cs_seg (2 uses)
+get_bootstrap_settings (2 uses)
+get_space_amps (2 uses)
+get_spatial_masks (2 uses)
+get_time_amps (2 uses)
+run_bootstrap (2 uses)
+save_pkl (2 uses)
+set_bootstrap_bool (2 uses)
+update_bootstrap_settings (2 uses)
+calc_LED_offset (1 use)
+calc_centre_distances (1 use)
+calc_contours_complexities (1 use)
+calc_mean_absolute_deviation (1 use)
+calc_spatial_opponency (1 use)
+calc_spectral_centroids (1 use)
+calc_tunings_amplitude (1 use)
+calc_tunings_area (1 use)
+calc_tunings_peaktime (1 use)
+centre_strfs (1 use)
+check_space_average_gabor (1 use)
+get_contours_count (1 use)
+get_opponency_bool (1 use)
+get_polarity_category_cell (1 use)
+get_pvals_table (1 use)
+get_seg_centres (1 use)
+get_timecourses_dominant (1 use)
+plot_chromatic_overview (1 use)
+plot_timecourse (1 use)
+
+# UNUSED METHODS (106 methods, alphabetical)
+__calc_pval_space
+__calc_pval_time
+_plot_pca_results
+_validate_data_consistency
+analyze_spatial_alignment
+bool_roi_signal
+bool_strf_signal
+by_channel_wrapper
+calc_centre_surr_vectors
+calc_centre_surround_metrics
+calc_colour_channel_offsets
+calc_contours_centroids
+calc_pca_rf_shape_analysis
+calc_spatial_correlations
+calc_spectrums
+calculate_strf
+check_strf_gabor
+collapse_times_chroma
+compute_average_spaces
+compute_colour_channel_overlap
+compute_spatial_offset_between_channels
+convolve_with_img
+demo_contouring
+demo_cs_seg
+get_biphasic_index
+get_centre_only_seg
+get_centre_surr_angles
+get_centre_surr_magnitudes
+get_centre_surr_x
+get_centre_surr_y
+get_chroma_strf
+get_chroma_times
+get_colour_channel_offsets_angles
+get_colour_channel_offsets_magnitudes
+get_colour_channel_offsets_true_centers
+get_colour_coefvar
+get_colour_coefvar_raw
+get_colour_sparseness_index
+get_contours_centres
+get_contours_centres_by_pol
+get_dominance_ratio
+get_dominant_response
+get_net_response
+get_noise_response
+get_npercent_times
+get_on_or_off
+get_opponency_index
+get_opponency_index_time
+get_opposite_polarity
+get_pca_centroidsX
+get_pca_centroidsY
+get_pca_eccentricities
+get_pca_major_axis_lengths
+get_pca_minor_axis_lengths
+get_pca_orientations
+get_peaktimes
+get_pix_times
+get_polarities_simple
+get_polarity_category_cell_simple
+get_polarity_labels
+get_secondary_percentage
+get_secondary_response
+get_seg_areas
+get_space_max
+get_space_min
+get_spectral_centroid_centre
+get_strf_masks
+get_time_amps_by_ch
+get_time_amps_surr
+get_time_to_peak
+get_timecourses_secondary
+get_total_magnitude
+is_region_a_dominant
+napari_strfs
+num_rois_sig
+pca_rf_shape_analysis
+play_multichrom_strf
+play_strf
+play_strf_rgb
+plot_space
+plot_spatial_alignment
+plot_strfs_space
+pval_space
+pval_time
+rf_masks_combined
+set_bootstrap_setting
+set_bootstrap_settings_default
+spatial_overlap_blue_uv
+spatial_overlap_channel_pair
+spatial_overlap_green_blue
+spatial_overlap_green_uv
+spatial_overlap_index_mean
+spatial_overlap_index_min
+spatial_overlap_index_stats
+spatial_overlap_index_std
+spatial_overlap_index_var
+spatial_overlap_red_blue
+spatial_overlap_red_green
+spatial_overlap_red_uv
+spatial_polarity_index
+stim_size
+stim_size_arbitrary
+strfs_chroma
+strfs_no_border
+unravel_chroma_roi
+unravel_strf_indices

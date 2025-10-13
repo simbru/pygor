@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import natsort
 import numpy as np
 import pandas as pd
-import sklearn.preprocessing
+# import sklearn.preprocessing
 import re
 from tqdm.auto import tqdm
 # Local imports
@@ -40,7 +40,7 @@ import pygor.strf.calculate_multicolour_optimized
 import pygor.utils.helpinfo
 import pygor.utils.unit_conversion as unit_conversion
 from pygor.classes.core_data import Core
-import scipy
+# import scipy
 from pygor.classes.core_data import try_fetch_os_params
 
 @dataclass(repr = False)
@@ -822,6 +822,8 @@ class STRF(Core):
         >>> print(offset)
         array([x_offset, y_offset])
         """
+        warnings.warn("This method is deprecated and will be removed in future versions.", DeprecationWarning)
+    
         if self.multicolour == True:
             # Get the average centre position for each colour
             avg_colour_centre = np.array([np.nanmean(yx, axis = 0) for yx in pygor.utilities.multicolour_reshape(self.get_contours_centres(), self.numcolour)])
