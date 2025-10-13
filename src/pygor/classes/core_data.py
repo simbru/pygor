@@ -83,6 +83,7 @@ class Core:
             # Basic information
             self.metadata = pygor.data_helpers.metadata_dict(HDF5_file)
             self.rois = try_fetch(HDF5_file, "ROIs")
+            self.roi_sizes = try_fetch(HDF5_file, "RoiSizes")
             self.num_rois = len(np.unique(self.rois)) - 1
             # Timing parameters
             self.triggertimes = try_fetch(HDF5_file, "Triggertimes")
@@ -95,6 +96,7 @@ class Core:
             self.ipl_depths = try_fetch(HDF5_file, "Positions")
             self.averages = try_fetch(HDF5_file, "Averages0")
             self.snippets = try_fetch(HDF5_file, "Snippets0")
+            self.quality_indices = try_fetch(HDF5_file, "QualityCriterion")
             self.trigger_mode = int(try_fetch_os_params(HDF5_file, "Trigger_Mode"))
             self.n_planes = int(try_fetch_os_params(HDF5_file, "nPlanes"))
             self.linedur_s = float(try_fetch_os_params(HDF5_file, "LineDuration"))
