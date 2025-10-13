@@ -54,6 +54,7 @@ package = true
 dev-dependencies = [
     "uv>=0.4.24",
 ]
+
 constraint-dependencies = ["pyqt5-qt5 <=5.15.2"]
 
 [tool.uv.sources]

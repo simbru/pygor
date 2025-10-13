@@ -2,9 +2,6 @@ version = 1
 revision = 1
 requires-python = ">=3.12"
 
-[manifest]
-constraints = [{ name = "pyqt5-qt5", specifier = "<=5.15.2" }]
-
 [[package]]
 name = "alabaster"
 version = "1.0.0"
