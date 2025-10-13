@@ -69,7 +69,7 @@ def sort_rows_by_correlation(data):
 def get_triggertimes(inputdata):
     """calculates when triggers happen (in ms, which equals indices after resampling) in each stimulus loop, then averages to get the triggertimes 
     for the average response. then adds the last timepoint of the average. """
-    triggertimes_ms = (inputdata.triggerstime_frame-inputdata.triggerstime_frame[0])/inputdata.frame_hz/inputdata.linedur_s*inputdata.n_planes
+    triggertimes_ms = (inputdata.triggertimes_frame-inputdata.triggertimes_frame[0])/inputdata.frame_hz/inputdata.linedur_s*inputdata.n_planes
     mean_triggertimes_ms = flexible_reshape(triggertimes_ms, inputdata.trigger_mode)
     mean_triggertimes_ms = np.mean(mean_triggertimes_ms, axis=0)-np.mean(mean_triggertimes_ms, axis=0)[0]
     mean_triggertimes_extended = np.round(np.append(mean_triggertimes_ms, len(inputdata.averages.transpose()))).astype(int)

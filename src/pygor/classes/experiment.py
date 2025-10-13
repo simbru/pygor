@@ -385,6 +385,8 @@ class Experiment:
                             roi_row['date'] = self.id_dict['date'][rec_idx]
                             roi_row['type'] = self.id_dict['type'][rec_idx]
                         
+                        #TODO: add warning if longer than 1000 datapoints: likely not a tuning function
+
                         # Extract ROI-specific data from each method result
                         for result_name in result_keys:
                             result_data = df.loc[rec_idx, result_name]

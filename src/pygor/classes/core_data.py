@@ -83,8 +83,11 @@ class Core:
             # Basic information
             self.metadata = pygor.data_helpers.metadata_dict(HDF5_file)
             self.rois = try_fetch(HDF5_file, "ROIs")
-            self.roi_sizes = try_fetch(HDF5_file, "RoiSizes")
+            # check if 0 in rois, if so, set to 1
+            if self.rois is not None and np.any(self.rois == 0):
+                self.rois[self.rois == 0] = 1
             self.num_rois = len(np.unique(self.rois)) - 1
+            self.roi_sizes = try_fetch(HDF5_file, "RoiSizes")[:self.num_rois]
             # Timing parameters
             self.triggertimes = try_fetch(HDF5_file, "Triggertimes")
             self.triggertimes = self.triggertimes[~np.isnan(self.triggertimes)].astype(
