@@ -1,3 +1,4 @@
+from math import nan
 import numpy as np
 import datetime
 import natsort
@@ -147,13 +148,22 @@ def load_strf(HDF5_file, post_process=True, fix_oversize=True):
     # Correct numerical sorting of strings
     strf_list_natsort = natsort.natsorted(strf_list)
     # Return those as tranposed arrays, in a list
-    strf_arr = np.array(
-        [
-            np.array(HDF5_file[v]).transpose(2, 1, 0)
-            for v in strf_list_natsort
-            if HDF5_file[v].ndim == 3
-        ]
-    )
+    try:
+        strf_arr = np.array(
+            [
+                np.array(HDF5_file[v]).transpose(2, 1, 0)
+                for v in strf_list_natsort
+                if HDF5_file[v].ndim == 3
+            ]
+        )
+    except Exception as e:
+        print(e)
+        print("Returning as Numpy array failed, check shape mismatch.")
+        strf_arr = [np.array(HDF5_file[v]).transpose(2, 1, 0)
+                for v in strf_list_natsort
+                if HDF5_file[v].ndim == 3]
+        for name, i in zip(strf_list_natsort, strf_arr):
+            print(name, i.shape)
     # 1. Check which axis is the "longest", as Igor frequently rotates arrays
     ## and correct this accordingly
     input_shape = strf_arr.shape
@@ -191,8 +201,7 @@ def load_strf(HDF5_file, post_process=True, fix_oversize=True):
     # 3. Post process by masking borders and z-scoring arrays
     strf_arr = post_process_strf_all(strf_arr)
     return strf_arr
-
-
+import scipy.stats
 def post_process_strf(arr_3d, correct_rotation=True, zscore=True):
     """Gentle post processing that removes border
     by masking and z-scores the STRFs"""
@@ -201,45 +210,19 @@ def post_process_strf(arr_3d, correct_rotation=True, zscore=True):
     # Remove border
     border_mask = pygor.utilities.auto_border_mask(arr_3d)
     arr_3d = np.ma.array(arr_3d, mask=border_mask)
+    len_arr3d = len(arr_3d) // 5
+    #len_arr3d = len(arr_3d)
+    #len_arr3d = 1
     if zscore == True:
         ## Old implementation
         # Z score over time and space
-        # arr_3d = scipy.stats.zscore(arr_3d, axis = None)
+        # arr_3d = scipy.stats.zscore(arr_3d, axis = None, nan_policy='omit')
         # centred_arr_3d = arr_3d
-        ## New implementation (normalised/centred to first frame)
-        avg_1stframe = np.ma.average(arr_3d[0])
-        std_1stframe = np.ma.std(arr_3d[0])
+        # ## New implementation (normalised/centred to first frame)
+        avg_1stframe = np.ma.average(arr_3d[0:len_arr3d])
+        std_1stframe = np.ma.std(arr_3d[0:len_arr3d])
         centred_arr_3d = (arr_3d - avg_1stframe) / std_1stframe
-        # # arr_3d = centred_arr_3d
-        return centred_arr_3d
-
-
-def post_process_strf_all(arr_4d, correct_rotation=True, zscore=True):
-    centred_arr_4d = np.ma.empty(arr_4d.shape)
-    for n, arr3d in enumerate(arr_4d):
-        arr3d = post_process_strf(arr3d)
-        centred_arr_4d[n] = arr3d
-    return centred_arr_4d
-
-
-def post_process_strf(arr_3d, correct_rotation=True, zscore=True):
-    """Gentle post processing that removes border
-    by masking and z-scores the STRFs"""
-    if arr_3d is np.nan:
-        return np.nan
-    # Remove border
-    border_mask = pygor.utilities.auto_border_mask(arr_3d)
-    arr_3d = np.ma.array(arr_3d, mask=border_mask)
-    if zscore == True:
-        ## Old implementation
-        # Z score over time and space
-        # arr_3d = scipy.stats.zscore(arr_3d, axis = None)
-        # centred_arr_3d = arr_3d
-        ## New implementation (normalised/centred to first frame)
-        avg_1stframe = np.ma.average(arr_3d[0])
-        std_1stframe = np.ma.std(arr_3d[0])
-        centred_arr_3d = (arr_3d - avg_1stframe) / std_1stframe
-        # # arr_3d = centred_arr_3d
+        # arr_3d = centred_arr_3d
         return centred_arr_3d
 
 

@@ -417,7 +417,7 @@ def ipl_summary_chroma(
     ax=None,
     split_polarity=False,
 ):
-    if split_polarity is True:
+    if split_polarity is False:
         if ax is None:
             fig, ax = plt.subplots(
                 1, 4, figsize=(figsize[0], figsize[1]), sharex=True, sharey=True
@@ -432,15 +432,16 @@ def ipl_summary_chroma(
             height *= fig.dpi
             plotarea = width * height
             i.scatter(
-                0.9,
-                0.9,
+                0.8,
+                0.93,
                 marker="o",
                 c=pygor.plotting.custom.fish_palette[n],
                 s=plotarea / 100,
                 transform=i.transAxes,
             )
         colormap = pygor.plotting.custom.polarity_palette
-    if split_polarity is False:
+        colormap = ["black", "grey"]
+    if split_polarity is True:
         if ax is None:
             fig, ax = plt.subplots(2, 4, figsize=figsize, sharex=True, sharey=True)
         else:
@@ -461,21 +462,21 @@ def ipl_summary_chroma(
     # sns.set_style("whitegrid")
     for n, i in enumerate(polarities):
         for m, j in enumerate(colours):
-            if split_polarity is True:
+            if split_polarity is False:
                 curr_colour = colormap[n]
                 label = polarity_map[i]
-            if split_polarity is False:
+            if split_polarity is True:
                 curr_colour = colormap[m]
                 label = colours_map[j]
             hist_vals_per_condition = np.histogram(
                 roi_df.query(
-                    f"polarity ==  {i} & colour == '{j}' & total_contour_area_largest > 0"
+                    f"polarity ==  {i} & colour == '{j}'" ## & total_contour_area_largest > 0
                 )["ipl_depths"],
                 bins=bins,
                 range=(0, 100),
             )[0]
             hist_vals_population = np.histogram(
-                roi_df.query(f"colour == '{j}' & total_contour_area_largest > 0")[
+                roi_df.query(f"colour == '{j}'")[ # & total_contour_area_largest > 0
                     "ipl_depths"
                 ],
                 bins=bins,
@@ -493,7 +494,7 @@ def ipl_summary_chroma(
             )
             ax[n, m].grid(False)
             ax[n, m].axhline(ipl_border, c="k", ls="--")
-            if m == 0 and split_polarity is False:
+            if m == 0 and split_polarity is True:
                 if i == -1:
                     ax[n, m].set_title(
                         "OFF",
@@ -510,7 +511,7 @@ def ipl_summary_chroma(
                     )
             num_cells = int(len(np.unique(roi_df.index)) / numcolours)
             num_strfs = int(
-                len(np.unique(roi_df.query("total_contour_area_largest > 0").index))
+                len(np.unique(roi_df.index))#.query("total_contour_area_largest > 0")
                 / numcolours
             )
             percent = np.round(num_strfs / num_cells * 100, 2)
@@ -537,7 +538,7 @@ def ipl_summary_chroma(
             transform=cax.transAxes,
         )
     if legend is True:
-        if split_polarity is True:
+        if split_polarity is False:
             handles, labels = [], []
             handles, labels = ax[0, 0].get_legend_handles_labels()
             labels_ = ["OFF", "ON"]
@@ -550,7 +551,7 @@ def ipl_summary_chroma(
                 bbox_to_anchor=(1.04, 1.4),
                 loc="upper left",
             )
-        if split_polarity is False:
+        if split_polarity is True:
             handles, labels = [], []
             for i in ax.flat:
                 handle, label = i.get_legend_handles_labels()
@@ -593,7 +594,7 @@ def ipl_summary_polarity_roi(
     else:
         axs = ax
         fig = plt.gcf()
-    skip_df = roi_df.query("total_contour_area_largest > 0")
+    skip_df = roi_df#.query("total_contour_area_largest > 0")
     # roi_df.iloc[roi_df["ipl_depths"].dropna().index]
     bins = 10
     titles = ["OFF", "ON", "Mixed polarity", "other"]
@@ -720,7 +721,7 @@ def plot_roi_hist(
         title = statistic
     if conditional == "default":
         roi_df = roi_df.query("contour_area_total > 0")
-    elif conditional != None or conditional != "default":
+    if conditional != None or conditional != "default":
         roi_df = roi_df.query(f"{conditional}")
     # if category == "colour":fi
     categories_specified = np.unique(roi_df[category])
@@ -879,7 +880,7 @@ def plot_roi_hist(
 def ipl_summary_polarity_chroma(
     chroma_df, numcolours=4, figsize=(8, 4), cat_pol=["off", "on"]
 ):
-    polarities = ["off", "on"]  # , 'opp']
+    polarities = ["off", "on", 'opp']
     fig, axs = plt.subplots(
         1, len(polarities), sharex=True, sharey=True, figsize=(4.8, 2.5)
     )

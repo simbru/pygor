@@ -5,6 +5,8 @@ try:
 except ImportError:
     from collections.abc import Iterable
 # Local imports
+import pygor.core.methods
+import pygor.core.plot
 import pygor.data_helpers
 import pygor.utils.helpinfo
 import pygor.strf.spatial
@@ -12,6 +14,7 @@ import pygor.strf.contouring
 import pygor.strf.temporal
 import pygor.plotting.basic
 import pygor.utils
+import pygor.core
 
 # Dependencies
 import operator
@@ -22,6 +25,7 @@ import h5py
 import matplotlib.patheffects as path_effects
 import matplotlib
 import warnings
+import scipy.ndimage
 import math
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import skimage
@@ -35,10 +39,10 @@ def try_fetch(file, key):
             result = np.array(result).T
     except KeyError as error:
         result = None
-        # raise KeyError(f"'{key}' not found in {file.filename}, setting to np.nan") from error
-        warnings.warn(
-            f"'{key}' not found in {file.filename}, setting to np.nan", stacklevel=2
-        )
+        # # raise KeyError(f"'{key}' not found in {file.filename}, setting to np.nan") from error
+        # warnings.warn(
+        #     f"'{key}' not found in {file.filename}, setting to np.nan", stacklevel=2
+        # )
         error
     return result
     
@@ -61,9 +65,7 @@ class Core:
     averages: np.array = np.nan
     snippets: np.array = np.nan
     ms_dur: int = np.nan
-    phase_num: int = (
-        1  # Default to 1, for simplicity in pygor.plotting.plots avgs etc...
-    )
+    trigger_mode : int = 1 #defualt value
     num_rois: int = field(init=False)
 
     def __post_init__(self):
@@ -85,9 +87,9 @@ class Core:
             # Timing parameters
             self.triggertimes = try_fetch(HDF5_file, "Triggertimes")
             self.triggertimes = self.triggertimes[~np.isnan(self.triggertimes)].astype(
-                int
+                float
             )
-            self.triggerstime_frame = try_fetch(HDF5_file, "Triggertimes_Frame")
+            self.triggertimes_frame = try_fetch(HDF5_file, "Triggertimes_Frame")
             self.__skip_first_frames = int(try_fetch_os_params(HDF5_file, "Skip_First_Triggers")) # Note name mangling to prevent accidents if 
             self.__skip_last_frames = -int(try_fetch_os_params(HDF5_file, "Skip_Last_Triggers")) # private class attrs share names 
             self.ipl_depths = try_fetch(HDF5_file, "Positions")
@@ -105,20 +107,20 @@ class Core:
             else:
                 self.frame_hz = float(1/(self.average_stack.shape[0]/self.n_planes*self.linedur_s))
         # Check that trigger mode matches phase number
-        if self.trigger_mode != self.phase_num:
-            warnings.warn(
-                f"{self.filename.stem}: Trigger mode {self.trigger_mode} does not match phase number {self.phase_num}",
-                stacklevel=3,
-            )
+        # if self.trigger_mode != self.phase_num:
+        #     warnings.warn(
+        #         f"{self.filename.stem}: Trigger mode {self.trigger_mode} does not match phase number {self.phase_num}",
+        #         stacklevel=3,
+        #     )
         # Imply from averages the ms_duration of one repeat
         if self.averages is not None:
             self.ms_dur = self.averages.shape[-1]
         else:
             self.ms_dur = None
-        # Ensure triggerstime_frame does not include uneccessary nans
-        if self.triggerstime_frame is not None:
-            self.triggerstime_frame = self.triggerstime_frame[
-                ~np.isnan(self.triggerstime_frame)
+        # Ensure triggertimes_frame does not include uneccessary nans
+        if self.triggertimes_frame is not None:
+            self.triggertimes_frame = self.triggertimes_frame[
+                ~np.isnan(self.triggertimes_frame)
             ].astype(int)
         # Set name
         self.name = self.filename.stem
@@ -142,7 +144,12 @@ class Core:
     def __str__(self):
         # For pretty printing
         return f"{self.__class__}"
-
+    
+    @property
+    def frametime_ms(self):
+        time_arr = np.arange(self.traces_raw.shape[1]) / self.frame_hz
+        return time_arr
+    
     def get_help(self, hints=False, types=False) -> None:
         """
         Get help information for the object, including methods and attributes.
@@ -158,7 +165,9 @@ class Core:
         -------
         None
         """
-        method_list = pygor.utils.helpinfo.get_methods_list(self, with_returns=types)
+        # Check if this class has patterns to exclude from help
+        exclude_patterns = getattr(self, '_help_exclude_patterns', None)
+        method_list = pygor.utils.helpinfo.get_methods_list(self, with_returns=types, exclude_patterns=exclude_patterns)
         attribute_list = pygor.utils.helpinfo.get_attribute_list(self, with_types=types)
         welcome = pygor.utils.helpinfo.welcome_help(
             self.type, self.metadata, hints=hints
@@ -175,29 +184,48 @@ class Core:
         axis=0,
         cbar=False,
         ax=None,
+        figsize=(None, None),
+        figsize_scale=None,
         zcrop: tuple = None,
         xcrop: tuple = None,
         ycrop: tuple = None,
+        alpha=0.5,
+        show_axes=False,
         **kwargs,
-    ) -> None:
+    ):
         """
         Display a projection of the image stack using the specified function.
 
         Parameters:
-        - func: Callable, optional, default: np.mean
-            The function used to compute the projection along the specified axis.
+        - func: Callable or str, optional, default: np.mean
+            The function used to compute the projection along the specified axis. 
+            If "average_stack", uses self.average_stack directly.
+            If pygor.core.methods.correlation_map, applies correlation mapping.
         - axis: int, optional, default: 0
             The axis along which the projection is computed.
         - cbar: bool, optional, default: False
             Whether to display a colorbar.
         - ax: matplotlib.axes.Axes, optional, default: None
             The matplotlib axes to use for the display. If None, the current axes will be used.
+        - figsize: tuple, optional, default: (None, None)
+            Figure size. If (None, None), defaults to (10, 10).
+        - figsize_scale: float, optional, default: None
+            Scale factor for figure size.
+        - alpha: float, optional, default: 0.5
+            Alpha transparency value (for consistency with view_stack_rois).
 
         Returns:
-        None
+        tuple
+            (fig, ax) - matplotlib figure and axes objects
         """
+        if figsize == (None, None):
+            figsize = (10, 10)
+        if figsize_scale is not None:
+            figsize = np.array(figsize) * np.array(figsize_scale)
+        else:
+            figsize_scale = 1
         if ax is None:
-            fig, ax = plt.subplots(1, 1)
+            fig, ax = plt.subplots(figsize=figsize)
         else:
             fig = plt.gcf()
         if zcrop is None:
@@ -218,16 +246,19 @@ class Core:
         else:
             ystart = ycrop[0]
             ystop = ycrop[1]
-        scanv = ax.imshow(
-            func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis=axis),
-            cmap="Greys_r",
-            origin="lower",
-            **kwargs,
-        )
+        if func == "average_stack":
+            scanv = ax.imshow(self.average_stack, cmap = "Greys_r", origin = "lower", **kwargs)
+        elif func == pygor.core.methods.correlation_map:
+            correlation_result = func(self.images[zstart:zstop, ystart:ystop, xstart:xstop])
+            scanv = ax.imshow(correlation_result, cmap ="Greys_r", origin = "lower", **kwargs)
+        else:
+            scanv = ax.imshow(func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis = axis), cmap ="Greys_r", origin = "lower", **kwargs)
         if cbar == True:
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
             plt.colorbar(scanv, ax=ax, cax=cax)
+        if show_axes == False:
+            ax.axis("off")
         return fig, ax
 
     def view_stack_rois(
@@ -242,26 +273,43 @@ class Core:
         zcrop: tuple = None,
         xcrop: tuple = None,
         ycrop: tuple = None,
+        alpha=0.5,
+        outline=True,
+        outline_smooth=True,
+        outline_width=2,
+        roi_indices=None,
         **kwargs,
-    ) -> None:
+    ):
         """
         Display a projection of the image stack using the specified function.
 
         Parameters:
-        - func: Callable, optional, default: np.mean
+        - func: Callable or str, optional, default: np.mean
             The function used to compute the projection along the specified axis.
+            If "average_stack", uses self.average_stack directly.
+            If pygor.core.methods.correlation_map, applies correlation mapping.
         - axis: int, optional, default: 0
             The axis along which the projection is computed.
         - cbar: bool, optional, default: False
             Whether to display a colorbar.
         - ax: matplotlib.axes.Axes, optional, default: None
             The matplotlib axes to use for the display. If None, the current axes will be used.
+        - outline: bool, optional, default: False
+            Whether to show ROIs as outlines instead of filled regions.
+        - outline_smooth: bool, optional, default: True
+            Whether to smooth the ROI outlines when outline=True.
+        - outline_width: int, optional, default: 2
+            Line width for ROI outlines when outline=True.
+        - roi_indices: list or array-like, optional, default: None
+            Indices of specific ROIs to display using 0-based indexing (0, 1, 2, etc.).
+            If None, all ROIs are shown.
 
         Returns:
-        None
+        tuple
+            (fig, ax) - matplotlib figure and axes objects
         """
         if figsize == (None, None):
-            figsize = (5, 5)
+            figsize = (10, 10)
         if figsize_scale is not None:
             figsize = np.array(figsize) * np.array(figsize_scale)
         else:
@@ -292,18 +340,89 @@ class Core:
         else:
             ystart = ycrop[0]
             ystop = ycrop[1]
-        num_rois = int(np.abs(np.min(self.rois)))
-        # color = cm.get_cmap('jet_r', num_rois)
+
+        # Use rois_alt for 0-based indexing
+        rois_to_use = self.rois_alt
+        
+        num_rois = int(np.nanmax(rois_to_use)) + 1  # +1 because 0-based indexing
         color = matplotlib.colormaps["jet_r"]
-        scanv = ax.imshow(
-            func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis=axis),
-            cmap="Greys_r",
-            origin="lower",
-        )
-        rois_masked = np.ma.masked_where(self.rois == 1, self.rois)[
-            ystart:ystop, xstart:xstop
-        ]
-        rois = ax.imshow(rois_masked, cmap=color, alpha=0.5, origin="lower")
+        
+        if func == "average_stack":
+            scanv = ax.imshow(self.average_stack, cmap = "Greys_r", origin = "lower", **kwargs)
+        elif func == pygor.core.methods.correlation_map:
+            correlation_result = func(self.images[zstart:zstop, ystart:ystop, xstart:xstop])
+            scanv = ax.imshow(correlation_result, cmap ="Greys_r", origin = "lower", **kwargs)
+        else:
+            scanv = ax.imshow(func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis = axis), cmap ="Greys_r", origin = "lower", **kwargs)
+        if outline:
+            # Extract ROI outlines instead of filled regions
+            from skimage import measure
+            
+            # Get unique ROI values from rois_alt (0-based indexing, background is NaN)
+            roi_values = np.unique(rois_to_use)
+            roi_values = roi_values[~np.isnan(roi_values)].astype(int)  # Remove NaN (background)
+            
+            # Filter by specific ROI indices if provided
+            if roi_indices is not None:
+                roi_indices = np.array(roi_indices)
+                roi_values = roi_values[np.isin(roi_values, roi_indices)]
+            
+            # Check if any ROIs remain after filtering
+            if len(roi_values) == 0:
+                print(f"Warning: No ROIs found with indices {roi_indices}")
+                # Create empty ScalarMappable for consistency
+                import matplotlib.cm as cm
+                norm = matplotlib.colors.Normalize(vmin=0, vmax=1)
+                rois = cm.ScalarMappable(norm=norm, cmap=color)
+            else:
+                # Apply cropping to ROIs
+                rois_cropped = rois_to_use[ystart:ystop, xstart:xstop]
+                
+                # Plot each ROI outline individually
+                for i, roi_val in enumerate(roi_values):
+                    # Create binary mask for current ROI
+                    roi_mask = (rois_cropped == roi_val).astype(int)
+                    
+                    if np.sum(roi_mask) == 0:  # Skip if ROI not in cropped region
+                        continue
+                    
+                    # Find contours
+                    contours = measure.find_contours(roi_mask, 0.5)
+                    
+                    # Get color for this ROI
+                    roi_color = color(i / len(roi_values))
+                    
+                    # Plot each contour
+                    for contour in contours:
+                        if outline_smooth:
+                            # Apply Gaussian smoothing to contour coordinates
+                            from scipy.ndimage import gaussian_filter1d
+                            contour[:, 0] = gaussian_filter1d(contour[:, 0], sigma=1.5)
+                            contour[:, 1] = gaussian_filter1d(contour[:, 1], sigma=1.5)
+                            
+                            # Close the contour by adding the first point to the end
+                            contour = np.vstack([contour, contour[0]])
+
+                        ax.plot(contour[:, 1], contour[:, 0], 
+                            color=roi_color, linewidth=outline_width, alpha=alpha)
+                
+                # Create dummy mappable for colorbar compatibility
+                import matplotlib.cm as cm
+                norm = matplotlib.colors.Normalize(vmin=np.min(roi_values), vmax=np.max(roi_values))
+                rois = cm.ScalarMappable(norm=norm, cmap=color)
+        else:
+            # Original filled region display using rois_alt
+            rois_display = rois_to_use.copy()
+            
+            # Filter by specific ROI indices if provided
+            if roi_indices is not None:
+                roi_indices = np.array(roi_indices)
+                # Create mask for ROIs not in roi_indices (set them to NaN)
+                mask = ~np.isin(rois_display, roi_indices) & ~np.isnan(rois_display)
+                rois_display[mask] = np.nan
+            
+            rois_masked = np.ma.masked_where(np.isnan(rois_display), rois_display)[ystart:ystop, xstart:xstop]
+            rois = ax.imshow(rois_masked, cmap = color, alpha = alpha, origin = "lower", **kwargs)
         ax.grid(False)
         ax.axis("off")
         if cbar == True:
@@ -311,9 +430,15 @@ class Core:
             cax = divider.append_axes("right", size="5%", pad=0.05)
             plt.colorbar(rois, ax=ax, cax=cax)
         if labels == True:
-            label_map = np.unique(self.rois)[:-1].astype(int)[
-                ::-1
-            ]  # -1 to count forwards instead of backwards
+            # Get ROI values from rois_alt (0-based indexing)
+            label_map = np.unique(rois_to_use)
+            label_map = label_map[~np.isnan(label_map)].astype(int)  # Remove NaN (background)
+            label_map = np.sort(label_map)  # Sort in ascending order
+            
+            # Filter label_map by roi_indices if provided
+            if roi_indices is not None:
+                roi_indices = np.array(roi_indices)
+                label_map = label_map[np.isin(label_map, roi_indices)]
             if "label_by" in kwargs:
                 labels = self.__keyword_lables[kwargs["label_by"]]
                 if np.isnan(labels) is True:
@@ -321,9 +446,9 @@ class Core:
                         f"Attribute {kwargs['label_by']} not found in object."
                     )
             else:
-                labels = np.abs(label_map) - 1
+                labels = label_map  # Use 0-based indexing directly
             for label_loc, label in zip(label_map, labels):
-                curr_roi_mask = self.rois == label_loc
+                curr_roi_mask = rois_to_use == label_loc
                 curr_roi_centroid = np.mean(np.argwhere(curr_roi_mask == 1), axis=0)
                 ax.text(
                     curr_roi_centroid[1],
@@ -343,6 +468,8 @@ class Core:
                         path_effects.Normal(),
                     ],
                 )
+        
+        return fig, ax
 
     def view_drift(
         self, frame_num="auto", butterworth_factor=0.5, chan_vese_factor=0.01, ax=None
@@ -393,8 +520,92 @@ class Core:
         d3[:, :, 2] = base2
         ax.imshow(pygor.utilities.min_max_norm(d3, 0, 1))
 
+    def get_depth(self):
+        """
+        Get the depth of the images in the stack.
+
+        Returns
+        -------
+        int
+            The depth of the images in the stack.
+        """
+        session = pygor.core.gui.methods.NapariDepthPrompt(self)
+        return session.run()
+    
+    def update_h5_key(self, key, value, overwrite=False):
+        """
+        Update a specific key in the H5 file with new data.
+        
+        Parameters
+        ----------
+        key : str
+            The H5 dataset key to update (e.g., 'Positions' for ipl_depths)
+        value : array-like
+            The new value to store
+        overwrite : bool, optional
+            Whether to overwrite existing data (default: False)
+            
+        Returns
+        -------
+        bool
+            True if update was successful, False otherwise
+        """
+        return pygor.core.methods.update_h5_key(self, key, value, overwrite)
+    
+    def update_ipl_depths(self, depths=None, overwrite=False):
+        """
+        Update IPL depths in the H5 file, optionally using interactive depth selection.
+        
+        Parameters
+        ----------
+        depths : array-like, optional
+            Pre-calculated depths. If None, launches interactive depth selection.
+        overwrite : bool, optional
+            Whether to overwrite existing ipl_depths (default: False)
+            
+        Returns
+        -------
+        bool
+            True if update was successful, False otherwise
+        """
+        if depths is None:
+            depths = self.get_depth()
+            if depths is None:
+                print("Depth calculation was cancelled or failed.")
+                return False
+        
+        success = self.update_h5_key('Positions', depths, overwrite)
+        if success:
+            self.ipl_depths = depths  # Update the object attribute
+            print(f"Successfully updated ipl_depths for {len(depths)} ROIs")
+        return success
+
+    def draw_rois(self, attribute = "calculate_image_average", style = "stacked",**kwargs):
+        """
+        Draw ROIs on the image stack.
+        """
+        def call_method(obj, method_str, *args, **kwargs):
+            # Extract method name by stripping trailing parentheses (if present)
+            method_name = method_str.split('(')[0].strip()  # Handles "method" or "method()"
+            method = getattr(obj, method_name)  # Get the method from the object
+            print(method)
+            if attribute in obj.__dict__:
+                return obj.__getattribute__(attribute)
+            else:
+                return method(*args, **kwargs)  # Call the method with arguments
+        target = call_method(self, attribute)
+        session = pygor.core.gui.methods.NapariRoiPrompt(target, traces_plot_style = style,**kwargs)
+        return session.run()
+
     def plot_averages(
-        self, rois=None, figsize=(None, None), figsize_scale=None, axs=None, **kwargs
+        self, rois=None, 
+        figsize=(None, None), 
+        figsize_scale=None, 
+        axs=None, 
+        independent_scale = False, 
+        n_rois_raster = 50,
+        sort_order = None,
+        **kwargs,
     ):
         """
         A function to plot the averages of specified regions of interest (rois) on separate subplots within a figure.
@@ -418,81 +629,17 @@ class Core:
         label_by : String, optional
             As above, but instead of changing the order of pygor.plotting.plots, changes the label associated with
             each ROI to be the specified metric.
+        clim : tuple, optional
+            A tuple that determines the lower and upper bounds of the clim for the imshow version of the plot, respectively.
 
         Returns
         -------
         None
         """
-        # Handle arguments, keywords, and exceptions
         if self.averages is None:
-            raise AttributeError(
-                "self.averages is nan, meaning it has likely not been generated"
-            )
-        if (
-            isinstance(rois, Iterable) is False and not rois
-        ):  # I dont like this solution, but it gets around user ambigouity error if passing numpy array
-            rois = np.arange(0, self.num_rois)
-            # fig, axs = plt.subplots(self.num_rois, figsize = figsize, sharey=True, sharex=True)
-            # ^ no longer needed, since error handling of 'rois' leads to naturally solving this
-        if isinstance(rois, Iterable) is False:
-            rois = [rois]
-        if isinstance(rois, np.ndarray) is False:
-            rois = np.array(rois)
-        if rois is not None and isinstance(rois, Iterable) is False:
-            rois = np.array([rois])
-        if "sort_by" in kwargs:
-            rois = rois[
-                np.argsort(self.__keyword_lables[kwargs["sort_by"]][rois].astype(int))
-            ]
-        if "label_by" in kwargs:
-            roi_labels = self.__keyword_lables[kwargs["label_by"]][rois]
-        else:
-            roi_labels = rois
-        if "filter_by" in kwargs:
-            filter_result = self.__compare_ops_map[kwargs["filter_by"][1]](
-                kwargs["filter_by"][0](self.averages, axis=1), kwargs["filter_by"][2]
-            )
-            rois = rois[filter_result]
-        if figsize == (None, None):
-            figsize = (10, len(rois))
-        if figsize_scale is not None:
-            figsize = np.array(figsize) * np.array(figsize_scale)
-        # Generate matplotlib plot
-        colormap = plt.cm.jet_r(np.linspace(1, 0, self.num_rois))
-        if axs is None:
-            fig, axs = plt.subplots(
-                len(rois), figsize=figsize, sharey=True, sharex=True
-            )
-        else:
-            fig = plt.gcf()
-        # Loop through and plot wwithin axes
-        if len(
-            rois == 1
-        ):  # This takes care of passing just 1 roi, not breaking axs.flat in the next line
-            axs = np.array([axs])
-        phase_dur = self.ms_dur / self.phase_num
-        for ax, roi, label in zip(axs.flat, rois, roi_labels):
-            ax.plot(self.snippets[roi].T, c="grey", alpha=0.5)
-            ax.plot(self.averages[roi], color=colormap[roi])
-            ax.set_xlim(0, len(self.averages[0]))
-            ax.set_yticklabels([])
-            ax.set_ylabel(label, rotation=0, verticalalignment="center")
-            ax.spines[["top", "bottom"]].set_visible(False)
-            # Now we need to add axvspans (don't think I can avoid for loops inside for loops...)
-            if self.phase_num != 1:
-                for interval in range(self.phase_num)[::2]:
-                    ax.axvspan(
-                        interval * phase_dur,
-                        (interval + 1) * phase_dur,
-                        alpha=0.2,
-                        color="gray",
-                        lw=0,
-                    )
-            ax.grid(False)
-        ax.set_xlabel("Time (ms)")
-        fig.subplots_adjust(wspace=0, hspace=0)
-        # plt.tight_layout()
-        return fig, axs
+            warnings.warn("Averages do not exist.")
+            return
+        return pygor.core.plot.plot_averages(self, rois, figsize, figsize_scale, axs, independent_scale, n_rois_raster, sort_order, **kwargs)
 
     def calculate_image_average(self, ignore_skip=False):
         """
@@ -509,7 +656,7 @@ class Core:
             The average image calculated from the trigger frames.
         """
         # If no repetitions
-        if self.phase_num == 1:
+        if self.trigger_mode == 1:
             warnings.warn("No repetitions detected, returning original images")
             return
         # Account for trigger skipping logic
@@ -517,7 +664,7 @@ class Core:
             # Ignore skipping parameters
             first_trig_frame = 0
             last_trig_frame = 0
-            # triggers_frames = self.triggerstime_frame
+            # triggers_frames = self.triggertimes_frame
         else:
             # Othrwise, account for skipping parameters
             first_trig_frame = self.__skip_first_frames
@@ -527,27 +674,27 @@ class Core:
             )
         if last_trig_frame == 0:
             last_trig_frame = None
-        triggers_frames = self.triggerstime_frame[first_trig_frame:last_trig_frame]
+        triggers_frames = self.triggertimes_frame[first_trig_frame:last_trig_frame]
         # Get the frame interval over which to average the images
-        rep_start_frames = triggers_frames[:: self.phase_num]
+        rep_start_frames = triggers_frames[:: self.trigger_mode]
         rep_delta_frames = np.diff(
-            triggers_frames[:: self.phase_num]
+            triggers_frames[:: self.trigger_mode]
         )  # time between repetitions, by frame number
         rep_delta = int(
             np.floor(np.average(rep_delta_frames))
         )  # take the average of the differentiated values, and round down. This your delta time in frames
         # Calculate number of full repetitions
         percise_reps = (
-            len(triggers_frames) / self.phase_num
+            len(triggers_frames) / self.trigger_mode
         )  # This may yield a float if partial repetition
         if (
             percise_reps % 1 != 0
         ):  # In that case, we don't have an exact loop so we ignore the residual partial loop
             reps = int(
                 triggers_frames[
-                    : int(np.floor(percise_reps) % percise_reps * self.phase_num)
+                    : int(np.floor(percise_reps) % percise_reps * self.trigger_mode)
                 ].shape[0]
-                / self.phase_num
+                / self.trigger_mode
             )  # number of full repetitions, by removing residual non-complete repetitions
             print(
                 f"Partial loop detected ({percise_reps}), using only",
@@ -563,9 +710,97 @@ class Core:
         images_to_average = np.concatenate(images_to_average, axis=0)
         # Print results
         print(
-            f"{len(triggers_frames)} triggers with a phase_num of {self.phase_num} gives {reps} full repetitions of {rep_delta} frames each."
+            f"{len(triggers_frames)} triggers with a trigger_mode of {self.trigger_mode} gives {reps} full repetitions of {rep_delta} frames each."
         )
         # Average the images
         split_arr = np.array(np.split(images_to_average, reps))
         avg_movie = np.average(split_arr, axis=0)
         return avg_movie
+
+    def get_average_markers(self):
+        return pygor.core.methods.determine_epoch_markers_ms(self)
+    
+    def get_epoch_dur(self, rtol=1e-3, atol=1e-3):
+        # Differentiate the average markers to get the epoch durations
+        diff = np.diff(self.get_average_markers())
+        if diff.size == 0:
+            warnings.warn("No epochs found, returning 0")
+            return 0
+        # Calculate the average duration of the epochs
+        avg = np.average(diff)
+        # Check for unequal epochs
+        if np.allclose(diff, avg, rtol=rtol, atol=atol) is False:
+            # If unequal, raise error and ask user to manually set epoch durations
+            raise ValueError(
+                f"Epoch durations are not equal with tolerences {rtol}, {atol}, adjust tolerences or manually set epoch durations."
+            )
+        return np.floor(np.average(np.diff(self.get_average_markers()))).astype(int)
+
+    def get_correlation_map(self):
+        return pygor.core.methods.correlation_map(self.images)
+
+    @property
+    def rois_alt(self):
+        temp_rois = self.rois.copy()
+        temp_rois[temp_rois == 1] = np.nan
+        temp_rois *= -1
+        temp_rois = temp_rois - 1
+        return temp_rois
+    
+    @property
+    def traces_znorm_ms(self):
+        """
+        Get interpolated and upscaled traces_znorm in millisecond precision.
+        
+        Converts traces from frame precision to line precision (~500 Hz sampling)
+        using linear interpolation, matching IGOR Pro's OS_BasicAveraging behavior.
+        
+        Returns
+        -------
+        numpy.ndarray
+            Interpolated traces with shape (n_rois, n_timepoints_ms) where 
+            n_timepoints_ms corresponds to line precision sampling rate.
+        """
+        if self.traces_znorm is None:
+            return None
+            
+        # Get dimensions
+        n_rois, n_frames = self.traces_znorm.shape
+        
+        # Calculate frame duration and line duration
+        frame_duration_s = 1.0 / self.frame_hz  # Frame duration in seconds
+        line_duration_s = self.linedur_s  # Line duration in seconds (typically ~0.002s)
+        
+        # Calculate number of lines per frame (nY equivalent)
+        lines_per_frame = int(frame_duration_s / line_duration_s)
+        
+        # Total interpolated time points (line precision)
+        n_points_ms = n_frames * lines_per_frame
+        
+        # Use scipy.ndimage.zoom for fast interpolation
+        from scipy.ndimage import zoom
+        
+        # Calculate zoom factor for time axis
+        zoom_factor = lines_per_frame
+        
+        # Interpolate all ROI traces at once using zoom
+        # zoom applies along the last axis (time axis)
+        traces_ms = zoom(self.traces_znorm, (1, zoom_factor), order=1, mode='nearest')
+        
+        return traces_ms
+    
+    @property
+    def roi_centroids(self, force = True):
+        """
+        Get the centre of mass for each ROI in the image if not already done.
+        """
+        if np.all(np.logical_or(np.unique(self.rois) < 0, np.unique(self.rois) == 1)):
+            temp_rois = self.rois_alt + 1
+            labels = np.unique(temp_rois)
+            labels = labels[~np.isnan(labels)]
+            centroids = scipy.ndimage.center_of_mass(temp_rois, temp_rois, labels)
+        else:
+            labels = np.unique(self.rois)
+            labels = labels[~np.isnan(labels)]
+            centroids = scipy.ndimage.center_of_mass(self.rois, self.rois, labels)
+        return np.array(centroids)

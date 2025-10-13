@@ -10,7 +10,7 @@ pp = pprint.PrettyPrinter(width=110, indent=2, compact=True)
 md = pprint.PrettyPrinter(width=110, indent=2, compact=True)
 
 
-def get_methods_list(obj, with_returns=True) -> list:
+def get_methods_list(obj, with_returns=True, exclude_patterns=None) -> list:
     """
     Get a list of methods of a given object.
 
@@ -21,6 +21,9 @@ def get_methods_list(obj, with_returns=True) -> list:
     with_returns : bool, optional
         If True, include the return type of each method in the list.
         Default is True.
+    exclude_patterns : list, optional
+        Patterns to exclude from method names (e.g., ['_by_channel']).
+        Default is None.
 
     Returns
     -------
@@ -29,10 +32,15 @@ def get_methods_list(obj, with_returns=True) -> list:
         each method is followed by its return type in parenthesis.
 
     """
+    import inspect
+    exclude_patterns = exclude_patterns or []
+    
     method_list = [
         func
         for func in dir(obj)
-        if callable(getattr(obj, func)) is True and "__" not in func
+        if (callable(inspect.getattr_static(obj, func)) and 
+            "__" not in func and
+            not any(func.endswith(pattern) for pattern in exclude_patterns))
     ]
     """
     TODO Sort the methods list alphabetically by the 
@@ -40,7 +48,7 @@ def get_methods_list(obj, with_returns=True) -> list:
     """
     if with_returns is True:
         method_list = [
-            func_str + f" ({get_return_type(getattr(obj, func_str))})"
+            func_str + f" ({get_return_type(inspect.getattr_static(obj, func_str))})"
             for func_str in method_list
         ]
     # Sort method list
@@ -75,14 +83,15 @@ def get_attribute_list(obj, with_types=True) -> list:
         each attribute is followed by its type in parenthesis.
 
     """
+    import inspect
     attribute_list = [
         attr
         for attr in dir(obj)
-        if callable(getattr(obj, attr)) is False and "__" not in attr and attr[0] != "_"
+        if not callable(inspect.getattr_static(obj, attr)) and "__" not in attr and attr[0] != "_"
     ]
     if with_types is True:
         attribute_list = [
-            attr_str + f" ({type(getattr(obj, attr_str)).__name__})"
+            attr_str + f" ({type(inspect.getattr_static(obj, attr_str)).__name__})"
             for attr_str in attribute_list
         ]
     return attribute_list

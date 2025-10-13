@@ -169,7 +169,7 @@ def plot_df_tuning(
     for cat in categories:
         for m, clust_id in enumerate(cluster_ids):
             analyse_df = post_cluster_df.query(f"cat_pol == '{cat}'").filter(
-                regex="^\w+_\d+$|^ipl_depths$|^cluster"
+                regex=r"^\w+_\d+$|^ipl_depths$|^cluster"
             )
             # Handle external (ax) and internal (_ax) axes assignment differentially
             if np.all(ax == None):
@@ -247,7 +247,7 @@ def plot_df_tuning(
         ## First let's find where we need to make changes
         where_no_area = np.all(
             post_cluster_df.query(f"{group_by} == '{clust_id}'").filter(
-                regex="area_\d+$"
+                regex=r"area_\d+$"
             )
             == 0,
             axis=0,
@@ -259,7 +259,7 @@ def plot_df_tuning(
             "478": 2,
             "588": 3,
         }  # TODO make this more robust and handle nm labels automatically
-        wavelength_only = [i.split("_")[-1] for i in where_no_area[index_true].index]
+        wavelength_only = [i.split("_")[-1] for i in where_no_area.iloc[index_true].index]
         change_index = [index_mapping[i] for i in wavelength_only]
         alpha_val = 0.1
         ## Each box has 6 associated lines: 2 whiskers, 2 caps, and 1 median (PLEASE MATPLOTLIB DON'T CHANGE THIS:/ )
@@ -704,7 +704,7 @@ def plot_spacetime_reconstruct(
     # print(space_len_xaxis, one_pix_visang, scalebar_space_len)
     # pygor.plotting.add_scalebar(scalebar_space_len, string = f"{np.rint(scalebar_deg).astype(int)}°", ax = ax[-1, 0], x = 0, orientation = 'h', line_width = 3, text_size = 8, offset_modifier=.6)
     visang_to_space = pygor.strf.pixconverter.visang_to_pix(
-        scalebar_deg, pixwidth=40, block_size=block_size
+        scalebar_deg, pixwidth=40, #block_size=block_size
     )
     pygor.plotting.add_scalebar(
         visang_to_space,
