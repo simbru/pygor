@@ -645,7 +645,7 @@ class Core:
             warnings.warn("Averages do not exist.")
             return
         return pygor.core.plot.plot_averages(self, rois, figsize, figsize_scale, axs, independent_scale, n_rois_raster, sort_order, **kwargs)
-
+    
     def calculate_image_average(self, ignore_skip=False):
         """
         Calculate the average image from a series of trigger frames.
@@ -743,6 +743,41 @@ class Core:
 
     def get_correlation_map(self):
         return pygor.core.methods.correlation_map(self.images)
+
+    def calc_mean_triggertimes_s(self):
+        """
+        Calculate the mean trigger times in seconds.
+        
+        Returns
+        -------
+        numpy.ndarray
+            Array of mean trigger times in seconds.
+        """
+        if self.trigger_mode == 1:
+            avg_epoch_dur = np.average(np.diff(self.triggertimes))
+            markers_arr = self.triggertimes * (1 / self.linedur_s)
+            markers_arr -= markers_arr[0]
+        else:
+            if self.triggertimes.shape[0] % self.trigger_mode != 0:
+                print(
+                    "WARNING: Trigger times are not evenly divisible by trigger mode"
+                )
+                # Determine amount of triggers to crop out to achieve loop alignment
+                num_triggers_to_crop = self.triggertimes.shape[0] % self.trigger_mode
+                triggertimes = self.triggertimes[:-num_triggers_to_crop]
+                print(f"WARNING: Cropped {num_triggers_to_crop} triggers to achieve loop alignment")
+            else:
+                triggertimes = self.triggertimes
+            # Calculate average trigger times in seconds
+            avg_epoch_dur = np.average(np.diff(triggertimes.reshape(-1, self.trigger_mode)[:, 0]))
+            epoch_reshape = triggertimes.reshape(-1, self.trigger_mode)
+            temp_arr = np.empty(epoch_reshape.shape)
+            for n, i in enumerate(epoch_reshape):
+                temp_arr[n] = i - (avg_epoch_dur * n)
+            avg_epoch_triggertimes = np.average(temp_arr, axis=0)
+            markers_arr = avg_epoch_triggertimes
+            markers_arr -= markers_arr[0]
+        return markers_arr
 
     @property
     def rois_alt(self):

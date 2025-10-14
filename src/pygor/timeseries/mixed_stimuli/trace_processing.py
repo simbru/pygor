@@ -74,4 +74,5 @@ def get_triggertimes(inputdata):
     mean_triggertimes_ms = np.mean(mean_triggertimes_ms, axis=0)-np.mean(mean_triggertimes_ms, axis=0)[0]
     mean_triggertimes_extended = np.round(np.append(mean_triggertimes_ms, len(inputdata.averages.transpose()))).astype(int)
     print('Triggers at ms:', mean_triggertimes_extended)
+    print('get_triggertimes is not accurate and will be disabled in a future release. use the .calc_mean_triggertimes_s() method instead')
     return mean_triggertimes_extended

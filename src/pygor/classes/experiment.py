@@ -491,6 +491,33 @@ class Experiment:
         else:
             return results
 
+    def fetch_averages(self):
+        '''
+        gets a numpy array with the average traces of all ROIs from multiple recordings
+        contained in an pygor experiment object.
+        
+        Parameters
+        ----------
+        recordings: experiment object, containing data from one or more recordings 
+        exported in .h5 format. 
+        '''
+        # compute lengths of recordings
+        rec_lengths = [int(rec.averages.shape[1]) for rec in self.recording]
+        min_trace_len = np.min(rec_lengths)
+        print('trace lengths differ up to', np.max(rec_lengths)-np.min(rec_lengths), 'datapoints')
+        print('truncating traces to', min_trace_len, 'datapoints')
+
+        # Stack ROI traces across recordings into one 2D array (rows=ROIs, cols=time)
+        rows = []
+
+        for rec in self.recording:
+            # truncate to min_trace_len along time axis
+            truncated = rec.averages[:, :min_trace_len]
+            # Append truncated ROI rows and mapping
+            rows.append(truncated)
+            
+        return(np.vstack(rows))
+
     def pickle_store(self, save_path, filename, compress=False, protocol=None):
         """
         Store experiment as compressed pickle file.
