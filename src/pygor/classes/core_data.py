@@ -744,7 +744,7 @@ class Core:
     def get_correlation_map(self):
         return pygor.core.methods.correlation_map(self.images)
 
-    def calc_mean_triggertimes_s(self):
+    def calc_mean_triggertimes(self):
         """
         Calculate the mean trigger times in seconds.
         
@@ -775,9 +775,9 @@ class Core:
             for n, i in enumerate(epoch_reshape):
                 temp_arr[n] = i - (avg_epoch_dur * n)
             avg_epoch_triggertimes = np.average(temp_arr, axis=0)
-            markers_arr = avg_epoch_triggertimes
+            markers_arr = avg_epoch_triggertimes / self.linedur_s
             markers_arr -= markers_arr[0]
-        return markers_arr
+        return markers_arr.astype(int)
 
     @property
     def rois_alt(self):

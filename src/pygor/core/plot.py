@@ -198,7 +198,7 @@ def plot_averages(
         # avg_epoch_triggertimes = np.average(temp_arr, axis=0)
         # markers_arr = avg_epoch_triggertimes * (1 / self.linedur_s)
         # markers_arr -= markers_arr[0]
-        markers_arr = self.calc_mean_triggertimes_s() / self.linedur_s
+        markers_arr = self.calc_mean_triggertimes() 
         # Use the passed figsize parameter instead of hardcoded (5, 3)
         if axs is None:
             fig, axs = plt.subplots(1, figsize=figsize)
