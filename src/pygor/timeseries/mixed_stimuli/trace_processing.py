@@ -12,6 +12,28 @@ def lowpass_filter(data, cutoff, fs, order=4):
     
     return filtered_data
 
+def sort_by_response(traces, all_stimtypes, trigger_inds, stimtype1, opponent=False, stimtype2=None):
+    '''
+    function to sort the traces by their cumulative response to a given stimulus type
+    '''
+    stimtype1_startloc = all_stimtypes.index(stimtype1)
+
+    response1 = traces[:, int(trigger_inds[stimtype1_startloc]):int(trigger_inds[stimtype1_startloc+1])]
+    cumulative_response1 = response1.cumsum(axis=1)[:,-1]
+
+    if opponent==True:
+        
+        stimtype2_startloc = all_stimtypes.index(stimtype2)
+        response2 = traces[:, int(trigger_inds[stimtype2_startloc]):int(trigger_inds[stimtype2_startloc+1])]
+        cumulative_response2 = response2.cumsum(axis=1)[:,-1]
+        preference = cumulative_response1 - cumulative_response2
+        sort_order = np.argsort(preference)
+
+    else: 
+        sort_order = np.argsort(cumulative_response1)
+
+    return sort_order
+
 def flexible_reshape(array, columns):
     # Calculate the number of elements to keep
     elements_to_keep = (len(array) // columns) * columns
