@@ -85,7 +85,7 @@ def plot_averages(
         )
         rois = rois[filter_result]
     if figsize == (None, None):
-        figsize = (5, len(rois))
+        figsize = (5, 5)
     if figsize_scale is not None:
         figsize = np.array(figsize) * np.array(figsize_scale)
     if len(rois) < n_rois_raster:
@@ -110,11 +110,6 @@ def plot_averages(
             axs = np.array([axs])
         sd_ratio_scalebar = 1
         phase_dur = self.ms_dur / self.trigger_mode * phase_dur_mod
-        """
-        TODO: Fix so it doesn't just put shading 
-        at regular intervals but instead looks at the
-        trigger times. 
-        """
         if sort_order is None:
             loop_through = enumerate(zip(axs.flat, rois, roi_labels))
         else:

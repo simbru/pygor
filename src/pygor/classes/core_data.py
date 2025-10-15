@@ -87,7 +87,9 @@ class Core:
             if self.rois is not None and np.any(self.rois == 0):
                 self.rois[self.rois == 0] = 1
             self.num_rois = len(np.unique(self.rois)) - 1
-            self.roi_sizes = try_fetch(HDF5_file, "RoiSizes")[:self.num_rois]
+            self.roi_sizes = try_fetch(HDF5_file, "RoiSizes")
+            if self.roi_sizes is not None:
+                self.roi_sizes = self.roi_sizes[:self.num_rois]
             # Timing parameters
             self.triggertimes = try_fetch(HDF5_file, "Triggertimes")
             self.triggertimes = self.triggertimes[~np.isnan(self.triggertimes)].astype(
@@ -744,7 +746,7 @@ class Core:
     def get_correlation_map(self):
         return pygor.core.methods.correlation_map(self.images)
 
-    def calc_mean_triggertimes(self):
+    def calc_mean_triggertimes(self, unit = "index"):
         """
         Calculate the mean trigger times in seconds.
         
@@ -775,9 +777,19 @@ class Core:
             for n, i in enumerate(epoch_reshape):
                 temp_arr[n] = i - (avg_epoch_dur * n)
             avg_epoch_triggertimes = np.average(temp_arr, axis=0)
-            markers_arr = avg_epoch_triggertimes / self.linedur_s
-            markers_arr -= markers_arr[0]
-        return markers_arr.astype(int)
+            markers_arr_s = avg_epoch_triggertimes# / self.linedur_s
+            markers_arr_s -= markers_arr_s[0]
+            if unit == "index" or unit == "indices":
+                markers_arr = markers_arr_s * (1 / self.linedur_s)
+                markers_arr = np.round(markers_arr, 0).astype(int)
+            if unit == "seconds" or unit == "s":
+                markers_arr = markers_arr_s
+            if unit == "frames" or unit == "frame":
+                markers_arr = markers_arr_s * self.frame_hz
+                markers_arr = np.round(markers_arr, 0).astype(int)
+            if unit == "ms":
+                markers_arr = markers_arr_s * 1000
+        return markers_arr#.astype(int)
 
     @property
     def rois_alt(self):
