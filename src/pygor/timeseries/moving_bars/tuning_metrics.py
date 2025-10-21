@@ -485,39 +485,62 @@ def compute_all_tuning_metrics(moving_bars_obj, metric='peak', roi_indices=None,
     
     # Handle phase ranges
     if phase_ranges is None:
-        # Backward compatibility - single phase (original behavior)
-        phase_ranges = [None]  # None means entire response period
+        # Use built-in phase support from compute_tuning_function
+        # This will automatically use self.dir_phase_num if > 1
+        tuning_functions = moving_bars_obj.compute_tuning_function(metric=metric)
+        if roi_indices != list(range(moving_bars_obj.num_rois)):
+            tuning_functions = tuning_functions[roi_indices]
+
+        # Check if phase data was returned
+        if len(tuning_functions.shape) == 3:
+            # Phase data: (n_rois, n_directions, n_phases)
+            # Transpose to (n_phases, n_rois, n_directions)
+            all_tuning_functions = tuning_functions.transpose(2, 0, 1)
+            n_phases = all_tuning_functions.shape[0]
+        else:
+            # Regular data: (n_rois, n_directions)
+            # Add phase dimension
+            all_tuning_functions = tuning_functions[np.newaxis, :, :]
+            n_phases = 1
     elif phase_ranges == "auto":
         # Automatic phase splitting using get_epoch_dur() and dir_phase_num
         epoch_dur = moving_bars_obj.get_epoch_dur()
         n_phases = moving_bars_obj.dir_phase_num
         phase_size = epoch_dur // n_phases
-        phase_ranges = []
+        phase_ranges_list = []
         for i in range(n_phases):
             start = i * phase_size
             end = (i + 1) * phase_size if i < n_phases - 1 else epoch_dur
-            phase_ranges.append((start, end))
-    
-    n_phases = len(phase_ranges)
-    n_rois = len(roi_indices)
-    
-    # Get all tuning functions at once (vectorized)
-    all_tuning_functions = []
-    for phase_range in phase_ranges:
-        if phase_range is None:
-            # Entire response period
-            tuning_functions = moving_bars_obj.compute_tuning_function(metric=metric)
-            if roi_indices != list(range(moving_bars_obj.num_rois)):
-                tuning_functions = tuning_functions[roi_indices]
-        else:
+            phase_ranges_list.append((start, end))
+
+        # Get all tuning functions for each phase window
+        all_tuning_functions = []
+        for phase_range in phase_ranges_list:
             # Specific phase window - vectorized computation
-            tuning_functions = moving_bars_obj.compute_tuning_function(metric=metric, window=phase_range)
+            # Explicitly set phase_num=None to prevent automatic phase splitting
+            tuning_functions = moving_bars_obj.compute_tuning_function(metric=metric, window=phase_range, phase_num=None)
             if roi_indices != list(range(moving_bars_obj.num_rois)):
                 tuning_functions = tuning_functions[roi_indices]
-        all_tuning_functions.append(tuning_functions)
-    
-    # Stack to get (n_phases, n_rois, n_directions)
-    all_tuning_functions = np.array(all_tuning_functions)
+            all_tuning_functions.append(tuning_functions)
+
+        # Stack to get (n_phases, n_rois, n_directions)
+        all_tuning_functions = np.array(all_tuning_functions)
+    else:
+        # Manual phase ranges provided
+        n_phases = len(phase_ranges)
+        all_tuning_functions = []
+        for phase_range in phase_ranges:
+            # Specific phase window - vectorized computation
+            # Explicitly set phase_num=None to prevent automatic phase splitting
+            tuning_functions = moving_bars_obj.compute_tuning_function(metric=metric, window=phase_range, phase_num=None)
+            if roi_indices != list(range(moving_bars_obj.num_rois)):
+                tuning_functions = tuning_functions[roi_indices]
+            all_tuning_functions.append(tuning_functions)
+
+        # Stack to get (n_phases, n_rois, n_directions)
+        all_tuning_functions = np.array(all_tuning_functions)
+
+    n_rois = len(roi_indices)
     
     # Vectorized computation of all metrics
     vector_magnitudes = np.zeros((n_phases, n_rois))
@@ -635,11 +658,13 @@ def compute_all_tuning_metrics(moving_bars_obj, metric='peak', roi_indices=None,
         'mean_direction': mean_directions,
         'roi_indices': np.array(roi_indices)
     }
-    
-    # Add phase_ranges to result if provided
-    if phase_ranges != [None]:
+
+    # Add phase_ranges to result if multi-phase analysis was performed
+    if phase_ranges == "auto":
+        result['phase_ranges'] = phase_ranges_list
+    elif phase_ranges is not None and n_phases > 1:
         result['phase_ranges'] = phase_ranges
-    
+
     return result
 
 

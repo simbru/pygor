@@ -562,14 +562,14 @@ class Core:
     def update_ipl_depths(self, depths=None, overwrite=False):
         """
         Update IPL depths in the H5 file, optionally using interactive depth selection.
-        
+
         Parameters
         ----------
         depths : array-like, optional
             Pre-calculated depths. If None, launches interactive depth selection.
         overwrite : bool, optional
             Whether to overwrite existing ipl_depths (default: False)
-            
+
         Returns
         -------
         bool
@@ -580,16 +580,54 @@ class Core:
             if depths is None:
                 print("Depth calculation was cancelled or failed.")
                 return False
-        
+
         success = self.update_h5_key('Positions', depths, overwrite)
         if success:
             self.ipl_depths = depths  # Update the object attribute
             print(f"Successfully updated ipl_depths for {len(depths)} ROIs")
         return success
 
-    def draw_rois(self, attribute = "calculate_image_average", style = "stacked",**kwargs):
+    def update_rois(self, roi_mask, overwrite=False):
+        """
+        Update ROIs in the H5 file with a pre-defined ROI mask.
+
+        For interactive ROI drawing, use draw_rois(overwrite=True) instead.
+
+        Parameters
+        ----------
+        roi_mask : array-like
+            ROI mask to save (background=1, ROIs=-1,-2,...,-n)
+        overwrite : bool, optional
+            Whether to overwrite existing ROIs (default: False)
+
+        Returns
+        -------
+        bool
+            True if update was successful, False otherwise
+        """
+        success = self.update_h5_key('ROIs', roi_mask, overwrite)
+        if success:
+            self.rois = roi_mask  # Update the object attribute
+            num_rois = len(np.unique(roi_mask)[np.unique(roi_mask) < 0])
+            print(f"Successfully updated ROIs: {num_rois} ROIs saved")
+        return success
+
+    def draw_rois(self, attribute = "calculate_image_average", style = "stacked", load_existing_rois=True, overwrite=False, **kwargs):
         """
         Draw ROIs on the image stack.
+
+        Parameters:
+        -----------
+        attribute : str
+            Method or attribute to use for image data
+        style : str
+            Trace plotting style ('stacked', 'individual', or 'raster')
+        load_existing_rois : bool
+            If True and self.rois exists, loads existing ROIs as editable shapes (default: True)
+        overwrite : bool
+            If True, saves ROIs to H5 file and overwrites existing data (default: False)
+        **kwargs : dict
+            Additional keyword arguments passed to NapariRoiPrompt
         """
         def call_method(obj, method_str, *args, **kwargs):
             # Extract method name by stripping trailing parentheses (if present)
@@ -600,9 +638,52 @@ class Core:
                 return obj.__getattribute__(attribute)
             else:
                 return method(*args, **kwargs)  # Call the method with arguments
+
         target = call_method(self, attribute)
-        session = pygor.core.gui.methods.NapariRoiPrompt(target, traces_plot_style = style,**kwargs)
-        return session.run()
+
+        # Check if existing ROIs should be loaded
+        existing_roi_mask = None
+        if load_existing_rois and hasattr(self, 'rois') and self.rois is not None:
+            existing_roi_mask = self.rois
+            print("Loading existing ROIs from self.rois")
+
+        session = pygor.core.gui.methods.NapariRoiPrompt(
+            target,
+            traces_plot_style=style,
+            existing_roi_mask=existing_roi_mask,
+            **kwargs
+        )
+        traces = session.run()
+
+        # Save ROI mask if overwrite is True
+        if overwrite:
+            # Convert Napari mask format to H5 format
+            napari_mask = session.mask
+            h5_mask = session.convert_napari_mask_to_h5_format(napari_mask)
+
+            # Check if ROIs actually changed
+            rois_changed = True
+            if existing_roi_mask is not None:
+                # Compare number of ROIs
+                old_roi_count = len(np.unique(existing_roi_mask)[np.unique(existing_roi_mask) < 0])
+                new_roi_count = len(np.unique(h5_mask)[np.unique(h5_mask) < 0])
+
+                if old_roi_count == new_roi_count:
+                    # Check if masks are identical
+                    rois_changed = not np.array_equal(existing_roi_mask, h5_mask)
+
+            if rois_changed:
+                success = self.update_h5_key('ROIs', h5_mask, overwrite=True)
+                if success:
+                    self.rois = h5_mask
+                    num_rois = len(np.unique(h5_mask)[np.unique(h5_mask) < 0])
+                    print(f"Successfully saved {num_rois} ROIs to H5 file")
+                else:
+                    print("Failed to save ROIs to H5 file")
+            else:
+                print("No changes detected - ROIs not overwritten")
+
+        return traces
 
     def plot_averages(
         self, rois=None, 

@@ -23,6 +23,7 @@ class NapariViewRois:
 
     def run(self):
         """Launch Napari and block execution properly."""
+        curr_rois = self.rois
         avg_movie = np.average(self.pygor_object.images, axis=0)
         std_movie = np.std(self.pygor_object.images, axis=0)
         corr_movie = pygor.strfs.spatial._legacy_corr_spacetime(self.pygor_object.images)
@@ -256,7 +257,7 @@ class NapariDepthPrompt:
         return self.result  # Now `self.result` is updated before returning
 
 class NapariRoiPrompt():
-    def __init__(self, array_input, traces_plot_style = "individual", plot = False):
+    def __init__(self, array_input, traces_plot_style = "individual", plot = False, existing_roi_mask=None):
         if get_ipython() is not None:
             get_ipython().run_line_magic('matplotlib', 'Qt5Agg')
         import napari
@@ -266,6 +267,7 @@ class NapariRoiPrompt():
         self.viewer = napari.Viewer()
         self.arr = array_input
         self.plot = plot
+        self.existing_roi_mask = existing_roi_mask  # Store existing ROIs
         # Create a Qt event loop
         self.event_loop = QEventLoop()
         self.make_fig = True
@@ -343,6 +345,71 @@ class NapariRoiPrompt():
             mask[x, y] = n  # Fill the mask
         mask = mask[:self.arr[0].shape[0], :self.arr[0].shape[1]]
         return mask
+
+    def roi_mask_to_polygons(self, roi_mask):
+        """
+        Convert ROI mask (where background=1, ROIs=-1,-2,...,-n) to polygon coordinates.
+
+        Parameters:
+        -----------
+        roi_mask : np.ndarray
+            Mask where background is 1 and ROIs are encoded as -1, -2, ..., -n
+
+        Returns:
+        --------
+        list of np.ndarray
+            List of polygon coordinates for each ROI, compatible with napari shapes layer
+        """
+        from skimage import measure
+
+        polygons = []
+        unique_vals = np.unique(roi_mask)
+        roi_vals = unique_vals[unique_vals < 0]  # Get all negative values (ROIs)
+
+        for roi_val in sorted(roi_vals, reverse=True):  # Sort to maintain order -1, -2, -3...
+            # Create binary mask for this ROI
+            binary_mask = (roi_mask == roi_val).astype(np.uint8)
+
+            # Find contours
+            contours = measure.find_contours(binary_mask, 0.5)
+
+            if len(contours) > 0:
+                # Use the longest contour (main boundary)
+                contour = max(contours, key=len)
+                # Napari expects (row, col) format, which is what find_contours returns
+                polygons.append(contour)
+
+        return polygons
+
+    def convert_napari_mask_to_h5_format(self, napari_mask):
+        """
+        Convert Napari mask format to H5 ROI format.
+
+        Napari format: background=NaN, ROIs=0,1,2,...
+        H5 format: background=1, ROIs=-1,-2,-3,...
+
+        Parameters:
+        -----------
+        napari_mask : np.ndarray
+            Mask from mask_from_coords (background=NaN, ROIs=0,1,2,...)
+
+        Returns:
+        --------
+        np.ndarray
+            Mask in H5 format (background=1, ROIs=-1,-2,-3,...)
+        """
+        h5_mask = np.ones_like(napari_mask)  # Start with all 1s (background)
+
+        # Get unique ROI values (excluding NaN)
+        unique_vals = np.unique(napari_mask)
+        roi_vals = unique_vals[~np.isnan(unique_vals)]
+
+        # Convert each ROI: 0 -> -1, 1 -> -2, 2 -> -3, etc.
+        for roi_val in roi_vals:
+            roi_pixels = (napari_mask == roi_val)
+            h5_mask[roi_pixels] = -(int(roi_val) + 1)
+
+        return h5_mask
         
     def fetch_traces(self, img_stack, roi_mask):
         unique_vals = np.unique(roi_mask)
@@ -437,7 +504,22 @@ class NapariRoiPrompt():
 #        except ValueError:
 #            pass
         self.viewer.add_image(self.arr, name="Image", opacity=.6, contrast_limits=(vmin, vmax))
-        roi_layer = self.viewer.add_shapes(name = "place ROIs", shape_type = 'polygon', opacity=.75, edge_width=.25, edge_color='yellow', face_color='transparent')
+
+        # Convert existing ROI mask to polygons if provided
+        initial_shapes = []
+        if self.existing_roi_mask is not None:
+            initial_shapes = self.roi_mask_to_polygons(self.existing_roi_mask)
+            print(f"Loaded {len(initial_shapes)} existing ROIs as editable shapes")
+
+        roi_layer = self.viewer.add_shapes(
+            initial_shapes,
+            name="place ROIs",
+            shape_type='polygon',
+            opacity=.75,
+            edge_width=.25,
+            edge_color='yellow',
+            face_color='transparent'
+        )
         roi_layer.mode = 'add_ellipse'
         self.viewer.layers[0]._keep_auto_contrast = True
         napari.run()
