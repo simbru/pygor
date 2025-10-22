@@ -98,3 +98,26 @@ def get_triggertimes(inputdata):
     print('Triggers at ms:', mean_triggertimes_extended)
     print('get_triggertimes is not accurate and will be disabled in a future release. use the .calc_mean_triggertimes_s() method instead')
     return mean_triggertimes_extended
+
+def filter_ROIs(df, traces, quality='quality_indices>0.5', std_threshold=30):
+    """
+    Filters ROIs to include only with quality index > 0.5 (default) and below 
+    a certain standard deviation (to remove too jittery ones).
+    
+    Parameters
+    ----------
+    
+    traces : np.ndarray
+        2D array of shape (n_rois, n_timepoints) containing the traces
+    df : pd.DataFrame
+        DataFrame containing ROI metadata, e.g. quality criterion, response amplitudes, roi sizes, which can be sorted by
+    """
+    df = df.query(quality)
+    traces = traces[df.index.values]
+    std_mask = np.where(np.std(traces, axis=1)<std_threshold)[0]
+    traces = traces[std_mask]
+    df = df.iloc[std_mask]
+    df = df.reset_index(drop=True)  # Add this line to reset the index
+    return traces, df
+
+#TODO: should maybe add function to sort and filter dataframe in object already? might require storing df as a property. 
