@@ -33,17 +33,30 @@ class ResponseMapping(Core):
         
         Returns
         -------
-        np.ndarray
-            Array of response amplitudes for each trigger, shape (n_triggers, n_rois)
+        pd.DataFrame
+            DataFrame with response amplitudes indexed by ROI, with columns named after stimuli strings.
+            Shape: (n_rois, n_stimuli)
         """
         # Get triggers from the Core class method
         triggers = self.calc_mean_triggertimes()
         
         # Use averages from Core
         traces = self.averages
-        responses = []
+        
+        # Initialize dictionary to build DataFrame
+        response_dict = {}
+        
         for trig_idx, trig in enumerate(triggers[:-1]):  # Exclude last trigger since it's just white
             startval = traces[:, trig]
             maxval = np.max(traces[:, trig:triggers[trig_idx + 1]], axis=1)
-            responses.append(maxval - startval)
-        return np.array(responses)
+            response = maxval - startval
+            
+            # Add response as a column with stimulus name as key
+            stimulus_name = str(self.stimuli[trig_idx])
+            response_dict[stimulus_name] = response
+        
+        # Create DataFrame from dictionary
+        df = pd.DataFrame(response_dict)
+        df.index.name = 'ROI'
+        
+        return df
