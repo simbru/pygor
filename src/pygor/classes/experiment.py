@@ -36,7 +36,7 @@ class Experiment:
         self.__update_data__()
 
     @classmethod
-    def from_files(cls, file_paths, pygor_class_name, n_jobs=-1):
+    def from_files(cls, file_paths, pygor_class_name, n_jobs=-1, **kwargs):
         """
         Initialize an Experiment from a list of file paths.
         
@@ -48,8 +48,10 @@ class Experiment:
             Name of the pygor class to use for loading (e.g., 'STRF', 'MovingBars', 'FullField')
         n_jobs : int, optional
             Number of parallel jobs for loading files. -1 uses all cores, 1 disables parallelization (default: -1)
+        **kwargs : dict, optional
+            Additional keyword arguments to pass to the pygor class constructor (e.g., stimuli for ResponseMapping)
             
-        Returns
+        Returnss
         -------
         Experiment
             New Experiment object with loaded recordings
@@ -61,6 +63,9 @@ class Experiment:
         
         >>> # Load single file  
         >>> exp = Experiment.from_files('single_file.h5', 'MovingBars')
+        
+        >>> # Load ResponseMapping files with stimuli
+        >>> exp = Experiment.from_files(file_list, 'ResponseMapping', stimuli=my_stimuli_array)
         
         >>> # Load with 4 parallel workers
         >>> exp = Experiment.from_files(file_list, 'STRF', n_jobs=4)
@@ -79,7 +84,7 @@ class Experiment:
         def load_single_file(file_path):
             """Helper function to load a single file"""
             try:
-                recording = pygor_class(file_path)
+                recording = pygor_class(file_path, **kwargs)
                 return ('success', file_path, recording)
             except Exception as e:
                 return ('failed', file_path, str(e))
