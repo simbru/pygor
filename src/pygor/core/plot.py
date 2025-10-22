@@ -85,12 +85,21 @@ def plot_averages(
         )
         rois = rois[filter_result]
     if figsize == (None, None):
-        figsize = (5, 5)
+        # determine if we are plotting raster or subplots
+        if len(rois) >= n_rois_raster:
+            # For rasters: aim for consistent pixel density with logarithmic damping
+            # ~0.03 inches per ROI, damped for large numbers
+            height = max(5, 0.03 * len(rois) * (1 / np.log10(len(rois) + 10)))
+            figsize = (10, height)
+        else:
+            # scale inverse to number of rois such that more rois does not balloon the figure size
+            figsize =  (10, 1 + 0.3 * len(rois))
     if figsize_scale is not None:
         figsize = np.array(figsize) * np.array(figsize_scale)
     if len(rois) < n_rois_raster:
         # Generate matplotlib plot
-        colormap = plt.cm.jet_r(np.linspace(1, 0, len(rois)))
+        # colormap = plt.cm.jet_r(np.linspace(1, 0, len(rois)))
+        colormap = plt.cm.gist_rainbow(np.linspace(0, 1, len(rois)))
         # Handle axis input first
         provided_axs = axs is not None
         
@@ -115,11 +124,11 @@ def plot_averages(
         else:
             loop_through = enumerate(zip(axs.flat, rois[sort_order], roi_labels[sort_order]))
         for n, (ax, roi, label) in loop_through:
-            if include_snippets is True:
+            if include_snippets is True and self.snippets is not None:
                 ax.plot(self.snippets[roi].T, c="grey", alpha=0.5)
             ax.plot(self.averages[roi], color=colormap[n])
             ax.set_xlim(0, len(self.averages[0]))
-            if independent_scale is False:
+            if independent_scale is False and self.snippets is not None:
                 ax.set_ylim(np.min(self.snippets[rois]), np.max(self.snippets[rois]))
             else:
                 closest_sd = np.ceil(np.max(self.averages[roi])*sd_ratio_scalebar)
@@ -169,30 +178,7 @@ def plot_averages(
         else:
             rois = rois[sort_order]
         # Generate raster plot
-        print(self.triggertimes.shape)
-        ## Work out closest triggertimes split for given trigger mode (in case of partial loops)
-        # if self.trigger_mode == 1:
-        #     avg_epoch_dur = np.average(np.diff(self.triggertimes))
-        #     markers_arr = self.triggertimes * (1 / self.linedur_s)
-        #     markers_arr -= markers_arr[0]
-        # else:
-        #     if self.triggertimes.shape[0] % self.trigger_mode != 0:
-        #         print(
-        #             "WARNING: Trigger times are not evenly divisible by trigger mode"
-        #         )
-        #         # Determine amount of triggers to crop out to achieve loop alignment
-        #         num_triggers_to_crop = self.triggertimes.shape[0] % self.trigger_mode
-        #         self.triggertimes = self.triggertimes[:-num_triggers_to_crop]
-        #         print(f"WARNING: Cropped {num_triggers_to_crop} triggers to achieve loop alignment")
-
-        # avg_epoch_dur = np.average(np.diff(self.triggertimes.reshape(-1, self.trigger_mode)[:, 0]))
-        # epoch_reshape = self.triggertimes.reshape(-1, self.trigger_mode)
-        # temp_arr = np.empty(epoch_reshape.shape)
-        # for n, i in enumerate(epoch_reshape):
-        #     temp_arr[n] = i - (avg_epoch_dur * n)
-        # avg_epoch_triggertimes = np.average(temp_arr, axis=0)
-        # markers_arr = avg_epoch_triggertimes * (1 / self.linedur_s)
-        # markers_arr -= markers_arr[0]
+        # Add vertical lines for average trigger times
         markers_arr = self.calc_mean_triggertimes() 
         # Use the passed figsize parameter instead of hardcoded (5, 3)
         if axs is None:
