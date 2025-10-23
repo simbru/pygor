@@ -60,3 +60,21 @@ class ResponseMapping(Core):
         df.index.name = 'ROI'
         
         return df
+
+    def calc_response_sd(self):
+        """
+        Calculate response standard deviation for each average trace.
+        
+        Needs stimuli as input to creating the object, and inherits averages and triggertimes from Core. 
+        
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with response standard deviations indexed by ROI, with columns named after stimuli strings.
+            Shape: (n_rois, n_stimuli)
+        """
+        
+        # Use averages from Core
+        average_sd = np.std(self.averages, axis=1)
+        return average_sd
+        
