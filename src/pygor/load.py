@@ -65,3 +65,9 @@ def dynamic_import(classes_folder="classes") -> None:
 # Call the function to import custom data objects, regardless if __name__ == "__main__"
 # such that the classes can be imported by importing pygor.load
 dynamic_import()
+
+# Backward compatibility: Add MovingBars alias for OSDS
+# This ensures legacy code using load.Experiment().from_files(..., "MovingBars", ...) continues to work
+if hasattr(sys.modules[__name__], 'OSDS'):
+    MovingBars = sys.modules[__name__].OSDS
+    setattr(sys.modules[__name__], 'MovingBars', MovingBars)
