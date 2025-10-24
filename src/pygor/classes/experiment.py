@@ -76,7 +76,13 @@ class Experiment:
         try:
             pygor_class = getattr(pygor.load, pygor_class_name)
         except AttributeError:
-            available_classes = [name for name in dir(pygor.load) if not name.startswith('_')]
+            # Only list actual class names (types that start with uppercase)
+            available_classes = [
+                name for name in dir(pygor.load)
+                if not name.startswith('_')
+                and hasattr(pygor.load, name)
+                and isinstance(getattr(pygor.load, name), type)
+            ]
             raise ValueError(f"Unknown pygor class '{pygor_class_name}'. Available classes: {available_classes}")
         
         def load_single_file(file_path):
