@@ -18,6 +18,7 @@ import pygor.strf.spatial
 import pygor.strf.temporal
 import pygor.strf.contouring
 from . import custom
+from scipy import stats
 
 
 def _legacy_play_movie(d3_arr, **kwargs):
@@ -264,6 +265,51 @@ def basic_stim_overlay(
 #     axs[0].set_xlabel(f"Percentage by polarity (n = {num_cells})", size = 15)
 #     plt.show()
 
+
+def plot_scatter_density(amps, y_unit):
+
+    '''
+    plots scatter and KDE plot of column-wise measurements in a dataframe. 
+    Parameters
+    ----------  
+    amps : pd.DataFrame
+        DataFrame where each column represents a different parameter to plot on the x axis 
+        and each row represents a measurement for that parameter.
+    y_unit : str
+        Label for the y-axis.
+        '''
+    # Plot response amplitudes for all stimuli on the same x-axis
+    fig, ax = plt.subplots(figsize=(7, 4))
+    stim_cmap = plt.get_cmap('tab20', len(amps.columns))
+
+
+    for stim_idx, (stim_name, stim_amps) in enumerate(amps.items()):
+
+        # Jittered scatter plot using stripplot
+        jitter = np.random.normal(stim_idx, 0.04, size=len(stim_amps))
+        ax.scatter(jitter, stim_amps.values, s=20, alpha=0.4, color=stim_cmap(stim_idx))
+        
+        # Plot distribution (density) on the right side
+        # Use kernel density estimation
+        density = stats.gaussian_kde(stim_amps)
+        y_vals = np.linspace(stim_amps.min(), stim_amps.max(), 200)
+        density_vals = density(y_vals)
+        # Normalize density to span from x_offset+0.2 to x_offset+0.4
+        density_vals = stim_idx + 0.2 + (density_vals / density_vals.max() * 0.2)
+        ax.fill_betweenx(y_vals, stim_idx + 0.2, density_vals, alpha=0.3, color=stim_cmap(stim_idx))
+        
+        # Add median line
+        ax.hlines(np.median(stim_amps), stim_idx - 0.2, stim_idx + 0.4, colors='k', linestyles='-', linewidth=1)
+
+    # Set x-axis labels
+    ax.set_xticks(range(amps.shape[1]))
+    ax.set_xticklabels(amps.columns, rotation=45, ha='right')
+    ax.set_ylabel(y_unit)
+
+    ax.grid(axis='y', alpha=0.3)
+    sns.despine()
+    plt.tight_layout()
+    plt.show()
 
 def plot_traces(
     array_2d, mode=None, on_dur=None, off_dur=None, plot_type="traces", axis=-1

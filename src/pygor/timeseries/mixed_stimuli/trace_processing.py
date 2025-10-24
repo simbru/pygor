@@ -1,4 +1,65 @@
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+def plot_rois_and_traces(rec, exp, df):
+    fig = plt.figure(figsize=(6, 6))
+    gs = fig.add_gridspec(3, 2, width_ratios=[1, 1], height_ratios=[1, 1, 1])
+
+    time = np.arange(len(exp.recording[0].averages.T))*exp.recording[0].linedur_s
+    pref_cmap = plt.get_cmap('jet', df.shape[0])
+    averages = exp.fetch_averages()
+    # Show average image on left, spanning all rows
+    ax_img = fig.add_subplot(gs[:, 0])
+    avg_img = exp.recording[rec].average_stack
+    p_low, p_high = np.percentile(avg_img, (2, 98))
+    ax_img.imshow(avg_img, cmap='gray', origin='lower', vmin=p_low, vmax=p_high)
+
+    # ROI label map for this recording
+    rois_to_use = exp.recording[rec].rois
+# subset DataFrame to this recording
+    rec_idxs = np.where(df['recording_id'] == rec)[0]
+    for rec_idx in rec_idxs:
+        local_roi_id = int(df.iloc[rec_idx]['roi_id'])
+        color = pref_cmap(rec_idx)
+    # create RGBA overlay for this ROI (labels are negative)
+        mask = (rois_to_use == -(local_roi_id+1))
+        rgba = np.zeros(rois_to_use.shape + (4,), dtype=float)
+        rgba[mask] = [*color[:3], 0.4]
+        ax_img.imshow(rgba, origin='lower')
+    ax_img.set_title(exp.recording[rec].name)
+    ax_img.axis('off')
+
+    #find which rec_idxs are less than the cutoff
+    top_indices = rec_idxs[rec_idxs < int(0.2*df.shape[0])]
+    top_rois = df.iloc[top_indices].index.values
+    top_averages = averages[top_rois]
+    average_trace = np.mean(top_averages, axis=0)
+    ax_top = fig.add_subplot(gs[0, 1])
+    ax_top.plot(time[:-1], top_averages.T, color='blue', alpha=0.1, linewidth=1)
+    ax_top.plot(time[:-1], average_trace, color='blue', linewidth=2)
+
+    #find which rec_idxs are intermediate
+    mid_indices = rec_idxs[(rec_idxs >= int(0.375*df.shape[0])) & (rec_idxs < int(0.625*df.shape[0]))]
+    mid_rois = df.iloc[mid_indices].index.values
+    mid_averages = averages[mid_rois]
+    average_trace = np.mean(mid_averages, axis=0)
+    ax_mid = fig.add_subplot(gs[1, 1])
+    ax_mid.plot(time[:-1], mid_averages.T, color='green', alpha=0.1, linewidth=1)
+    ax_mid.plot(time[:-1], average_trace, color='green', linewidth=2)
+
+    #find which rec_idxs are in the bottom 25%
+    bot_indices = rec_idxs[rec_idxs >= int(0.8*df.shape[0])]
+    bot_rois = df.iloc[bot_indices].index.values
+    bot_averages = averages[bot_rois]
+    average_trace = np.mean(bot_averages, axis=0)
+    ax_bot = fig.add_subplot(gs[2, 1])
+    ax_bot.plot(time[:-1], bot_averages.T, color='red', alpha=0.1, linewidth=1)
+    ax_bot.plot(time[:-1], average_trace, color='red', linewidth=2)
+    
+    sns.despine()
+    plt.tight_layout()
+    plt.show()
 
 def lowpass_filter(data, cutoff, fs, order=4):
 
