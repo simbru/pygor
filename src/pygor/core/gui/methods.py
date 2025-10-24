@@ -257,7 +257,7 @@ class NapariDepthPrompt:
         return self.result  # Now `self.result` is updated before returning
 
 class NapariRoiPrompt():
-    def __init__(self, array_input, traces_plot_style = "individual", plot = False, existing_roi_mask=None):
+    def __init__(self, array_input, traces_plot_style = "individual", plot = False, existing_roi_mask=None, correlation_projection=None):
         if get_ipython() is not None:
             get_ipython().run_line_magic('matplotlib', 'Qt5Agg')
         import napari
@@ -268,6 +268,9 @@ class NapariRoiPrompt():
         self.arr = array_input
         self.plot = plot
         self.existing_roi_mask = existing_roi_mask  # Store existing ROIs
+        self.correlation_projection = correlation_projection  # Store correlation projection
+        self.initial_shape_count = None  # Track initial number of shapes
+        self.rois_were_modified = False  # Flag to track if user modified ROIs
         # Create a Qt event loop
         self.event_loop = QEventLoop()
         self.make_fig = True
@@ -306,26 +309,17 @@ class NapariRoiPrompt():
         self.viewer.window._qt_window.closeEvent = custom_close_event
 
     def grab_coordinates(self):
-        """Retrieve ROI coordinates, ensuring the latest data is captured."""
+        """Retrieve ROI coordinates and shape types, ensuring the latest data is captured."""
         print("Processing user selection...")
-        # roi_layer.refresh()  # Force update before reading data
         if self.viewer.layers["place ROIs"].data is not None:
-            # coords = self.viewer.layers["place ROIs"].data
-            # coords = [[np.clip(x, (0, self.arr[0].shape[1])), np.clip(y, 0, (self.arr[0].shape[0]))] for x, y in zip(coords[:, 0], coords[:, 1])]
-            # self.roi_coordinates = coords
-            """
-            TODO: Fix coordinates landing outside of the image. Its just annoying for keeping ROI count. 
-            Just delete them.
-            """
             coordinates = self.viewer.layers["place ROIs"].data
+            shape_types = self.viewer.layers["place ROIs"].shape_type
             shape = self.arr[0].shape
             coordinates = [np.dstack([np.clip(curr_coord[:, 0], 0 , shape[0]), np.clip(curr_coord[:, 1], 0 , shape[1])]) for curr_coord in coordinates]
 
             self.roi_coordinates = coordinates
-            print(coordinates)
-            # self.viewer.layers["place ROIs"].data = coordinates
-            
-            # self.roi_coordinates = self.viewer.layers["place ROIs"].data
+            self.roi_shape_types = shape_types  # Store shape types for proper rendering
+            print(f"Grabbed {len(coordinates)} ROIs with types: {shape_types}")
             
 
     def on_close(self):
@@ -336,13 +330,34 @@ class NapariRoiPrompt():
             self.generate_plot()
 
     # Methods to handle ROI output
-    def mask_from_coords(self, coords_list, mask_shape):
+    def mask_from_coords(self, coords_list, mask_shape, shape_types=None):
+        from skimage.draw import ellipse
+
         mask = np.ones(mask_shape) * np.nan  # Boolean mask
-        for n, coords in enumerate(coords_list):
-            coords = np.ceil(coords)
-            # Fill the mask
-            x, y = polygon(coords[:, 0], coords[:, 1], shape=mask_shape)
-            mask[x, y] = n  # Fill the mask
+
+        # If no shape types provided, assume all are polygons
+        if shape_types is None:
+            shape_types = ['polygon'] * len(coords_list)
+
+        for n, (coords, shape_type) in enumerate(zip(coords_list, shape_types)):
+            coords = np.squeeze(coords)  # Remove extra dimensions from dstack
+
+            if shape_type == 'ellipse':
+                # Napari stores ellipses as 4 corner points of bounding box
+                # Calculate center and radii
+                center_y = (coords[:, 0].min() + coords[:, 0].max()) / 2
+                center_x = (coords[:, 1].min() + coords[:, 1].max()) / 2
+                radius_y = (coords[:, 0].max() - coords[:, 0].min()) / 2
+                radius_x = (coords[:, 1].max() - coords[:, 1].min()) / 2
+
+                # Draw filled ellipse
+                rr, cc = ellipse(center_y, center_x, radius_y, radius_x, shape=mask_shape)
+                mask[rr, cc] = n
+            else:
+                # Polygon or other shapes
+                x, y = polygon(coords[:, 0], coords[:, 1], shape=mask_shape)
+                mask[x, y] = n
+
         mask = mask[:self.arr[0].shape[0], :self.arr[0].shape[1]]
         return mask
 
@@ -444,7 +459,8 @@ class NapariRoiPrompt():
 
     def update_self(self):
         self.roi_coordinates = self.viewer.layers["place ROIs"].data
-        self.mask = self.mask_from_coords(self.roi_coordinates, self.arr[0].shape)
+        self.roi_shape_types = self.viewer.layers["place ROIs"].shape_type
+        self.mask = self.mask_from_coords(self.roi_coordinates, self.arr[0].shape, self.roi_shape_types)
         self.traces = self.fetch_traces(self.arr, self.mask)
 
     def generate_plot(self):
@@ -459,8 +475,7 @@ class NapariRoiPrompt():
                 ax[0].text(np.average(coords[:, 1]), np.average(coords[:, 0]), str(n), fontsize=14, ha="center", va="center", color="white")
         if self.traces_plot_style == "stacked":
             for n, i in enumerate(self.traces):
-                ax[1].plot(i, color = colormap[-n], label = f"ROI {n}")
-                ax[1].legend()
+                ax[1].plot(i, color = colormap[-n])
         if self.traces_plot_style == "individual":
             # Get the figure and number of traces
             fig = ax[0].figure
@@ -497,6 +512,11 @@ class NapariRoiPrompt():
         import napari
         """Launch Napari and block execution properly."""
         vmin, vmax = np.percentile(self.arr, (1, 99))
+
+        # Add correlation projection if available
+        if self.correlation_projection is not None:
+            self.viewer.add_image(self.correlation_projection, name="Correlation", colormap="gray")
+
         self.viewer.add_image(np.std(self.arr, axis = 0), name="SD")
         self.viewer.add_image(np.mean(self.arr, axis = 0), name="Average")
 #        try:
@@ -511,19 +531,36 @@ class NapariRoiPrompt():
             initial_shapes = self.roi_mask_to_polygons(self.existing_roi_mask)
             print(f"Loaded {len(initial_shapes)} existing ROIs as editable shapes")
 
+        # Create shape_type list - loaded ROIs are polygons, allow ellipses to be added
+        if len(initial_shapes) > 0:
+            initial_shape_types = ['polygon'] * len(initial_shapes)
+        else:
+            initial_shape_types = 'ellipse'
+
         roi_layer = self.viewer.add_shapes(
             initial_shapes,
+            shape_type=initial_shape_types,
             name="place ROIs",
-            shape_type='polygon',
             opacity=.75,
             edge_width=.25,
             edge_color='yellow',
             face_color='transparent'
         )
         roi_layer.mode = 'add_ellipse'
+
+        # Track initial shape count and set up change detection
+        self.initial_shape_count = len(initial_shapes)
+
+        def on_shapes_change(event):
+            """Callback to detect when shapes are modified"""
+            self.rois_were_modified = True
+
+        # Connect to shape layer events
+        roi_layer.events.data.connect(on_shapes_change)
+
         self.viewer.layers[0]._keep_auto_contrast = True
-        napari.run()
-        self.event_loop.exec_()  # Block until close event triggers
+        # napari.run()
+        self.event_loop.exec_()  # Block until close event triggers (needed despite double execution)
         if get_ipython() is not None:
             get_ipython().run_line_magic('matplotlib', 'inline')
         if self.viewer.layers["place ROIs"].data != []:

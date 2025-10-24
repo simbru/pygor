@@ -35,7 +35,8 @@ def try_fetch(file, key):
     try:
         result = file[key]
         result_shape = result.shape
-        if result_shape != ():
+        if result_shape != (): # if not a scalar
+            # reshape to match expected orientation for Python
             result = np.array(result).T
     except KeyError as error:
         result = None
@@ -102,6 +103,7 @@ class Core:
             self.averages = try_fetch(HDF5_file, "Averages0")
             self.snippets = try_fetch(HDF5_file, "Snippets0")
             self.quality_indices = try_fetch(HDF5_file, "QualityCriterion")
+            self.correlation_projection = try_fetch(HDF5_file, "correlation_projection")
             self.trigger_mode = int(try_fetch_os_params(HDF5_file, "Trigger_Mode"))
             self.n_planes = int(try_fetch_os_params(HDF5_file, "nPlanes"))
             self.linedur_s = float(try_fetch_os_params(HDF5_file, "LineDuration"))
@@ -612,7 +614,7 @@ class Core:
             print(f"Successfully updated ROIs: {num_rois} ROIs saved")
         return success
 
-    def draw_rois(self, attribute = "calculate_image_average", style = "stacked", load_existing_rois=True, overwrite=False, **kwargs):
+    def draw_rois(self, attribute = "calculate_image_average", style = "stacked", load_existing_rois=True, overwrite=False, show_correlation=True, **kwargs):
         """
         Draw ROIs on the image stack.
 
@@ -626,6 +628,8 @@ class Core:
             If True and self.rois exists, loads existing ROIs as editable shapes (default: True)
         overwrite : bool
             If True, saves ROIs to H5 file and overwrites existing data (default: False)
+        show_correlation : bool
+            If True, displays correlation projection in Napari viewer (default: True)
         **kwargs : dict
             Additional keyword arguments passed to NapariRoiPrompt
         """
@@ -647,43 +651,380 @@ class Core:
             existing_roi_mask = self.rois
             print("Loading existing ROIs from self.rois")
 
+        # Compute correlation projection if requested and not already available
+        correlation_projection = None
+        if show_correlation:
+            if self.correlation_projection is None:
+                print("Computing correlation projection...")
+                correlation_projection = self.compute_correlation_projection()
+            else:
+                correlation_projection = self.correlation_projection
+
         session = pygor.core.gui.methods.NapariRoiPrompt(
             target,
             traces_plot_style=style,
             existing_roi_mask=existing_roi_mask,
+            correlation_projection=correlation_projection,
             **kwargs
         )
         traces = session.run()
 
         # Save ROI mask if overwrite is True
         if overwrite:
-            # Convert Napari mask format to H5 format
-            napari_mask = session.mask
-            h5_mask = session.convert_napari_mask_to_h5_format(napari_mask)
+            # Check if user actually modified ROIs in Napari
+            if hasattr(session, 'rois_were_modified') and not session.rois_were_modified:
+                # ROIs were not modified - use original mask to prevent growth
+                print("No changes detected - ROIs not overwritten")
+            else:
+                # ROIs were modified - convert and save
+                napari_mask = session.mask
+                h5_mask = session.convert_napari_mask_to_h5_format(napari_mask)
 
-            # Check if ROIs actually changed
-            rois_changed = True
-            if existing_roi_mask is not None:
-                # Compare number of ROIs
-                old_roi_count = len(np.unique(existing_roi_mask)[np.unique(existing_roi_mask) < 0])
-                new_roi_count = len(np.unique(h5_mask)[np.unique(h5_mask) < 0])
-
-                if old_roi_count == new_roi_count:
-                    # Check if masks are identical
-                    rois_changed = not np.array_equal(existing_roi_mask, h5_mask)
-
-            if rois_changed:
                 success = self.update_h5_key('ROIs', h5_mask, overwrite=True)
                 if success:
                     self.rois = h5_mask
-                    num_rois = len(np.unique(h5_mask)[np.unique(h5_mask) < 0])
-                    print(f"Successfully saved {num_rois} ROIs to H5 file")
+                    self.num_rois = len(np.unique(h5_mask)[np.unique(h5_mask) < 0])
+                    print(f"Successfully saved {self.num_rois} ROIs to H5 file")
+
+                    # Recompute dependent data since ROIs changed
+                    print("\nRecomputing traces, snippets, and averages for new ROIs...")
+
+                    # Compute both raw and z-normalized traces
+                    self.compute_traces_from_rois(overwrite=True)
+
+                    # Compute snippets and averages
+                    self.compute_snippets_and_averages(overwrite=True)
+
+                    # Verify shapes match
+                    print("\nVerifying data integrity:")
+                    print(f"  num_rois: {self.num_rois}")
+                    print(f"  traces_raw shape: {self.traces_raw.shape if self.traces_raw is not None else 'None'}")
+                    print(f"  averages shape: {self.averages.shape if self.averages is not None else 'None'}")
+                    print(f"  snippets shape: {self.snippets.shape if self.snippets is not None else 'None'}")
+
+                    print("All dependent data recomputed and saved successfully")
                 else:
                     print("Failed to save ROIs to H5 file")
-            else:
-                print("No changes detected - ROIs not overwritten")
 
         return traces
+
+    def compute_correlation_projection(self, include_diagonals=True, n_jobs=-1, overwrite=False, force_recompute=False):
+        """
+        Compute pixel-wise temporal correlation with neighboring pixels.
+
+        This creates a correlation map useful for visualizing functional connectivity
+        in 2-photon calcium imaging data. Each pixel's correlation is computed as the
+        average correlation coefficient with its immediate neighbors (4 or 8 neighbors).
+
+        Parameters:
+        -----------
+        include_diagonals : bool, optional
+            If True, uses 8-neighbor connectivity (including diagonals).
+            If False, uses 4-neighbor connectivity (only cardinal directions).
+            Default: True
+        n_jobs : int, optional
+            Number of parallel jobs to run. -1 uses all available CPUs.
+            Default: -1
+        overwrite : bool, optional
+            If True, saves the result to H5 file, overwriting existing data.
+            Default: False
+        force_recompute : bool, optional
+            If True, recomputes even if correlation_projection already exists.
+            Useful for testing or when you want to recompute without saving to H5.
+            Default: False
+
+        Returns:
+        --------
+        np.ndarray
+            Correlation projection with shape (height, width).
+            Values range from -1 to 1, representing average correlation with neighbors.
+        """
+        # Check if already computed and not forcing recompute
+        if not force_recompute and not overwrite and self.correlation_projection is not None:
+            print("Correlation projection already exists. Use force_recompute=True or overwrite=True to recompute.")
+            return self.correlation_projection
+
+        if self.images is None:
+            raise ValueError("No image data available. Cannot compute correlation projection.")
+
+        # Get image dimensions
+        images = self.images
+        n_frames, height, width = images.shape
+
+        # Define neighbor offsets
+        if include_diagonals:
+            # 8-connectivity (all surrounding pixels)
+            neighbor_offsets = [(-1, -1), (-1, 0), (-1, 1),
+                              (0, -1),           (0, 1),
+                              (1, -1),  (1, 0),  (1, 1)]
+        else:
+            # 4-connectivity (cardinal directions only)
+            neighbor_offsets = [(-1, 0), (0, -1), (0, 1), (1, 0)]
+
+        def compute_pixel_correlation(y, x):
+            """Compute correlation for a single pixel with its neighbors."""
+            pixel_trace = images[:, y, x]
+            correlations = []
+
+            for dy, dx in neighbor_offsets:
+                ny, nx = y + dy, x + dx
+                # Check if neighbor is within bounds
+                if 0 <= ny < height and 0 <= nx < width:
+                    neighbor_trace = images[:, ny, nx]
+                    # Compute Pearson correlation
+                    corr = np.corrcoef(pixel_trace, neighbor_trace)[0, 1]
+                    if not np.isnan(corr):
+                        correlations.append(corr)
+
+            # Return mean correlation with neighbors
+            return np.mean(correlations) if correlations else 0.0
+
+        # Create list of all pixel coordinates
+        pixel_coords = [(y, x) for y in range(height) for x in range(width)]
+
+        # Compute correlations in parallel
+        if n_jobs == 1 or len(pixel_coords) <= 100:
+            # Sequential computation for small images or when explicitly requested
+            correlation_values = [compute_pixel_correlation(y, x) for y, x in pixel_coords]
+        else:
+            # Parallel computation using joblib
+            from joblib import Parallel, delayed
+            print(f"Computing correlation projection using {n_jobs if n_jobs > 0 else 'all'} CPU cores...")
+            correlation_values = Parallel(n_jobs=n_jobs, verbose=1)(
+                delayed(compute_pixel_correlation)(y, x) for y, x in pixel_coords
+            )
+
+        # Reshape to 2D image
+        correlation_projection = np.array(correlation_values).reshape(height, width)
+
+        # Save to object attribute
+        self.correlation_projection = correlation_projection
+
+        # Optionally save to H5 file if overwrite is True
+        if overwrite:
+            success = self.update_h5_key('correlation_projection', correlation_projection, overwrite=True)
+            if success:
+                print("Successfully saved correlation projection to H5 file")
+            else:
+                print("Failed to save correlation projection to H5 file")
+
+        return correlation_projection
+
+    def compute_traces_from_rois(self, overwrite=False):
+        """
+        Compute ROI traces from images and ROI mask.
+
+        Extracts the average fluorescence signal for each ROI across all frames.
+        Always computes BOTH raw and z-normalized traces to ensure consistency.
+        Mimics IGOR's OS_TracesAndTriggers functionality for trace extraction.
+
+        Parameters:
+        -----------
+        overwrite : bool, optional
+            If True, saves traces to H5 file (default: False)
+
+        Returns:
+        --------
+        tuple
+            (traces_raw, traces_znorm) both with shape (n_frames, n_rois)
+        """
+        if self.images is None:
+            raise ValueError("No image data available. Cannot compute traces.")
+        if self.rois is None:
+            raise ValueError("No ROIs defined. Cannot compute traces.")
+
+        # Use the H5 format: background=1, ROIs=-1,-2,-3,...
+        roi_mask = self.rois
+        unique_vals = np.unique(roi_mask)
+        roi_vals = unique_vals[unique_vals < 0]  # Get negative values (ROIs)
+        n_rois = len(roi_vals)
+
+        if n_rois == 0:
+            raise ValueError("No ROIs found in mask")
+
+        n_frames = self.images.shape[0]
+        traces_raw = np.zeros((n_frames, n_rois))
+
+        print(f"Computing traces for {n_rois} ROIs across {n_frames} frames...")
+
+        # Extract traces for each ROI
+        for idx, roi_val in enumerate(sorted(roi_vals, reverse=True)):
+            mask = (roi_mask == roi_val)
+            # Compute mean signal across ROI pixels for each frame
+            for frame_idx in range(n_frames):
+                traces_raw[frame_idx, idx] = np.mean(self.images[frame_idx][mask])
+
+        # Always compute z-normalized traces
+        traces_znorm = np.zeros_like(traces_raw)
+        for roi_idx in range(n_rois):
+            trace = traces_raw[:, roi_idx]
+            traces_znorm[:, roi_idx] = (trace - np.mean(trace)) / np.std(trace)
+
+        # Set both attributes
+        self.traces_raw = traces_raw
+        self.traces_znorm = traces_znorm
+
+        # Save to H5 if requested
+        if overwrite:
+            success_raw = self.update_h5_key('Traces0_raw', traces_raw, overwrite=True)
+            success_znorm = self.update_h5_key('Traces0_znorm', traces_znorm, overwrite=True)
+            if success_raw and success_znorm:
+                print(f"Successfully saved {n_rois} raw and z-normalized traces to H5 file")
+            else:
+                print("Warning: Some traces failed to save to H5 file")
+
+        return traces_raw, traces_znorm
+
+    def compute_snippets_and_averages(self, overwrite=False):
+        """
+        Compute snippets and averages from ROI traces.
+
+        Mimics IGOR's OS_BasicAveraging functionality. Snippets are individual
+        stimulus repetitions, and averages are the mean across all repetitions.
+        Always uses raw traces (not z-normalized) as IGOR does.
+
+        Parameters:
+        -----------
+        overwrite : bool, optional
+            If True, saves snippets and averages to H5 file (default: False)
+
+        Returns:
+        --------
+        tuple
+            (snippets, averages) where:
+            - snippets: shape (snippet_length, n_loops, n_rois)
+            - averages: shape (snippet_length, n_rois)
+        """
+        # Check prerequisites
+        if self.traces_raw is None:
+            print("Traces not available, computing them now...")
+            self.compute_traces_from_rois(overwrite=overwrite)
+
+        if self.triggertimes is None:
+            raise ValueError("Triggertimes not available. Cannot compute snippets.")
+
+        # Use z-normalized traces (always use SD format as IGOR does)
+        # Traces are stored as (n_frames, n_rois) after compute_traces_from_rois
+        # or transposed by try_fetch when loaded from H5
+        traces = self.traces_znorm
+
+        # Check and handle different possible trace formats
+        if traces.shape[0] < traces.shape[1]:
+            # Likely (n_rois, n_frames) - transpose to (n_frames, n_rois)
+            traces = traces.T
+
+        n_frames, n_rois = traces.shape
+
+        # Get parameters
+        ignore_first_triggers = self._Core__skip_first_frames
+        ignore_last_triggers = self._Core__skip_last_frames
+        trigger_mode = self.trigger_mode
+        triggertimes = self.triggertimes
+
+        # Line-precision upsampling parameters (matching IGOR)
+        n_lines = self.images.shape[1]  # Height of image (number of scan lines)
+        line_duration = self.linedur_s
+        frame_duration = n_lines * line_duration
+        n_lines_lumped = 1  # Default, could be made a parameter
+        lines_per_frame = n_lines // n_lines_lumped
+
+        # Calculate valid triggers and snippet parameters (in frame units first)
+        n_triggers = len(triggertimes)
+        snippet_duration_s = triggertimes[trigger_mode + ignore_first_triggers] - triggertimes[ignore_first_triggers]
+        snippet_duration_frames = int(snippet_duration_s / frame_duration)
+
+        # Calculate number of complete loops
+        valid_triggers = n_triggers - ignore_first_triggers + ignore_last_triggers
+        n_loops = valid_triggers // trigger_mode
+
+        print(f"Extracting snippets: {n_triggers} triggers, {n_loops} complete loops, snippet duration: {snippet_duration_frames} frames")
+
+        # Initialize output arrays (using frame-level dimensions)
+        snippets_frames = np.zeros((snippet_duration_frames, n_loops, n_rois))
+
+        # Extract snippets for each loop from frame-level traces (much faster!)
+        for loop_idx in range(n_loops):
+            trigger_idx = loop_idx * trigger_mode + ignore_first_triggers
+            start_time = triggertimes[trigger_idx]
+            # Convert time to frame index
+            start_frame = int(start_time / frame_duration)
+            end_frame = start_frame + snippet_duration_frames
+
+            # Ensure we don't exceed array bounds
+            if end_frame > n_frames:
+                print(f"Warning: Loop {loop_idx} exceeds frame array, truncating at {n_loops}")
+                n_loops = loop_idx
+                break
+
+            # Extract snippet for all ROIs from frame-level traces
+            snippets_frames[:, loop_idx, :] = traces[start_frame:end_frame, :]
+
+        # Trim snippets if we had to stop early
+        if n_loops < snippets_frames.shape[1]:
+            snippets_frames = snippets_frames[:, :n_loops, :]
+
+        # Compute averages across loops (still at frame level)
+        averages_frames = np.mean(snippets_frames, axis=1)  # Shape: (snippet_duration_frames, n_rois)
+
+        print(f"Upsampling averages from {snippet_duration_frames} frames to line-precision")
+
+        # NOW upsample only the averages (much more efficient!)
+        # Vectorized upsampling using linear interpolation
+        weights_next = np.tile(np.arange(lines_per_frame) / lines_per_frame, snippet_duration_frames - 1)
+        weights_curr = 1 - weights_next
+        frame_indices = np.repeat(np.arange(snippet_duration_frames - 1), lines_per_frame)
+
+        # Upsample averages
+        averages_upsampled_flat = (averages_frames[frame_indices, :] * weights_curr[:, np.newaxis] +
+                                   averages_frames[frame_indices + 1, :] * weights_next[:, np.newaxis])
+
+        # Calculate expected upsampled length
+        snippet_duration_upsampled = int(snippet_duration_s / (line_duration * n_lines_lumped))
+        averages = averages_upsampled_flat[:snippet_duration_upsampled, :]  # Shape: (snippet_upsampled, n_rois)
+
+        # For snippets, we'll keep them at frame level for now (can upsample later if needed)
+        # Most analyses work fine with frame-level snippets
+        snippets = snippets_frames
+
+        # For H5 storage, keep as (snippet_length, n_rois) to match IGOR format
+        averages_for_h5 = averages
+
+        # For in-memory use, transpose to match try_fetch behavior: (n_rois, snippet_length)
+        averages = averages.T
+
+        # Compute quality criterion (variance of mean / mean of variance)
+        quality_criterion = np.zeros(n_rois)
+        for roi_idx in range(n_rois):
+            # Variance of the mean (averages has shape (n_rois, snippet_length))
+            variance_of_mean = np.var(averages[roi_idx, :])
+
+            # Mean of variances across loops
+            variances = np.var(snippets[:, :, roi_idx], axis=0)
+            mean_of_variance = np.mean(variances)
+
+            # Quality criterion
+            if mean_of_variance > 0:
+                quality_criterion[roi_idx] = variance_of_mean / mean_of_variance
+            else:
+                quality_criterion[roi_idx] = np.nan
+
+        # Save to attributes
+        self.snippets = snippets
+        self.averages = averages  # Shape: (n_rois, snippet_length) - consistent with try_fetch
+        self.quality_indices = quality_criterion
+
+        # Save to H5 file if requested
+        if overwrite:
+            success_snip = self.update_h5_key('Snippets0', snippets, overwrite=True)
+            success_avg = self.update_h5_key('Averages0', averages_for_h5, overwrite=True)
+            success_qc = self.update_h5_key('QualityCriterion', quality_criterion, overwrite=True)
+
+            if success_snip and success_avg and success_qc:
+                print("Successfully saved snippets, averages, and quality criterion to H5 file")
+            else:
+                print("Warning: Some data failed to save to H5 file")
+
+        return snippets, averages
 
     def plot_averages(
         self, rois=None, 

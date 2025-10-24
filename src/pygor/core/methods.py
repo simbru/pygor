@@ -131,11 +131,7 @@ def update_h5_key(pygor_obj, key, value, overwrite=False):
         # Convert value to numpy array for consistency
         if not isinstance(value, np.ndarray):
             value = np.array(value)
-            
-        # Validate input
-        if len(value) != pygor_obj.num_rois:
-            warnings.warn(f"Value length ({len(value)}) doesn't match number of ROIs ({pygor_obj.num_rois})")
-        
+
         # Open H5 file for modification
         with h5py.File(pygor_obj.filename, 'r+') as h5_file:
             # Check if key already exists
@@ -149,13 +145,9 @@ def update_h5_key(pygor_obj, key, value, overwrite=False):
                     del h5_file[key]  # Delete existing dataset
             
             # Create new dataset
-            # Transpose to match IGOR convention (pygor transposes on read)
-            if value.ndim > 1:
-                value_to_store = value.T
-            else:
-                value_to_store = value
-                
-            h5_file.create_dataset(key, data=value_to_store)
+            # Store as-is to match IGOR convention
+            # (try_fetch will transpose on read to maintain consistency)
+            h5_file.create_dataset(key, data=value)
             print(f"Successfully updated '{key}' in {pygor_obj.filename.name}")
             return True
             
