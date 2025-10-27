@@ -431,14 +431,14 @@ def compute_orientation_selectivity_index(responses, directions_deg):
 
 
 
-def compute_all_tuning_metrics(moving_bars_obj, metric='peak', roi_indices=None, phase_ranges=None):
+def compute_all_tuning_metrics(osds_obj, metric='peak', roi_indices=None, phase_ranges=None):
     """
-    Compute all directional tuning metrics for ROIs in a MovingBars object.
+    Compute all directional tuning metrics for ROIs in a OSDS object.
     
     Parameters:
     -----------
-    moving_bars_obj : MovingBars
-        MovingBars object containing directional response data
+    osds_obj : OSDS
+        OSDS object containing directional response data
     metric : str or callable
         Metric to use for computing tuning functions:
         - 'peak': maximum absolute value
@@ -479,33 +479,59 @@ def compute_all_tuning_metrics(moving_bars_obj, metric='peak', roi_indices=None,
     """
     # Handle ROI indices
     if roi_indices is None:
-        roi_indices = list(range(moving_bars_obj.num_rois))
+        roi_indices = list(range(osds_obj.num_rois))
     
-    directions_deg = np.array(moving_bars_obj.directions_list)
+    directions_deg = np.array(osds_obj.directions_list)
     
     # Handle phase ranges
     if phase_ranges is None:
         # Use built-in phase support from compute_tuning_function
         # This will automatically use self.dir_phase_num if > 1
-        tuning_functions = moving_bars_obj.compute_tuning_function(metric=metric)
-        if roi_indices != list(range(moving_bars_obj.num_rois)):
-            tuning_functions = tuning_functions[roi_indices]
+        tuning_functions = osds_obj.compute_tuning_function(metric=metric)
+        print(f"tuning_functions shape from compute_tuning_function: {tuning_functions.shape}")
+        print(f"osds_obj.num_rois: {osds_obj.num_rois}")
+        print(f"len(roi_indices): {len(roi_indices)}")
 
         # Check if phase data was returned
         if len(tuning_functions.shape) == 3:
-            # Phase data: (n_rois, n_directions, n_phases)
-            # Transpose to (n_phases, n_rois, n_directions)
-            all_tuning_functions = tuning_functions.transpose(2, 0, 1)
+            # Phase data could be: (n_rois, n_directions, n_phases) or (n_directions, n_rois, n_phases)
+            print(f"3D data detected, shape: {tuning_functions.shape}")
+            # Determine correct orientation based on num_rois
+            if tuning_functions.shape[0] == osds_obj.num_rois:
+                # Shape is (n_rois, n_directions, n_phases)
+                if roi_indices != list(range(osds_obj.num_rois)):
+                    tuning_functions = tuning_functions[roi_indices]
+                # Transpose to (n_phases, n_rois, n_directions)
+                all_tuning_functions = tuning_functions.transpose(2, 0, 1)
+            elif tuning_functions.shape[1] == osds_obj.num_rois:
+                # Shape is (n_directions, n_rois, n_phases)
+                # Transpose to (n_rois, n_directions, n_phases) first
+                tuning_functions = tuning_functions.transpose(1, 0, 2)
+                if roi_indices != list(range(osds_obj.num_rois)):
+                    tuning_functions = tuning_functions[roi_indices]
+                # Then transpose to (n_phases, n_rois, n_directions)
+                all_tuning_functions = tuning_functions.transpose(2, 0, 1)
+            else:
+                raise ValueError(f"Cannot determine tuning_functions orientation: shape {tuning_functions.shape}, num_rois {osds_obj.num_rois}")
             n_phases = all_tuning_functions.shape[0]
+            print(f"Final all_tuning_functions shape: {all_tuning_functions.shape}")
         else:
-            # Regular data: (n_rois, n_directions)
+            # Regular 2D data: could be (n_rois, n_directions) or (n_directions, n_rois)
+            print(f"2D data detected, shape: {tuning_functions.shape}")
+            if tuning_functions.shape[0] != osds_obj.num_rois:
+                # Need to transpose
+                tuning_functions = tuning_functions.T
+                print(f"Transposed to: {tuning_functions.shape}")
+            if roi_indices != list(range(osds_obj.num_rois)):
+                tuning_functions = tuning_functions[roi_indices]
             # Add phase dimension
             all_tuning_functions = tuning_functions[np.newaxis, :, :]
             n_phases = 1
+            print(f"Final all_tuning_functions shape: {all_tuning_functions.shape}")
     elif phase_ranges == "auto":
         # Automatic phase splitting using get_epoch_dur() and dir_phase_num
-        epoch_dur = moving_bars_obj.get_epoch_dur()
-        n_phases = moving_bars_obj.dir_phase_num
+        epoch_dur = osds_obj.get_epoch_dur()
+        n_phases = osds_obj.dir_phase_num
         phase_size = epoch_dur // n_phases
         phase_ranges_list = []
         for i in range(n_phases):
@@ -515,16 +541,25 @@ def compute_all_tuning_metrics(moving_bars_obj, metric='peak', roi_indices=None,
 
         # Get all tuning functions for each phase window
         all_tuning_functions = []
-        for phase_range in phase_ranges_list:
+        for i, phase_range in enumerate(phase_ranges_list):
             # Specific phase window - vectorized computation
             # Explicitly set phase_num=None to prevent automatic phase splitting
-            tuning_functions = moving_bars_obj.compute_tuning_function(metric=metric, window=phase_range, phase_num=None)
-            if roi_indices != list(range(moving_bars_obj.num_rois)):
+            tuning_functions = osds_obj.compute_tuning_function(metric=metric, window=phase_range, phase_num=None)
+            print(f"Phase {i}: tuning_functions shape before transpose: {tuning_functions.shape}")
+            print(f"  osds_obj.num_rois: {osds_obj.num_rois}")
+            print(f"  len(roi_indices): {len(roi_indices)}")
+            # Transpose if needed to ensure (n_rois, n_directions) shape BEFORE indexing
+            if tuning_functions.shape[0] != osds_obj.num_rois:
+                tuning_functions = tuning_functions.T
+                print(f"  Transposed to: {tuning_functions.shape}")
+            if roi_indices != list(range(osds_obj.num_rois)):
                 tuning_functions = tuning_functions[roi_indices]
+                print(f"  After indexing: {tuning_functions.shape}")
             all_tuning_functions.append(tuning_functions)
 
         # Stack to get (n_phases, n_rois, n_directions)
         all_tuning_functions = np.array(all_tuning_functions)
+        print(f"Final all_tuning_functions shape: {all_tuning_functions.shape}")
     else:
         # Manual phase ranges provided
         n_phases = len(phase_ranges)
@@ -532,8 +567,11 @@ def compute_all_tuning_metrics(moving_bars_obj, metric='peak', roi_indices=None,
         for phase_range in phase_ranges:
             # Specific phase window - vectorized computation
             # Explicitly set phase_num=None to prevent automatic phase splitting
-            tuning_functions = moving_bars_obj.compute_tuning_function(metric=metric, window=phase_range, phase_num=None)
-            if roi_indices != list(range(moving_bars_obj.num_rois)):
+            tuning_functions = osds_obj.compute_tuning_function(metric=metric, window=phase_range, phase_num=None)
+            # Transpose if needed to ensure (n_rois, n_directions) shape BEFORE indexing
+            if tuning_functions.shape[0] != osds_obj.num_rois:
+                tuning_functions = tuning_functions.T
+            if roi_indices != list(range(osds_obj.num_rois)):
                 tuning_functions = tuning_functions[roi_indices]
             all_tuning_functions.append(tuning_functions)
 

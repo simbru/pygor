@@ -2,11 +2,11 @@ from pygor.classes.core_data import Core
 from dataclasses import dataclass, field
 import numpy as np
 
-from pygor.timeseries.moving_bars.plotting import circular_directional_plots
-from pygor.timeseries.moving_bars import tuning_metrics, tuning_computation
+from pygor.timeseries.osds.plotting import circular_directional_plots
+from pygor.timeseries.osds import tuning_metrics, tuning_computation
 
 @dataclass(kw_only=False, repr=False)
-class MovingBars(Core):
+class OSDS(Core):
     dir_num: int = field(default=None, metadata={"required": True})
     dir_phase_num: int = field(default=1)
     colour_num: int = field(default=1)
@@ -14,7 +14,7 @@ class MovingBars(Core):
 
     def __post_init__(self):
         if self.dir_num is None:
-            raise ValueError("dir_num must be specified for MovingBars data")
+            raise ValueError("dir_num must be specified for OSDS data")
         
         # Warn about dir_phase_num if not explicitly set to something other than 1
         if self.dir_phase_num == 1:
@@ -22,7 +22,7 @@ class MovingBars(Core):
             warnings.warn(
                 "dir_phase_num is set to 1 (single phase per direction). "
                 "If your experiment has multiple phases per direction (e.g., ON→OFF, OFF→ON), "
-                "set dir_phase_num=2 when creating the MovingBars object for proper phase-aware analysis.",
+                "set dir_phase_num=2 when creating the OSDS object for proper phase-aware analysis.",
                 UserWarning, stacklevel=2
             )
         
@@ -110,135 +110,147 @@ class MovingBars(Core):
         """
         Returns snippets split by direction, expect one more dimension than the averages array (repetitions).
         Handles uneven divisions by trimming excess elements.
+
+        Returns:
+        --------
+        np.ndarray
+            Shape: (n_directions, n_loops, n_rois, timepoints_per_direction)
         """
-        # Remove first column (time axis) and check split compatibility
-        data_to_split = self.snippets[:, :, 1:]
+        # Snippets stored as (snippet_length, n_loops, n_rois) in memory
+        # Need to split along axis=0 (snippet_length/timepoints) into directions
         adjusted_data, actual_splits, remainder = self._check_split_compatibility(
-            data_to_split, self.dir_num, axis=-1
+            self.snippets, self.dir_num, axis=0
         )
-        
+
         if remainder > 0:
             print(f"DirectionalSnippets: Lost {remainder} time points to ensure even splitting")
-            
-        return np.array(np.split(adjusted_data, actual_splits, axis=-1))
+
+        # Split along timepoints axis (axis=0) and get shape (n_directions, timepoints_per_direction, n_loops, n_rois)
+        split_data = np.array(np.split(adjusted_data, actual_splits, axis=0))
+
+        # Transpose to get desired output shape: (n_directions, n_loops, n_rois, timepoints_per_direction)
+        return split_data.transpose(0, 2, 3, 1)
    
     def split_averages_directionally(self) -> np.ndarray:
         """
         Returns averages split by direction.
-        Handles uneven divisions by trimming excess elements and column indexing issues.
+        Handles uneven divisions by trimming excess elements.
+
+        Returns:
+        --------
+        np.ndarray
+            Shape: (n_directions, n_rois, timepoints_per_direction)
         """
-        # Try both with and without first column removal to handle inconsistent data formats
-        try:
-            # First try with all columns (newer format)
-            adjusted_data, actual_splits, remainder = self._check_split_compatibility(
-                self.averages[:, :], self.dir_num, axis=-1
-            )
-        except (IndexError, ValueError):
-            # Fall back to removing first column (older format)
-            adjusted_data, actual_splits, remainder = self._check_split_compatibility(
-                self.averages[:, 1:], self.dir_num, axis=-1
-            )
-        
-        # if remainder > 0:
-        #     print(f"DirectionalAverages: Lost {remainder} time points to ensure even splitting")
-            
-        return np.array(np.split(adjusted_data, actual_splits, axis=-1))
+        # Averages stored as (n_rois, timepoints) in memory after try_fetch transpose
+        # Need to split along axis=1 (timepoints) into directions
+        adjusted_data, actual_splits, remainder = self._check_split_compatibility(
+            self.averages, self.dir_num, axis=1
+        )
+
+        if remainder > 0:
+            print(f"DirectionalAverages: Lost {remainder} time points to ensure even splitting")
+
+        # Split along timepoints axis (axis=1) and get shape (n_directions, n_rois, timepoints_per_direction)
+        split_data = np.array(np.split(adjusted_data, actual_splits, axis=1))
+
+        # Result already has the desired shape: (n_directions, n_rois, timepoints_per_direction)
+        return split_data
     
     def plot_circular_responses(self, roi_index=-1, figsize=(8, 8)):
         """Plot directional responses in circular arrangement"""
         arr = np.squeeze(self.split_averages_directionally()[:, [roi_index]])
         return circular_directional_plots.plot_directional_responses_circular(arr, self.directions_list, figsize)
     
-    def plot_circular_responses_with_polar(self, roi_index=-1, metric='peak', figsize=(10, 10), 
-                                        show_trials=True, polar_size=0.3, data_crop=None,
-                                        use_phases=None, phase_colors=None):
-        """
-        Plot directional responses with central polar summary and optional individual trials.
+    # def plot_circular_responses_with_polar(self, roi_index=-1, metric='peak', figsize=(10, 10), 
+    #                                     show_trials=True, polar_size=0.3, data_crop=None,
+    #                                     use_phases=None, phase_colors=None):
+    #     """
+    #     Plot directional responses with central polar summary and optional individual trials.
         
-        Parameters:
-        -----------
-        roi_index : int, optional
-            ROI index to plot (default -1 for last ROI)
-        metric : str, optional
-            Summary metric for polar plot ('peak', 'auc', 'mean', etc.)
-        figsize : tuple, optional
-            Figure size (width, height)
-        show_trials : bool, optional
-            Whether to show individual trial traces as faint lines (default False)
-        polar_size : float, optional
-            Size of the central polar plot as fraction of figure (default 0.3)
-        use_phases : bool or None
-            If None, uses self.dir_phase_num > 1 to decide
-            If True, forces phase analysis with overlay in polar plot
-            If False, forces single-phase analysis
-        phase_colors : list or None
-            Colors for each phase. If None, uses default colors
+    #     Parameters:
+    #     -----------
+    #     roi_index : int, optional
+    #         ROI index to plot (default -1 for last ROI)
+    #     metric : str, optional
+    #         Summary metric for polar plot ('peak', 'auc', 'mean', etc.)
+    #     figsize : tuple, optional
+    #         Figure size (width, height)
+    #     show_trials : bool, optional
+    #         Whether to show individual trial traces as faint lines (default False)
+    #     polar_size : float, optional
+    #         Size of the central polar plot as fraction of figure (default 0.3)
+    #     use_phases : bool or None
+    #         If None, uses self.dir_phase_num > 1 to decide
+    #         If True, forces phase analysis with overlay in polar plot
+    #         If False, forces single-phase analysis
+    #     phase_colors : list or None
+    #         Colors for each phase. If None, uses default colors
         
-        Returns:
-        --------
-        fig, ax_polar : matplotlib objects
-            Figure and polar axes objects
-        """
-        # Automatically use phases if dir_phase_num > 1 and use_phases not specified
-        if use_phases is None:
-            use_phases = self.dir_phase_num > 1
+    #     Returns:
+    #     --------
+    #     fig, ax_polar : matplotlib objects
+    #         Figure and polar axes objects
+    #     """
+    #     # Automatically use phases if dir_phase_num > 1 and use_phases not specified
+    #     if use_phases is None:
+    #         use_phases = self.dir_phase_num > 1
         
-        # Set default phase colors
-        if phase_colors is None:
-            phase_colors = ['#2E8B57', '#B8860B', '#8B4513', '#483D8B']  # Default colors for phases
+    #     # Set default phase colors
+    #     if phase_colors is None:
+    #         phase_colors = ['#2E8B57', '#B8860B', '#8B4513', '#483D8B']  # Default colors for phases
         
-        return circular_directional_plots.plot_directional_responses_circular_with_polar(
-            moving_bars_obj=self,
-            roi_index=roi_index,
-            metric=metric,
-            figsize=figsize,
-            show_trials=show_trials,
-            polar_size=polar_size,
-            data_crop=data_crop,
-            use_phases=use_phases,
-            phase_colors=phase_colors
-        )
+    #     return circular_directional_plots.plot_directional_responses_circular_with_polar(
+    #         moving_bars_obj=self,
+    #         roi_index=roi_index,
+    #         metric=metric,
+    #         figsize=figsize,
+    #         show_trials=show_trials,
+    #         polar_size=polar_size,
+    #         data_crop=data_crop,
+    #         use_phases=use_phases,
+    #         phase_colors=phase_colors
+    #     )
     
-    def plot_dual_phase_responses(self, roi_index=-1, phase_split=3200, metric='peak', 
-                            figsize=(12, 10), show_trials=True, polar_kwargs=None,
-                            phase_colors=("#2E8B57", "#B8860B")):
-        """
-        Plot directional responses for two stimulus phases (OFF->ON and ON->OFF) 
-        with overlapping polar plots and separate trace arrangements.
+    # def plot_dual_phase_responses(self, roi_index=-1, phase_split=3200, metric='peak', 
+    #                         figsize=(12, 10), show_trials=True, polar_kwargs=None,
+    #                         phase_colors=("#2E8B57", "#B8860B")):
+    #     """
+    #     Plot directional responses for two stimulus phases (OFF->ON and ON->OFF) 
+    #     with overlapping polar plots and separate trace arrangements.
 
-        Parameters:
-        -----------
-        phase_split : int, optional
-            Frame number where phase 1 ends and phase 2 begins (default 3200)
-        roi_index : int, optional
-            ROI index to plot (default -1 for last ROI)
-        metric : str, optional
-            Summary metric for polar plots ('peak', 'auc', 'mean', etc.)
-        figsize : tuple, optional
-            Figure size (width, height)
-        show_trials : bool, optional
-            Whether to show individual trial traces (default True)
-        polar_kwargs : dict, optional
-            Additional keyword arguments for polar plot styling
-        phase_colors : tuple, optional
-            Colors for (phase1, phase2) plots
+    #     Parameters:
+    #     -----------
+    #     phase_split : int, optional
+    #         Frame number where phase 1 ends and phase 2 begins (default 3200)
+    #     roi_index : int, optional
+    #         ROI index to plot (default -1 for last ROI)
+    #     metric : str, optional
+    #         Summary metric for polar plots ('peak', 'auc', 'mean', etc.)
+    #     figsize : tuple, optional
+    #         Figure size (width, height)
+    #     show_trials : bool, optional
+    #         Whether to show individual trial traces (default True)
+    #     polar_kwargs : dict, optional
+    #         Additional keyword arguments for polar plot styling
+    #     phase_colors : tuple, optional
+    #         Colors for (phase1, phase2) plots
 
-        Returns:
-        --------
-        fig, ax_polar : matplotlib objects
-            Figure and polar axes objects
-        """
-        return circular_directional_plots.plot_directional_responses_dual_phase(
-            moving_bars_obj=self,
-            roi_index=roi_index,
-            metric=metric,
-            figsize=figsize,
-            show_trials=show_trials,
-            polar_kwargs=polar_kwargs,
-            phase_colors=phase_colors
-        )
+    #     Returns:
+    #     --------
+    #     fig, ax_polar : matplotlib objects
+    #         Figure and polar axes objects
+    #     """
+    #     return circular_directional_plots.plot_directional_responses_dual_phase(
+    #         moving_bars_obj=self,
+    #         roi_index=roi_index,
+    #         metric=metric,
+    #         figsize=figsize,
+    #         show_trials=show_trials,
+    #         polar_kwargs=polar_kwargs,
+    #         phase_colors=phase_colors
+    #     )
 
-    def compute_tuning_function(self, roi_index=None, window=None, metric='max', phase_num=None):
+    def compute_tuning_function(self, roi_index=None, window=None, metric='peak', phase_num=None):
         """
         Compute tuning function for each ROI across all directions.
         
@@ -288,148 +300,148 @@ class MovingBars(Core):
             self, roi_index=roi_index, window=window, metric=metric, phase_num=phase_num
         )
 
-    def plot_tuning_function(self, rois=None, figsize=(6, 6), colors=None, ax=None, show_title=True, 
-                           show_theta_labels=True, show_tuning=True, show_mean_vector=False, 
-                           mean_vector_color='red', show_orientation_vector=False, 
-                           orientation_vector_color='orange', use_phases=None, 
-                           phase_colors=None, overlay_phases=True, legend=True, minimal=False, **kwargs):
-        """
-        Plot tuning functions as polar plots.
+    # def plot_tuning_function(self, rois=None, figsize=(6, 6), colors=None, ax=None, show_title=True, 
+    #                        show_theta_labels=True, show_tuning=True, show_mean_vector=False, 
+    #                        mean_vector_color='red', show_orientation_vector=False, 
+    #                        orientation_vector_color='orange', use_phases=None, 
+    #                        phase_colors=None, overlay_phases=True, legend=True, minimal=False, **kwargs):
+    #     """
+    #     Plot tuning functions as polar plots.
         
-        Parameters:
-        -----------
-        rois : list of int or None
-            ROI indices to plot. If None, plots all ROIs
-        figsize : tuple
-            Figure size (width, height)
-        colors : list or None
-            Colors for each ROI. If None, uses default color cycle
-        ax : matplotlib.axes.Axes or None
-            Existing polar axes to plot on. If None, creates new figure and axes
-        show_title : bool
-            Whether to show the title on the plot (default True)
-        show_theta_labels : bool
-            Whether to show the theta (direction) labels on the plot (default True)
-        show_tuning : bool
-            Whether to show the tuning curve itself (default True). When False, only shows vectors.
-        show_mean_vector : bool
-            Whether to show mean direction vectors as overlays (default False)
-        mean_vector_color : str
-            Color for mean direction vector arrows (default 'red')
-        show_orientation_vector : bool
-            Whether to show mean orientation vectors as overlays (default False)
-        orientation_vector_color : str
-            Color for mean orientation vector arrows (default 'orange')
-        use_phases : bool or None
-            If None, uses self.dir_phase_num > 1 to decide
-            If True, forces phase analysis
-            If False, forces single-phase analysis
-        phase_colors : list or None
-            Colors for each phase. If None, uses default colors
-        overlay_phases : bool
-            Whether to overlay phases on same plot (True) or create separate plots (False)
-        legend : bool
-            Whether to show the legend (default True)
-        minimal : bool
-            Whether to use minimal plotting (no titles, legends, or labels except axis ticks) (default False)
-        **kwargs
-            Additional arguments passed to compute_tuning_function.
+    #     Parameters:
+    #     -----------
+    #     rois : list of int or None
+    #         ROI indices to plot. If None, plots all ROIs
+    #     figsize : tuple
+    #         Figure size (width, height)
+    #     colors : list or None
+    #         Colors for each ROI. If None, uses default color cycle
+    #     ax : matplotlib.axes.Axes or None
+    #         Existing polar axes to plot on. If None, creates new figure and axes
+    #     show_title : bool
+    #         Whether to show the title on the plot (default True)
+    #     show_theta_labels : bool
+    #         Whether to show the theta (direction) labels on the plot (default True)
+    #     show_tuning : bool
+    #         Whether to show the tuning curve itself (default True). When False, only shows vectors.
+    #     show_mean_vector : bool
+    #         Whether to show mean direction vectors as overlays (default False)
+    #     mean_vector_color : str
+    #         Color for mean direction vector arrows (default 'red')
+    #     show_orientation_vector : bool
+    #         Whether to show mean orientation vectors as overlays (default False)
+    #     orientation_vector_color : str
+    #         Color for mean orientation vector arrows (default 'orange')
+    #     use_phases : bool or None
+    #         If None, uses self.dir_phase_num > 1 to decide
+    #         If True, forces phase analysis
+    #         If False, forces single-phase analysis
+    #     phase_colors : list or None
+    #         Colors for each phase. If None, uses default colors
+    #     overlay_phases : bool
+    #         Whether to overlay phases on same plot (True) or create separate plots (False)
+    #     legend : bool
+    #         Whether to show the legend (default True)
+    #     minimal : bool
+    #         Whether to use minimal plotting (no titles, legends, or labels except axis ticks) (default False)
+    #     **kwargs
+    #         Additional arguments passed to compute_tuning_function.
         
-        Returns:
-        --------
-        fig : matplotlib.figure.Figure
-            The figure object
-        ax : matplotlib.axes.Axes
-            The polar plot axes object
-        """
-        # Automatically use phases if dir_phase_num > 1 and use_phases not specified
-        if use_phases is None:
-            use_phases = self.dir_phase_num > 1
+    #     Returns:
+    #     --------
+    #     fig : matplotlib.figure.Figure
+    #         The figure object
+    #     ax : matplotlib.axes.Axes
+    #         The polar plot axes object
+    #     """
+    #     # Automatically use phases if dir_phase_num > 1 and use_phases not specified
+    #     if use_phases is None:
+    #         use_phases = self.dir_phase_num > 1
         
-        # Override phase_num in kwargs if use_phases is determined
-        if use_phases:
-            kwargs['phase_num'] = self.dir_phase_num
+    #     # Override phase_num in kwargs if use_phases is determined
+    #     if use_phases:
+    #         kwargs['phase_num'] = self.dir_phase_num
         
-        # Handle minimal mode by overriding display options
-        if minimal:
-            show_title = False
-            legend = False
+    #     # Handle minimal mode by overriding display options
+    #     if minimal:
+    #         show_title = False
+    #         legend = False
         
-        # Extract parameters from kwargs before passing to compute_tuning_function
-        # (compute_tuning_function doesn't accept these parameters)
-        tuning_kwargs = {k: v for k, v in kwargs.items() if k not in ['legend', 'minimal']}
+    #     # Extract parameters from kwargs before passing to compute_tuning_function
+    #     # (compute_tuning_function doesn't accept these parameters)
+    #     tuning_kwargs = {k: v for k, v in kwargs.items() if k not in ['legend', 'minimal']}
         
-        # Get tuning functions for all ROIs
-        tuning_functions = self.compute_tuning_function(**tuning_kwargs)
+    #     # Get tuning functions for all ROIs
+    #     tuning_functions = self.compute_tuning_function(**tuning_kwargs)
         
-        # Handle phase data
-        if use_phases and len(tuning_functions.shape) == 3:  # (n_rois, n_directions, n_phases)
-            # Set default phase colors
-            if phase_colors is None:
-                phase_colors = ['#2E8B57', '#B8860B', '#8B4513', '#483D8B']  # Default colors for phases
+    #     # Handle phase data
+    #     if use_phases and len(tuning_functions.shape) == 3:  # (n_rois, n_directions, n_phases)
+    #         # Set default phase colors
+    #         if phase_colors is None:
+    #             phase_colors = ['#2E8B57', '#B8860B', '#8B4513', '#483D8B']  # Default colors for phases
             
-            if overlay_phases:
-                # Overlay phases on same plot
-                return circular_directional_plots.plot_tuning_function_polar_overlay(
-                    tuning_functions,
-                    self.directions_list,
-                    rois=rois,
-                    figsize=figsize,
-                    colors=colors,
-                    phase_colors=phase_colors,
-                    ax=ax,
-                    show_title=show_title,
-                    show_theta_labels=show_theta_labels,
-                    show_tuning=show_tuning,
-                    show_mean_vector=show_mean_vector,
-                    mean_vector_color=mean_vector_color,
-                    show_orientation_vector=show_orientation_vector,
-                    orientation_vector_color=orientation_vector_color,
-                    metric=kwargs.get('metric', 'peak'),
-                    legend=legend,
-                    minimal=minimal
-                )
-            else:
-                # Create separate plots for each phase
-                return circular_directional_plots.plot_tuning_function_multi_phase(
-                    tuning_functions=tuning_functions,
-                    directions_list=self.directions_list,
-                    phase_num=kwargs['phase_num'],
-                    rois=rois,
-                    figsize=figsize,
-                    colors=colors,
-                    ax=ax,
-                    show_title=show_title,
-                    show_theta_labels=show_theta_labels,
-                    show_tuning=show_tuning,
-                    show_mean_vector=show_mean_vector,
-                    mean_vector_color=mean_vector_color,
-                    show_orientation_vector=show_orientation_vector,
-                    orientation_vector_color=orientation_vector_color,
-                    metric=kwargs.get('metric', 'peak'),
-                    legend=legend,
-                    minimal=minimal
-                )
-        else:
-            # Regular single-phase plotting
-            return circular_directional_plots.plot_tuning_function_polar(
-                tuning_functions.T,  # Transpose to (n_directions, n_rois)
-                self.directions_list,
-                rois=rois,
-                figsize=figsize,
-                colors=colors,
-                metric=kwargs.get('metric', 'peak'),
-                ax=ax,
-                show_title=show_title,
-                show_theta_labels=show_theta_labels,
-                show_tuning=show_tuning,
-                show_mean_vector=show_mean_vector,
-                mean_vector_color=mean_vector_color,
-                show_orientation_vector=show_orientation_vector,
-                orientation_vector_color=orientation_vector_color,
-                legend=legend,
-                minimal=minimal
-            )
+    #         if overlay_phases:
+    #             # Overlay phases on same plot
+    #             return circular_directional_plots.plot_tuning_function_polar_overlay(
+    #                 tuning_functions,
+    #                 self.directions_list,
+    #                 rois=rois,
+    #                 figsize=figsize,
+    #                 colors=colors,
+    #                 phase_colors=phase_colors,
+    #                 ax=ax,
+    #                 show_title=show_title,
+    #                 show_theta_labels=show_theta_labels,
+    #                 show_tuning=show_tuning,
+    #                 show_mean_vector=show_mean_vector,
+    #                 mean_vector_color=mean_vector_color,
+    #                 show_orientation_vector=show_orientation_vector,
+    #                 orientation_vector_color=orientation_vector_color,
+    #                 metric=kwargs.get('metric', 'peak'),
+    #                 legend=legend,
+    #                 minimal=minimal
+    #             )
+    #         else:
+    #             # Create separate plots for each phase
+    #             return circular_directional_plots.plot_tuning_function_multi_phase(
+    #                 tuning_functions=tuning_functions,
+    #                 directions_list=self.directions_list,
+    #                 phase_num=kwargs['phase_num'],
+    #                 rois=rois,
+    #                 figsize=figsize,
+    #                 colors=colors,
+    #                 ax=ax,
+    #                 show_title=show_title,
+    #                 show_theta_labels=show_theta_labels,
+    #                 show_tuning=show_tuning,
+    #                 show_mean_vector=show_mean_vector,
+    #                 mean_vector_color=mean_vector_color,
+    #                 show_orientation_vector=show_orientation_vector,
+    #                 orientation_vector_color=orientation_vector_color,
+    #                 metric=kwargs.get('metric', 'peak'),
+    #                 legend=legend,
+    #                 minimal=minimal
+    #             )
+    #     else:
+    #         # Regular single-phase plotting
+    #         return circular_directional_plots.plot_tuning_function_polar(
+    #             tuning_functions.T,  # Transpose to (n_directions, n_rois)
+    #             self.directions_list,
+    #             rois=rois,
+    #             figsize=figsize,
+    #             colors=colors,
+    #             metric=kwargs.get('metric', 'peak'),
+    #             ax=ax,
+    #             show_title=show_title,
+    #             show_theta_labels=show_theta_labels,
+    #             show_tuning=show_tuning,
+    #             show_mean_vector=show_mean_vector,
+    #             mean_vector_color=mean_vector_color,
+    #             show_orientation_vector=show_orientation_vector,
+    #             orientation_vector_color=orientation_vector_color,
+    #             legend=legend,
+    #             minimal=minimal
+    #         )
 
     def compute_tuning_metrics(self, roi_indices=None, metric='peak'):
         """
@@ -876,7 +888,10 @@ class MovingBars(Core):
             self, roi_index, ax, show_trials=show_trials, metric=metric, 
             trace_scale=trace_scale, minimal=minimal, polar_color=polar_color, 
             trace_alpha=trace_alpha, use_phases=use_phases, phase_colors=phase_colors,
-            orbit_distance=orbit_distance, trace_aspect_x=trace_aspect_x, 
+            orbit_distance=orbit_distance, trace_aspect_x=trace_aspect_x,
             trace_aspect_y=trace_aspect_y, separate_phase_axes=separate_phase_axes, **kwargs
         )
-    
+
+
+# Backward compatibility alias
+MovingBars = OSDS

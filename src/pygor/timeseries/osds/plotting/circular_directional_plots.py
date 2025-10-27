@@ -59,7 +59,7 @@ def plot_directional_responses_circular(data, directions_list=None, figsize=(8, 
 
 
 def plot_directional_responses_circular_with_polar(
-    moving_bars_obj,
+    osds_obj,
     directions_list=None,
     figsize=(10, 10),
     metric="peak",
@@ -78,7 +78,7 @@ def plot_directional_responses_circular_with_polar(
     -----------
     data : np.ndarray or None
             Array of shape (n_directions, n_timepoints) containing response traces.
-            If moving_bars_obj is provided, this can be None.
+            If osds_obj is provided, this can be None.
     directions_list : list of int/float, optional
             List of direction values in degrees. If None, uses evenly spaced angles.
     figsize : tuple
@@ -95,7 +95,7 @@ def plot_directional_responses_circular_with_polar(
             Additional keyword arguments for polar plot styling
     polar_size : float, optional
             Size of the central polar plot as fraction of figure (default 0.3)
-    moving_bars_obj : MovingBars object, optional
+    osds_obj : OSDS object, optional
             If provided, will extract data and optionally show individual trials
     roi_index : int, optional
             ROI index to plot (default -1 for last ROI)
@@ -104,7 +104,7 @@ def plot_directional_responses_circular_with_polar(
     data_crop : tuple, optional
             Tuple of (start, end) indices to crop data timepoints
     use_phases : bool or None
-            If None, uses moving_bars_obj.dir_phase_num > 1 to decide
+            If None, uses osds_obj.dir_phase_num > 1 to decide
             If True, forces phase analysis with overlay in polar plot
             If False, forces single-phase analysis
     phase_colors : list or None
@@ -120,22 +120,22 @@ def plot_directional_responses_circular_with_polar(
 
     # Automatically use phases if dir_phase_num > 1 and use_phases not specified
     if use_phases is None:
-        use_phases = moving_bars_obj.dir_phase_num > 1
+        use_phases = osds_obj.dir_phase_num > 1
     
     # Set default phase colors
     if phase_colors is None:
         phase_colors = ['#2E8B57', '#B8860B', '#8B4513', '#483D8B']
     
-    # Extract data from MovingBars object if provided
+    # Extract data from OSDS object if provided
     trial_data = None  # Initialize here so it's available throughout the function
 
-    data = np.squeeze(moving_bars_obj.split_averages_directionally()[:, [roi_index]])
-    directions_list = moving_bars_obj.directions_list
+    data = np.squeeze(osds_obj.split_averages_directionally()[:, [roi_index]])
+    directions_list = osds_obj.directions_list
 
     # Get trial data if requested
     if show_trials:
         # Shape: (n_directions, n_rois, n_trials, n_timepoints) -> (n_directions, n_trials, n_timepoints)
-        trial_data = moving_bars_obj.split_snippets_directionally()[:, roi_index, :, :]
+        trial_data = osds_obj.split_snippets_directionally()[:, roi_index, :, :]
 
     if data_crop is not None:
         print(data.shape)
@@ -143,8 +143,8 @@ def plot_directional_responses_circular_with_polar(
         if trial_data is not None:
             trial_data = trial_data[:, :, data_crop[0] : data_crop[1]]
 
-    # # Handle the case where data is None but moving_bars_obj is provided
-    # data = np.squeeze(moving_bars_obj.split_averages_directionally()[:, [roi_index]])
+    # # Handle the case where data is None but osds_obj is provided
+    # data = np.squeeze(osds_obj.split_averages_directionally()[:, [roi_index]])
 
     n_directions = data.shape[0]
 
@@ -278,7 +278,7 @@ def plot_directional_responses_circular_with_polar(
 
 
 def plot_directional_responses_dual_phase(
-    moving_bars_obj,
+    osds_obj,
     phase_split=None,
     directions_list=None,
     figsize=(12, 10),
@@ -294,7 +294,7 @@ def plot_directional_responses_dual_phase(
 
     Parameters:
     -----------
-    moving_bars_obj : MovingBars object
+    osds_obj : OSDS object
         Object containing the directional response data
     phase_split : int
         Frame number where phase 1 ends and phase 2 begins (default 3200)
@@ -321,15 +321,15 @@ def plot_directional_responses_dual_phase(
     """
 
     # Extract data
-    data = np.squeeze(moving_bars_obj.split_averages_directionally()[:, [roi_index]])
-    directions_list = moving_bars_obj.directions_list
+    data = np.squeeze(osds_obj.split_averages_directionally()[:, [roi_index]])
+    directions_list = osds_obj.directions_list
 
     # Get trial data if requested
     trial_data = None
     if show_trials:
-        trial_data = moving_bars_obj.split_snippets_directionally()[:, roi_index, :, :]
+        trial_data = osds_obj.split_snippets_directionally()[:, roi_index, :, :]
     if phase_split is None:
-        phase_split = phase_split = moving_bars_obj.averages.shape[1] // moving_bars_obj.trigger_mode // 2  # Should be ~2866
+        phase_split = phase_split = osds_obj.averages.shape[1] // osds_obj.trigger_mode // 2  # Should be ~2866
         print(f"Phase split: {phase_split}")
     else:
         phase_split = int(phase_split)
@@ -687,7 +687,7 @@ def plot_tuning_function_polar(tuning_functions, directions_list, rois=None, fig
     
     # Add mean direction vectors if requested
     if show_mean_vector:
-        from pygor.timeseries.moving_bars import tuning_metrics
+        from pygor.timeseries.osds import tuning_metrics
         
         for i, roi_idx in enumerate(rois):
             # Get tuning function for this ROI
@@ -719,7 +719,7 @@ def plot_tuning_function_polar(tuning_functions, directions_list, rois=None, fig
     
     # Add mean orientation vectors if requested
     if show_orientation_vector:
-        from pygor.timeseries.moving_bars import tuning_metrics
+        from pygor.timeseries.osds import tuning_metrics
         
         for i, roi_idx in enumerate(rois):
             # Get tuning function for this ROI
@@ -925,7 +925,7 @@ def plot_tuning_function_multi_phase(tuning_functions, directions_list, phase_nu
     
     # Add mean direction vectors if requested (phase-dependent)
     if show_mean_vector:
-        from pygor.timeseries.moving_bars import tuning_metrics
+        from pygor.timeseries.osds import tuning_metrics
         import matplotlib.colors as mcolors
         
         
@@ -971,7 +971,7 @@ def plot_tuning_function_multi_phase(tuning_functions, directions_list, phase_nu
     
     # Add mean orientation vectors if requested (phase-dependent)
     if show_orientation_vector:
-        from pygor.timeseries.moving_bars import tuning_metrics
+        from pygor.timeseries.osds import tuning_metrics
         import matplotlib.colors as mcolors
         
         for roi_i, roi_idx in enumerate(rois):
@@ -1386,7 +1386,7 @@ def plot_tuning_function_polar_overlay(tuning_functions, directions_list, rois=N
     
     # Add mean direction vectors if requested (phase-dependent)
     if show_mean_vector:
-        from pygor.timeseries.moving_bars import tuning_metrics
+        from pygor.timeseries.osds import tuning_metrics
         
         for roi_i, roi_idx in enumerate(rois):
             for phase_i in range(n_phases):
@@ -1415,7 +1415,7 @@ def plot_tuning_function_polar_overlay(tuning_functions, directions_list, rois=N
     
     # Add mean orientation vectors if requested (phase-dependent)
     if show_orientation_vector:
-        from pygor.timeseries.moving_bars import tuning_metrics
+        from pygor.timeseries.osds import tuning_metrics
         
         for roi_i, roi_idx in enumerate(rois):
             for phase_i in range(n_phases):
@@ -1589,7 +1589,7 @@ def plot_orientation_tuning_cartesian_phases(responses, directions_deg, phase_co
     return fig, ax, osi_info
 
 
-def plot_tuning_function_with_traces(moving_bars_obj, roi_index, ax=None, show_trials=True, 
+def plot_tuning_function_with_traces(osds_obj, roi_index, ax=None, show_trials=True, 
                                     metric='peak', trace_scale=0.2, minimal=True, 
                                     polar_color='#2E8B57', trace_alpha=1, use_phases=None, 
                                     phase_colors=None, orbit_distance=0.5, trace_aspect_x=1.0, 
@@ -1600,7 +1600,7 @@ def plot_tuning_function_with_traces(moving_bars_obj, roi_index, ax=None, show_t
     
     Parameters:
     -----------
-    moving_bars_obj : MovingBars object
+    osds_obj : OSDS object
         Object containing directional response data
     roi_index : int
         ROI index to analyze
@@ -1641,24 +1641,24 @@ def plot_tuning_function_with_traces(moving_bars_obj, roi_index, ax=None, show_t
     """
     # Automatically use phases if dir_phase_num > 1 and use_phases not specified
     if use_phases is None:
-        use_phases = moving_bars_obj.dir_phase_num > 1
+        use_phases = osds_obj.dir_phase_num > 1
     
     # Set default phase colors
     if phase_colors is None:
         phase_colors = ["#000000", "#4B4B4B", '#8B4513', '#483D8B']
     
     # Debug print
-    # print(f"DEBUG: dir_phase_num = {moving_bars_obj.dir_phase_num}, use_phases = {use_phases}")
+    # print(f"DEBUG: dir_phase_num = {osds_obj.dir_phase_num}, use_phases = {use_phases}")
     # print(f"DEBUG: phase_colors = {phase_colors}")
-    
-    # Extract data from MovingBars object
-    data = np.squeeze(moving_bars_obj.split_averages_directionally()[:, [roi_index]])
-    directions_list = moving_bars_obj.directions_list
+
+    # Extract data from OSDS object
+    data = np.squeeze(osds_obj.split_averages_directionally()[:, [roi_index]])
+    directions_list = osds_obj.directions_list
     
     # Get trial data if requested
     trial_data = None
     if show_trials:
-        trial_data = moving_bars_obj.split_snippets_directionally()[:, roi_index, :, :]
+        trial_data = osds_obj.split_snippets_directionally()[:, roi_index, :, :]
     
     # Handle data cropping
     data_crop = kwargs.get('data_crop', None)
@@ -1669,20 +1669,20 @@ def plot_tuning_function_with_traces(moving_bars_obj, roi_index, ax=None, show_t
     
     # Handle phase splitting for dual-phase data
     individual_phases_data = None
-    if use_phases and moving_bars_obj.dir_phase_num > 1:
-        # print(f"DEBUG: Processing {moving_bars_obj.dir_phase_num} phases")
+    if use_phases and osds_obj.dir_phase_num > 1:
+        # print(f"DEBUG: Processing {osds_obj.dir_phase_num} phases")
         # print(f"DEBUG: Original data shape: {data.shape}")
         
         # Split data into phases
-        phase_split = data.shape[1] // moving_bars_obj.dir_phase_num
+        phase_split = data.shape[1] // osds_obj.dir_phase_num
         # print(f"DEBUG: Phase split at: {phase_split}")
         
         phases_data = []
         phases_trial_data = []
         
-        for phase_i in range(moving_bars_obj.dir_phase_num):
+        for phase_i in range(osds_obj.dir_phase_num):
             start_idx = phase_i * phase_split
-            end_idx = (phase_i + 1) * phase_split if phase_i < moving_bars_obj.dir_phase_num - 1 else data.shape[1]
+            end_idx = (phase_i + 1) * phase_split if phase_i < osds_obj.dir_phase_num - 1 else data.shape[1]
             # print(f"DEBUG: Phase {phase_i}: indices {start_idx}:{end_idx}")
             phases_data.append(data[:, start_idx:end_idx])
             if trial_data is not None:
@@ -1708,12 +1708,12 @@ def plot_tuning_function_with_traces(moving_bars_obj, roi_index, ax=None, show_t
         sorted_trial_data = trial_data[sort_indices]
     
     # Calculate metric values for polar plot (handle phases)
-    if use_phases and moving_bars_obj.dir_phase_num > 1 and individual_phases_data is not None:
-        # print(f"DEBUG: Calculating metrics for {moving_bars_obj.dir_phase_num} phases")
+    if use_phases and osds_obj.dir_phase_num > 1 and individual_phases_data is not None:
+        # print(f"DEBUG: Calculating metrics for {osds_obj.dir_phase_num} phases")
         # Calculate metrics for each phase separately
         phase_values = []
         
-        for phase_i in range(moving_bars_obj.dir_phase_num):
+        for phase_i in range(osds_obj.dir_phase_num):
             # Use the individual phase data, then apply sort
             phase_data = individual_phases_data[phase_i][sort_indices]
             # print(f"DEBUG: Phase {phase_i} data shape: {phase_data.shape}")
@@ -1745,28 +1745,28 @@ def plot_tuning_function_with_traces(moving_bars_obj, roi_index, ax=None, show_t
             values = np.array([np.max(np.abs(trace)) for trace in sorted_data])  # Default to peak
     
     # Branch into separate mode vs overlay mode
-    if separate_phase_axes and use_phases and moving_bars_obj.dir_phase_num > 1 and individual_phases_data is not None:
+    if separate_phase_axes and use_phases and osds_obj.dir_phase_num > 1 and individual_phases_data is not None:
         # SEPARATE AXES MODE: Each phase gets its own polar plot + orbit traces
-        # print(f"DEBUG: Using separate axes mode for {moving_bars_obj.dir_phase_num} phases")
+        # print(f"DEBUG: Using separate axes mode for {osds_obj.dir_phase_num} phases")
         
         # Handle axes creation/validation
         if ax is None:
             # Create figure and axes automatically with proper spacing
             import matplotlib.pyplot as plt
-            fig, ax = plt.subplots(1, moving_bars_obj.dir_phase_num, 
-                                 figsize=(6*moving_bars_obj.dir_phase_num, 5))
+            fig, ax = plt.subplots(1, osds_obj.dir_phase_num, 
+                                 figsize=(6*osds_obj.dir_phase_num, 5))
             # Add space between subplots to prevent orbit overlap
             plt.subplots_adjust(wspace=0.8)  # Increase horizontal spacing
-            if moving_bars_obj.dir_phase_num == 1:
+            if osds_obj.dir_phase_num == 1:
                 ax = [ax]  # Make it a list for consistency
         elif hasattr(ax, '__len__') and hasattr(ax, '__getitem__'):
             # Handle list, tuple, or numpy array of axes
-            if len(ax) != moving_bars_obj.dir_phase_num:
-                raise ValueError(f"When separate_phase_axes=True, ax array must have {moving_bars_obj.dir_phase_num} axes, got {len(ax)}")
+            if len(ax) != osds_obj.dir_phase_num:
+                raise ValueError(f"When separate_phase_axes=True, ax array must have {osds_obj.dir_phase_num} axes, got {len(ax)}")
             fig = ax[0].figure
             
             # Intelligently adjust spacing to prevent orbit overlap
-            if moving_bars_obj.dir_phase_num > 1:
+            if osds_obj.dir_phase_num > 1:
                 # Check current subplot positions to determine if spacing adjustment is needed
                 current_positions = [a.get_position() for a in ax]
                 
@@ -1783,7 +1783,7 @@ def plot_tuning_function_with_traces(moving_bars_obj, roi_index, ax=None, show_t
                         fig.subplots_adjust(wspace=optimal_wspace)
         else:
             # Single axes provided but we need multiple
-            raise ValueError(f"When separate_phase_axes=True, ax must be a list/tuple/array of {moving_bars_obj.dir_phase_num} axes, or None for automatic creation")
+            raise ValueError(f"When separate_phase_axes=True, ax must be a list/tuple/array of {osds_obj.dir_phase_num} axes, or None for automatic creation")
         
         if ax is not None:
             fig = ax[0].figure
@@ -1799,7 +1799,7 @@ def plot_tuning_function_with_traces(moving_bars_obj, roi_index, ax=None, show_t
         # Also calculate global limits for raw trace data
         if trial_data is not None:
             all_trial_data = []
-            for phase_i in range(moving_bars_obj.dir_phase_num):
+            for phase_i in range(osds_obj.dir_phase_num):
                 phase_trial_data = phases_trial_data[phase_i][sort_indices]  # Apply sort to trial data
                 all_trial_data.append(phase_trial_data.flatten())
             all_raw_data = np.concatenate(all_trial_data)
@@ -1814,7 +1814,7 @@ def plot_tuning_function_with_traces(moving_bars_obj, roi_index, ax=None, show_t
         y_max_global = y_max_raw + y_buffer_raw
         
         # Process each phase separately
-        for phase_i in range(moving_bars_obj.dir_phase_num):
+        for phase_i in range(osds_obj.dir_phase_num):
             curr_ax = ax[phase_i]
             phase_color = phase_colors[phase_i % len(phase_colors)]
             
@@ -1947,7 +1947,7 @@ def plot_tuning_function_with_traces(moving_bars_obj, roi_index, ax=None, show_t
         # Plot central polar (handle phases)
         polar_angles = np.append(sorted_angles, sorted_angles[0])
         
-        if use_phases and moving_bars_obj.dir_phase_num > 1 and 'phase_values' in locals():
+        if use_phases and osds_obj.dir_phase_num > 1 and 'phase_values' in locals():
             # print(f"DEBUG: Plotting {len(phase_values)} phases on polar plot")
             # Plot each phase on polar plot
             for phase_i, phase_vals in enumerate(phase_values):
@@ -1968,7 +1968,7 @@ def plot_tuning_function_with_traces(moving_bars_obj, roi_index, ax=None, show_t
         
         # Calculate global limits for both polar plots and orbit traces
         # Get metric values for consistent scaling
-        if use_phases and moving_bars_obj.dir_phase_num > 1 and 'phase_values' in locals():
+        if use_phases and osds_obj.dir_phase_num > 1 and 'phase_values' in locals():
             all_metric_values = np.concatenate(phase_values)
             global_metric_max = max([np.max(phase_vals) for phase_vals in phase_values])
         else:
@@ -2068,9 +2068,9 @@ def plot_tuning_function_with_traces(moving_bars_obj, roi_index, ax=None, show_t
             trace_ax.axhline(0, color='gray', alpha=0.4)
             
             # Add phase separation line if multi-phase
-            if use_phases and moving_bars_obj.dir_phase_num > 1 and individual_phases_data is not None:
+            if use_phases and osds_obj.dir_phase_num > 1 and individual_phases_data is not None:
                 phase_split = len(individual_phases_data[0][0])  # Length of one phase
-                for phase_i in range(1, moving_bars_obj.dir_phase_num):
+                for phase_i in range(1, osds_obj.dir_phase_num):
                     sep_x = phase_i * phase_split
                     trace_ax.axvline(sep_x, color='k', alpha=0.8, 
                                     linestyle='-', zorder = -1)

@@ -1,14 +1,14 @@
 import numpy as np
 
 
-def compute_tuning_function(moving_bars_obj, roi_index=None, window=None, metric='max', phase_num=None):
+def compute_tuning_function(osds_obj, roi_index=None, window=None, metric='max', phase_num=None):
     """
     Compute tuning function for each ROI across all directions.
     
     Parameters:
     -----------
-    moving_bars_obj : MovingBars
-        MovingBars object containing the data
+    osds_obj : OSDS
+        OSDS object containing the data
     window : int or tuple, optional
         Time window within each direction phase to analyze.
         If int, uses that many frames from start of each direction.
@@ -43,11 +43,11 @@ def compute_tuning_function(moving_bars_obj, roi_index=None, window=None, metric
         If phase_num is specified:
             If roi_index is None: tuning values with shape (n_rois, n_directions, n_phases).
             If roi_index is specified: tuning values with shape (n_directions, n_phases).
-        Values are ordered according to moving_bars_obj.directions_list.
+        Values are ordered according to osds_obj.directions_list.
     """
     # Get directionally split averages: (n_directions, n_rois, timepoints_per_direction)
-    dir_averages = moving_bars_obj.split_averages_directionally()
-    
+    dir_averages = osds_obj.split_averages_directionally()
+
     # Handle phase splitting
     if phase_num is not None:
         if not isinstance(phase_num, int) or phase_num < 1:

@@ -50,7 +50,7 @@ class Experiment:
             Number of parallel jobs for loading files. -1 uses all cores, 1 disables parallelization (default: -1)
         **class_kwargs : dict, optional
             Additional keyword arguments to pass to the pygor class constructor
-            (e.g., dir_num=8 for MovingBars)
+            (e.g., dir_num=8 for OSDS data)
 
         Returns
         -------
@@ -62,11 +62,11 @@ class Experiment:
         >>> # Load multiple STRF files in parallel
         >>> exp = Experiment.from_files(['file1.h5', 'file2.h5'], 'STRF')
 
-        >>> # Load MovingBars with dir_num
-        >>> exp = Experiment.from_files('file.h5', 'MovingBars', dir_num=8)
+        >>> # Load OSDS with dir_num
+        >>> exp = Experiment.from_files('file.h5', 'OSDS', dir_num=8)
 
         >>> # Load with 4 parallel workers and additional parameters
-        >>> exp = Experiment.from_files(file_list, 'MovingBars', n_jobs=4, dir_num=8, dir_phase_num=2)
+        >>> exp = Experiment.from_files(file_list, 'OSDS', n_jobs=4, dir_num=8, dir_phase_num=2)
         """
         # Handle single file input
         if isinstance(file_paths, (str, pathlib.Path)):
