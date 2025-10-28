@@ -664,57 +664,57 @@ class OSDS(Core):
             responses = self.compute_tuning_function(roi_index=roi_index, metric=metric, phase_num=None)
             return tuning_metrics.compute_orientation_selectivity_index(responses, self.directions_list)
     
-    def plot_orientation_tuning_cartesian(self, roi_index, metric='peak', use_phases=None, 
-                                         phase_colors=None, **kwargs):
-        """
-        Plot orientation tuning curve in cartesian coordinates for a specific ROI.
+    # def plot_orientation_tuning_cartesian(self, roi_index, metric='peak', use_phases=None, 
+    #                                      phase_colors=None, **kwargs):
+    #     """
+    #     Plot orientation tuning curve in cartesian coordinates for a specific ROI.
         
-        Parameters:
-        -----------
-        roi_index : int
-            ROI index to analyze
-        metric : str or callable
-            Metric to use for computing tuning function
-        use_phases : bool or None
-            If None, uses self.dir_phase_num > 1 to decide
-            If True, forces phase analysis with overlay
-            If False, forces single-phase analysis
-        phase_colors : list or None
-            Colors for each phase. If None, uses default colors
-        **kwargs : additional arguments
-            Passed to plot_orientation_tuning_cartesian function
+    #     Parameters:
+    #     -----------
+    #     roi_index : int
+    #         ROI index to analyze
+    #     metric : str or callable
+    #         Metric to use for computing tuning function
+    #     use_phases : bool or None
+    #         If None, uses self.dir_phase_num > 1 to decide
+    #         If True, forces phase analysis with overlay
+    #         If False, forces single-phase analysis
+    #     phase_colors : list or None
+    #         Colors for each phase. If None, uses default colors
+    #     **kwargs : additional arguments
+    #         Passed to plot_orientation_tuning_cartesian function
             
-        Returns:
-        --------
-        fig : matplotlib.figure.Figure
-            Figure object
-        ax : matplotlib.axes.Axes
-            Axes object
-        osi_info : dict
-            Dictionary containing OSI calculation results
-        """
-        # Automatically use phases if dir_phase_num > 1 and use_phases not specified
-        if use_phases is None:
-            use_phases = self.dir_phase_num > 1
+    #     Returns:
+    #     --------
+    #     fig : matplotlib.figure.Figure
+    #         Figure object
+    #     ax : matplotlib.axes.Axes
+    #         Axes object
+    #     osi_info : dict
+    #         Dictionary containing OSI calculation results
+    #     """
+    #     # Automatically use phases if dir_phase_num > 1 and use_phases not specified
+    #     if use_phases is None:
+    #         use_phases = self.dir_phase_num > 1
         
-        if use_phases:
-            # Get phase-aware tuning function
-            responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
-            # responses shape: (n_directions, n_phases)
+    #     if use_phases:
+    #         # Get phase-aware tuning function
+    #         responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
+    #         # responses shape: (n_directions, n_phases)
             
-            # Set default phase colors
-            if phase_colors is None:
-                phase_colors = ['#2E8B57', '#B8860B', '#8B4513', '#483D8B']  # Default colors for phases
+    #         # Set default phase colors
+    #         if phase_colors is None:
+    #             phase_colors = ['#2E8B57', '#B8860B', '#8B4513', '#483D8B']  # Default colors for phases
             
-            return circular_directional_plots.plot_orientation_tuning_cartesian_phases(
-                responses, self.directions_list, phase_colors=phase_colors, **kwargs
-            )
-        else:
-            # Single phase analysis
-            responses = self.compute_tuning_function(roi_index=roi_index, metric=metric, phase_num=None)
-            return circular_directional_plots.plot_orientation_tuning_cartesian(
-                responses, self.directions_list, **kwargs
-            )
+    #         return circular_directional_plots.plot_orientation_tuning_cartesian_phases(
+    #             responses, self.directions_list, phase_colors=phase_colors, **kwargs
+    #         )
+    #     else:
+    #         # Single phase analysis
+    #         responses = self.compute_tuning_function(roi_index=roi_index, metric=metric, phase_num=None)
+    #         return circular_directional_plots.plot_orientation_tuning_cartesian(
+    #             responses, self.directions_list, **kwargs
+    #         )
     
     # def plot_orientation_tuning_comparison(self, roi_index, metric='peak', use_phases=None,
     #                                      phase_colors=None, **kwargs):
