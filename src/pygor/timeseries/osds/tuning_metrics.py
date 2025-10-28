@@ -706,62 +706,62 @@ def compute_all_tuning_metrics(osds_obj, metric='peak', roi_indices=None, phase_
     return result
 
 
-def plot_tuning_metrics_histograms(metrics_dict, figsize=(15, 10), bins=20):
-    """
-    Plot histograms of all tuning metrics.
+# def plot_tuning_metrics_histograms(metrics_dict, figsize=(15, 10), bins=20):
+#     """
+#     Plot histograms of all tuning metrics.
     
-    Parameters:
-    -----------
-    metrics_dict : dict
-        Dictionary returned by compute_all_tuning_metrics
-    figsize : tuple
-        Figure size
-    bins : int
-        Number of histogram bins
+#     Parameters:
+#     -----------
+#     metrics_dict : dict
+#         Dictionary returned by compute_all_tuning_metrics
+#     figsize : tuple
+#         Figure size
+#     bins : int
+#         Number of histogram bins
         
-    Returns:
-    --------
-    fig : matplotlib.figure.Figure
-        Figure object
-    """
-    import matplotlib.pyplot as plt
+#     Returns:
+#     --------
+#     fig : matplotlib.figure.Figure
+#         Figure object
+#     """
+#     import matplotlib.pyplot as plt
     
-    fig, axes = plt.subplots(2, 4, figsize=figsize)
-    axes = axes.flatten()
+#     fig, axes = plt.subplots(2, 4, figsize=figsize)
+#     axes = axes.flatten()
     
-    metrics_to_plot = [
-        ('vector_magnitude', 'Vector Magnitude (r)', (0, 1)),
-        ('circular_variance', 'Circular Variance (CV)', (0, 1)),
-        ('dsi', 'Directional Selectivity Index (DSI)', (-1, 1)),
-        ('osi', 'Orientation Selectivity Index (OSI)', (0, 1)),
-        ('preferred_direction', 'Preferred Direction (°)', (0, 360)),
-        ('preferred_orientation', 'Preferred Orientation (°)', (0, 180)),
-        ('mean_direction', 'Mean Direction (°)', (0, 360))
-    ]
+#     metrics_to_plot = [
+#         ('vector_magnitude', 'Vector Magnitude (r)', (0, 1)),
+#         ('circular_variance', 'Circular Variance (CV)', (0, 1)),
+#         ('dsi', 'Directional Selectivity Index (DSI)', (-1, 1)),
+#         ('osi', 'Orientation Selectivity Index (OSI)', (0, 1)),
+#         ('preferred_direction', 'Preferred Direction (°)', (0, 360)),
+#         ('preferred_orientation', 'Preferred Orientation (°)', (0, 180)),
+#         ('mean_direction', 'Mean Direction (°)', (0, 360))
+#     ]
     
-    for i, (metric_key, title, xlim) in enumerate(metrics_to_plot):
-        if metric_key in metrics_dict:
-            data = metrics_dict[metric_key]
-            # Remove NaN values
-            data_clean = data[~np.isnan(data)]
+#     for i, (metric_key, title, xlim) in enumerate(metrics_to_plot):
+#         if metric_key in metrics_dict:
+#             data = metrics_dict[metric_key]
+#             # Remove NaN values
+#             data_clean = data[~np.isnan(data)]
             
-            axes[i].hist(data_clean, bins=bins, alpha=0.7, edgecolor='black')
-            axes[i].set_title(f'{title}\n(n={len(data_clean)} ROIs)')
-            axes[i].set_xlabel(title.split('(')[0].strip())
-            axes[i].set_ylabel('Count')
-            axes[i].set_xlim(xlim)
-            axes[i].grid(True, alpha=0.3)
+#             axes[i].hist(data_clean, bins=bins, alpha=0.7, edgecolor='black')
+#             axes[i].set_title(f'{title}\n(n={len(data_clean)} ROIs)')
+#             axes[i].set_xlabel(title.split('(')[0].strip())
+#             axes[i].set_ylabel('Count')
+#             axes[i].set_xlim(xlim)
+#             axes[i].grid(True, alpha=0.3)
             
-            # Add mean line
-            if len(data_clean) > 0:
-                mean_val = np.mean(data_clean)
-                axes[i].axvline(mean_val, color='red', linestyle='--', linewidth=2, 
-                               label=f'Mean: {mean_val:.3f}')
-                axes[i].legend()
+#             # Add mean line
+#             if len(data_clean) > 0:
+#                 mean_val = np.mean(data_clean)
+#                 axes[i].axvline(mean_val, color='red', linestyle='--', linewidth=2, 
+#                                label=f'Mean: {mean_val:.3f}')
+#                 axes[i].legend()
     
-    # Hide unused subplots (we have 7 metrics in 2x4 grid = 8 subplots)
-    for i in range(len(metrics_to_plot), len(axes)):
-        axes[i].set_visible(False)
+#     # Hide unused subplots (we have 7 metrics in 2x4 grid = 8 subplots)
+#     for i in range(len(metrics_to_plot), len(axes)):
+#         axes[i].set_visible(False)
     
-    plt.tight_layout()
-    return fig
+#     plt.tight_layout()
+#     return fig

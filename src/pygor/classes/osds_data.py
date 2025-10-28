@@ -119,18 +119,19 @@ class OSDS(Core):
         # Snippets stored as (snippet_length, n_loops, n_rois) in memory
         # Need to split along axis=0 (snippet_length/timepoints) into directions
         adjusted_data, actual_splits, remainder = self._check_split_compatibility(
-            self.snippets, self.dir_num, axis=0
+            self.snippets, self.dir_num, axis=-1
         )
 
         if remainder > 0:
             print(f"DirectionalSnippets: Lost {remainder} time points to ensure even splitting")
 
         # Split along timepoints axis (axis=0) and get shape (n_directions, timepoints_per_direction, n_loops, n_rois)
-        split_data = np.array(np.split(adjusted_data, actual_splits, axis=0))
+        print(adjusted_data.shape, actual_splits)
+        split_data = np.array(np.split(adjusted_data, actual_splits, axis=-1))
 
         # Transpose to get desired output shape: (n_directions, n_loops, n_rois, timepoints_per_direction)
-        return split_data.transpose(0, 2, 3, 1)
-   
+        return split_data.transpose(0, 2, 1, 3)
+
     def split_averages_directionally(self) -> np.ndarray:
         """
         Returns averages split by direction.
@@ -156,10 +157,10 @@ class OSDS(Core):
         # Result already has the desired shape: (n_directions, n_rois, timepoints_per_direction)
         return split_data
     
-    def plot_circular_responses(self, roi_index=-1, figsize=(8, 8)):
-        """Plot directional responses in circular arrangement"""
-        arr = np.squeeze(self.split_averages_directionally()[:, [roi_index]])
-        return circular_directional_plots.plot_directional_responses_circular(arr, self.directions_list, figsize)
+    # def plot_circular_responses(self, roi_index=-1, figsize=(8, 8)):
+    #     """Plot directional responses in circular arrangement"""
+    #     arr = np.squeeze(self.split_averages_directionally()[:, [roi_index]])
+    #     return circular_directional_plots.plot_directional_responses_circular(arr, self.directions_list, figsize)
     
     # def plot_circular_responses_with_polar(self, roi_index=-1, metric='peak', figsize=(10, 10), 
     #                                     show_trials=True, polar_size=0.3, data_crop=None,
@@ -474,34 +475,34 @@ class OSDS(Core):
             self, roi_indices=roi_indices, metric=metric
         )
     
-    def plot_tuning_metrics_histograms(self, roi_indices=None, metric='peak', 
-                                     figsize=(15, 10), bins=20):
-        """
-        Plot histograms of directional tuning metrics.
+    # def plot_tuning_metrics_histograms(self, roi_indices=None, metric='peak', 
+    #                                  figsize=(15, 10), bins=20):
+    #     """
+    #     Plot histograms of directional tuning metrics.
         
-        Parameters:
-        -----------
-        roi_indices : list or None
-            ROI indices to analyze. If None, analyzes all ROIs.
-        metric : str or callable
-            Metric to use for computing tuning functions (default 'peak')
-        figsize : tuple
-            Figure size
-        bins : int
-            Number of histogram bins
+    #     Parameters:
+    #     -----------
+    #     roi_indices : list or None
+    #         ROI indices to analyze. If None, analyzes all ROIs.
+    #     metric : str or callable
+    #         Metric to use for computing tuning functions (default 'peak')
+    #     figsize : tuple
+    #         Figure size
+    #     bins : int
+    #         Number of histogram bins
             
-        Returns:
-        --------
-        fig : matplotlib.figure.Figure
-            Figure object
-        metrics_dict : dict
-            Dictionary of computed metrics
-        """
-        metrics_dict = self.compute_tuning_metrics(roi_indices=roi_indices, metric=metric)
-        fig = tuning_metrics.plot_tuning_metrics_histograms(
-            metrics_dict, figsize=figsize, bins=bins
-        )
-        return fig, metrics_dict
+    #     Returns:
+    #     --------
+    #     fig : matplotlib.figure.Figure
+    #         Figure object
+    #     metrics_dict : dict
+    #         Dictionary of computed metrics
+    #     """
+    #     metrics_dict = self.compute_tuning_metrics(roi_indices=roi_indices, metric=metric)
+    #     fig = tuning_metrics.plot_tuning_metrics_histograms(
+    #         metrics_dict, figsize=figsize, bins=bins
+    #     )
+    #     return fig, metrics_dict
     
     def extract_direction_vectors(self, roi_index, metric='peak', use_phases=None):
         """
@@ -715,57 +716,57 @@ class OSDS(Core):
                 responses, self.directions_list, **kwargs
             )
     
-    def plot_orientation_tuning_comparison(self, roi_index, metric='peak', use_phases=None,
-                                         phase_colors=None, **kwargs):
-        """
-        Plot side-by-side comparison of polar and cartesian orientation tuning.
+    # def plot_orientation_tuning_comparison(self, roi_index, metric='peak', use_phases=None,
+    #                                      phase_colors=None, **kwargs):
+    #     """
+    #     Plot side-by-side comparison of polar and cartesian orientation tuning.
         
-        Parameters:
-        -----------
-        roi_index : int
-            ROI index to analyze
-        metric : str or callable
-            Metric to use for computing tuning function
-        use_phases : bool or None
-            If None, uses self.dir_phase_num > 1 to decide
-            If True, forces phase analysis with overlay
-            If False, forces single-phase analysis
-        phase_colors : list or None
-            Colors for each phase. If None, uses default colors
-        **kwargs : additional arguments
-            Passed to plot_orientation_tuning_comparison function
+    #     Parameters:
+    #     -----------
+    #     roi_index : int
+    #         ROI index to analyze
+    #     metric : str or callable
+    #         Metric to use for computing tuning function
+    #     use_phases : bool or None
+    #         If None, uses self.dir_phase_num > 1 to decide
+    #         If True, forces phase analysis with overlay
+    #         If False, forces single-phase analysis
+    #     phase_colors : list or None
+    #         Colors for each phase. If None, uses default colors
+    #     **kwargs : additional arguments
+    #         Passed to plot_orientation_tuning_comparison function
             
-        Returns:
-        --------
-        fig : matplotlib.figure.Figure
-            Figure object
-        axes : list
-            List containing [polar_ax, cartesian_ax]
-        osi_info : dict
-            Dictionary containing OSI calculation results
-        """
-        # Automatically use phases if dir_phase_num > 1 and use_phases not specified
-        if use_phases is None:
-            use_phases = self.dir_phase_num > 1
+    #     Returns:
+    #     --------
+    #     fig : matplotlib.figure.Figure
+    #         Figure object
+    #     axes : list
+    #         List containing [polar_ax, cartesian_ax]
+    #     osi_info : dict
+    #         Dictionary containing OSI calculation results
+    #     """
+    #     # Automatically use phases if dir_phase_num > 1 and use_phases not specified
+    #     if use_phases is None:
+    #         use_phases = self.dir_phase_num > 1
         
-        if use_phases:
-            # Get phase-aware tuning function
-            responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
-            # responses shape: (n_directions, n_phases)
+    #     if use_phases:
+    #         # Get phase-aware tuning function
+    #         responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
+    #         # responses shape: (n_directions, n_phases)
             
-            # Set default phase colors
-            if phase_colors is None:
-                phase_colors = ['#2E8B57', '#B8860B', '#8B4513', '#483D8B']  # Default colors for phases
+    #         # Set default phase colors
+    #         if phase_colors is None:
+    #             phase_colors = ['#2E8B57', '#B8860B', '#8B4513', '#483D8B']  # Default colors for phases
             
-            return circular_directional_plots.plot_orientation_tuning_comparison_phases(
-                responses, self.directions_list, phase_colors=phase_colors, **kwargs
-            )
-        else:
-            # Single phase analysis
-            responses = self.compute_tuning_function(roi_index=roi_index, metric=metric, phase_num=None)
-            return circular_directional_plots.plot_orientation_tuning_comparison(
-                responses, self.directions_list, **kwargs
-            )
+    #         return circular_directional_plots.plot_orientation_tuning_comparison_phases(
+    #             responses, self.directions_list, phase_colors=phase_colors, **kwargs
+    #         )
+    #     else:
+    #         # Single phase analysis
+    #         responses = self.compute_tuning_function(roi_index=roi_index, metric=metric, phase_num=None)
+    #         return circular_directional_plots.plot_orientation_tuning_comparison(
+    #             responses, self.directions_list, **kwargs
+    #         )
     
     def compute_phase_tuning_metrics(self, metric='peak', roi_indices=None, 
                                     phase_ranges=None):
@@ -832,12 +833,11 @@ class OSDS(Core):
     
     def plot_tuning_function_with_traces(self, roi_index, ax=None, show_trials=True, 
                                        metric='peak', trace_scale=0.25, minimal=True, 
-                                       polar_color='#2E8B57', trace_alpha=0.7, use_phases=None, 
+                                       polar_color=None, trace_alpha=0.7, use_phases=None, 
                                        phase_colors=None, orbit_distance=0.5, trace_aspect_x=1.0, 
                                        trace_aspect_y=1.0, separate_phase_axes=False, **kwargs):
         """
         Plot tuning function with floating trace snippets in external axes.
-        Optimized for poster presentations with clean, minimal styling.
         
         Parameters:
         -----------
@@ -884,6 +884,9 @@ class OSDS(Core):
             If separate_phase_axes=False: single polar plot axes
             If separate_phase_axes=True: list of polar axes (one per phase)
         """
+        if use_phases is None:
+            if self.dir_phase_num > 1:
+                use_phases = True
         return circular_directional_plots.plot_tuning_function_with_traces(
             self, roi_index, ax, show_trials=show_trials, metric=metric, 
             trace_scale=trace_scale, minimal=minimal, polar_color=polar_color, 

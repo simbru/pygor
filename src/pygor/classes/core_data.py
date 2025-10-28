@@ -978,19 +978,29 @@ class Core:
         averages_upsampled_flat = (averages_frames[frame_indices, :] * weights_curr[:, np.newaxis] +
                                    averages_frames[frame_indices + 1, :] * weights_next[:, np.newaxis])
 
-        # Calculate expected upsampled length
-        snippet_duration_upsampled = int(snippet_duration_s / (line_duration * n_lines_lumped))
-        averages = averages_upsampled_flat[:snippet_duration_upsampled, :]  # Shape: (snippet_upsampled, n_rois)
+        # Use the actual length from interpolation (not the calculated target)
+        snippet_duration_upsampled = len(averages_upsampled_flat)
+        averages = averages_upsampled_flat  # Shape: (snippet_upsampled, n_rois)
 
-        # For snippets, we'll keep them at frame level for now (can upsample later if needed)
-        # Most analyses work fine with frame-level snippets
-        snippets = snippets_frames
+        # Upsample snippets using the same interpolation approach
+        print(f"Upsampling snippets from {snippet_duration_frames} frames to line-precision ({snippet_duration_upsampled} samples)")
+        snippets_upsampled = np.zeros((snippet_duration_upsampled, n_loops, n_rois))
 
-        # For H5 storage, keep as (snippet_length, n_rois) to match IGOR format
+        for loop_idx in range(n_loops):
+            # Upsample each loop separately
+            snippets_upsampled_flat = (snippets_frames[frame_indices, loop_idx, :] * weights_curr[:, np.newaxis] +
+                                       snippets_frames[frame_indices + 1, loop_idx, :] * weights_next[:, np.newaxis])
+            snippets_upsampled[:, loop_idx, :] = snippets_upsampled_flat
+
+        # For H5 storage, keep as (snippet_length, n_loops, n_rois) and (snippet_length, n_rois)
+        snippets_for_h5 = snippets_upsampled
         averages_for_h5 = averages
 
-        # For in-memory use, transpose to match try_fetch behavior: (n_rois, snippet_length)
+        # For in-memory use, transpose to match try_fetch behavior
+        # Averages: (n_rois, snippet_length)
         averages = averages.T
+        # Snippets: (n_rois, n_loops, snippet_length) to match first dimension with averages
+        snippets = np.transpose(snippets_upsampled, (2, 1, 0))
 
         # Compute quality criterion (variance of mean / mean of variance)
         quality_criterion = np.zeros(n_rois)
@@ -999,7 +1009,8 @@ class Core:
             variance_of_mean = np.var(averages[roi_idx, :])
 
             # Mean of variances across loops
-            variances = np.var(snippets[:, :, roi_idx], axis=0)
+            # snippets now has shape (n_rois, n_loops, snippet_length)
+            variances = np.var(snippets[roi_idx, :, :], axis=1)
             mean_of_variance = np.mean(variances)
 
             # Quality criterion
@@ -1009,13 +1020,13 @@ class Core:
                 quality_criterion[roi_idx] = np.nan
 
         # Save to attributes
-        self.snippets = snippets
-        self.averages = averages  # Shape: (n_rois, snippet_length) - consistent with try_fetch
+        self.snippets = snippets  # Shape: (n_rois, n_loops, snippet_length)
+        self.averages = averages  # Shape: (n_rois, snippet_length)
         self.quality_indices = quality_criterion
 
         # Save to H5 file if requested
         if overwrite:
-            success_snip = self.update_h5_key('Snippets0', snippets, overwrite=True)
+            success_snip = self.update_h5_key('Snippets0', snippets_for_h5, overwrite=True)
             success_avg = self.update_h5_key('Averages0', averages_for_h5, overwrite=True)
             success_qc = self.update_h5_key('QualityCriterion', quality_criterion, overwrite=True)
 
