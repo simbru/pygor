@@ -9,6 +9,13 @@ def plot_rois_and_traces(rec, exp, df):
     time = np.arange(len(exp.recording[0].averages.T))*exp.recording[0].linedur_s
     pref_cmap = plt.get_cmap('jet', df.shape[0])
     averages = exp.fetch_averages()
+
+    if len(time) > averages.shape[1]:
+        time = time[:averages.shape[1]]
+
+    elif averages.shape[1] > len(time):
+        averages = averages[:, :len(time)]
+
     # Show average image on left, spanning all rows
     ax_img = fig.add_subplot(gs[:, 0])
     avg_img = exp.recording[rec].average_stack
@@ -36,8 +43,8 @@ def plot_rois_and_traces(rec, exp, df):
     top_averages = averages[top_rois]
     average_trace = np.mean(top_averages, axis=0)
     ax_top = fig.add_subplot(gs[0, 1])
-    ax_top.plot(time[:-1], top_averages.T, color='blue', alpha=0.1, linewidth=1)
-    ax_top.plot(time[:-1], average_trace, color='blue', linewidth=2)
+    ax_top.plot(time, top_averages.T, color='blue', alpha=0.1, linewidth=1)
+    ax_top.plot(time, average_trace, color='blue', linewidth=2)
 
     #find which rec_idxs are intermediate
     mid_indices = rec_idxs[(rec_idxs >= int(0.375*df.shape[0])) & (rec_idxs < int(0.625*df.shape[0]))]
@@ -45,8 +52,8 @@ def plot_rois_and_traces(rec, exp, df):
     mid_averages = averages[mid_rois]
     average_trace = np.mean(mid_averages, axis=0)
     ax_mid = fig.add_subplot(gs[1, 1])
-    ax_mid.plot(time[:-1], mid_averages.T, color='green', alpha=0.1, linewidth=1)
-    ax_mid.plot(time[:-1], average_trace, color='green', linewidth=2)
+    ax_mid.plot(time, mid_averages.T, color='green', alpha=0.1, linewidth=1)
+    ax_mid.plot(time, average_trace, color='green', linewidth=2)
 
     #find which rec_idxs are in the bottom 25%
     bot_indices = rec_idxs[rec_idxs >= int(0.8*df.shape[0])]
@@ -54,8 +61,8 @@ def plot_rois_and_traces(rec, exp, df):
     bot_averages = averages[bot_rois]
     average_trace = np.mean(bot_averages, axis=0)
     ax_bot = fig.add_subplot(gs[2, 1])
-    ax_bot.plot(time[:-1], bot_averages.T, color='red', alpha=0.1, linewidth=1)
-    ax_bot.plot(time[:-1], average_trace, color='red', linewidth=2)
+    ax_bot.plot(time, bot_averages.T, color='red', alpha=0.1, linewidth=1)
+    ax_bot.plot(time, average_trace, color='red', linewidth=2)
     
     sns.despine()
     plt.tight_layout()
