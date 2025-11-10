@@ -645,6 +645,11 @@ class Core:
 
         target = call_method(self, attribute)
 
+        # If target is None (e.g., no repetitions), fall back to raw images
+        if target is None:
+            print("No averaged data available (likely no repetitions). Using raw images instead.")
+            target = self.images
+
         # Check if existing ROIs should be loaded
         existing_roi_mask = None
         if load_existing_rois and hasattr(self, 'rois') and self.rois is not None:
@@ -665,6 +670,7 @@ class Core:
             traces_plot_style=style,
             existing_roi_mask=existing_roi_mask,
             correlation_projection=correlation_projection,
+            plot=False,  # Disable internal plotting, we'll plot after computing proper z-scores
             **kwargs
         )
         traces = session.run()
@@ -706,7 +712,59 @@ class Core:
                 else:
                     print("Failed to save ROIs to H5 file")
 
+        # Plot traces if requested (using properly computed z-normalized traces)
+        if kwargs.get('plot', False) and overwrite and self.traces_znorm is not None:
+            print("\nGenerating traces plot...")
+            self._plot_traces(style=style, session=session)
+
         return traces
+
+    def _plot_traces(self, style="stacked", session=None):
+        """
+        Plot z-normalized traces using matplotlib.
+        Uses the properly computed traces_znorm from compute_traces_from_rois().
+
+        Parameters:
+        -----------
+        style : str
+            Plotting style ('stacked', 'individual', or 'raster')
+        session : NapariRoiPrompt, optional
+            Napari session object for accessing ROI visualization data
+        """
+        import matplotlib.pyplot as plt
+
+        # Transpose to (n_rois, n_frames) for plotting
+        traces_plot = self.traces_znorm.T
+
+        fig, ax = plt.subplots(2, 1, figsize=(10, 4))
+        colormap = plt.cm.rainbow(np.linspace(0, 1, len(traces_plot)))
+
+        # Top panel: Show average image with ROI overlay
+        avg_img = np.mean(self.images, axis=0)
+        ax[0].imshow(avg_img, cmap="Greys_r", origin='lower')
+        if session is not None and hasattr(session, 'mask'):
+            ax[0].imshow(session.mask, cmap="rainbow", alpha=0.25, origin='lower')
+        ax[0].set_title('ROIs')
+        ax[0].axis('off')
+
+        # Bottom panel: Plot z-normalized traces
+        if style == "stacked":
+            for n, trace in enumerate(traces_plot):
+                ax[1].plot(trace, color=colormap[-n], alpha=0.7, linewidth=0.5)
+            ax[1].set_ylabel('Z-score', fontsize=10)
+            ax[1].set_xlabel('Frame', fontsize=10)
+            ax[1].set_title('Z-normalized traces (baseline corrected)')
+
+        elif style == "raster":
+            im = ax[1].imshow(traces_plot, aspect="auto", cmap="RdBu_r",
+                            interpolation="none", origin='lower')
+            ax[1].set_ylabel('ROI #', fontsize=10)
+            ax[1].set_xlabel('Frame', fontsize=10)
+            ax[1].set_title('Z-normalized traces (baseline corrected)')
+            plt.colorbar(im, ax=ax[1], label='Z-score')
+
+        plt.tight_layout()
+        plt.show()
 
     def compute_correlation_projection(self, include_diagonals=True, n_jobs=-1, overwrite=False, force_recompute=False):
         """
@@ -817,6 +875,7 @@ class Core:
         Extracts the average fluorescence signal for each ROI across all frames.
         Always computes BOTH raw and z-normalized traces to ensure consistency.
         Mimics IGOR's OS_TracesAndTriggers functionality for trace extraction.
+        Uses parallel processing for speed and IGOR's baseline z-normalization method.
 
         Parameters:
         -----------
@@ -833,47 +892,74 @@ class Core:
         if self.rois is None:
             raise ValueError("No ROIs defined. Cannot compute traces.")
 
-        # Use the H5 format: background=1, ROIs=-1,-2,-3,...
-        roi_mask = self.rois
-        unique_vals = np.unique(roi_mask)
-        roi_vals = unique_vals[unique_vals < 0]  # Get negative values (ROIs)
-        n_rois = len(roi_vals)
+        # Use pygor.core.gui.methods parallel extraction (fast, handles uint16 overflow)
+        import pygor.core.gui.methods
 
-        if n_rois == 0:
-            raise ValueError("No ROIs found in mask")
+        print(f"Computing traces using parallel extraction...")
 
-        n_frames = self.images.shape[0]
-        traces_raw = np.zeros((n_frames, n_rois))
+        # Extract raw traces using the fast parallel method
+        # Returns shape (n_rois, n_frames) so we transpose to (n_frames, n_rois)
+        traces_raw_t = pygor.core.gui.methods._fetch_traces_parallel(self.images, self.rois)
+        traces_raw = traces_raw_t.T  # Transpose to (n_frames, n_rois)
 
-        print(f"Computing traces for {n_rois} ROIs across {n_frames} frames...")
+        n_frames, n_rois = traces_raw.shape
 
-        # Extract traces for each ROI
-        for idx, roi_val in enumerate(sorted(roi_vals, reverse=True)):
-            mask = (roi_mask == roi_val)
-            # Compute mean signal across ROI pixels for each frame
-            for frame_idx in range(n_frames):
-                traces_raw[frame_idx, idx] = np.mean(self.images[frame_idx][mask])
-
-        # Always compute z-normalized traces
+        # Compute z-normalized traces using IGOR's baseline method
+        # IGOR uses first nSeconds_prerun_reference (after ignoring first X seconds) as baseline
         traces_znorm = np.zeros_like(traces_raw)
+
+        # Get baseline parameters from OS_Parameters
+        try:
+            baseline_seconds = self.__baseline_duration if hasattr(self, '_Core__baseline_duration') else 3.0
+            ignore_first_seconds = self.__ignore_first_seconds if hasattr(self, '_Core__ignore_first_seconds') else 0.0
+            frame_duration = 1.0 / self.frame_hz
+
+            # Calculate baseline window (in frames)
+            n_frames_ignore = int(ignore_first_seconds / frame_duration)
+            n_frames_baseline = int(baseline_seconds / frame_duration)
+
+            # Need at least 3 frames for SD calculation
+            if n_frames_baseline < 3:
+                n_frames_baseline = 3
+            # Don't use more than half the recording
+            if n_frames_baseline > n_frames // 2:
+                n_frames_baseline = n_frames // 2
+
+            baseline_start = n_frames_ignore
+            baseline_end = baseline_start + n_frames_baseline
+
+            print(f"Using baseline window: frames {baseline_start}-{baseline_end} ({n_frames_baseline} frames)")
+
+        except:
+            # Fallback: use first 10% of recording as baseline
+            baseline_start = 0
+            baseline_end = max(3, n_frames // 10)
+            print(f"Using default baseline: first {baseline_end} frames")
+
+        # Compute z-score for each ROI using its baseline period
         for roi_idx in range(n_rois):
             trace = traces_raw[:, roi_idx]
-            traces_znorm[:, roi_idx] = (trace - np.mean(trace)) / np.std(trace)
+            baseline = trace[baseline_start:baseline_end]
+            baseline_mean = np.mean(baseline)
+            baseline_std = np.std(baseline)
+
+            # IGOR formula: (trace - baseline_mean) / baseline_std
+            traces_znorm[:, roi_idx] = (trace - baseline_mean) / baseline_std
 
         # Set both attributes
-        self.traces_raw = traces_raw
-        self.traces_znorm = traces_znorm
+        self.traces_raw = traces_raw.astype(np.float32)
+        self.traces_znorm = traces_znorm.astype(np.float32)
 
         # Save to H5 if requested
         if overwrite:
-            success_raw = self.update_h5_key('Traces0_raw', traces_raw, overwrite=True)
-            success_znorm = self.update_h5_key('Traces0_znorm', traces_znorm, overwrite=True)
+            success_raw = self.update_h5_key('Traces0_raw', self.traces_raw, overwrite=True)
+            success_znorm = self.update_h5_key('Traces0_znorm', self.traces_znorm, overwrite=True)
             if success_raw and success_znorm:
                 print(f"Successfully saved {n_rois} raw and z-normalized traces to H5 file")
             else:
                 print("Warning: Some traces failed to save to H5 file")
 
-        return traces_raw, traces_znorm
+        return self.traces_raw, self.traces_znorm
 
     def compute_snippets_and_averages(self, overwrite=False):
         """

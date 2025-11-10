@@ -14,6 +14,102 @@ import napari
 from qtpy.QtWidgets import QApplication
 from qtpy.QtCore import QEventLoop
 import pygor.strf.spatial
+from joblib import Parallel, delayed
+import multiprocessing as mp
+
+
+def _fetch_traces_parallel(img_stack, roi_mask):
+    """
+    Extract traces from image stack using parallel processing.
+    Standalone function that can be imported and used by Core class.
+
+    Parameters:
+    -----------
+    img_stack : np.ndarray
+        Image stack with shape (n_frames, height, width)
+    roi_mask : np.ndarray
+        ROI mask in H5 format (background=1, ROIs=-1,-2,-3,...)
+
+    Returns:
+    --------
+    np.ndarray
+        Traces with shape (n_rois, n_frames)
+    """
+    import os
+    from multiprocessing import shared_memory
+
+    unique_vals = np.unique(roi_mask)
+    unique_vals = unique_vals[~np.isnan(unique_vals)]
+
+    # Handle both H5 format (ROIs = -1,-2,-3...) and Napari format (ROIs = 0,1,2...)
+    if np.any(unique_vals < 0):
+        # H5 format: negative values are ROIs
+        unique_vals = unique_vals[unique_vals < 0]
+    else:
+        # Napari format: non-negative values are ROIs (background should be NaN)
+        unique_vals = unique_vals[unique_vals >= 0]
+
+    n_rois = len(unique_vals)
+
+    # Use all available CPU cores
+    n_jobs = os.cpu_count()
+
+    # Create shared memory for img_stack to avoid copying to each worker
+    img_stack_c = np.ascontiguousarray(img_stack)  # Ensure contiguous memory
+    shm = shared_memory.SharedMemory(create=True, size=img_stack_c.nbytes)
+
+    # Copy data to shared memory
+    shm_array = np.ndarray(img_stack_c.shape, dtype=img_stack_c.dtype, buffer=shm.buf)
+    np.copyto(shm_array, img_stack_c)
+
+    try:
+        # Process each ROI in parallel - workers access shared memory
+        traces = Parallel(n_jobs=n_jobs, verbose=0)(
+            delayed(_process_single_roi_shared)(
+                img_stack_c.shape, img_stack_c.dtype, roi_mask, roi_val, shm.name
+            )
+            for roi_val in sorted(unique_vals, reverse=True)
+        )
+
+        return np.array(traces)
+
+    finally:
+        # Clean up shared memory
+        shm.close()
+        shm.unlink()
+
+
+# Standalone function for parallel processing (must be picklable)
+def _process_single_roi_shared(img_shape, img_dtype, roi_mask, roi_val, shm_name):
+    """Process a single ROI using shared memory. Standalone function for joblib."""
+    from multiprocessing import shared_memory
+
+    # Attach to existing shared memory
+    shm = shared_memory.SharedMemory(name=shm_name)
+    # Create numpy array view of shared memory
+    img_stack = np.ndarray(img_shape, dtype=img_dtype, buffer=shm.buf)
+
+    mask = (roi_mask == roi_val)
+
+    # CRITICAL: Manual sum to prevent uint16 overflow
+    # einsum with uint16 causes overflow when summing many pixels
+    # (e.g., 50 pixels × 55000 = 2,750,000 which exceeds uint16 max of 65535)
+    count = mask.sum()
+
+    # Extract traces frame by frame with explicit float64 accumulation
+    n_frames = img_shape[0]
+    sum_per_frame = np.zeros(n_frames, dtype=np.float64)
+
+    for frame_idx in range(n_frames):
+        # Sum pixels in this ROI for this frame, converting to float64 first
+        sum_per_frame[frame_idx] = np.sum(img_stack[frame_idx][mask].astype(np.float64))
+
+    # Don't close/unlink - parent will handle that
+    shm.close()
+
+    return sum_per_frame / count
+
+
 class NapariViewRois:
     def __init__(self, pygor_object):
         self.viewer = napari.Viewer()
@@ -257,7 +353,7 @@ class NapariDepthPrompt:
         return self.result  # Now `self.result` is updated before returning
 
 class NapariRoiPrompt():
-    def __init__(self, array_input, traces_plot_style = "individual", plot = False, existing_roi_mask=None, correlation_projection=None):
+    def __init__(self, array_input, traces_plot_style = "stacked", plot = False, existing_roi_mask=None, correlation_projection=None):
         if get_ipython() is not None:
             get_ipython().run_line_magic('matplotlib', 'Qt5Agg')
         import napari
@@ -275,6 +371,8 @@ class NapariRoiPrompt():
         self.event_loop = QEventLoop()
         self.make_fig = True
         self.already_plotted = []
+        # Cache the average image to avoid recomputing for large stacks
+        self._avg_image = None
 
         @self.viewer.bind_key("c")
         def plot_on_demand(viewer):
@@ -324,13 +422,17 @@ class NapariRoiPrompt():
 
     def on_close(self):
         """Function triggered when the viewer closes."""
-        print("Napari GUI closed. Generating final plot...")
+        print("Napari GUI closed...")
         self.grab_coordinates()  # Compute the final result
-        if self.viewer.layers["place ROIs"].data is not None:
+        self.update_self()
+
+        if self.viewer.layers["place ROIs"].data is not None and self.plot:
+            print("Generating final plot...")
             self.generate_plot()
 
     # Methods to handle ROI output
     def mask_from_coords(self, coords_list, mask_shape, shape_types=None):
+        print("Generating ROI mask from coordinates...")
         from skimage.draw import ellipse
 
         mask = np.ones(mask_shape) * np.nan  # Boolean mask
@@ -427,16 +529,14 @@ class NapariRoiPrompt():
         return h5_mask
         
     def fetch_traces(self, img_stack, roi_mask):
-        unique_vals = np.unique(roi_mask)
-        unique_vals = unique_vals[~np.isnan(unique_vals)]
-        traces = []
-        for n in unique_vals:
-            mask = (roi_mask == n)
-            # Efficiently compute the sum and count using einsum
-            sum_per_frame = np.einsum('ijk,jk->i', img_stack, mask, optimize=True)
-            count = mask.sum()
-            traces.append(sum_per_frame / count)
-        return np.array(traces)
+        """Extract traces using the shared parallel extraction function."""
+        print("Extracting traces from image stack...")
+
+        # Use the shared parallel extraction function (handles uint16 overflow)
+        traces = _fetch_traces_parallel(img_stack, roi_mask)
+
+        print("Trace extraction complete!")
+        return traces
 
     def get_or_create_figure(self):
         """Return the specific labeled figure, or create it if missing."""
@@ -454,21 +554,24 @@ class NapariRoiPrompt():
         print("Generating new plot")
         fig, ax = plt.subplots(2, 1, figsize=(10,4), label = FIGURE_LABEL)
         self.make_fig = False
-        plt.show(block=True)
+        # Don't call plt.show() - let Jupyter handle inline display
         return fig, ax
 
     def update_self(self):
+        print("Updating internal state with current ROI data...")
         self.roi_coordinates = self.viewer.layers["place ROIs"].data
         self.roi_shape_types = self.viewer.layers["place ROIs"].shape_type
-        self.mask = self.mask_from_coords(self.roi_coordinates, self.arr[0].shape, self.roi_shape_types)
-        self.traces = self.fetch_traces(self.arr, self.mask)
+        self.mask = self.mask_from_coords(self.roi_coordinates, self.arr[0].shape, self.roi_shape_types) # relatively fast
+        self.traces = self.fetch_traces(self.arr, self.mask) # slow with many ROIs and long recording stacks (bottleneck, function uses a for loop and appending to list)
 
     def generate_plot(self):
-        self.update_self()
         fig, ax = self.get_or_create_figure()
         colormap = plt.cm.rainbow(np.linspace(0, 1, len(self.traces)))
-        ax[0].imshow(np.average(self.arr, axis = 0), cmap = "Greys_r")
-        ax[0].imshow(self.mask, cmap = "rainbow", alpha = 0.25)
+        # Compute average image once and cache it
+        if self._avg_image is None:
+            self._avg_image = np.average(self.arr, axis=0)
+        ax[0].imshow(self._avg_image, cmap = "Greys_r", origin='lower')
+        ax[0].imshow(self.mask, cmap = "rainbow", alpha = 0.25, origin='lower')
         for n, coords in enumerate(self.roi_coordinates):
                 ax[0].scatter(coords[:, 1], coords[:, 0], s = 1)
                 ax[0].text(np.average(coords[:, 1]), np.average(coords[:, 0]), str(n), fontsize=16, ha="center", va="center", color="black")
@@ -505,7 +608,7 @@ class NapariRoiPrompt():
             fig.subplots_adjust(hspace=0, wspace=0)
         if self.traces_plot_style == "raster":
             if len(self.traces) > 0:
-                ax[1].imshow(self.traces, aspect = "auto", cmap = "Greys_r", interpolation="none")
+                ax[1].imshow(self.traces, aspect = "auto", cmap = "Greys_r", interpolation="none", origin='lower')
         plt.draw()
         
     def run(self):
@@ -567,4 +670,4 @@ class NapariRoiPrompt():
             plt.show(block = False)
         else:
             plt.close()
-        return self.fetch_traces(self.arr, self.mask)  # Now `self.result` is updated before returning
+        return self.traces  # Return already computed traces from update_self()
