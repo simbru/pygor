@@ -41,7 +41,7 @@ import pygor.utils.helpinfo
 import pygor.utils.unit_conversion as unit_conversion
 from pygor.classes.core_data import Core
 # import scipy
-from pygor.classes.core_data import try_fetch_os_params
+from pygor.classes.core_data import try_fetch_table_params
 
 @dataclass(repr = False)
 class STRF(Core):
@@ -76,7 +76,7 @@ class STRF(Core):
                 multicolour_bool = False
             else:
                 multicolour_bool = True
-            self.strf_dur_ms = try_fetch_os_params(HDF5_file, "Noise_FilterLength_s") * 1000
+            self.strf_dur_ms = try_fetch_table_params(HDF5_file, "Noise_FilterLength_s") * 1000
             # if True in bool_partofmulticolour_list and False in bool_partofmulticolour_list:
             #     raise AttributeError("There are both single-coloured and multi-coloured STRFs loaded. Manual fix required.")
             if multicolour_bool is True:
