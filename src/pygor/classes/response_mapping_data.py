@@ -50,11 +50,9 @@ class ResponseMapping(Core):
             startval = traces[:, trig]
             maxval = np.max(traces[:, trig:triggers[trig_idx + 1]], axis=1)
             response = maxval - startval
-            
             # Add response as a column with stimulus name as key
             stimulus_name = str(self.stimuli[trig_idx])
             response_dict[stimulus_name] = response
-        
         # Create DataFrame from dictionary
         df = pd.DataFrame(response_dict)
         df.index.name = 'ROI'
