@@ -3,6 +3,362 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 
+# ============================================================================
+# Helper functions for plot_tuning_function_with_traces
+# ============================================================================
+
+def _calculate_metric(data, metric='peak'):
+    """
+    Calculate summary metric for traces.
+
+    Parameters
+    ----------
+    data : ndarray
+        Array of traces (directions × timepoints)
+    metric : str or callable
+        'peak', 'auc', 'mean', or custom function
+
+    Returns
+    -------
+    values : ndarray
+        Metric value for each trace
+    """
+    if metric == 'peak':
+        return np.array([np.max(np.abs(trace)) for trace in data])
+    elif metric == 'auc':
+        return np.array([np.trapz(np.abs(trace)) for trace in data])
+    elif metric == 'mean':
+        return np.array([np.mean(trace) for trace in data])
+    elif callable(metric):
+        return np.array([metric(trace) for trace in data])
+    else:
+        return np.array([np.max(np.abs(trace)) for trace in data])
+
+
+def _prepare_tuning_data(osds_obj, roi_index, use_phases=None, show_trials=True, data_crop=None):
+    """
+    Extract and sort directional tuning data from OSDS object.
+
+    Parameters
+    ----------
+    osds_obj : OSDS object
+        Object containing directional response data
+    roi_index : int
+        ROI index to analyze
+    use_phases : bool or None
+        Whether to split data by phases. If None, auto-detect from osds_obj
+    show_trials : bool
+        Whether to include trial data
+    data_crop : tuple or None
+        (start, end) indices for cropping data
+
+    Returns
+    -------
+    dict with keys:
+        'data': sorted average traces (directions × timepoints)
+        'trial_data': sorted trial traces or None
+        'angles': sorted angles in radians
+        'directions_deg': sorted directions in degrees
+        'sort_indices': indices used for sorting
+        'phases_data': list of phase-separated average data (if multi-phase)
+        'phases_trial_data': list of phase-separated trial data (if multi-phase)
+        'use_phases': resolved boolean indicating if phases are used
+        'dir_phase_num': number of phases
+    """
+    # Auto-detect phases
+    if use_phases is None:
+        use_phases = osds_obj.dir_phase_num > 1
+
+    # Extract data
+    data = np.squeeze(osds_obj.split_averages_directionally()[:, [roi_index]])
+    directions_list = osds_obj.directions_list
+
+    # Get trial data if requested
+    trial_data = None
+    if show_trials:
+        trial_data = osds_obj.split_snippets_directionally()[:, :, roi_index, :]
+
+    # Handle data cropping
+    if data_crop is not None:
+        data = data[:, data_crop[0]:data_crop[1]]
+        if trial_data is not None:
+            trial_data = trial_data[:, :, data_crop[0]:data_crop[1]]
+
+    # Handle phase splitting for multi-phase data
+    phases_data = None
+    phases_trial_data = None
+
+    if use_phases and osds_obj.dir_phase_num > 1:
+        phase_split = data.shape[1] // osds_obj.dir_phase_num
+        phases_data = []
+        phases_trial_data = []
+
+        for phase_i in range(osds_obj.dir_phase_num):
+            start_idx = phase_i * phase_split
+            end_idx = (phase_i + 1) * phase_split if phase_i < osds_obj.dir_phase_num - 1 else data.shape[1]
+            phases_data.append(data[:, start_idx:end_idx])
+            if trial_data is not None:
+                phases_trial_data.append(trial_data[:, :, start_idx:end_idx])
+
+        # Concatenate phases for trace display
+        data = np.concatenate(phases_data, axis=1)
+        if trial_data is not None:
+            trial_data = np.concatenate(phases_trial_data, axis=2)
+
+    # Sort by direction
+    angles = np.radians(directions_list)
+    directions_deg = np.array(directions_list)
+    sort_indices = np.argsort(directions_deg)
+
+    sorted_angles = angles[sort_indices]
+    sorted_data = data[sort_indices]
+    sorted_directions_deg = directions_deg[sort_indices]
+    sorted_trial_data = trial_data[sort_indices] if trial_data is not None else None
+
+    return {
+        'data': sorted_data,
+        'trial_data': sorted_trial_data,
+        'angles': sorted_angles,
+        'directions_deg': sorted_directions_deg,
+        'sort_indices': sort_indices,
+        'phases_data': phases_data,
+        'phases_trial_data': phases_trial_data,
+        'use_phases': use_phases,
+        'dir_phase_num': osds_obj.dir_phase_num
+    }
+
+
+def _setup_figure_and_axes(ax, num_subplots=1):
+    """
+    Handle figure and axes creation/validation.
+
+    Parameters
+    ----------
+    ax : Axes, array/list of Axes, or None
+        Provided axes or None for automatic creation
+    num_subplots : int
+        Number of subplots needed
+
+    Returns
+    -------
+    fig : Figure
+    axes : list of Axes
+        Always returns a list for consistency
+    """
+    if ax is None:
+        fig, ax = plt.subplots(1, num_subplots, figsize=(6*num_subplots, 5))
+        if num_subplots > 1:
+            plt.subplots_adjust(wspace=0.8)
+        axes = [ax] if num_subplots == 1 else list(ax)
+        return fig, axes
+
+    # Handle provided axes
+    if hasattr(ax, '__len__') and hasattr(ax, '__getitem__'):
+        if len(ax) != num_subplots:
+            raise ValueError(f"Expected {num_subplots} axes, got {len(ax)}")
+        return ax[0].figure, list(ax)
+    else:
+        # Single axes provided
+        if num_subplots != 1:
+            raise ValueError(f"Expected {num_subplots} axes, got 1")
+        return ax.figure, [ax]
+
+
+def _calculate_orbit_positions(fig, ax_polar, angles, orbit_distance=0.5,
+                               trace_scale=0.2, trace_aspect_x=1.0, trace_aspect_y=1.0):
+    """
+    Calculate positions for orbit trace subplots around polar plot.
+
+    Parameters
+    ----------
+    fig : Figure
+    ax_polar : Axes
+        The polar plot axes
+    angles : ndarray
+        Array of angles in radians
+    orbit_distance : float
+        Distance of trace orbit from polar plot center
+    trace_scale : float
+        Scale factor for trace subplot size
+    trace_aspect_x : float
+        Horizontal scaling factor for trace plots
+    trace_aspect_y : float
+        Vertical scaling factor for trace plots
+
+    Returns
+    -------
+    positions : list of tuples
+        Each tuple is (x_center, y_center, trace_width, trace_height)
+    """
+    fig.canvas.draw_idle()
+    axes_bbox = ax_polar.get_position()
+    axes_center_x = axes_bbox.x0 + axes_bbox.width / 2
+    axes_center_y = axes_bbox.y0 + axes_bbox.height / 2
+
+    fig_size = fig.get_size_inches()
+    fig_aspect = fig_size[0] / fig_size[1]
+
+    # Aspect ratio correction for circular orbit
+    if fig_aspect > 1:
+        orbit_radius_x = orbit_distance / fig_aspect
+        orbit_radius_y = orbit_distance
+    else:
+        orbit_radius_x = orbit_distance
+        orbit_radius_y = orbit_distance * fig_aspect
+
+    base_trace_size = trace_scale * min(axes_bbox.width, axes_bbox.height)
+    trace_width = base_trace_size * trace_aspect_x
+    trace_height = base_trace_size * trace_aspect_y
+
+    positions = []
+    for angle in angles:
+        x_center = axes_center_x + orbit_radius_x * np.cos(angle)
+        y_center = axes_center_y + orbit_radius_y * np.sin(angle)
+        positions.append((x_center, y_center, trace_width, trace_height))
+
+    return positions
+
+
+def _calculate_global_limits(data_list, trial_data_list=None, minimal=True):
+    """
+    Calculate consistent y-limits across all data.
+
+    Parameters
+    ----------
+    data_list : list of ndarrays
+        List of data arrays (can be single-element list)
+    trial_data_list : list of ndarrays or None
+        List of trial data arrays
+    minimal : bool
+        Whether to use minimal buffering
+
+    Returns
+    -------
+    y_min, y_max : float
+        Global y-limits
+    """
+    if trial_data_list is not None and any(td is not None for td in trial_data_list):
+        all_data = np.concatenate([td.flatten() for td in trial_data_list if td is not None])
+    else:
+        all_data = np.concatenate([d.flatten() for d in data_list])
+
+    y_min = np.min(all_data)
+    y_max = np.max(all_data)
+    y_range = y_max - y_min
+    y_buffer = y_range * 0.05 if minimal else y_range * 0.1
+
+    return y_min - y_buffer, y_max + y_buffer
+
+
+def _style_polar_plot(ax_polar, angles, values, color, minimal=True, global_max=None):
+    """
+    Apply consistent polar plot styling.
+
+    Parameters
+    ----------
+    ax_polar : PolarAxes
+        The polar axes to style
+    angles : ndarray
+        Array of angles in radians
+    values : ndarray
+        Values to plot at each angle
+    color : str
+        Color for the plot
+    minimal : bool
+        Whether to use minimal styling
+    global_max : float or None
+        Maximum value for consistent scaling across multiple plots
+    """
+    polar_angles = np.append(angles, angles[0])
+    polar_values = np.append(values, values[0])
+
+    ax_polar.plot(polar_angles, polar_values, color=color, alpha=1)
+    ax_polar.fill(polar_angles, polar_values, alpha=0.33, color=color)
+
+    max_val = global_max if global_max is not None else np.max(values)
+
+    if minimal:
+        ax_polar.grid(True, alpha=0.3)
+        ax_polar.set_thetagrids([])
+
+        max_tick = int(np.ceil(max_val))
+
+        # Smart tick calculation
+        if max_tick <= 3:
+            ticks = [1, 2, max_tick] if max_tick > 2 else [1, max_tick]
+        else:
+            step = max(1, max_tick // 3)
+            ticks = [step, 2*step, 3*step]
+            if ticks[-1] > max_tick:
+                ticks[-1] = max_tick
+
+        ticks = sorted(list(set(ticks)))[:3]
+        ax_polar.set_rgrids(ticks, alpha=0.7)
+        ax_polar.set_ylim(0, max_val * 1.1)
+    else:
+        ax_polar.grid(True, alpha=0.3)
+        ax_polar.set_ylim(0, max_val * 1.1)
+
+
+def _add_orbit_trace(fig, position, trace_data, trial_data, color, y_limits,
+                     show_trials=True, trace_alpha=1.0):
+    """
+    Create a single orbit trace subplot.
+
+    Parameters
+    ----------
+    fig : Figure
+    position : tuple
+        (x_center, y_center, trace_width, trace_height)
+    trace_data : ndarray
+        Average trace to plot
+    trial_data : ndarray or None
+        Individual trial traces
+    color : str
+        Color for the trace
+    y_limits : tuple
+        (y_min, y_max)
+    show_trials : bool
+        Whether to show individual trials
+    trace_alpha : float
+        Alpha for average trace
+
+    Returns
+    -------
+    trace_ax : Axes
+        The created trace axes
+    """
+    x_center, y_center, trace_width, trace_height = position
+
+    trace_ax = fig.add_axes([
+        x_center - trace_width/2,
+        y_center - trace_height/2,
+        trace_width,
+        trace_height
+    ])
+
+    if show_trials and trial_data is not None:
+        trace_ax.plot(trial_data.T, color=color, alpha=0.1)
+
+    trace_ax.plot(trace_data, color=color, alpha=trace_alpha)
+    trace_ax.set_facecolor((1, 1, 1, 0))
+    trace_ax.axhline(0, color='gray', alpha=0.4)
+
+    trace_ax.set_xlim(0, len(trace_data))
+    trace_ax.set_ylim(y_limits[0], y_limits[1])
+    trace_ax.set_xticks([])
+    trace_ax.set_yticks([])
+
+    for spine in trace_ax.spines.values():
+        spine.set_visible(False)
+
+    return trace_ax
+
+
+# ============================================================================
+# Main plotting function
+# ============================================================================
+
 def plot_tuning_function_with_traces(osds_obj, roi_index, ax=None, show_trials=True, 
                                     metric='peak', trace_scale=0.2, minimal=True, 
                                     polar_color="#3D3AC4", trace_alpha=1, use_phases=None, 
@@ -53,179 +409,75 @@ def plot_tuning_function_with_traces(osds_obj, roi_index, ax=None, show_trials=T
         If separate_phase_axes=False: single polar plot axes
         If separate_phase_axes=True: list of polar axes (one per phase)
     """
-    # Automatically use phases if dir_phase_num > 1 and use_phases not specified
-    if use_phases is None:
-        use_phases = osds_obj.dir_phase_num > 1
-    
     # Set default phase colors
     if phase_colors is None:
         phase_colors = ["#000000", "#4B4B4B", '#8B4513', '#483D8B']
-    
-    # Debug print
-    # print(f"DEBUG: dir_phase_num = {osds_obj.dir_phase_num}, use_phases = {use_phases}")
-    # print(f"DEBUG: phase_colors = {phase_colors}")
 
-    # Extract data from OSDS object
-    data = np.squeeze(osds_obj.split_averages_directionally()[:, [roi_index]])
-    directions_list = osds_obj.directions_list
-    
-    # Get trial data if requested
-    trial_data = None
-    if show_trials:
-        trial_data = osds_obj.split_snippets_directionally()[:, :, roi_index, :]
-    
-    # Handle data cropping
+    # Prepare all data using helper function
     data_crop = kwargs.get('data_crop', None)
-    if data_crop is not None:
-        data = data[:, data_crop[0]:data_crop[1]]
-        if trial_data is not None:
-            trial_data = trial_data[:, :, data_crop[0]:data_crop[1]]
-    
-    # Handle phase splitting for dual-phase data
-    individual_phases_data = None
-    if use_phases and osds_obj.dir_phase_num > 1:
-        # print(f"DEBUG: Processing {osds_obj.dir_phase_num} phases")
-        # print(f"DEBUG: Original data shape: {data.shape}")
-        
-        # Split data into phases
-        phase_split = data.shape[1] // osds_obj.dir_phase_num
-        # print(f"DEBUG: Phase split at: {phase_split}")
-        
-        phases_data = []
-        phases_trial_data = []
-        
-        for phase_i in range(osds_obj.dir_phase_num):
-            start_idx = phase_i * phase_split
-            end_idx = (phase_i + 1) * phase_split if phase_i < osds_obj.dir_phase_num - 1 else data.shape[1]
-            # print(f"DEBUG: Phase {phase_i}: indices {start_idx}:{end_idx}")
-            phases_data.append(data[:, start_idx:end_idx])
-            if trial_data is not None:
-                phases_trial_data.append(trial_data[:, :, start_idx:end_idx])
-        
-        # Store individual phases for polar plot metrics
-        individual_phases_data = phases_data.copy()
-        
-        # Use concatenated phases for traces
-        data = np.concatenate(phases_data, axis=1)
-        if trial_data is not None:
-            trial_data = np.concatenate(phases_trial_data, axis=2)
-        # print(f"DEBUG: Concatenated data shape: {data.shape}")
-    
-    # Convert directions and sort
-    angles = np.radians(directions_list)
-    directions_deg = np.array(directions_list)
-    sort_indices = np.argsort(directions_deg)
-    sorted_angles = angles[sort_indices]
-    sorted_data = data[sort_indices]
-    sorted_directions_deg = directions_deg[sort_indices]
-    if trial_data is not None:
-        sorted_trial_data = trial_data[sort_indices]
+    data_dict = _prepare_tuning_data(osds_obj, roi_index, use_phases, show_trials, data_crop)
+
+    # Unpack prepared data
+    sorted_data = data_dict['data']
+    sorted_trial_data = data_dict['trial_data']
+    sorted_angles = data_dict['angles']
+    sorted_directions_deg = data_dict['directions_deg']
+    sort_indices = data_dict['sort_indices']
+    individual_phases_data = data_dict['phases_data']
+    phases_trial_data = data_dict['phases_trial_data']
+    use_phases = data_dict['use_phases']
+    dir_phase_num = data_dict['dir_phase_num']
     
     # Calculate metric values for polar plot (handle phases)
-    if use_phases and osds_obj.dir_phase_num > 1 and individual_phases_data is not None:
-        # print(f"DEBUG: Calculating metrics for {osds_obj.dir_phase_num} phases")
-        # Calculate metrics for each phase separately
+    if use_phases and dir_phase_num > 1 and individual_phases_data is not None:
+        # Calculate metrics for each phase separately using helper function
         phase_values = []
-        
-        for phase_i in range(osds_obj.dir_phase_num):
-            # Use the individual phase data, then apply sort
+        for phase_i in range(dir_phase_num):
             phase_data = individual_phases_data[phase_i][sort_indices]
-            # print(f"DEBUG: Phase {phase_i} data shape: {phase_data.shape}")
-            
-            if metric == 'peak':
-                phase_vals = np.array([np.max(np.abs(trace)) for trace in phase_data])
-            elif metric == 'auc':
-                phase_vals = np.array([np.trapz(np.abs(trace)) for trace in phase_data])
-            elif metric == 'mean':
-                phase_vals = np.array([np.mean(trace) for trace in phase_data])
-            elif callable(metric):
-                phase_vals = np.array([metric(trace) for trace in phase_data])
-            else:
-                phase_vals = np.array([np.max(np.abs(trace)) for trace in phase_data])
-            
-            # print(f"DEBUG: Phase {phase_i} values: {phase_vals[:3]}...")  # Show first 3 values
+            phase_vals = _calculate_metric(phase_data, metric)
             phase_values.append(phase_vals)
     else:
         # Single phase calculation
-        if metric == 'peak':
-            values = np.array([np.max(np.abs(trace)) for trace in sorted_data])
-        elif metric == 'auc':
-            values = np.array([np.trapz(np.abs(trace)) for trace in sorted_data])
-        elif metric == 'mean':
-            values = np.array([np.mean(trace) for trace in sorted_data])
-        elif callable(metric):
-            values = np.array([metric(trace) for trace in sorted_data])
-        else:
-            values = np.array([np.max(np.abs(trace)) for trace in sorted_data])  # Default to peak
+        values = _calculate_metric(sorted_data, metric)
     
     # Branch into separate mode vs overlay mode
     if separate_phase_axes and use_phases and osds_obj.dir_phase_num > 1 and individual_phases_data is not None:
         # SEPARATE AXES MODE: Each phase gets its own polar plot + orbit traces
         # print(f"DEBUG: Using separate axes mode for {osds_obj.dir_phase_num} phases")
         
-        # Handle axes creation/validation
-        if ax is None:
-            # Create figure and axes automatically with proper spacing
-            import matplotlib.pyplot as plt
-            fig, ax = plt.subplots(1, osds_obj.dir_phase_num, 
-                                 figsize=(6*osds_obj.dir_phase_num, 5))
-            # Add space between subplots to prevent orbit overlap
-            plt.subplots_adjust(wspace=0.8)  # Increase horizontal spacing
-            if osds_obj.dir_phase_num == 1:
-                ax = [ax]  # Make it a list for consistency
-        elif hasattr(ax, '__len__') and hasattr(ax, '__getitem__'):
-            # Handle list, tuple, or numpy array of axes
-            if len(ax) != osds_obj.dir_phase_num:
-                raise ValueError(f"When separate_phase_axes=True, ax array must have {osds_obj.dir_phase_num} axes, got {len(ax)}")
-            fig = ax[0].figure
-            
-            # Intelligently adjust spacing to prevent orbit overlap
-            if osds_obj.dir_phase_num > 1:
-                # Check current subplot positions to determine if spacing adjustment is needed
-                current_positions = [a.get_position() for a in ax]
-                
-                # Calculate the minimum spacing needed based on orbit_distance and trace_scale
-                # Each orbit extends approximately orbit_distance in each direction from the center
-                required_spacing = 2 * orbit_distance * trace_scale
-                
-                # Check if current spacing is sufficient
-                if len(current_positions) >= 2:
-                    current_spacing = current_positions[1].x0 - (current_positions[0].x0 + current_positions[0].width)
-                    if current_spacing < required_spacing:
-                        # Adjust spacing to prevent overlap
-                        optimal_wspace = max(0.4, required_spacing * 2)  # At least 0.4, or calculated value
-                        fig.subplots_adjust(wspace=optimal_wspace)
-        else:
-            # Single axes provided but we need multiple
-            raise ValueError(f"When separate_phase_axes=True, ax must be a list/tuple/array of {osds_obj.dir_phase_num} axes, or None for automatic creation")
-        
-        if ax is not None:
-            fig = ax[0].figure
+        # Handle axes creation/validation using helper function
+        fig, ax = _setup_figure_and_axes(ax, dir_phase_num)
+
+        # Adjust spacing to prevent orbit overlap if axes were provided
+        if dir_phase_num > 1 and ax is not None:
+            current_positions = [a.get_position() for a in ax]
+            required_spacing = 2 * orbit_distance * trace_scale
+            if len(current_positions) >= 2:
+                current_spacing = current_positions[1].x0 - (current_positions[0].x0 + current_positions[0].width)
+                if current_spacing < required_spacing:
+                    optimal_wspace = max(0.4, required_spacing * 2)
+                    fig.subplots_adjust(wspace=optimal_wspace)
+
         ax_polars = []
         all_trace_axes = []
         
-        # Calculate global limits for both polar plots and orbit traces
-        # Use the same metric-based scaling for consistency
-        all_phase_metric_values = np.concatenate(phase_values)
-        global_metric_min = np.min(all_phase_metric_values)
-        global_metric_max = np.max(all_phase_metric_values)
-        
-        # Also calculate global limits for raw trace data
-        if trial_data is not None:
-            all_trial_data = []
-            for phase_i in range(osds_obj.dir_phase_num):
-                phase_trial_data = phases_trial_data[phase_i][sort_indices]  # Apply sort to trial data
-                all_trial_data.append(phase_trial_data.flatten())
-            all_raw_data = np.concatenate(all_trial_data)
+        # Calculate global limits using helper functions
+        global_metric_max = max([np.max(phase_vals) for phase_vals in phase_values])
+
+        # Calculate global y-limits for trace data
+        if sorted_trial_data is not None:
+            trial_data_list = [phases_trial_data[i][sort_indices] for i in range(dir_phase_num)]
+            y_min_global, y_max_global = _calculate_global_limits(
+                [individual_phases_data[i] for i in range(dir_phase_num)],
+                trial_data_list,
+                minimal
+            )
         else:
-            all_raw_data = np.concatenate([phase_data.flatten() for phase_data in individual_phases_data])
-        
-        y_min_raw = np.min(all_raw_data)
-        y_max_raw = np.max(all_raw_data)
-        y_range_raw = y_max_raw - y_min_raw
-        y_buffer_raw = y_range_raw if minimal else y_range_raw * 0.1
-        y_min_global = y_min_raw - y_buffer_raw
-        y_max_global = y_max_raw + y_buffer_raw
+            y_min_global, y_max_global = _calculate_global_limits(
+                [individual_phases_data[i] for i in range(dir_phase_num)],
+                None,
+                minimal
+            )
         
         # Process each phase separately
         for phase_i in range(osds_obj.dir_phase_num):
@@ -239,96 +491,31 @@ def plot_tuning_function_with_traces(osds_obj, roi_index, ax=None, show_trials=T
             ax_polar.set_theta_zero_location('E')
             ax_polars.append(ax_polar)
             
-            # Plot polar for this phase only
-            polar_angles = np.append(sorted_angles, sorted_angles[0])
+            # Plot and style polar for this phase using helper function
             phase_vals = phase_values[phase_i]
-            phase_polar_values = np.append(phase_vals, phase_vals[0])
+            _style_polar_plot(ax_polar, sorted_angles, phase_vals, phase_color, minimal, global_metric_max)
             
-            ax_polar.plot(polar_angles, phase_polar_values, color=phase_color, alpha=1)
-            ax_polar.fill(polar_angles, phase_polar_values, alpha=0.33, color=phase_color)
-            
-            # Styling - use global scaling for consistency
-            if minimal:
-                ax_polar.grid(True, alpha=0.3)
-                ax_polar.set_thetagrids([])
-                # Use global metric max for consistent scaling across phases
-                max_tick = int(np.ceil(global_metric_max))
-                if max_tick <= 3:
-                    ticks = [1, 2, max_tick] if max_tick > 2 else [1, max_tick]
-                else:
-                    step = max_tick // 3
-                    if step == 0:
-                        step = 1
-                    ticks = [step, 2*step, 3*step]
-                    if ticks[-1] > max_tick:
-                        ticks = [step, 2*step, max_tick]
-                ticks = sorted(list(set(ticks)))[:3]
-                ax_polar.set_rgrids(ticks, alpha=0.7)
-                # Set consistent radial limits
-                ax_polar.set_ylim(0, global_metric_max * 1.1)
-            else:
-                ax_polar.grid(True, alpha=0.3)
-                ax_polar.set_ylim(0, global_metric_max * 1.1)
-            
-            # Add orbit traces for this phase
-            phase_trace_axes = []
-            
-            # Get phase-specific data
+            # Add orbit traces for this phase using helper functions
             phase_data = individual_phases_data[phase_i][sort_indices]
             phase_trial_data = None
-            if show_trials and trial_data is not None:
+            if show_trials and sorted_trial_data is not None:
                 phase_trial_data = phases_trial_data[phase_i][sort_indices]
-            
-            # Positioning calculations - get fresh position after any layout changes
-            fig.canvas.draw_idle()  # Ensure layout is updated
-            axes_bbox = ax_polar.get_position()
-            axes_center_x = axes_bbox.x0 + axes_bbox.width / 2
-            axes_center_y = axes_bbox.y0 + axes_bbox.height / 2
-            
-            fig_size = fig.get_size_inches()
-            fig_aspect = fig_size[0] / fig_size[1]
-            
-            base_orbit_distance = orbit_distance
-            if fig_aspect > 1:
-                orbit_radius_x = base_orbit_distance / fig_aspect
-                orbit_radius_y = base_orbit_distance
-            else:
-                orbit_radius_x = base_orbit_distance
-                orbit_radius_y = base_orbit_distance * fig_aspect
-            
-            base_trace_size = trace_scale * min(axes_bbox.width, axes_bbox.height)
-            trace_width = base_trace_size * trace_aspect_x
-            trace_height = base_trace_size * trace_aspect_y
-            
-            # Create orbit traces for this phase
-            for i, angle in enumerate(sorted_angles):
-                x_center = axes_center_x + orbit_radius_x * np.cos(angle)
-                y_center = axes_center_y + orbit_radius_y * np.sin(angle)
-                
-                trace_ax = fig.add_axes([
-                    x_center - trace_width/2,
-                    y_center - trace_height/2, 
-                    trace_width,
-                    trace_height
-                ])
-                
-                # Plot trace data for this phase only
-                if show_trials and phase_trial_data is not None:
-                    trace_ax.plot(phase_trial_data[i].T, color=phase_color, alpha=0.1)
-                trace_ax.plot(phase_data[i], color=phase_color, alpha=trace_alpha)
-                
-                trace_ax.set_facecolor((1, 1, 1, 0))
-                trace_ax.axhline(0, color='gray', alpha=0.4)
-                
-                # Clean styling
-                trace_ax.set_xlim(0, len(phase_data[i]))
-                trace_ax.set_ylim(y_min_global, y_max_global)
-                trace_ax.set_xticks([])
-                trace_ax.set_yticks([])
-                
-                for spine in trace_ax.spines.values():
-                    spine.set_visible(False)
-                    
+
+            # Calculate orbit positions
+            positions = _calculate_orbit_positions(
+                fig, ax_polar, sorted_angles, orbit_distance,
+                trace_scale, trace_aspect_x, trace_aspect_y
+            )
+
+            # Create orbit traces
+            phase_trace_axes = []
+            for i, position in enumerate(positions):
+                trace_ax = _add_orbit_trace(
+                    fig, position, phase_data[i],
+                    phase_trial_data[i] if phase_trial_data is not None else None,
+                    phase_color, (y_min_global, y_max_global),
+                    show_trials, trace_alpha
+                )
                 phase_trace_axes.append(trace_ax)
             
             all_trace_axes.append(phase_trace_axes)
@@ -338,20 +525,11 @@ def plot_tuning_function_with_traces(osds_obj, roi_index, ax=None, show_trials=T
         
     else:
         # OVERLAY MODE: Single polar plot with overlaid phases (original behavior)
-        # print("DEBUG: Using overlay mode")
-        
-        # Handle axes creation/validation
-        if ax is None:
-            # Create figure and axes automatically
-            import matplotlib.pyplot as plt
-            fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-        elif hasattr(ax, '__len__') and hasattr(ax, '__getitem__'):
-            ax = ax[0]  # Use first axes if array/list provided
-            fig = ax.figure
-        else:
-            # Single axes provided
-            fig = ax.figure
-        
+
+        # Handle axes creation/validation using helper function
+        fig, axes_list = _setup_figure_and_axes(ax, 1)
+        ax = axes_list[0]
+
         # Convert to polar using subplot positioning instead of absolute coordinates
         ax_gridspec = ax.get_subplotspec()
         ax.remove()
@@ -359,151 +537,73 @@ def plot_tuning_function_with_traces(osds_obj, roi_index, ax=None, show_trials=T
         ax_polar.set_theta_zero_location('E')
         
         # Plot central polar (handle phases)
-        polar_angles = np.append(sorted_angles, sorted_angles[0])
-        
-        if use_phases and osds_obj.dir_phase_num > 1 and 'phase_values' in locals():
-            # print(f"DEBUG: Plotting {len(phase_values)} phases on polar plot")
-            # Plot each phase on polar plot
+        if use_phases and dir_phase_num > 1 and 'phase_values' in locals():
+            # Multi-phase: plot each phase with different style
+            polar_angles = np.append(sorted_angles, sorted_angles[0])
             for phase_i, phase_vals in enumerate(phase_values):
                 phase_polar_values = np.append(phase_vals, phase_vals[0])
                 phase_color = phase_colors[phase_i % len(phase_colors)]
                 linestyle = ['-', '--', '-.', ':'][phase_i % 4]
-                
-                # print(f"DEBUG: Phase {phase_i}: color={phase_color}, style={linestyle}")
-                ax_polar.plot(polar_angles, phase_polar_values, color=phase_color, 
+                ax_polar.plot(polar_angles, phase_polar_values, color=phase_color,
                              alpha=0.9, linestyle=linestyle)
                 ax_polar.fill(polar_angles, phase_polar_values, alpha=0.2, color=phase_color)
-        else:
-            # print("DEBUG: Single phase polar plot")
-            # Single phase polar plot
-            polar_values = np.append(values, values[0])
-            ax_polar.plot(polar_angles, polar_values, color=polar_color, alpha=0.8)
-            ax_polar.fill(polar_angles, polar_values, alpha=0.2, color=polar_color)
-        
-        # Calculate global limits for both polar plots and orbit traces
-        # Get metric values for consistent scaling
-        if use_phases and osds_obj.dir_phase_num > 1 and 'phase_values' in locals():
-            all_metric_values = np.concatenate(phase_values)
             global_metric_max = max([np.max(phase_vals) for phase_vals in phase_values])
         else:
-            all_metric_values = values
+            # Single phase: use helper function for styling
+            _style_polar_plot(ax_polar, sorted_angles, values, polar_color, minimal, None)
             global_metric_max = np.max(values)
-        
-        # Calculate global y-limits for trace data
-        if trial_data is not None:
-            all_data = sorted_trial_data.flatten()
-        else:
-            all_data = sorted_data.flatten()
-        
-        y_min = np.min(all_data)
-        y_max = np.max(all_data)
-        y_range = y_max - y_min
-        y_buffer = y_range if minimal else y_range * 0.1
-        y_min_global = y_min - y_buffer
-        y_max_global = y_max + y_buffer
-        
-        if minimal:
-            # Minimal polar styling
-            ax_polar.grid(True, alpha=.3)
-            ax_polar.set_thetagrids([])  # No angle labels
-            
-            # Use global metric max for consistent polar scaling
-            max_tick = int(np.ceil(global_metric_max))
-            if max_tick <= 3:
-                ticks = [1, 2, max_tick] if max_tick > 2 else [1, max_tick]
-            else:
-                # Create 3 evenly spaced integer ticks
-                step = max_tick // 3
-                if step == 0:
-                    step = 1
-                ticks = [step, 2*step, 3*step]
-                # Adjust if needed to not exceed max_tick
-                if ticks[-1] > max_tick:
-                    ticks = [step, 2*step, max_tick]
-            
-            # Remove duplicates and ensure we have at most 3 ticks
-            ticks = sorted(list(set(ticks)))[:3]
-            ax_polar.set_rgrids(ticks, alpha=0.7)
-            # Set consistent radial limits
-            ax_polar.set_ylim(0, global_metric_max * 1.1)
-        else:
-            # Full radial grid for non-minimal mode
-            ax_polar.grid(True, alpha=0.3)
-            ax_polar.set_ylim(0, global_metric_max * 1.1)
 
-        # Add floating trace snippets around perimeter
+        # Apply styling for multi-phase plots (single-phase already styled above)
+        if use_phases and dir_phase_num > 1:
+            if minimal:
+                ax_polar.grid(True, alpha=0.3)
+                ax_polar.set_thetagrids([])
+                max_tick = int(np.ceil(global_metric_max))
+                if max_tick <= 3:
+                    ticks = [1, 2, max_tick] if max_tick > 2 else [1, max_tick]
+                else:
+                    step = max(1, max_tick // 3)
+                    ticks = [step, 2*step, 3*step]
+                    if ticks[-1] > max_tick:
+                        ticks[-1] = max_tick
+                ticks = sorted(list(set(ticks)))[:3]
+                ax_polar.set_rgrids(ticks, alpha=0.7)
+                ax_polar.set_ylim(0, global_metric_max * 1.1)
+            else:
+                ax_polar.grid(True, alpha=0.3)
+                ax_polar.set_ylim(0, global_metric_max * 1.1)
+
+        # Calculate global y-limits for trace data using helper function
+        y_min_global, y_max_global = _calculate_global_limits(
+            [sorted_data],
+            [sorted_trial_data] if sorted_trial_data is not None else None,
+            minimal
+        )
+
+        # Add floating trace snippets around perimeter using helper functions
+        positions = _calculate_orbit_positions(
+            fig, ax_polar, sorted_angles, orbit_distance,
+            trace_scale, trace_aspect_x, trace_aspect_y
+        )
+
         trace_axes = []
-        
-        # Get axes position and figure aspect ratio - get fresh position after any layout changes
-        fig.canvas.draw_idle()  # Ensure layout is updated
-        axes_bbox = ax_polar.get_position()
-        axes_center_x = axes_bbox.x0 + axes_bbox.width / 2
-        axes_center_y = axes_bbox.y0 + axes_bbox.height / 2
-        
-        # Get figure size in inches to calculate display aspect ratio
-        fig_size = fig.get_size_inches()
-        fig_aspect = fig_size[0] / fig_size[1]  # width / height
-        
-        # Use user-specified orbit distance with aspect ratio correction
-        base_orbit_distance = orbit_distance
-        
-        # Adjust orbit radius components to maintain circular appearance in display coordinates
-        if fig_aspect > 1:  # Wide figure
-            orbit_radius_x = base_orbit_distance / fig_aspect  # Compress horizontally
-            orbit_radius_y = base_orbit_distance
-        else:  # Tall figure
-            orbit_radius_x = base_orbit_distance
-            orbit_radius_y = base_orbit_distance * fig_aspect  # Compress vertically
-        
-        # Base trace size (can be made rectangular with aspect ratios)
-        base_trace_size = trace_scale * min(axes_bbox.width, axes_bbox.height)
-        trace_width = base_trace_size * trace_aspect_x
-        trace_height = base_trace_size * trace_aspect_y
-        
-        for i, angle in enumerate(sorted_angles):
-            # Circular positioning with aspect ratio correction
-            x_center = axes_center_x + orbit_radius_x * np.cos(angle)
-            y_center = axes_center_y + orbit_radius_y * np.sin(angle)
-            
-            # Create trace subplot (can be rectangular now)
-            trace_ax = fig.add_axes([
-                x_center - trace_width/2,
-                y_center - trace_height/2, 
-                trace_width,
-                trace_height
-            ])
-            
-            # Plot trace (handle phases with separation line)
-            if show_trials and trial_data is not None:
-                trace_ax.plot(sorted_trial_data[i].T, 'k-',alpha=0.1)
-            trace_ax.plot(sorted_data[i], 'k-', alpha=trace_alpha)
-            # set background to transparent
-            trace_ax.set_facecolor((1, 1, 1, 0))
-            trace_ax.axhline(0, color='gray', alpha=0.4)
-            
-            # Add phase separation line if multi-phase
-            if use_phases and osds_obj.dir_phase_num > 1 and individual_phases_data is not None:
-                phase_split = len(individual_phases_data[0][0])  # Length of one phase
-                for phase_i in range(1, osds_obj.dir_phase_num):
-                    sep_x = phase_i * phase_split
-                    # trace_ax.axvline(sep_x, color='k', alpha=0.2, 
-                    #                 linestyle='-', zorder = -1)
-                    # Alternating shaded background for phases
+        for i, position in enumerate(positions):
+            trace_ax = _add_orbit_trace(
+                fig, position, sorted_data[i],
+                sorted_trial_data[i] if sorted_trial_data is not None else None,
+                'k', (y_min_global, y_max_global),
+                show_trials, trace_alpha
+            )
+
+            # Add phase separation shading if multi-phase
+            if use_phases and dir_phase_num > 1 and individual_phases_data is not None:
+                phase_split = len(individual_phases_data[0][0])
+                for phase_i in range(1, dir_phase_num):
                     if phase_i % 2 == 1:
-                        trace_ax.axvspan((phase_i - 1) * phase_split, 
-                                        phase_i * phase_split, 
+                        trace_ax.axvspan((phase_i - 1) * phase_split,
+                                        phase_i * phase_split,
                                         facecolor='gray', alpha=0.5, zorder=-1, edgecolor='none')
-            
-            # Clean minimal styling
-            trace_ax.set_xlim(0, len(sorted_data[i]))
-            trace_ax.set_ylim(y_min_global, y_max_global)
-            trace_ax.set_xticks([])
-            trace_ax.set_yticks([])
-            
-            # Remove all spines for clean look
-            for spine in trace_ax.spines.values():
-                spine.set_visible(False)
-                
+
             trace_axes.append(trace_ax)
         
         
