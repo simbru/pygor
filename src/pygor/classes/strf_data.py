@@ -2635,6 +2635,97 @@ class STRF(Core):
         # return np.where(pass_bool, vals, np.nan)
         return pygor.strf.temporal.find_peaktime_obj(self)
 
+    def get_strf_peak_times(self, roi=None, mask=None, interpolate=True, upscale_factor=10):
+        """
+        Get peak times for each pixel in STRF data.
+
+        Parameters:
+        -----------
+        roi : int or None, optional
+            ROI index to analyze. If None, returns peak times for all ROIs (vectorized)
+        mask : np.ndarray, float, int, or None, optional
+            Mask specification:
+            - If np.ndarray: 2D/3D boolean mask - True for pixels to analyze
+              For single ROI: 2D mask (height, width)
+              For all ROIs: 3D mask (n_rois, height, width)
+            - If float or int: Amplitude threshold - pixels with abs(amplitude) > mask are analyzed
+            - If None: all pixels are analyzed
+        interpolate : bool
+            Whether to use interpolation for sub-frame precision
+        upscale_factor : int
+            Factor to upscale temporal resolution (only used if interpolate=True)
+
+        Returns:
+        --------
+        strf_max_times : np.ma.MaskedArray or np.ndarray
+            - If roi is int: 2D array of peak times in seconds (height, width)
+            - If roi is None: 3D array of peak times (n_rois, height, width)
+        """
+        from scipy.interpolate import interp1d
+
+        # Always compute vectorized for all ROIs
+        strf_data = self.strfs_no_border  # (n_rois, n_frames, height, width)
+        n_rois, n_frames, height, width = strf_data.shape
+        strf_dur_s = self.strf_dur_ms / 1000
+        t_original = np.linspace(0, strf_dur_s, n_frames)
+
+        # Handle mask input
+        if mask is not None:
+            if isinstance(mask, (int, float)):
+                # Create amplitude mask for all ROIs
+                mask_3d = np.abs(self.collapse_times()) > mask  # (n_rois, height, width)
+            elif isinstance(mask, np.ndarray):
+                if mask.ndim == 2:
+                    # 2D mask provided for single ROI case - expand to 3D
+                    if roi is not None:
+                        mask_3d = np.zeros((n_rois, height, width), dtype=bool)
+                        mask_3d[roi] = mask.astype(bool) if mask.dtype != bool else mask
+                    else:
+                        raise ValueError("2D mask provided but no ROI specified. Use 3D mask or specify roi.")
+                elif mask.ndim == 3:
+                    mask_3d = mask.astype(bool) if mask.dtype != bool else mask
+                else:
+                    raise ValueError("Mask must be 2D (for single ROI) or 3D (for all ROIs)")
+            else:
+                raise TypeError("mask must be a boolean array, float, int, or None")
+        else:
+            mask_3d = None
+
+        if interpolate:
+            # Upscale temporal resolution
+            t_upscaled = np.linspace(0, strf_dur_s, n_frames * upscale_factor)
+
+            # Vectorized interpolation: reshape to (n_frames, n_rois * height * width)
+            strf_flat = strf_data.reshape(n_rois, n_frames, -1).transpose(1, 0, 2).reshape(n_frames, -1)
+
+            interp_func = interp1d(t_original, strf_flat, kind='cubic', axis=0)
+            strf_upscaled_flat = interp_func(t_upscaled)
+
+            # Reshape back to (n_rois, n_frames_upscaled, height, width)
+            strf_upscaled = strf_upscaled_flat.reshape(len(t_upscaled), n_rois, height, width).transpose(1, 0, 2, 3)
+            time_array = t_upscaled
+            data_to_analyze = strf_upscaled
+        else:
+            time_array = t_original
+            data_to_analyze = strf_data
+
+        # Find argmax across time dimension
+        if mask_3d is not None:
+            # Apply mask: expand to (n_rois, n_frames, height, width)
+            mask_expanded = np.repeat(~mask_3d[:, np.newaxis, :, :], data_to_analyze.shape[1], axis=1)
+            strf_masked = np.ma.masked_array(data_to_analyze, mask=mask_expanded)
+            strf_max_indices = np.ma.argmax(np.ma.abs(strf_masked), axis=1)  # (n_rois, height, width)
+            strf_max_times = np.ma.masked_array(time_array[strf_max_indices], mask=~mask_3d)
+        else:
+            strf_max_indices = np.argmax(np.abs(data_to_analyze), axis=1)  # (n_rois, height, width)
+            strf_max_times = time_array[strf_max_indices]
+
+        # Return single ROI if specified
+        if roi is not None:
+            return strf_max_times[roi]
+
+        return strf_max_times
+
     def calc_spectrums(self, roibyroi = False) -> tuple[np.ndarray, np.ndarray]:
         spectrum_neg = np.array([pygor.strf.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 0]])
         spectrum_pos = np.array([pygor.strf.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 1]])
