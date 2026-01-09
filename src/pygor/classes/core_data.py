@@ -81,6 +81,7 @@ class Core:
             self.traces_raw = try_fetch(HDF5_file, "Traces0_raw")
             self.traces_znorm = try_fetch(HDF5_file, "Traces0_znorm")
             self.images = try_fetch(HDF5_file, "wDataCh0_detrended")
+            self.trigger_images = try_fetch(HDF5_file, "wDataCh2")  # Trigger channel
             # Basic information
             self.metadata = pygor.data_helpers.metadata_dict(HDF5_file)
             self.rois = try_fetch(HDF5_file, "ROIs")
@@ -144,6 +145,316 @@ class Core:
             ">=": operator.ge,
             "<=": operator.le,
         }
+
+    @classmethod
+    def from_scanm(
+        cls,
+        path,
+        imaging_channel: int = 0,
+        trigger_channel: int = 2,
+        skip_first_triggers: int = 0,
+        skip_last_triggers: int = 0,
+        trigger_mode: int = 1,
+    ):
+        """
+        Create a Core object directly from ScanM SMP/SMH files.
+        
+        This alternative constructor bypasses the need for an intermediate H5 file,
+        loading data directly from ScanM format and populating all Core attributes.
+        
+        Parameters
+        ----------
+        path : str or Path
+            Path to .smp or .smh file
+        imaging_channel : int, optional
+            Channel index for imaging data (default: 0)
+        trigger_channel : int, optional
+            Channel index for trigger detection (default: 2)
+        skip_first_triggers : int, optional
+            Number of initial triggers to skip (default: 0)
+        skip_last_triggers : int, optional
+            Number of final triggers to skip (default: 0)
+        trigger_mode : int, optional
+            Trigger detection mode (default: 1)
+            
+        Returns
+        -------
+        Core
+            A fully initialized Core object with all standard methods available.
+            
+        Examples
+        --------
+        >>> from pygor.classes.core_data import Core
+        >>> data = Core.from_scanm("recording.smp")
+        >>> print(data.images.shape)
+        (1000, 64, 200)
+        >>> data.view_stack_rois()  # All Core methods work!
+        
+        Notes
+        -----
+        To save the data for later use, call `data.export_to_h5("output.h5")`.
+        """
+        import pygor.preproc.scanm as scanm_module
+        
+        path = pathlib.Path(path)
+        
+        # Load ScanM data
+        channels_to_load = list(set([imaging_channel, trigger_channel]))
+        header, channel_data = scanm_module.load_scanm(path, channels=channels_to_load)
+        
+        # Get actual number of frames recorded
+        n_frames_total = header.get("NumberOfFrames", 0)
+        frame_counter = header.get("FrameCounter", 0)
+        stim_buf_per_fr = header.get("StimBufPerFr", 1)
+        actual_frames = (n_frames_total - frame_counter) * stim_buf_per_fr
+        
+        # Get imaging data
+        if imaging_channel not in channel_data:
+            raise ValueError(f"Imaging channel {imaging_channel} not found in data")
+        images = channel_data[imaging_channel][:actual_frames]
+        
+        # Compute timing parameters
+        timing = scanm_module._compute_timing_params(header, images)
+        
+        # Parse datetime
+        exp_date, exp_time = scanm_module._parse_scanm_datetime(header)
+        
+        # Detect triggers and store trigger channel data
+        if trigger_channel in channel_data:
+            trigger_stack = channel_data[trigger_channel][:actual_frames]
+            all_triggers = scanm_module._detect_triggers_simple(trigger_stack)
+            
+            # Apply skip settings
+            if skip_last_triggers > 0:
+                all_triggers = all_triggers[skip_first_triggers:-skip_last_triggers]
+            else:
+                all_triggers = all_triggers[skip_first_triggers:]
+        else:
+            trigger_stack = None
+            all_triggers = np.array([], dtype=int)
+        
+        # Create instance without calling __post_init__
+        # We use object.__new__ to bypass dataclass __init__
+        instance = object.__new__(cls)
+        
+        # Set all required attributes manually
+        instance.filename = path
+        instance.type = cls.__name__
+        instance.name = path.stem
+        
+        # Image data
+        instance.images = images
+        instance.trigger_images = trigger_stack  # Store trigger channel for visualization
+        instance.average_stack = images.mean(axis=0)
+        instance.correlation_projection = None
+        
+        # Timing
+        instance.frame_hz = timing["frame_hz"]
+        instance.linedur_s = timing["line_duration_s"]
+        instance.n_planes = timing["n_planes"]
+        
+        # Triggers
+        instance.triggertimes_frame = all_triggers
+        instance.triggertimes = all_triggers.astype(float)
+        instance.trigger_mode = trigger_mode
+        instance._Core__skip_first_frames = skip_first_triggers
+        instance._Core__skip_last_frames = -skip_last_triggers if skip_last_triggers > 0 else 0
+        
+        # Metadata - preserve all relevant header info
+        instance.metadata = {
+            "filename": str(path),
+            "exp_date": exp_date,
+            "exp_time": exp_time,
+            "objectiveXYZ": (
+                header.get("XCoord_um"),
+                header.get("YCoord_um"),
+                header.get("ZCoord_um"),
+            ),
+            # Preserve additional ScanM-specific metadata
+            "PixelDuration_us": header.get("PixelDuration"),
+            "RetracePixels": header.get("RtrcLen"),
+            "LineOffset": header.get("LineOffSet"),
+            "FrameWidth": header.get("FrameWidth"),
+            "FrameHeight": header.get("FrameHeight"),
+            "NumberOfFrames": header.get("NumberOfFrames"),
+            "FrameCounter": header.get("FrameCounter"),
+            "StimBufPerFr": header.get("StimBufPerFr"),
+            "ScanMode": header.get("ScanMode"),
+            "Zoom": header.get("Zoom"),
+            "Angle": header.get("Angle"),
+            "User": header.get("User"),
+            "Comment": header.get("Comment"),
+        }
+        
+        # ROI-related (initially empty)
+        instance.rois = None
+        instance.num_rois = 0
+        instance.roi_sizes = None
+        instance.traces_raw = None
+        instance.traces_znorm = None
+        
+        # Other attributes
+        instance.averages = None
+        instance.snippets = None
+        instance.ms_dur = None
+        instance.quality_indices = None
+        instance.ipl_depths = None
+        
+        # Private attributes that Core uses
+        instance._Core__keyword_lables = {"ipl_depths": None}
+        instance._Core__compare_ops_map = {
+            "==": operator.eq,
+            ">": operator.gt,
+            "<": operator.lt,
+            ">=": operator.ge,
+            "<=": operator.le,
+        }
+        
+        # Store header for export
+        instance._scanm_header = header
+        
+        return instance
+    
+    def export_to_h5(
+        self,
+        output_path=None,
+        overwrite: bool = False,
+    ):
+        """
+        Export Core data to H5 file.
+        
+        Useful for saving preprocessed data or data loaded from ScanM files.
+        
+        Parameters
+        ----------
+        output_path : str or Path, optional
+            Output H5 file path. If None, uses same name as source with .h5 extension.
+        overwrite : bool, optional
+            If True, overwrite existing file. Default False.
+            
+        Returns
+        -------
+        Path
+            Path to the created H5 file.
+        """
+        import h5py
+        
+        if output_path is None:
+            output_path = self.filename.with_suffix(".h5")
+        else:
+            output_path = pathlib.Path(output_path)
+        
+        if output_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {output_path}. Use overwrite=True to replace."
+            )
+        
+        with h5py.File(output_path, "w") as f:
+            # === Image data ===
+            # H5 expects (width, height, frames) - transposed from our (frames, height, width)
+            images_t = self.images.transpose(2, 1, 0)
+            f.create_dataset("wDataCh0_detrended", data=images_t, dtype=np.int16)
+            
+            # Trigger channel (if available)
+            if hasattr(self, 'trigger_images') and self.trigger_images is not None:
+                trigger_t = self.trigger_images.transpose(2, 1, 0)
+                f.create_dataset("wDataCh2", data=trigger_t, dtype=np.int16)
+            
+            # Average stack
+            f.create_dataset("Stack_Ave", data=self.average_stack.T, dtype=np.float32)
+            
+            # === ROIs ===
+            if self.rois is not None:
+                f.create_dataset("ROIs", data=self.rois.T, dtype=np.int16)
+                
+            if self.roi_sizes is not None:
+                f.create_dataset("RoiSizes", data=self.roi_sizes, dtype=np.int32)
+            
+            # === Traces ===
+            if self.traces_raw is not None:
+                f.create_dataset("Traces0_raw", data=self.traces_raw.T, dtype=np.float32)
+                
+            if self.traces_znorm is not None:
+                f.create_dataset("Traces0_znorm", data=self.traces_znorm.T, dtype=np.float32)
+            
+            # === Trigger times ===
+            max_triggers = max(len(self.triggertimes_frame) if self.triggertimes_frame is not None else 0, 1000)
+            triggertimes = np.full(max_triggers, np.nan)
+            if self.triggertimes is not None and len(self.triggertimes) > 0:
+                triggertimes[:len(self.triggertimes)] = self.triggertimes
+            f.create_dataset("Triggertimes", data=triggertimes, dtype=np.float64)
+            
+            triggertimes_frame = np.full(max_triggers, np.nan)
+            if self.triggertimes_frame is not None and len(self.triggertimes_frame) > 0:
+                triggertimes_frame[:len(self.triggertimes_frame)] = self.triggertimes_frame
+            f.create_dataset("Triggertimes_Frame", data=triggertimes_frame, dtype=np.float64)
+            
+            # === wParamsStr (date/time metadata) ===
+            exp_date = self.metadata["exp_date"]
+            exp_time = self.metadata["exp_time"]
+            date_str = f"{exp_date.year}-{exp_date.month:02d}-{exp_date.day:02d}"
+            time_str = f"{exp_time.hour:02d}-{exp_time.minute:02d}-{exp_time.second:02d}-00"
+            
+            params_str = [""] * 10
+            params_str[4] = date_str
+            params_str[5] = time_str
+            params_str[0] = str(self.filename.stem)
+            
+            dt = h5py.special_dtype(vlen=str)
+            params_str_ds = f.create_dataset("wParamsStr", (len(params_str),), dtype=dt)
+            for i, s in enumerate(params_str):
+                params_str_ds[i] = s.encode("utf-8")
+            
+            # === wParamsNum (XYZ position) ===
+            params_num = np.zeros(50, dtype=np.float64)
+            xyz = self.metadata.get("objectiveXYZ", (0, 0, 0))
+            params_num[26] = xyz[0]
+            params_num[27] = xyz[2]
+            params_num[28] = xyz[1]
+            f.create_dataset("wParamsNum", data=params_num, dtype=np.float64)
+            
+            # === OS_Parameters ===
+            os_params_keys = [
+                "placeholder",
+                "LineDuration",
+                "nPlanes", 
+                "Trigger_Mode",
+                "Skip_First_Triggers",
+                "Skip_Last_Triggers",
+            ]
+            os_params_values = np.array([
+                0,
+                self.linedur_s,
+                self.n_planes,
+                self.trigger_mode,
+                0,
+                0,
+            ], dtype=np.float64)
+            
+            os_params_ds = f.create_dataset("OS_Parameters", data=os_params_values)
+            os_params_ds.attrs["OS_Parameters"] = np.array(
+                [b"Keys"] + [k.encode() for k in os_params_keys], 
+                dtype=object
+            )
+            
+            # === Optional data ===
+            if self.averages is not None:
+                f.create_dataset("Averages0", data=self.averages.T, dtype=np.float32)
+                
+            if self.snippets is not None:
+                f.create_dataset("Snippets0", data=self.snippets.T, dtype=np.float32)
+                
+            if self.ipl_depths is not None:
+                f.create_dataset("Positions", data=self.ipl_depths, dtype=np.float64)
+                
+            if self.correlation_projection is not None:
+                f.create_dataset("correlation_projection", data=self.correlation_projection.T, dtype=np.float32)
+                
+            if self.quality_indices is not None:
+                f.create_dataset("QualityCriterion", data=self.quality_indices, dtype=np.float64)
+        
+        print(f"Exported to: {output_path}")
+        return output_path
 
     def __repr__(self):
         # For pretty printing
@@ -613,6 +924,18 @@ class Core:
             num_rois = len(np.unique(roi_mask)[np.unique(roi_mask) < 0])
             print(f"Successfully updated ROIs: {num_rois} ROIs saved")
         return success
+
+    def view_images_interactive(self, **kwargs):
+        """
+        View the image stack interactively using Napari.
+
+        Parameters:
+        -----------
+        **kwargs : dict
+            Additional keyword arguments passed to Napari viewer
+        """
+        session = pygor.core.gui.methods.NapariViewStack(self, **kwargs)
+        session.run()
 
     def draw_rois(self, attribute = "calculate_image_average", style = "stacked", load_existing_rois=True, overwrite=False, show_correlation=True, **kwargs):
         """

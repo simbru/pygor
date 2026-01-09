@@ -109,6 +109,29 @@ def _process_single_roi_shared(img_shape, img_dtype, roi_mask, roi_val, shm_name
 
     return sum_per_frame / count
 
+class NapariViewStack:
+    def __init__(self, pygor_object):
+        self.viewer = napari.Viewer()
+        self.pygor_object = pygor_object
+        # Create a Qt event loop
+        self.event_loop = QEventLoop()
+
+    def run(self):
+        """Launch Napari and block execution properly."""
+        avg_movie = np.average(self.pygor_object.images, axis=0)
+        std_movie = np.std(self.pygor_object.images, axis=0)
+        images_stack = self.pygor_object.images
+        
+        # Make layers
+        self.viewer.add_image(avg_movie, name = "Average", colormap = "Greys_r")
+        self.viewer.add_image(std_movie, name = "SD", colormap = "Greys_r")
+        # Add trigger channel if available
+        if hasattr(self.pygor_object, 'trigger_images') and self.pygor_object.trigger_images is not None:
+            trigger_stack = self.pygor_object.trigger_images
+            self.viewer.add_image(trigger_stack, name = "Trigger channel", colormap = "magma", visible = False)
+        self.viewer.add_image(images_stack, name = "Image stack", colormap = "Greys_r")        
+
+        napari.run()
 
 class NapariViewRois:
     def __init__(self, pygor_object):

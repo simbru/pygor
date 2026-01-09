@@ -1,5 +1,7 @@
 import pygor
 import pygor.preproc as preproc
+import pygor.filehandling
+import pygor.classes.core_data
 import shutil
 import os 
 import pathlib
@@ -47,30 +49,37 @@ to their imaging data, and then performing a tandem analysis on the matched pair
 
 def main():
     example_path = r"D:\Igor analyses\OSDS\251112 OSDS\0_1_SWN_200_White.smh"
-    
-    # Test header loading
-    header = preproc.read_smh_header(example_path)
-    print("Header loaded successfully!")
-    print(f"  FrameWidth: {header['FrameWidth']}, FrameHeight: {header['FrameHeight']}")
-    print(f"  NumberOfFrames: {header['NumberOfFrames']}, FrameCounter: {header['FrameCounter']}")
-    
-    # Test full data loading
-    header, data = preproc.load_scanm(example_path)
-    print(f"\nData loaded: {list(data.keys())} channels")
-    for ch, stack in data.items():
-        print(f"  Channel {ch}: {stack.shape}")
-    
-    # Test pygor-compatible object creation
-    print("\nCreating pygor-compatible object...")
-    scanm_data = preproc.to_pygor_data(example_path)
-    print(f"  Type: {scanm_data.type}")
-    print(f"  Images shape: {scanm_data.images.shape}")
-    print(f"  Frame rate: {scanm_data.frame_hz:.2f} Hz")
-    print(f"  Line duration: {scanm_data.linedur_s*1000:.3f} ms")
-    print(f"  Triggers detected: {len(scanm_data.triggertimes_frame)}")
-    print(f"  Date: {scanm_data.metadata['exp_date']}")
-    print(f"  Position (XYZ): {scanm_data.metadata['objectiveXYZ']}")
-    print(f"\nObject repr: {repr(scanm_data)}")
 
+    # Test loading directly as Core from ScanM files
+    print("Loading ScanM file directly as Core...")
+    from pygor.classes.core_data import Core
+    
+    data = Core.from_scanm(example_path)
+    print(f"  Type: {data.type}")
+    print(f"  Images shape: {data.images.shape}")
+    print(f"  Frame rate: {data.frame_hz:.2f} Hz")
+    print(f"  Line duration: {data.linedur_s*1000:.3f} ms")
+    print(f"  Triggers detected: {len(data.triggertimes_frame)}")
+    print(f"  Date: {data.metadata['exp_date']}")
+    print(f"  Position (XYZ): {data.metadata['objectiveXYZ']}")
+    print(f"\nObject repr: {repr(data)}")
+    
+    # Test that Core methods work
+    print("\n--- Testing Core methods ---")
+    print(f"  average_stack shape: {data.average_stack.shape}")
+    print(f"  n_planes: {data.n_planes}")
+    print(f"  trigger_mode: {data.trigger_mode}")
+    
+    # Test export to H5
+    print("\n--- Testing H5 Export ---")
+    h5_path = data.export_to_h5(overwrite=True)
+    
+    # Reload as Core from H5 to verify roundtrip
+    print("\nReloading exported H5...")
+    reloaded = pygor.filehandling.load(h5_path, as_class=Core)
+    print(f"  Reloaded images shape: {reloaded.images.shape}")
+    print(f"  Reloaded frame_hz: {reloaded.frame_hz:.2f} Hz")
+    print(f"  Reloaded triggers: {len(reloaded.triggertimes_frame)}")
+    reloaded.view_images_interactive()
 if __name__ == "__main__":
     main()

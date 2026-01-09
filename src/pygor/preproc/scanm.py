@@ -7,30 +7,42 @@ into Python, without requiring IGOR Pro as an intermediary.
 File Format Reference
 ---------------------
 ScanM produces paired files for each recording:
-- .smh - Header file (text, metadata)
+- .smh - Header file (UTF-16-LE encoded text, metadata)
 - .smp - Pixel data file (binary)
 
-The SMH header is latin-1 encoded text with entries in format:
+The SMH header contains entries in format:
     type,variable_name=value;
 
 The SMP file contains:
-- 64-byte pre-header (8 x uint64)
-- Pixel data as 16-bit signed integers, multi-channel interleaved
+- Pixel data as 16-bit signed integers
+- Channels are interleaved in buffer blocks (PixelBuffer_#0_Length pixels per block)
+- Data layout: [ch0_buf0, ch1_buf0, ch0_buf1, ch1_buf1, ...]
 
-Format specification derived from ScanM documentation and
-ScM_FileIO.ipf (Thomas Euler, MPImF/Heidelberg, CIN/Uni Tübingen).
+Key header parameters for decoding:
+- FrameWidth: Raw pixels per line (including retrace)
+- FrameHeight: Number of lines per frame
+- PixRetraceLen: Pixels for line retrace (to be cropped)
+- XPixLineOffs: Line offset pixels (to be cropped from start)
+- PixelBuffer_#0_Length: Buffer chunk size for channel interleaving
+- InputChannelMask: Bitmask of active channels (e.g., 5 = channels 0,2)
+
+Format specification derived from ScanM documentation,
+ScM_FileIO.ipf (Thomas Euler, MPImF/Heidelberg, CIN/Uni Tübingen),
+and eulerlab/processing_pypeline (Andre Chagas).
 """
 
 from pathlib import Path
 import struct
 import numpy as np
 import datetime
+import h5py
 
 __all__ = [
     "read_smh_header",
     "read_smp_data",
     "load_scanm",
     "to_pygor_data",
+    "ScanMData",
 ]
 
 
@@ -146,6 +158,7 @@ def read_smp_data(
     path: str | Path,
     header: dict | None = None,
     channels: list[int] | None = None,
+    decode: bool = True,
 ) -> dict[int, np.ndarray]:
     """
     Read SMP binary pixel data.
@@ -159,19 +172,33 @@ def read_smp_data(
         partner .smh file.
     channels : list of int, optional
         Which channels to load. If None, loads all available channels.
+    decode : bool, optional
+        If True (default), crops retrace and line offset pixels from each line
+        to produce the actual imaging data. If False, returns raw uncropped data.
+        
+        For XY scans, decoded width = FrameWidth - PixRetraceLen - XPixLineOffs.
+        This matches what IGOR's ScM_FileIO produces.
 
     Returns
     -------
     dict[int, np.ndarray]
         Dictionary mapping channel index to 3D array (frames, height, width).
+        If decode=True, width is the decoded imaging width.
+        If decode=False, width is the raw FrameWidth from header.
 
     Examples
     --------
     >>> header = read_smh_header("recording.smh")
     >>> data = read_smp_data("recording.smp", header)
-    >>> stack = data[0]  # Channel 0
+    >>> stack = data[0]  # Channel 0 (decoded)
     >>> print(stack.shape)
-    (1000, 512, 512)
+    (1000, 64, 128)  # Decoded dimensions
+    
+    >>> # Get raw data with retrace pixels
+    >>> data_raw = read_smp_data("recording.smp", header, decode=False)
+    >>> stack_raw = data_raw[0]
+    >>> print(stack_raw.shape)
+    (1000, 64, 200)  # Raw dimensions including retrace
     """
     path = Path(path)
 
@@ -235,35 +262,67 @@ def read_smp_data(
                 f"Available: {available_channels}"
             )
 
+    # Get pixel buffer length for de-interleaving
+    # Channels are stored in blocks of pixBuffer length, NOT per-pixel interleaved
+    # Reference: eulerlab/processing_pypeline/readScanM.py
+    pix_buffer = (
+        header.get("PixelBuffer_#0_Length") or
+        header.get("uPixelBuffer_#0_Length") or
+        frame_width * frame_height  # Fallback: one frame per buffer
+    )
+
     # Read binary data
     with open(path, "rb") as f:
-        # Skip pre-header (64 bytes = 8 x uint64)
-        f.seek(64)
+        # NO header offset - SMP files start with pixel data immediately
+        f.seek(0)
 
         # Read all pixel data as int16
-        # Data is interleaved: all channels for pixel 0, then pixel 1, etc.
-        pixels_per_frame = frame_width * frame_height
-        total_samples = pixels_per_frame * n_frames * n_channels
+        raw_data = np.fromfile(f, dtype=np.int16)
 
-        raw_data = np.fromfile(f, dtype=np.int16, count=total_samples)
-
-    if len(raw_data) < total_samples:
-        # Adjust n_frames if file is shorter than expected
-        actual_samples = len(raw_data)
-        n_frames = actual_samples // (pixels_per_frame * n_channels)
-        raw_data = raw_data[:n_frames * pixels_per_frame * n_channels]
-
-    # Reshape and de-interleave channels
-    # Data layout: [ch0_px0, ch1_px0, ch2_px0, ch0_px1, ch1_px1, ch2_px1, ...]
-    raw_data = raw_data.reshape(-1, n_channels)  # (total_pixels, n_channels)
+    # De-interleave channels using buffer blocks
+    # Data layout: [ch0_buf0, ch1_buf0, ch0_buf1, ch1_buf1, ...]
+    # where each buffer chunk is pix_buffer pixels
+    chunk_size = n_channels * pix_buffer
+    
+    # Initialize lists to collect channel data
+    channel_data = {ch: [] for ch in available_channels}
+    
+    for i in range(0, len(raw_data), chunk_size):
+        for ch_idx, ch in enumerate(available_channels):
+            start = i + ch_idx * pix_buffer
+            end = start + pix_buffer
+            if end <= len(raw_data):
+                channel_data[ch].append(raw_data[start:end])
+    
+    # Calculate decode parameters for cropping retrace/offset pixels
+    # For XY scans: decoded_width = FrameWidth - PixRetraceLen - XPixLineOffs
+    retrace_len = header.get("PixRetraceLen") or header.get("RtrcLen") or 0
+    line_offset = header.get("XPixLineOffs") or header.get("LineOffSet") or 0
+    decoded_width = frame_width - retrace_len - line_offset
+    
+    # Ensure decoded_width is sensible
+    if decode and decoded_width <= 0:
+        print(f"Warning: decoded_width={decoded_width} is invalid, falling back to raw data")
+        decode = False
 
     result = {}
-    for i, ch_idx in enumerate(available_channels):
-        if ch_idx in channels_to_load:
-            ch_data = raw_data[:, i]  # Extract this channel
-            # Reshape to (frames, height, width)
-            ch_data = ch_data.reshape(n_frames, frame_height, frame_width)
-            result[ch_idx] = ch_data
+    pixels_per_frame = frame_width * frame_height
+    
+    for ch in channels_to_load:
+        if ch in channel_data and channel_data[ch]:
+            ch_data = np.concatenate(channel_data[ch])
+            # Calculate actual number of complete frames
+            actual_frames = len(ch_data) // pixels_per_frame
+            ch_data = ch_data[:actual_frames * pixels_per_frame]
+            # Reshape to (frames, height, raw_width)
+            ch_data = ch_data.reshape(actual_frames, frame_height, frame_width)
+            
+            if decode:
+                # Crop to imaging region: skip line offset, remove retrace
+                # XPixLineOffs is the number of pixels to skip at the start
+                ch_data = ch_data[:, :, line_offset:line_offset + decoded_width]
+            
+            result[ch] = ch_data
 
     return result
 
@@ -275,6 +334,7 @@ def read_smp_data(
 def load_scanm(
     path: str | Path,
     channels: list[int] | None = None,
+    decode: bool = True,
 ) -> tuple[dict, dict[int, np.ndarray]]:
     """
     Load SMP/SMH file pair.
@@ -287,6 +347,11 @@ def load_scanm(
         Path to either .smp or .smh file. Will find the partner file.
     channels : list of int, optional
         Which channels to load. If None, loads all available channels.
+    decode : bool, optional
+        If True (default), crops retrace and line offset pixels from each line
+        to produce the actual imaging data. If False, returns raw uncropped data.
+        
+        For XY scans, decoded width = FrameWidth - PixRetraceLen - XPixLineOffs.
 
     Returns
     -------
@@ -294,19 +359,19 @@ def load_scanm(
         Parsed header metadata.
     data : dict[int, np.ndarray]
         Dictionary mapping channel index to 3D stack (frames, height, width).
+        Width is decoded (cropped) if decode=True, raw if decode=False.
 
     Examples
     --------
     >>> header, data = load_scanm("0_0_SWN_200_White.smp")
     >>> print(f"Recording: {header.get('sOriginalPixelDataFileName', 'unknown')}")
-    >>> print(f"Frames: {header['uNumberOfFrames']}")
-    >>> print(f"Dimensions: {header['uFrameWidth']} x {header['uFrameHeight']}")
-    >>>
-    >>> stack = data[0]  # Primary imaging channel
-    >>> print(f"Stack shape: {stack.shape}")
+    >>> print(f"Frames: {header['NumberOfFrames']}")
+    >>> stack = data[0]  # Primary imaging channel (decoded)
+    >>> print(f"Stack shape: {stack.shape}")  # e.g., (20291, 64, 128)
 
-    >>> # Load only channel 0
-    >>> header, data = load_scanm("recording.smp", channels=[0])
+    >>> # Load raw data with retrace pixels
+    >>> header, data = load_scanm("recording.smp", decode=False)
+    >>> print(f"Raw shape: {data[0].shape}")  # e.g., (20291, 64, 200)
     """
     path = Path(path)
 
@@ -318,7 +383,7 @@ def load_scanm(
         raise ValueError(f"Expected .smp or .smh file, got: {path.suffix}")
 
     header = read_smh_header(smh_path)
-    data = read_smp_data(smp_path, header, channels)
+    data = read_smp_data(smp_path, header, channels, decode=decode)
 
     return header, data
 
@@ -355,31 +420,35 @@ def _compute_timing_params(header: dict, images: np.ndarray) -> dict:
     - line_duration_s: time per line (seconds)
     - frame_duration_s: time per frame (seconds)
     - frame_hz: frame rate (Hz)
+    
+    Notes
+    -----
+    The header's FrameWidth already includes retrace and line offset pixels.
+    So line duration = FrameWidth * pixel_duration (not adding retrace again).
     """
     # Get pixel duration in microseconds
     pixel_duration_us = header.get("RealPixelDuration_µs", header.get("TargetedPixelDuration_µs", 5.0))
     
-    # Frame dimensions
-    frame_width = header.get("FrameWidth", images.shape[2])
+    # Raw frame dimensions (FrameWidth includes retrace and line offset)
+    frame_width_raw = header.get("FrameWidth", 200)
     frame_height = header.get("FrameHeight", images.shape[1])
     
-    # Retrace length (dead pixels at end of each line)
+    # Get decode parameters for reporting
     retrace_len = header.get("PixRetraceLen", 0)
     line_offset = header.get("XPixLineOffs", 0)
+    decoded_width = frame_width_raw - retrace_len - line_offset
     
-    # Total pixels per line including retrace
-    total_pixels_per_line = frame_width + retrace_len + line_offset
-    
-    # Line duration in seconds
-    line_duration_s = total_pixels_per_line * pixel_duration_us * 1e-6
+    # Line duration: raw FrameWidth already includes all pixels per line
+    # Do NOT add retrace/offset again - they're already in FrameWidth
+    line_duration_s = frame_width_raw * pixel_duration_us * 1e-6
     
     # Frame duration (lines * line_duration)
+    frame_duration_s = frame_height * line_duration_s
+    
     # Account for n_planes if doing volumetric imaging
     n_planes = header.get("dZPixels", 1)
-    if n_planes == 0:
+    if n_planes == 0 or n_planes is None:
         n_planes = 1
-        
-    frame_duration_s = frame_height * line_duration_s
     
     # Frame rate
     frame_hz = 1.0 / frame_duration_s if frame_duration_s > 0 else 0.0
@@ -389,6 +458,8 @@ def _compute_timing_params(header: dict, images: np.ndarray) -> dict:
         "frame_duration_s": frame_duration_s,
         "frame_hz": frame_hz,
         "n_planes": n_planes,
+        "decoded_width": decoded_width,
+        "raw_width": frame_width_raw,
     }
 
 
@@ -638,6 +709,158 @@ class ScanMData:
         
         # Z-normalize traces
         self.traces_znorm = (traces - traces.mean(axis=1, keepdims=True)) / traces.std(axis=1, keepdims=True)
+
+    def export_to_h5(
+        self,
+        output_path: str | Path | None = None,
+        overwrite: bool = False,
+    ) -> Path:
+        """
+        Export data to IGOR-compatible H5 file for loading as pygor.classes.Core.
+        
+        Parameters
+        ----------
+        output_path : str or Path, optional
+            Output H5 file path. If None, uses same name as source with .h5 extension.
+        overwrite : bool, optional
+            If True, overwrite existing file. Default False.
+            
+        Returns
+        -------
+        Path
+            Path to the created H5 file.
+            
+        Examples
+        --------
+        >>> data = ScanMData("recording.smp")
+        >>> data.set_rois(my_rois)  # Optional preprocessing
+        >>> h5_path = data.export_to_h5("recording.h5")
+        >>> 
+        >>> # Now load as Core with all methods
+        >>> import pygor
+        >>> core_data = pygor.load(pygor.classes.Core, h5_path)
+        """
+        if output_path is None:
+            output_path = self.filename.with_suffix(".h5")
+        else:
+            output_path = Path(output_path)
+        
+        if output_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {output_path}. Use overwrite=True to replace."
+            )
+        
+        # Get header for metadata
+        header = self._header
+        
+        with h5py.File(output_path, "w") as f:
+            # === Image data ===
+            # Core expects (width, height, frames) - transposed from our (frames, height, width)
+            images_t = self.images.transpose(2, 1, 0)
+            f.create_dataset("wDataCh0_detrended", data=images_t, dtype=np.int16)
+            
+            # Average stack - Core expects (width, height) transposed
+            f.create_dataset("Stack_Ave", data=self.average_stack.T, dtype=np.float32)
+            
+            # === ROIs ===
+            if self.rois is not None:
+                # Core expects transposed ROI mask
+                f.create_dataset("ROIs", data=self.rois.T, dtype=np.int16)
+                
+            if self.roi_sizes is not None:
+                f.create_dataset("RoiSizes", data=self.roi_sizes, dtype=np.int32)
+            
+            # === Traces ===
+            if self.traces_raw is not None:
+                # Core expects (frames, rois) - transposed from our (rois, frames)
+                f.create_dataset("Traces0_raw", data=self.traces_raw.T, dtype=np.float32)
+                
+            if self.traces_znorm is not None:
+                f.create_dataset("Traces0_znorm", data=self.traces_znorm.T, dtype=np.float32)
+            
+            # === Trigger times ===
+            # Pad with NaNs to fixed size (Core expects this)
+            max_triggers = max(len(self.triggertimes_frame), 1000)
+            triggertimes = np.full(max_triggers, np.nan)
+            triggertimes[:len(self.triggertimes)] = self.triggertimes
+            f.create_dataset("Triggertimes", data=triggertimes, dtype=np.float64)
+            
+            triggertimes_frame = np.full(max_triggers, np.nan)
+            triggertimes_frame[:len(self.triggertimes_frame)] = self.triggertimes_frame
+            f.create_dataset("Triggertimes_Frame", data=triggertimes_frame, dtype=np.float64)
+            
+            # === wParamsStr (date/time metadata) ===
+            # Core expects specific format: index 4 = date, index 5 = time
+            exp_date = self.metadata["exp_date"]
+            exp_time = self.metadata["exp_time"]
+            date_str = f"{exp_date.year}-{exp_date.month:02d}-{exp_date.day:02d}"
+            time_str = f"{exp_time.hour:02d}-{exp_time.minute:02d}-{exp_time.second:02d}-00"
+            
+            # Create wParamsStr array (minimum 6 elements, with date at 4, time at 5)
+            params_str = [""] * 10
+            params_str[4] = date_str
+            params_str[5] = time_str
+            params_str[0] = str(self.filename.stem)  # Recording name
+            
+            # Encode as bytes for h5py
+            dt = h5py.special_dtype(vlen=str)
+            params_str_ds = f.create_dataset("wParamsStr", (len(params_str),), dtype=dt)
+            for i, s in enumerate(params_str):
+                params_str_ds[i] = s.encode("utf-8")
+            
+            # === wParamsNum (XYZ position, etc.) ===
+            # Core reads XYZ from indices 26, 27, 28
+            params_num = np.zeros(50, dtype=np.float64)
+            xyz = self.metadata.get("objectiveXYZ", (0, 0, 0))
+            params_num[26] = xyz[0]  # X
+            params_num[27] = xyz[2]  # Z (swapped in Core)
+            params_num[28] = xyz[1]  # Y
+            f.create_dataset("wParamsNum", data=params_num, dtype=np.float64)
+            
+            # === OS_Parameters (timing, trigger settings) ===
+            # Create OS_Parameters dataset with attributes
+            os_params_keys = [
+                "placeholder",  # Index 0 is skipped in Core
+                "LineDuration",
+                "nPlanes", 
+                "Trigger_Mode",
+                "Skip_First_Triggers",
+                "Skip_Last_Triggers",
+            ]
+            os_params_values = np.array([
+                0,  # placeholder
+                self.linedur_s,
+                self.n_planes,
+                self.trigger_mode,
+                0,  # skip_first (applied already)
+                0,  # skip_last (applied already)
+            ], dtype=np.float64)
+            
+            os_params_ds = f.create_dataset("OS_Parameters", data=os_params_values)
+            # Store keys as attribute (Core reads keys from here)
+            os_params_ds.attrs["OS_Parameters"] = np.array(
+                [b"Keys"] + [k.encode() for k in os_params_keys], 
+                dtype=object
+            )
+            
+            # === Optional: averages, snippets ===
+            if self.averages is not None:
+                f.create_dataset("Averages0", data=self.averages.T, dtype=np.float32)
+                
+            if self.snippets is not None:
+                f.create_dataset("Snippets0", data=self.snippets.T, dtype=np.float32)
+                
+            if self.ipl_depths is not None:
+                f.create_dataset("Positions", data=self.ipl_depths, dtype=np.float64)
+                
+            if self.correlation_projection is not None:
+                f.create_dataset("correlation_projection", data=self.correlation_projection.T, dtype=np.float32)
+                
+            if self.quality_indices is not None:
+                f.create_dataset("QualityCriterion", data=self.quality_indices, dtype=np.float64)
+        
+        print(f"Exported to: {output_path}")
+        return output_path
 
 
 def to_pygor_data(
