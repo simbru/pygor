@@ -2145,14 +2145,15 @@ def plot_all_cluster_averages_enhanced(df_with_clusters, experiment_obj, cluster
                         linewidth=0.1,
                         # size=3,
                         jitter=False)
-                        sns.barplot(data=cluster_rois[matching_metrics], 
-                            ax=ax, alpha=0.5, 
+                        sns.barplot(data=cluster_rois[matching_metrics],
+                            ax=ax, alpha=0.5,
                             orient='h',
                             # palette="dark:k",
                             palette = fish_palette,
                             errorbar='sd',
                             capsize=.4,
-                            err_kws={"color": ".5",},
+                            err_kws={"color": "k", "linewidth": 0.5},
+                            linewidth=0,  # No edge on bars
                         )
                         ax.set_yticks([])
                     # Use global axis limits across all clusters for this metric

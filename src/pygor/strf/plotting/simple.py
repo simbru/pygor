@@ -46,4 +46,5 @@ def plot_collapsed_strfs(self, cval=None, channel = None, cmap = "bwr", origin =
             y_pos = i * h + 1  # Adjust for visibility
             ax.text(x_pos, y_pos, str(slice_idx), fontsize=8, color="black", 
                     bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
-    plt.show()
+    # plt.show()
+    return fig, ax
