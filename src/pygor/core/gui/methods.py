@@ -374,10 +374,26 @@ class NapariRoiPrompt():
         # Cache the average image to avoid recomputing for large stacks
         self._avg_image = None
 
+        # Print keybinding help
+        print("\n" + "="*60)
+        print("NAPARI ROI DRAWING SESSION")
+        print("Keybindings:")
+        print("  'c' - Generate interactive plot of current ROIs")
+        print("  'k' - Delete last ROI")
+        print("  'Ctrl+k' - Clear all ROIs")
+        print("Close the napari window when finished to continue.")
+        print("="*60 + "\n")
+
         @self.viewer.bind_key("c")
         def plot_on_demand(viewer):
             self.grab_coordinates()
-            self.generate_plot()
+            self.update_self()
+            # Compute traces on-demand for interactive plotting
+            if self.viewer.layers["place ROIs"].data is not None and len(self.viewer.layers["place ROIs"].data) > 0:
+                self.traces = self.fetch_traces(self.arr, self.mask)
+                self.generate_plot()
+            else:
+                print("No ROIs to plot - draw some ROIs first")
 
         @self.viewer.bind_key("ctrl+k")
         def clear_all_rois(viewer):
@@ -425,10 +441,7 @@ class NapariRoiPrompt():
         print("Napari GUI closed...")
         self.grab_coordinates()  # Compute the final result
         self.update_self()
-
-        if self.viewer.layers["place ROIs"].data is not None and self.plot:
-            print("Generating final plot...")
-            self.generate_plot()
+        # Plotting is now handled by Core._plot_traces()
 
     # Methods to handle ROI output
     def mask_from_coords(self, coords_list, mask_shape, shape_types=None):

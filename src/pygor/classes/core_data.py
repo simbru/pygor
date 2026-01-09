@@ -670,7 +670,6 @@ class Core:
             traces_plot_style=style,
             existing_roi_mask=existing_roi_mask,
             correlation_projection=correlation_projection,
-            plot=False,  # Disable internal plotting, we'll plot after computing proper z-scores
             **kwargs
         )
         traces = session.run()
@@ -712,17 +711,30 @@ class Core:
                 else:
                     print("Failed to save ROIs to H5 file")
 
-        # Plot traces if requested (using properly computed z-normalized traces)
-        if kwargs.get('plot', False) and overwrite and self.traces_znorm is not None:
+        # Plot traces if requested
+        if kwargs.get('plot', False):
             print("\nGenerating traces plot...")
-            self._plot_traces(style=style, session=session)
+
+            if overwrite and self.traces_znorm is not None:
+                # Saved mode: plot from computed traces
+                self._plot_traces(style=style, session=session)
+            elif hasattr(session, 'mask') and session.mask is not None:
+                # Preview mode: plot from temporary mask
+                target_images = self.images if target is self.images else target
+                self._plot_traces(style=style, session=session,
+                                 roi_mask=session.mask, images=target_images)
+            else:
+                print("No ROI data available for plotting")
 
         return traces
 
-    def _plot_traces(self, style="stacked", session=None):
+    def _plot_traces(self, style="stacked", session=None, roi_mask=None, images=None):
         """
         Plot z-normalized traces using matplotlib.
-        Uses the properly computed traces_znorm from compute_traces_from_rois().
+
+        Can operate in two modes:
+        1. Preview mode: Pass roi_mask and images to compute traces on-the-fly
+        2. Saved mode: Use self.traces_znorm (already computed and saved)
 
         Parameters:
         -----------
@@ -730,20 +742,113 @@ class Core:
             Plotting style ('stacked', 'individual', or 'raster')
         session : NapariRoiPrompt, optional
             Napari session object for accessing ROI visualization data
+        roi_mask : np.ndarray, optional
+            ROI mask for preview mode (if provided with images, computes traces on-the-fly)
+        images : np.ndarray, optional
+            Image stack for preview mode (if provided with roi_mask, computes traces on-the-fly)
         """
         import matplotlib.pyplot as plt
+        import pygor.core.gui.methods
 
-        # Transpose to (n_rois, n_frames) for plotting
-        traces_plot = self.traces_znorm.T
+        # Determine mode and prepare data
+        if roi_mask is not None and images is not None:
+            # PREVIEW MODE: Compute traces on-the-fly
+            print("Preview mode: computing traces on-the-fly...")
 
+            # Validate ROI mask has valid ROIs
+            unique_vals = np.unique(roi_mask)
+            unique_vals = unique_vals[~np.isnan(unique_vals)]
+
+            # Handle both H5 format (-1,-2,-3...) and Napari format (0,1,2...)
+            if np.any(unique_vals < 0):
+                valid_rois = unique_vals[unique_vals < 0]
+            else:
+                valid_rois = unique_vals[unique_vals >= 0]
+
+            if len(valid_rois) == 0:
+                print("No valid ROIs found - skipping plot")
+                return
+
+            # Extract traces using parallel method
+            traces_raw = pygor.core.gui.methods._fetch_traces_parallel(images, roi_mask)
+            # Returns (n_rois, n_frames) - IGOR convention
+
+            n_rois, n_frames = traces_raw.shape
+
+            # Compute z-scores using same baseline logic as compute_traces_from_rois()
+            traces_znorm = np.zeros_like(traces_raw)
+
+            # Get baseline parameters
+            try:
+                ignore_first_seconds = self.os_parameters['Ignore1stXseconds']
+                baseline_seconds = self.os_parameters['Baseline_nSeconds']
+                line_duration = self.os_parameters['LineDuration']
+                n_lines = images.shape[1]  # nY from image dimensions
+            except (AttributeError, KeyError, TypeError):
+                # Fallback if OS_Parameters not available
+                print("Warning: OS_Parameters not available, using default baseline settings")
+                ignore_first_seconds = 0
+                baseline_seconds = 2
+                line_duration = 0.002  # 2ms default
+                n_lines = images.shape[1]
+
+            frame_duration = n_lines * line_duration
+            n_frames_ignore = int(ignore_first_seconds / frame_duration)
+            n_frames_baseline = int(baseline_seconds / frame_duration)
+
+            # Ensure baseline window is valid
+            if n_frames_baseline < 3:
+                n_frames_baseline = 3
+            if n_frames_ignore + n_frames_baseline > n_frames:
+                n_frames_ignore = 0
+                n_frames_baseline = min(n_frames // 2, 10)
+
+            baseline_start = n_frames_ignore
+            baseline_end = baseline_start + n_frames_baseline
+
+            # Compute z-score for each ROI
+            for roi_idx in range(n_rois):
+                trace = traces_raw[roi_idx, :]  # Shape (n_rois, n_frames), get one ROI
+                baseline = trace[baseline_start:baseline_end]
+                baseline_mean = np.mean(baseline)
+                baseline_std = np.std(baseline)
+
+                if baseline_std > 0:
+                    traces_znorm[roi_idx, :] = (trace - baseline_mean) / baseline_std
+                else:
+                    traces_znorm[roi_idx, :] = 0
+
+            # Prepare for plotting (already in correct format)
+            traces_plot = traces_znorm  # Already (n_rois, n_frames)
+            avg_img = np.mean(images, axis=0)
+
+        else:
+            # SAVED MODE: Use existing computed traces
+            if self.traces_znorm is None:
+                print("No traces available - call compute_traces_from_rois() first or provide roi_mask and images for preview")
+                return
+
+            # Check if traces shape matches current ROI count (staleness check)
+            if self.rois is not None:
+                current_roi_count = len(np.unique(self.rois)[np.unique(self.rois) < 0])
+                trace_roi_count = self.traces_znorm.shape[0]  # First dimension is n_rois
+                if trace_roi_count != current_roi_count:
+                    print(f"WARNING: Trace count ({trace_roi_count}) doesn't match ROI count ({current_roi_count}).")
+                    print("Traces may be stale from H5 file. Restart kernel or call compute_traces_from_rois(overwrite=True).")
+
+            traces_plot = self.traces_znorm  # Already (n_rois, n_frames) from IGOR convention
+            avg_img = np.mean(self.images, axis=0)
+
+        # Create plot
         fig, ax = plt.subplots(2, 1, figsize=(10, 4))
         colormap = plt.cm.rainbow(np.linspace(0, 1, len(traces_plot)))
 
         # Top panel: Show average image with ROI overlay
-        avg_img = np.mean(self.images, axis=0)
         ax[0].imshow(avg_img, cmap="Greys_r", origin='lower')
         if session is not None and hasattr(session, 'mask'):
             ax[0].imshow(session.mask, cmap="rainbow", alpha=0.25, origin='lower')
+        elif roi_mask is not None:
+            ax[0].imshow(roi_mask, cmap="rainbow", alpha=0.25, origin='lower')
         ax[0].set_title('ROIs')
         ax[0].axis('off')
 
@@ -898,11 +1003,10 @@ class Core:
         print(f"Computing traces using parallel extraction...")
 
         # Extract raw traces using the fast parallel method
-        # Returns shape (n_rois, n_frames) so we transpose to (n_frames, n_rois)
-        traces_raw_t = pygor.core.gui.methods._fetch_traces_parallel(self.images, self.rois)
-        traces_raw = traces_raw_t.T  # Transpose to (n_frames, n_rois)
+        # Returns shape (n_rois, n_frames) - IGOR convention
+        traces_raw = pygor.core.gui.methods._fetch_traces_parallel(self.images, self.rois)
 
-        n_frames, n_rois = traces_raw.shape
+        n_rois, n_frames = traces_raw.shape
 
         # Compute z-normalized traces using IGOR's baseline method
         # IGOR uses first nSeconds_prerun_reference (after ignoring first X seconds) as baseline
@@ -938,13 +1042,13 @@ class Core:
 
         # Compute z-score for each ROI using its baseline period
         for roi_idx in range(n_rois):
-            trace = traces_raw[:, roi_idx]
+            trace = traces_raw[roi_idx, :]  # Shape (n_rois, n_frames), get one ROI
             baseline = trace[baseline_start:baseline_end]
             baseline_mean = np.mean(baseline)
             baseline_std = np.std(baseline)
 
             # IGOR formula: (trace - baseline_mean) / baseline_std
-            traces_znorm[:, roi_idx] = (trace - baseline_mean) / baseline_std
+            traces_znorm[roi_idx, :] = (trace - baseline_mean) / baseline_std
 
         # Set both attributes
         self.traces_raw = traces_raw.astype(np.float32)
@@ -990,14 +1094,9 @@ class Core:
             raise ValueError("Triggertimes not available. Cannot compute snippets.")
 
         # Use z-normalized traces (always use SD format as IGOR does)
-        # Traces are stored as (n_frames, n_rois) after compute_traces_from_rois
-        # or transposed by try_fetch when loaded from H5
-        traces = self.traces_znorm
-
-        # Check and handle different possible trace formats
-        if traces.shape[0] < traces.shape[1]:
-            # Likely (n_rois, n_frames) - transpose to (n_frames, n_rois)
-            traces = traces.T
+        # Traces are stored as (n_rois, n_frames) - IGOR convention
+        # Need to transpose to (n_frames, n_rois) for snippet extraction
+        traces = self.traces_znorm.T  # Transpose to (n_frames, n_rois)
 
         n_frames, n_rois = traces.shape
 
