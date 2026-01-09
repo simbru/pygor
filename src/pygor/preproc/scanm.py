@@ -279,20 +279,23 @@ def read_smp_data(
         # Read all pixel data as int16
         raw_data = np.fromfile(f, dtype=np.int16)
 
-    # De-interleave channels using buffer blocks
+    # De-interleave channels using buffer blocks (VECTORIZED)
     # Data layout: [ch0_buf0, ch1_buf0, ch0_buf1, ch1_buf1, ...]
     # where each buffer chunk is pix_buffer pixels
     chunk_size = n_channels * pix_buffer
     
-    # Initialize lists to collect channel data
-    channel_data = {ch: [] for ch in available_channels}
+    # Truncate to complete chunks
+    n_complete_chunks = len(raw_data) // chunk_size
+    raw_truncated = raw_data[:n_complete_chunks * chunk_size]
     
-    for i in range(0, len(raw_data), chunk_size):
-        for ch_idx, ch in enumerate(available_channels):
-            start = i + ch_idx * pix_buffer
-            end = start + pix_buffer
-            if end <= len(raw_data):
-                channel_data[ch].append(raw_data[start:end])
+    # Reshape to (n_chunks, n_channels, pix_buffer) for vectorized de-interleaving
+    raw_reshaped = raw_truncated.reshape(n_complete_chunks, n_channels, pix_buffer)
+    
+    # Extract each channel by slicing (no Python loop needed)
+    channel_data = {}
+    for ch_idx, ch in enumerate(available_channels):
+        # Flatten (n_chunks, pix_buffer) back to 1D
+        channel_data[ch] = raw_reshaped[:, ch_idx, :].ravel()
     
     # Calculate decode parameters for cropping retrace/offset pixels
     # For XY scans: decoded_width = FrameWidth - PixRetraceLen - XPixLineOffs
@@ -309,8 +312,8 @@ def read_smp_data(
     pixels_per_frame = frame_width * frame_height
     
     for ch in channels_to_load:
-        if ch in channel_data and channel_data[ch]:
-            ch_data = np.concatenate(channel_data[ch])
+        if ch in channel_data and len(channel_data[ch]) > 0:
+            ch_data = channel_data[ch]  # Already 1D array from vectorized extraction
             # Calculate actual number of complete frames
             actual_frames = len(ch_data) // pixels_per_frame
             ch_data = ch_data[:actual_frames * pixels_per_frame]
@@ -494,17 +497,36 @@ def _detect_triggers_simple(
         peak = np.percentile(trace, 99)
         threshold = baseline + 0.5 * (peak - baseline)
     
-    # Find frames above threshold
+    # Find frames above threshold (vectorized)
     above_thresh = trace > threshold
     
-    # Find rising edges
-    trigger_frames = []
-    last_trigger = -min_separation
+    # Find rising edges (vectorized): current frame is high AND previous was low
+    # Prepend False so first frame can be a rising edge
+    rising_edges = above_thresh & ~np.concatenate([[False], above_thresh[:-1]])
     
-    for i, is_trigger in enumerate(above_thresh):
-        if is_trigger and (i - last_trigger) >= min_separation:
-            trigger_frames.append(i)
-            last_trigger = i
+    # Get indices of all rising edges
+    candidate_indices = np.where(rising_edges)[0]
+    
+    # Apply minimum separation filter (vectorized where possible)
+    if len(candidate_indices) == 0:
+        return np.array([], dtype=int)
+    
+    # Use diff to find gaps, keep first trigger always
+    if len(candidate_indices) == 1:
+        return candidate_indices
+    
+    # Vectorized: compute gaps between consecutive candidates
+    gaps = np.diff(candidate_indices)
+    
+    # Keep triggers where gap >= min_separation (plus always keep first)
+    keep_mask = np.concatenate([[True], gaps >= min_separation])
+    
+    # But we need cumulative filtering - a skipped trigger shouldn't reset the gap
+    # Use a simple loop for this final step (usually small number of triggers)
+    trigger_frames = [candidate_indices[0]]
+    for i in range(1, len(candidate_indices)):
+        if candidate_indices[i] - trigger_frames[-1] >= min_separation:
+            trigger_frames.append(candidate_indices[i])
     
     return np.array(trigger_frames, dtype=int)
 

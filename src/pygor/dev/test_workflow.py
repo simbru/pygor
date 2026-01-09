@@ -1,3 +1,4 @@
+import time
 import pygor
 import pygor.preproc as preproc
 import pygor.filehandling
@@ -6,6 +7,7 @@ import shutil
 import os 
 import pathlib
 import re
+import timeit
 
 """
 Imaginative workflow for matching files in a directory based on specific naming patterns, 
@@ -48,6 +50,8 @@ to their imaging data, and then performing a tandem analysis on the matched pair
 #     return result
 
 def main():
+    # start timeit
+    time_start = timeit.default_timer()
     example_path = r"D:\Igor analyses\OSDS\251112 OSDS\0_1_SWN_200_White.smh"
 
     # Test loading directly as Core from ScanM files
@@ -70,16 +74,23 @@ def main():
     print(f"  n_planes: {data.n_planes}")
     print(f"  trigger_mode: {data.trigger_mode}")
     
+
+    ## Optionally:
     # Test export to H5
-    print("\n--- Testing H5 Export ---")
-    h5_path = data.export_to_h5(overwrite=True)
+    # print("\n--- Testing H5 Export ---")
+    # h5_path = data.export_to_h5(overwrite=True)
     
-    # Reload as Core from H5 to verify roundtrip
-    print("\nReloading exported H5...")
-    reloaded = pygor.filehandling.load(h5_path, as_class=Core)
-    print(f"  Reloaded images shape: {reloaded.images.shape}")
-    print(f"  Reloaded frame_hz: {reloaded.frame_hz:.2f} Hz")
-    print(f"  Reloaded triggers: {len(reloaded.triggertimes_frame)}")
-    reloaded.view_images_interactive()
+    # # Reload as Core from H5 to verify roundtrip
+    # print("\nReloading exported H5...")
+    # reloaded = pygor.filehandling.load(h5_path, as_class=Core)
+    # print(f"  Reloaded images shape: {reloaded.images.shape}")
+    # print(f"  Reloaded frame_hz: {reloaded.frame_hz:.2f} Hz")
+    # print(f"  Reloaded triggers: {len(reloaded.triggertimes_frame)}")
+    
+    # data.view_images_interactive()
+
+    # End timeit
+    time_end = timeit.default_timer()
+    print(f"\nTotal execution time: {time_end - time_start:.2f} seconds")
 if __name__ == "__main__":
     main()
