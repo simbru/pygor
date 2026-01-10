@@ -87,7 +87,13 @@ def main():
     # print(f"  Reloaded frame_hz: {reloaded.frame_hz:.2f} Hz")
     # print(f"  Reloaded triggers: {len(reloaded.triggertimes_frame)}")
     
-    # data.view_images_interactive()
+    # Apply preprocessing (light artifact fix, x-flip, optional detrend)
+    print("\n--- Applying Preprocessing ---")
+    data.preprocess(detrend=False)  # Skip detrend for faster testing
+    print(f"  Preprocessing applied: {data._preprocessed}")
+    print(f"  Preprocessing params: {data.metadata.get('preprocessing', {})}")
+    
+    data.view_images_interactive()
 
     # End timeit
     time_end = timeit.default_timer()

@@ -1,7 +1,104 @@
 # Pygor Preprocessing Module Plan
 
 *Document created: 2026-01-09*
+*Last updated: 2026-01-10*
 *Focus: Core preprocessing functionality to replace IGOR*
+
+---
+
+## Implementation Status
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| SMP/SMH loading | ✅ Complete | `load_scanm()` in `pygor.preproc.scanm` |
+| Header parsing | ✅ Complete | UTF-16-LE encoding, proper type conversion |
+| Trigger detection | ✅ Complete | IGOR-compatible, matches exactly (64/64 triggers) |
+| X-flip + light artifact | ✅ Complete | `fix_light_artifact()` + `fill_light_artifact()` |
+| Detrending | ✅ Complete | `detrend_stack()` with temporal binning |
+| Full preprocessing | ✅ Complete | `preprocess_stack()` matches IGOR output (max diff 0.45) |
+| Core.preprocess() method | ✅ Complete | In-place preprocessing with config support |
+| Core.from_scanm(preprocess=) | ✅ Complete | Load with optional preprocessing |
+| Configuration system | ✅ Complete | `pygor.config` with user/project config files |
+| Documentation | ✅ Complete | `docs/modules/preprocessing.md`, `docs/configuration.md` |
+| H5 export | 🔶 Partial | `Core.export_to_h5()` exists, needs verification |
+| Registration | ⬜ Planned | Motion correction |
+| ROI handling | ⬜ Planned | Auto-ROI, manual ROI, ROI transfer |
+
+---
+
+## Session Summary (2026-01-09 to 2026-01-10)
+
+### What We Accomplished
+
+1. **Verified ScanM loading** - Raw pixel data matches IGOR's `wDataCh0` exactly
+2. **Fixed trigger detection** - Changed from 1179 false triggers to 64 correct triggers
+3. **Implemented IGOR-compatible preprocessing**:
+   - X-flip algorithm: `InputData[artifact:]` = `raw[artifact:][::-1]`
+   - Light artifact fill: Mean of `Stack_Ave[:, artifact+1:]`
+   - First frame fix: Copy frame 1 to frame 0
+   - Detrending: Temporal smoothing with boxcar filter
+4. **Added `Core.preprocess()` method** - Callable after loading
+5. **Added `preprocess` parameter to `from_scanm()`** - Accepts `bool` or `dict`
+6. **Created configuration system** - `~/.pygor/config.yaml` and `./pygor.yaml`
+7. **Built documentation** - `docs/index.md`, `docs/modules/preprocessing.md`, `docs/configuration.md`
+
+### Key Files Modified/Created
+
+| File | Change |
+|------|--------|
+| `pygor/preproc/scanm.py` | Added `PREPROCESS_DEFAULTS`, preprocessing functions |
+| `pygor/classes/core_data.py` | Added `preprocess()` method, updated `from_scanm()` |
+| `pygor/config.py` | **New** - Configuration loading system |
+| `docs/index.md` | **New** - Documentation index |
+| `docs/modules/preprocessing.md` | **New** - Preprocessing docs |
+| `docs/configuration.md` | **New** - Config file docs |
+
+### Verification Results
+
+```
+Preprocessing comparison vs IGOR wDataCh0_detrended:
+  Max difference:  0.45 (float32 precision)
+  Mean difference: 0.01
+  Result: ✅ MATCH
+```
+
+---
+
+## Next Steps (After Weekend)
+
+### Priority 1: Test with Real Workflows
+
+- [ ] Test `Core.from_scanm(preprocess=True)` on multiple recordings
+- [ ] Verify trigger counts match IGOR for different stimulus types
+- [ ] Test detrending (currently tested with `detrend=False` only)
+- [ ] Check that downstream analyses (STRF, OSDS, etc.) work with preprocessed data
+
+### Priority 2: H5 Export Verification
+
+- [ ] Verify `Core.export_to_h5()` produces IGOR-compatible files
+- [ ] Test roundtrip: SMP → preprocess → H5 → reload
+- [ ] Ensure exported H5 can be used by existing IGOR scripts (if needed)
+
+### Priority 3: Registration (Motion Correction)
+
+- [ ] Port `OS_Register.ipf` algorithm to Python
+- [ ] Implement phase correlation registration
+- [ ] Add `Core.register()` method
+- [ ] Handle ROI transfer after registration
+
+### Priority 4: ROI Handling
+
+- [ ] Auto-ROI generation (port `OS_AutoRoiByCorr.ipf`)
+- [ ] Manual ROI drawing/editing in viewer
+- [ ] ROI import from IGOR H5 files
+- [ ] ROI transfer between recordings
+
+### Priority 5: Polish & Testing
+
+- [ ] Add unit tests for preprocessing functions
+- [ ] Add integration tests for full workflow
+- [ ] Update remaining documentation
+- [ ] Consider adding progress bars for long operations
 
 ---
 
@@ -84,11 +181,48 @@ Key functions from `readScanM.py`:
 - `to_frame()` - Reshape to (nFrames, height, width)
 - `trigger_detection()` - Find triggers from Ch2
 
-**IGOR reference files:**
-- `C:\Users\SimenLab\...\User Procedures\ScM\ScanM_FileIO\ScM_FileIO.ipf` - File I/O
-- `C:\Users\SimenLab\...\User Procedures\OS\OS_DetrendStack.ipf` - Detrending
-- `C:\Users\SimenLab\...\User Procedures\OS\OS_TracesAndTriggers.ipf` - Trigger detection
-- `C:\Users\SimenLab\...\User Procedures\OS\OS_Register.ipf` - Registration
+**IGOR reference files (OS Scripts):**
+
+Located at: `C:\Users\SimenLab\OneDrive\Dokumenter\WaveMetrics\Igor Pro 9 User Files\User Procedures\OS\`
+
+| Script | Purpose |
+|--------|---------|
+| `OS_DetrendStack.ipf` | Detrending and trigger channel reduction to 2 columns (lines 37-49) |
+| `OS_TracesAndTriggers.ipf` | Trigger detection (lines 120-155) and ROI trace extraction |
+| `OS_Register.ipf` | Frame registration/motion correction |
+| `OS_ParameterTable.ipf` | Parameter table generation |
+| `OS_AutoRoiByCorr.ipf` | Automatic ROI generation |
+
+**IGOR Workflow:**
+1. Load ScanM data (SMP/SMH)
+2. Generate parameter table (OS_ParameterTable)
+3. Standard pre-formatting: detrend + trigger ch reduction (OS_DetrendStack)
+4. Optional: Registration (OS_Register)
+5. Draw ROIs manually or auto-generate
+6. Extract traces and triggers (OS_TracesAndTriggers)
+7. Export to H5
+
+**Key IGOR Trigger Detection Algorithm (OS_TracesAndTriggers.ipf):**
+```igor
+// Uses only column 0 of trigger channel: InputTriggers[0][yy][ff]
+// Threshold: trigger fires when value < 2^16 - trigger_threshold
+// Default trigger_threshold typically 10000, so trigger at value < 55536
+// Uses "expectlow" flag for debouncing
+for (ff=0;ff<nF-1;ff+=1)
+    for (yy=0;yy<nY;yy+=1)
+        if (InputTriggers[0][yy][ff]>2^16-trigger_threshold)
+            expectlow = 0  // reset - allow next trigger
+        endif
+        if (InputTriggers[0][yy][ff]<2^16-trigger_threshold && expectlow==0)
+            // TRIGGER DETECTED
+            OutputTriggerTimes[nTriggers]=ff*nY*LineDuration+yy*LineDuration
+            nTriggers+=1
+            expectlow = 1  // prevent re-triggering until signal goes high again
+            // Skip ahead by seconds_skip_after_trigger
+        endif
+    endfor
+endfor
+```
 
 ---
 
@@ -488,6 +622,47 @@ def test_read_smp_data_shape():
 def test_load_scanm_roundtrip():
     """Load SMP → save H5 → load H5 → compare."""
 ```
+
+---
+
+## Quick Reference (for resuming work)
+
+### How to test preprocessing
+
+```python
+from pygor.classes.core_data import Core
+
+# Load and preprocess
+data = Core.from_scanm(r"D:\Igor analyses\OSDS\251112 OSDS\0_1_SWN_200_White.smh", preprocess=True)
+
+# Or load raw, then preprocess
+data = Core.from_scanm(r"path/to/file.smh")
+data.preprocess(detrend=False)  # Skip detrend for speed
+
+# Check preprocessing was applied
+print(data._preprocessed)  # True
+print(data.metadata.get('preprocessing'))  # Shows params used
+
+# View result
+data.view_images_interactive()
+```
+
+### Key test files
+
+- `D:\Igor analyses\OSDS\251112 OSDS\0_1_gradient_contrast_400_white.smp` - Has IGOR H5 for comparison
+- `D:\Igor analyses\OSDS\251112 OSDS\0_1_SWN_200_White.smp` - White noise stimulus
+
+### Comparison script
+
+```bash
+python src/pygor/dev/compare_igor_vs_scanm.py
+```
+
+### Documentation
+
+- `docs/index.md` - Main docs index
+- `docs/modules/preprocessing.md` - Preprocessing module docs
+- `docs/configuration.md` - Config file docs
 
 ### Integration Tests
 
