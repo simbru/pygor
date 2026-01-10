@@ -32,7 +32,6 @@ and eulerlab/processing_pypeline (Andre Chagas).
 """
 
 from pathlib import Path
-import struct
 import numpy as np
 import datetime
 import h5py
@@ -41,9 +40,41 @@ __all__ = [
     "read_smh_header",
     "read_smp_data",
     "load_scanm",
+    "fix_light_artifact",
+    "fill_light_artifact",
+    "detrend_stack",
+    "preprocess_stack",
+    "detect_triggers",
     "to_pygor_data",
     "ScanMData",
+    "PREPROCESS_DEFAULTS",
 ]
+
+
+# -----------------------------------------------------------------------------
+# Default parameters (matching IGOR OS Scripts)
+# -----------------------------------------------------------------------------
+
+PREPROCESS_DEFAULTS = {
+    "artifact_width": 2,
+    "flip_x": True,
+    "detrend": True,
+    "smooth_window_s": 1000.0,
+    "time_bin": 10,
+    "fix_first_frame": True,
+}
+"""
+Default preprocessing parameters matching IGOR OS_Parameters defaults.
+
+These can be overridden via:
+1. User config file: ~/.pygor/config.yaml
+2. Project config file: ./pygor.yaml
+3. Direct function arguments
+
+See Also
+--------
+pygor.config : Configuration loading and management
+"""
 
 
 # -----------------------------------------------------------------------------
@@ -276,8 +307,11 @@ def read_smp_data(
         # NO header offset - SMP files start with pixel data immediately
         f.seek(0)
 
-        # Read all pixel data as int16
-        raw_data = np.fromfile(f, dtype=np.int16)
+        # Read all pixel data as uint16 (unsigned)
+        # ScanM stores raw ADC values as unsigned 16-bit integers
+        # Reading as int16 and using .view(uint16) gives identical results,
+        # but reading directly as uint16 is cleaner and matches IGOR's wDataCh0
+        raw_data = np.fromfile(f, dtype=np.uint16)
 
     # De-interleave channels using buffer blocks (VECTORIZED)
     # Data layout: [ch0_buf0, ch1_buf0, ch0_buf1, ch1_buf1, ...]
@@ -466,69 +500,328 @@ def _compute_timing_params(header: dict, images: np.ndarray) -> dict:
     }
 
 
-def _detect_triggers_simple(
-    trigger_stack: np.ndarray,
-    threshold: float | None = None,
-    min_separation: int = 5,
+# -----------------------------------------------------------------------------
+# Preprocessing: Light artifact and detrending
+# -----------------------------------------------------------------------------
+
+def fix_light_artifact(
+    stack: np.ndarray,
+    artifact_width: int = 2,
+    flip_x: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Handle scanning light artifact by X-flipping the image.
+    
+    The leftmost pixels in each frame often contain a light artifact from the
+    scanning laser turn-around. IGOR handles this by:
+    1. X-flipping the non-artifact region only
+    2. Later filling the artifact region (done after detrending)
+    
+    This function performs the X-flip. Use `fill_light_artifact()` after 
+    any detrending to complete the artifact handling.
+    
+    Parameters
+    ----------
+    stack : np.ndarray
+        3D array (frames, lines, width) of imaging data
+    artifact_width : int, default=2
+        Number of pixels at left edge affected by light artifact.
+        IGOR default is 2 (OS_Parameters[%LightArtifact_cut]).
+        Note: IGOR uses inclusive indexing, so artifact_width=2 means
+        pixels 0, 1, 2 are affected (3 pixels total).
+    flip_x : bool, default=True
+        Whether to flip the image horizontally (IGOR does this).
+        
+    Returns
+    -------
+    result : np.ndarray
+        Stack with X-flip applied (artifact region not yet filled)
+    stack_ave : np.ndarray
+        Mean image (lines, width) computed from the x-flipped data
+        
+    Notes
+    -----
+    IGOR's x-flip algorithm (OS_DetrendStack.ipf, line ~93):
+    ``InputData[LightArtifactCut,nX-1][][]=wDataCh0[nX-1-(p-LightArtifactCut)][q][r]``
+    
+    This flips positions [artifact:] by mapping:
+    - position artifact → source position nX-1
+    - position artifact+1 → source position nX-2
+    - etc.
+    """
+    n_frames, n_lines, n_width = stack.shape
+    result = stack.astype(np.float32).copy()
+    
+    if flip_x and artifact_width < n_width:
+        # IGOR-compatible X-flip: flip only [artifact_width:] region
+        # Maps position p to source position (nX-1) - (p - artifact_width)
+        for p in range(artifact_width, n_width):
+            source_idx = n_width - 1 - (p - artifact_width)
+            result[:, :, p] = stack[:, :, source_idx]
+    
+    # Compute Stack_Ave from x-flipped data (used for artifact fill later)
+    stack_ave = result.mean(axis=0)  # (lines, width)
+    
+    return result, stack_ave
+
+
+def fill_light_artifact(
+    stack: np.ndarray,
+    stack_ave: np.ndarray,
+    artifact_width: int = 2,
 ) -> np.ndarray:
     """
-    Simple trigger detection from trigger channel stack.
+    Fill the light artifact region with mean of non-artifact pixels.
+    
+    This should be called after detrending (or after x-flip if not detrending)
+    to complete the artifact handling.
+    
+    Parameters
+    ----------
+    stack : np.ndarray
+        3D array (frames, lines, width) - typically already x-flipped
+    stack_ave : np.ndarray
+        Mean image (lines, width) from x-flipped data
+    artifact_width : int, default=2
+        IGOR LightArtifact_cut parameter. With inclusive indexing,
+        this fills pixels 0 through artifact_width (inclusive).
+        
+    Returns
+    -------
+    np.ndarray
+        Stack with artifact region filled
+        
+    Notes
+    -----
+    IGOR fills artifact with mean of Stack_Ave[artifact_width+1:, :]:
+    ``ImageStats/Q tempimage`` (where tempimage = Stack_Ave[LightArtifactCut:])
+    ``InputData[0,LightArtifactCut][][]=V_Avg``
+    """
+    result = stack.copy()
+    
+    # IGOR: artifact region is [0, LightArtifact_cut] INCLUSIVE
+    # So with artifact_width=2, we fill pixels 0, 1, 2 (indices 0:3 in Python)
+    fill_width = artifact_width + 1
+    
+    # Compute fill value: mean of Stack_Ave for non-artifact region
+    non_artifact_mean = stack_ave[:, fill_width:].mean()
+    
+    # Fill artifact region in all frames
+    result[:, :, :fill_width] = non_artifact_mean
+    
+    return result
+
+
+def detrend_stack(
+    stack: np.ndarray,
+    frame_rate: float,
+    smooth_window_s: float = 1000.0,
+    time_bin: int = 10,
+) -> np.ndarray:
+    """
+    Remove slow baseline drift from imaging stack.
+    
+    For each pixel, subtracts a heavily smoothed version of its time course,
+    then adds back the pixel's mean to preserve intensity scale.
+    
+    This matches IGOR's OS_DetrendStack algorithm:
+    ``InputData -= SubtractionStack - Stack_Ave``
+    
+    Parameters
+    ----------
+    stack : np.ndarray
+        3D array (frames, lines, width) of imaging data
+    frame_rate : float
+        Frame rate in Hz
+    smooth_window_s : float, default=1000.0
+        Smoothing window in seconds. IGOR default is 1000.
+    time_bin : int, default=10
+        Temporal binning factor for speed. IGOR default is 10.
+        
+    Returns
+    -------
+    np.ndarray
+        Detrended stack (same shape as input)
+    """
+    from scipy.ndimage import uniform_filter1d
+    
+    n_frames, n_lines, n_width = stack.shape
+    
+    # Compute mean per pixel (to add back after subtracting baseline)
+    pixel_mean = stack.mean(axis=0)  # Shape: (n_lines, n_width)
+    
+    # Calculate smoothing window in frames
+    smooth_frames = int(frame_rate * smooth_window_s / time_bin)
+    smooth_frames = min(smooth_frames, 2**15 - 1)  # IGOR limit
+    smooth_frames = max(smooth_frames, 1)
+    
+    # Temporal binning for speed (IGOR uses simple subsampling)
+    binned_stack = stack[::time_bin, :, :]
+    
+    # Apply smoothing along time dimension
+    # IGOR uses Smooth/DIM=2 which is a boxcar/uniform filter
+    smoothed = uniform_filter1d(binned_stack.astype(np.float32), 
+                                 size=smooth_frames, axis=0, mode='nearest')
+    
+    # Upsample back to original frame count by repeating
+    # (IGOR: SubtractionStack[p][q][r/nTimeBin])
+    baseline = np.repeat(smoothed, time_bin, axis=0)[:n_frames]
+    
+    # Subtract baseline and add back mean
+    # IGOR: InputData -= SubtractionStack - Stack_Ave
+    result = stack.astype(np.float32) - baseline + pixel_mean
+    
+    return result
+
+
+def preprocess_stack(
+    stack: np.ndarray,
+    frame_rate: float,
+    artifact_width: int = 2,
+    flip_x: bool = True,
+    detrend: bool = True,
+    smooth_window_s: float = 1000.0,
+    time_bin: int = 10,
+    fix_first_frame: bool = True,
+) -> np.ndarray:
+    """
+    Full preprocessing pipeline matching IGOR's OS_DetrendStack.
+    
+    Applies light artifact correction and optional detrending.
+    
+    Parameters
+    ----------
+    stack : np.ndarray
+        3D array (frames, lines, width) of imaging data
+    frame_rate : float
+        Frame rate in Hz
+    artifact_width : int, default=2
+        Pixels to mask for light artifact. IGOR default is 2.
+    flip_x : bool, default=True
+        Whether to X-flip the image.
+    detrend : bool, default=True
+        Whether to apply temporal detrending.
+    smooth_window_s : float, default=1000.0
+        Detrending smooth window in seconds.
+    time_bin : int, default=10
+        Temporal binning for detrending speed.
+    fix_first_frame : bool, default=True
+        Copy frame 2 into frame 1 to fix first-frame artifact.
+        
+    Returns
+    -------
+    np.ndarray
+        Preprocessed stack
+        
+    Notes
+    -----
+    IGOR preprocessing order (OS_DetrendStack.ipf):
+    1. X-flip the non-artifact region
+    2. Compute Stack_Ave (mean per pixel)
+    3. Detrend (if not skipped): subtract smoothed baseline, add back Stack_Ave
+    4. Fix frame 0 by copying from frame 1
+    5. Fill artifact region with mean of non-artifact Stack_Ave
+    """
+    # Step 1: X-flip (artifact region initially just copied)
+    result, stack_ave = fix_light_artifact(stack, artifact_width=artifact_width, flip_x=flip_x)
+    
+    # Step 2: Detrending (uses stack_ave internally)
+    if detrend:
+        result = detrend_stack(result, frame_rate, 
+                               smooth_window_s=smooth_window_s, 
+                               time_bin=time_bin)
+    
+    # Step 3: Fix first frame artifact (IGOR copies frame 2 to frame 1)
+    # IGOR: InputData[][][0]=InputData[p][q][1]
+    if fix_first_frame and result.shape[0] > 1:
+        result[0] = result[1]
+    
+    # Step 4: Fill artifact region with mean of non-artifact Stack_Ave
+    result = fill_light_artifact(result, stack_ave, artifact_width=artifact_width)
+    
+    return result
+
+
+# -----------------------------------------------------------------------------
+# Trigger detection
+# -----------------------------------------------------------------------------
+
+def detect_triggers(
+    trigger_stack: np.ndarray,
+    line_duration: float,
+    trigger_threshold: int = 20000,
+    min_gap_seconds: float = 0.1,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Detect stimulus triggers from trigger channel stack.
+    
+    Uses IGOR-compatible detection: triggers fire when signal drops below
+    a threshold value (2^16 - trigger_threshold). This matches the algorithm
+    in OS_TracesAndTriggers.ipf.
     
     Parameters
     ----------
     trigger_stack : np.ndarray
-        3D array (frames, height, width) from trigger channel
-    threshold : float, optional
-        Detection threshold. If None, auto-computed as mean + 3*std
-    min_separation : int
-        Minimum frames between triggers
+        3D array (frames, lines, width) from trigger channel
+    line_duration : float
+        Duration of one scan line in seconds
+    trigger_threshold : int, default=20000
+        Threshold parameter. Trigger fires when value < 2^16 - threshold.
+        IGOR default is 20000 (OS_Parameters[%Trigger_Threshold]).
+    min_gap_seconds : float, default=0.1
+        Minimum time between triggers in seconds. Prevents re-triggering.
+        IGOR default is 0.1 (OS_Parameters[%Trigger_after_skip_s]).
         
     Returns
     -------
     trigger_frames : np.ndarray
         1D array of frame indices where triggers occurred
+    trigger_times : np.ndarray
+        1D array of trigger times in seconds (with line precision)
     """
-    # Downsample to 1D trace (max of each frame)
-    trace = trigger_stack.max(axis=(1, 2))
+    n_frames, n_lines, _ = trigger_stack.shape
     
-    # Auto-threshold
-    if threshold is None:
-        baseline = np.percentile(trace, 10)
-        peak = np.percentile(trace, 99)
-        threshold = baseline + 0.5 * (peak - baseline)
+    # Use column 0 only (IGOR convention), flatten to 1D for vectorized ops
+    # Shape: (n_frames * n_lines,)
+    signal = trigger_stack[:, :, 0].ravel()
     
-    # Find frames above threshold (vectorized)
-    above_thresh = trace > threshold
+    # Threshold: trigger when signal drops below this value
+    threshold_value = 2**16 - trigger_threshold
     
-    # Find rising edges (vectorized): current frame is high AND previous was low
-    # Prepend False so first frame can be a rising edge
-    rising_edges = above_thresh & ~np.concatenate([[False], above_thresh[:-1]])
+    # Find all samples below threshold (potential triggers)
+    below_thresh = signal < threshold_value
     
-    # Get indices of all rising edges
-    candidate_indices = np.where(rising_edges)[0]
+    # Find falling edges: current sample is low AND previous was high
+    # This is the trigger onset
+    falling_edges = below_thresh & ~np.concatenate([[False], below_thresh[:-1]])
     
-    # Apply minimum separation filter (vectorized where possible)
+    # Get flat indices of all trigger onsets
+    candidate_indices = np.where(falling_edges)[0]
+    
     if len(candidate_indices) == 0:
-        return np.array([], dtype=int)
+        return np.array([], dtype=int), np.array([], dtype=float)
     
-    # Use diff to find gaps, keep first trigger always
-    if len(candidate_indices) == 1:
-        return candidate_indices
+    # Minimum gap in samples (lines)
+    min_gap_samples = int(min_gap_seconds / line_duration)
     
-    # Vectorized: compute gaps between consecutive candidates
-    gaps = np.diff(candidate_indices)
+    # Filter by minimum gap - keep first, then only those far enough apart
+    # This is the debounce logic (IGOR's "expectlow" + skip)
+    kept_indices = [candidate_indices[0]]
+    for idx in candidate_indices[1:]:
+        if idx - kept_indices[-1] >= min_gap_samples:
+            kept_indices.append(idx)
     
-    # Keep triggers where gap >= min_separation (plus always keep first)
-    keep_mask = np.concatenate([[True], gaps >= min_separation])
+    kept_indices = np.array(kept_indices, dtype=int)
     
-    # But we need cumulative filtering - a skipped trigger shouldn't reset the gap
-    # Use a simple loop for this final step (usually small number of triggers)
-    trigger_frames = [candidate_indices[0]]
-    for i in range(1, len(candidate_indices)):
-        if candidate_indices[i] - trigger_frames[-1] >= min_separation:
-            trigger_frames.append(candidate_indices[i])
+    # Convert flat indices to frame indices and times
+    trigger_frames = kept_indices // n_lines
+    trigger_lines = kept_indices % n_lines
+    trigger_times = (trigger_frames * n_lines + trigger_lines) * line_duration
     
-    return np.array(trigger_frames, dtype=int)
+    return trigger_frames, trigger_times
+
+
+
 
 
 class ScanMData:
@@ -639,16 +932,21 @@ class ScanMData:
         # Detect triggers
         if trigger_channel in channel_data:
             trigger_stack = channel_data[trigger_channel][:actual_frames]
-            all_triggers = _detect_triggers_simple(trigger_stack)
+            trigger_frames, trigger_times = detect_triggers(
+                trigger_stack, 
+                line_duration=self.linedur_s,
+            )
             
             # Apply skip settings
             if skip_last_triggers > 0:
-                all_triggers = all_triggers[skip_first_triggers:-skip_last_triggers]
+                trigger_frames = trigger_frames[skip_first_triggers:-skip_last_triggers]
+                trigger_times = trigger_times[skip_first_triggers:-skip_last_triggers]
             else:
-                all_triggers = all_triggers[skip_first_triggers:]
+                trigger_frames = trigger_frames[skip_first_triggers:]
+                trigger_times = trigger_times[skip_first_triggers:]
                 
-            self.triggertimes_frame = all_triggers
-            self.triggertimes = all_triggers.astype(float)  # For compatibility
+            self.triggertimes_frame = trigger_frames
+            self.triggertimes = trigger_times  # Now has accurate line-precision times
         else:
             self.triggertimes_frame = np.array([], dtype=int)
             self.triggertimes = np.array([], dtype=float)
@@ -772,14 +1070,12 @@ class ScanMData:
                 f"File already exists: {output_path}. Use overwrite=True to replace."
             )
         
-        # Get header for metadata
-        header = self._header
-        
         with h5py.File(output_path, "w") as f:
             # === Image data ===
             # Core expects (width, height, frames) - transposed from our (frames, height, width)
+            # IGOR stores as uint16 (unsigned), matching raw ADC values
             images_t = self.images.transpose(2, 1, 0)
-            f.create_dataset("wDataCh0_detrended", data=images_t, dtype=np.int16)
+            f.create_dataset("wDataCh0_detrended", data=images_t, dtype=np.uint16)
             
             # Average stack - Core expects (width, height) transposed
             f.create_dataset("Stack_Ave", data=self.average_stack.T, dtype=np.float32)

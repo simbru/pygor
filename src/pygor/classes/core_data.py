@@ -155,6 +155,7 @@ class Core:
         skip_first_triggers: int = 0,
         skip_last_triggers: int = 0,
         trigger_mode: int = 1,
+        preprocess: bool | dict = False,
     ):
         """
         Create a Core object directly from ScanM SMP/SMH files.
@@ -176,6 +177,18 @@ class Core:
             Number of final triggers to skip (default: 0)
         trigger_mode : int, optional
             Trigger detection mode (default: 1)
+        preprocess : bool or dict, optional
+            If False (default), load raw data without preprocessing.
+            If True, apply preprocessing with defaults from config.
+            If dict, apply preprocessing with custom parameters.
+            
+            Preprocessing parameters:
+            - artifact_width (int): Light artifact pixels (default: 2)
+            - flip_x (bool): X-flip image (default: True)
+            - detrend (bool): Apply detrending (default: True)
+            - smooth_window_s (float): Detrend window (default: 1000.0)
+            - time_bin (int): Detrend binning (default: 10)
+            - fix_first_frame (bool): Fix first frame (default: True)
             
         Returns
         -------
@@ -185,10 +198,18 @@ class Core:
         Examples
         --------
         >>> from pygor.classes.core_data import Core
+        >>> # Load raw data
         >>> data = Core.from_scanm("recording.smp")
-        >>> print(data.images.shape)
-        (1000, 64, 200)
-        >>> data.view_stack_rois()  # All Core methods work!
+        >>> 
+        >>> # Load with default preprocessing
+        >>> data = Core.from_scanm("recording.smp", preprocess=True)
+        >>> 
+        >>> # Load with custom preprocessing
+        >>> data = Core.from_scanm("recording.smp", preprocess={"detrend": False})
+        >>> 
+        >>> # Load raw, then preprocess later
+        >>> data = Core.from_scanm("recording.smp")
+        >>> data.preprocess(artifact_width=3, detrend=True)
         
         Notes
         -----
@@ -219,19 +240,25 @@ class Core:
         # Parse datetime
         exp_date, exp_time = scanm_module._parse_scanm_datetime(header)
         
-        # Detect triggers and store trigger channel data
+        # Detect triggers
         if trigger_channel in channel_data:
             trigger_stack = channel_data[trigger_channel][:actual_frames]
-            all_triggers = scanm_module._detect_triggers_simple(trigger_stack)
+            trigger_frames, trigger_times = scanm_module.detect_triggers(
+                trigger_stack, 
+                line_duration=timing["line_duration_s"],
+            )
             
             # Apply skip settings
             if skip_last_triggers > 0:
-                all_triggers = all_triggers[skip_first_triggers:-skip_last_triggers]
+                trigger_frames = trigger_frames[skip_first_triggers:-skip_last_triggers]
+                trigger_times = trigger_times[skip_first_triggers:-skip_last_triggers]
             else:
-                all_triggers = all_triggers[skip_first_triggers:]
+                trigger_frames = trigger_frames[skip_first_triggers:]
+                trigger_times = trigger_times[skip_first_triggers:]
         else:
             trigger_stack = None
-            all_triggers = np.array([], dtype=int)
+            trigger_frames = np.array([], dtype=int)
+            trigger_times = np.array([], dtype=float)
         
         # Create instance without calling __post_init__
         # We use object.__new__ to bypass dataclass __init__
@@ -253,9 +280,9 @@ class Core:
         instance.linedur_s = timing["line_duration_s"]
         instance.n_planes = timing["n_planes"]
         
-        # Triggers
-        instance.triggertimes_frame = all_triggers
-        instance.triggertimes = all_triggers.astype(float)
+        # Triggers - now with accurate line-precision times
+        instance.triggertimes_frame = trigger_frames
+        instance.triggertimes = trigger_times
         instance.trigger_mode = trigger_mode
         instance._Core__skip_first_frames = skip_first_triggers
         instance._Core__skip_last_frames = -skip_last_triggers if skip_last_triggers > 0 else 0
@@ -313,7 +340,130 @@ class Core:
         # Store header for export
         instance._scanm_header = header
         
+        # Preprocessing state tracking
+        instance._preprocessed = False
+        
+        # Apply preprocessing if requested
+        if preprocess:
+            if isinstance(preprocess, dict):
+                instance.preprocess(**preprocess)
+            else:
+                instance.preprocess()
+        
         return instance
+    
+    def preprocess(
+        self,
+        artifact_width: int = None,
+        flip_x: bool = None,
+        detrend: bool = None,
+        smooth_window_s: float = None,
+        time_bin: int = None,
+        fix_first_frame: bool = None,
+        force: bool = False,
+    ) -> None:
+        """
+        Apply preprocessing to images in-place.
+        
+        Handles light artifact correction, X-flip, and optional detrending.
+        This matches IGOR's OS_DetrendStack preprocessing pipeline.
+        
+        Parameters
+        ----------
+        artifact_width : int, optional
+            Number of pixels affected by light artifact (default: 2).
+            IGOR parameter: LightArtifact_cut
+        flip_x : bool, optional
+            X-flip the image (default: True). Standard for ScanM data.
+        detrend : bool, optional
+            Apply temporal baseline subtraction (default: True).
+        smooth_window_s : float, optional
+            Detrending smooth window in seconds (default: 1000.0).
+        time_bin : int, optional
+            Temporal binning factor for detrending speed (default: 10).
+        fix_first_frame : bool, optional
+            Copy frame 2 to frame 1 to fix first-frame artifact (default: True).
+        force : bool, optional
+            If True, re-apply preprocessing even if already done (default: False).
+            
+        Raises
+        ------
+        RuntimeWarning
+            If preprocessing was already applied and force=False.
+            
+        Examples
+        --------
+        >>> data = Core.from_scanm("recording.smp")
+        >>> data.preprocess()  # Apply with defaults
+        >>> data.preprocess(detrend=False)  # Skip detrending
+        >>> data.preprocess(artifact_width=3, force=True)  # Re-apply with custom params
+        
+        See Also
+        --------
+        pygor.preproc.scanm.preprocess_stack : Underlying preprocessing function
+        pygor.config : Configuration management for defaults
+        """
+        import pygor.preproc.scanm as scanm_module
+        
+        # Check if already preprocessed
+        if hasattr(self, '_preprocessed') and self._preprocessed and not force:
+            warnings.warn(
+                "Data has already been preprocessed. Use force=True to re-apply. "
+                "Note: re-preprocessing already-preprocessed data may produce artifacts.",
+                RuntimeWarning
+            )
+            return
+        
+        # Get defaults from config, then override with explicit args
+        try:
+            from pygor.config import get_preprocess_defaults
+            defaults = get_preprocess_defaults()
+        except ImportError:
+            defaults = scanm_module.PREPROCESS_DEFAULTS.copy()
+        
+        # Use provided values or fall back to defaults
+        if artifact_width is None:
+            artifact_width = defaults.get("artifact_width", 2)
+        if flip_x is None:
+            flip_x = defaults.get("flip_x", True)
+        if detrend is None:
+            detrend = defaults.get("detrend", True)
+        if smooth_window_s is None:
+            smooth_window_s = defaults.get("smooth_window_s", 1000.0)
+        if time_bin is None:
+            time_bin = defaults.get("time_bin", 10)
+        if fix_first_frame is None:
+            fix_first_frame = defaults.get("fix_first_frame", True)
+        
+        # Apply preprocessing
+        self.images = scanm_module.preprocess_stack(
+            self.images,
+            frame_rate=self.frame_hz,
+            artifact_width=artifact_width,
+            flip_x=flip_x,
+            detrend=detrend,
+            smooth_window_s=smooth_window_s,
+            time_bin=time_bin,
+            fix_first_frame=fix_first_frame,
+        )
+        
+        # Update average_stack to reflect preprocessed data
+        self.average_stack = self.images.mean(axis=0)
+        
+        # Mark as preprocessed
+        self._preprocessed = True
+        
+        # Store preprocessing params in metadata
+        if self.metadata is None:
+            self.metadata = {}
+        self.metadata["preprocessing"] = {
+            "artifact_width": artifact_width,
+            "flip_x": flip_x,
+            "detrend": detrend,
+            "smooth_window_s": smooth_window_s,
+            "time_bin": time_bin,
+            "fix_first_frame": fix_first_frame,
+        }
     
     def export_to_h5(
         self,
@@ -353,7 +503,8 @@ class Core:
             # === Image data ===
             # H5 expects (width, height, frames) - transposed from our (frames, height, width)
             images_t = self.images.transpose(2, 1, 0)
-            f.create_dataset("wDataCh0_detrended", data=images_t, dtype=np.int16)
+            # IGOR stores as uint16 (unsigned), matching raw ADC values
+            f.create_dataset("wDataCh0_detrended", data=images_t, dtype=np.uint16)
             
             # Trigger channel (if available)
             if hasattr(self, 'trigger_images') and self.trigger_images is not None:
