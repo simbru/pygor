@@ -1,3 +1,6 @@
+# Pygor local config (user-specific settings)
+pygor.toml
+.pygor/config.toml
 # Others
 meetingnotes.ipynb
 analysis.ipynb
