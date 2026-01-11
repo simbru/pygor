@@ -14,9 +14,6 @@ Simple batch-averaged registration for calcium imaging.
 def main():
     time_start = timeit.default_timer()
     
-    viewer = napari.Viewer()
-    napari.run()
-
     # Load data
     example_path = pathlib.Path(r"D:\Igor analyses\OSDS\251112 OSDS\1_0_SWN_200_White.smp")
     print("Loading data...")
@@ -39,19 +36,23 @@ def main():
         plot = True,
     )
     
-    if stats["mean_error"] < 0.05:
-        print("Registration successful.")
-    else:
-        print("Warning: Registration error exceeds threshold.")
-        print("Exiting without saving. Adjust parameters and try again.")
-        exit()
+    print(f"Registration completed in {timeit.default_timer() - time_start:.2f} seconds.")
+    print("Registration stats:")
+    for key, value in stats.items():
+        print(f"  {key}: {value}")
+    registered = data.images#[:, :, 2:]
+    # Visualize
+    viewer = napari.Viewer()
+    viewer.add_image(reference, name='Reference')
+    viewer.add_image(image_stack[:batch_size].mean(axis=0) - registered[:batch_size].mean(axis=0), 
+                     name='Difference', colormap='bwr')
+    viewer.add_image(image_stack, name='Original')
+    viewer.add_image(registered, name='Registered')
+    viewer.add_image(np.std(image_stack, axis=0), name='Original std')
+    viewer.add_image(np.std(registered, axis=0), name='Registered std')
 
-    # data.draw_rois()
+    napari.run()
 
-
-
-    # Save registered data
-    # data.export_to_h5(example_path.with_suffix('.h5'))
 
 if __name__ == "__main__":
     main()

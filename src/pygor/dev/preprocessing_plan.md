@@ -19,10 +19,51 @@
 | Core.preprocess() method | ✅ Complete | In-place preprocessing with config support |
 | Core.from_scanm(preprocess=) | ✅ Complete | Load with optional preprocessing |
 | Configuration system | ✅ Complete | `pygor.config` with user/project config files |
-| Documentation | ✅ Complete | `docs/modules/preprocessing.md`, `docs/configuration.md` |
+| Documentation | 🔶 Partial | `docs/modules/preprocessing.md`, `docs/configuration.md` - needs registration section |
 | H5 export | 🔶 Partial | `Core.export_to_h5()` exists, needs verification |
-| Registration | ⬜ Planned | Motion correction |
-| ROI handling | ⬜ Planned | Auto-ROI, manual ROI, ROI transfer |
+| Registration | ✅ Complete | Batch-averaged phase cross-correlation in `pygor.preproc.registration` |
+| Core.register() method | ✅ Complete | In-place registration with config support |
+| ROI transfer | ✅ Complete | `transfer_rois()` for tandem recordings |
+| ROI handling | ⬜ Planned | Auto-ROI, manual ROI drawing |
+
+---
+
+## Session Summary (2026-01-11)
+
+### Registration Implementation
+
+Integrated registration (motion correction) functionality into the main codebase based on the batch-averaged phase cross-correlation approach from `resgitration_testing_simple.py`.
+
+**Key Implementation**:
+- Created `pygor.preproc.registration` module with:
+  - `register_stack()`: Main registration function
+  - `compute_batch_shifts()`: Compute shifts without applying
+  - `apply_shifts_to_stack()`: Apply pre-computed shifts
+  - `transfer_rois()`: ROI transfer between recordings
+- Added `Core.register()` method for in-place registration
+- Added configuration support via `pygor.config`
+- Updated module exports in `__init__.py`
+
+**Design Decisions**:
+1. **Batch averaging**: Groups frames into batches (default: 10) and averages before computing shifts
+   - Dramatically improves SNR for calcium imaging
+   - Trades temporal resolution for better shift estimates
+2. **normalization=None**: Critical for low-SNR data (prevents poor registration)
+3. **Artifact handling**: Can fill left edge pixels with mean value (matches preprocessing)
+4. **Config integration**: Defaults can be customized via user/project config files
+
+**Files Modified/Created**:
+- `pygor/preproc/registration.py` - **New** registration module
+- `pygor/classes/core_data.py` - Added `register()` method
+- `pygor/preproc/__init__.py` - Export registration functions
+- `pygor/config.py` - Added `REGISTRATION_DEFAULTS` and `get_registration_defaults()`
+
+**Usage**:
+```python
+data = Core.from_scanm("recording.smp", preprocess=True)
+stats = data.register()  # Apply with defaults
+print(f"Mean drift: {stats['mean_shift']}")
+```
 
 ---
 

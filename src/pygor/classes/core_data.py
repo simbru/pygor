@@ -414,37 +414,30 @@ class Core:
             )
             return
         
-        # Get defaults from config, then override with explicit args
-        try:
-            from pygor.config import get_preprocess_defaults
-            defaults = get_preprocess_defaults()
-        except ImportError:
-            defaults = scanm_module.PREPROCESS_DEFAULTS.copy()
-        
-        # Use provided values or fall back to defaults
-        if artifact_width is None:
-            artifact_width = defaults.get("artifact_width", 2)
-        if flip_x is None:
-            flip_x = defaults.get("flip_x", True)
-        if detrend is None:
-            detrend = defaults.get("detrend", True)
-        if smooth_window_s is None:
-            smooth_window_s = defaults.get("smooth_window_s", 1000.0)
-        if time_bin is None:
-            time_bin = defaults.get("time_bin", 10)
-        if fix_first_frame is None:
-            fix_first_frame = defaults.get("fix_first_frame", True)
-        
+        # Get defaults from config
+        from pygor.config import get_preprocess_defaults
+        defaults = get_preprocess_defaults()
+
+        # Collect user-provided params (filter out None values)
+        user_params = {
+            k: v for k, v in {
+                'artifact_width': artifact_width,
+                'flip_x': flip_x,
+                'detrend': detrend,
+                'smooth_window_s': smooth_window_s,
+                'time_bin': time_bin,
+                'fix_first_frame': fix_first_frame,
+            }.items() if v is not None
+        }
+
+        # Merge defaults with user overrides
+        params = {**defaults, **user_params}
+
         # Apply preprocessing
         self.images = scanm_module.preprocess_stack(
             self.images,
             frame_rate=self.frame_hz,
-            artifact_width=artifact_width,
-            flip_x=flip_x,
-            detrend=detrend,
-            smooth_window_s=smooth_window_s,
-            time_bin=time_bin,
-            fix_first_frame=fix_first_frame,
+            **params,
         )
         
         # Update average_stack to reflect preprocessed data
@@ -456,15 +449,185 @@ class Core:
         # Store preprocessing params in metadata
         if self.metadata is None:
             self.metadata = {}
-        self.metadata["preprocessing"] = {
-            "artifact_width": artifact_width,
-            "flip_x": flip_x,
-            "detrend": detrend,
-            "smooth_window_s": smooth_window_s,
-            "time_bin": time_bin,
-            "fix_first_frame": fix_first_frame,
+        self.metadata["preprocessing"] = params
+
+    def register(
+        self,
+        n_reference_frames: int = None,
+        batch_size: int = None,
+        upsample_factor: int = None,
+        normalization: str = None,
+        order: int = None,
+        mode: str = None,
+        force: bool = False,
+        plot: bool = False,
+    ) -> dict:
+        """
+        Apply motion correction (registration) to images in-place.
+
+        Uses batch-averaged phase cross-correlation to correct for sample
+        drift and motion artifacts. This dramatically improves the quality
+        of registration for low-SNR calcium imaging data.
+
+        Parameters
+        ----------
+        n_reference_frames : int, optional
+            Number of initial frames to average for stable reference (default: 1000).
+        batch_size : int, optional
+            Frames per batch for shift computation (default: 10).
+            Larger values give better shift estimates but lower temporal resolution.
+        upsample_factor : int, optional
+            Subpixel precision factor (default: 10).
+            Higher values increase precision but slow computation.
+        normalization : str or None, optional
+            Phase correlation normalization mode (default: None).
+            For low-SNR data, None is recommended. Use 'phase' for high-SNR.
+        order : int, optional
+            Spline interpolation order for shifting (0-5, default: 1).
+        mode : str, optional
+            Edge handling mode for shifting (default: 'reflect').
+        force : bool, optional
+            If True, re-apply registration even if already done (default: False).
+        plot : bool, optional
+            If True, display a matplotlib plot of shifts and errors (default: False).
+
+        Returns
+        -------
+        dict
+            Registration statistics with keys:
+            - 'mean_shift': (dy, dx) mean shift in pixels
+            - 'std_shift': (dy, dx) standard deviation of shifts
+            - 'max_shift': (dy, dx) maximum shift in pixels
+            - 'mean_error': mean registration error (lower is better)
+            - 'shifts': per-batch shifts array (n_batches, 2)
+            - 'errors': per-batch errors array (n_batches,)
+
+        Raises
+        ------
+        RuntimeWarning
+            If registration was already applied and force=False.
+
+        Examples
+        --------
+        >>> data = Core.from_scanm("recording.smp", preprocess=True)
+        >>> stats = data.register()  # Apply with defaults
+        >>> print(f"Mean drift: {stats['mean_shift']}")
+        >>>
+        >>> # Custom parameters for faster processing
+        >>> stats = data.register(batch_size=20, upsample_factor=5)
+        >>>
+        >>> # Force re-registration
+        >>> stats = data.register(force=True)
+        >>>
+        >>> # Register and plot results
+        >>> stats = data.register(plot=True)
+
+        Notes
+        -----
+        - Registration should typically be applied AFTER preprocessing
+        - For low-SNR calcium imaging, normalization=None is crucial
+        - Preprocessing handles artifact removal before registration
+        - Registration modifies self.images in-place
+
+        See Also
+        --------
+        pygor.preproc.registration.register_stack : Underlying registration function
+        preprocess : Preprocessing method (should be called first)
+        """
+        import pygor.preproc.registration as reg_module
+
+        # Check if already registered
+        if hasattr(self, '_registered') and self._registered and not force:
+            warnings.warn(
+                "Data has already been registered. Use force=True to re-apply. "
+                "Note: re-registering already-registered data may produce artifacts.",
+                RuntimeWarning
+            )
+            return self.metadata.get("registration", {})
+
+        # Get defaults from config
+        from pygor.config import get_registration_defaults
+        defaults = get_registration_defaults()
+
+        # Collect user-provided params (filter out None values)
+        user_params = {
+            k: v for k, v in {
+                'n_reference_frames': n_reference_frames,
+                'batch_size': batch_size,
+                'upsample_factor': upsample_factor,
+                'normalization': normalization,
+                'order': order,
+                'mode': mode,
+            }.items() if v is not None
         }
-    
+
+        # Merge defaults with user overrides
+        params = {**defaults, **user_params}
+
+        # Apply registration
+        registered, shifts, errors = reg_module.register_stack(
+            self.images,
+            return_shifts=True,
+            **params,
+        )
+
+        # Update images
+        self.images = registered
+
+        # Update average_stack to reflect registered data
+        self.average_stack = self.images.mean(axis=0)
+
+        # Mark as registered
+        self._registered = True
+
+        # Compute statistics
+        stats = {
+            'mean_shift': tuple(shifts.mean(axis=0)),
+            'std_shift': tuple(shifts.std(axis=0)),
+            'max_shift': tuple(shifts.max(axis=0)),
+            'mean_error': float(errors.mean()),
+            'shifts': shifts,
+            'errors': errors,
+        }
+
+        # Store registration params and stats in metadata
+        if self.metadata is None:
+            self.metadata = {}
+        self.metadata["registration"] = {**params, **stats}
+
+        # Plot if requested
+        if plot:
+            self._plot_registration_results(shifts, errors)
+
+        return stats
+
+    def _plot_registration_results(self, shifts: np.ndarray, errors: np.ndarray):
+        """Plot registration shifts and errors."""
+        import matplotlib.pyplot as plt
+
+        batch_idx = np.arange(len(shifts))
+
+        fig, axes = plt.subplots(2, 1, figsize=(10, 6))
+
+        # Shifts
+        axes[0].plot(batch_idx, shifts[:, 0], 'b.-', label='Y shift', linewidth=1, markersize=4)
+        axes[0].plot(batch_idx, shifts[:, 1], 'r.-', label='X shift', linewidth=1, markersize=4)
+        axes[0].axhline(0, color='k', linestyle='--', alpha=0.3)
+        axes[0].set_ylabel('Shift (pixels)')
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
+        axes[0].set_title('Registration Shifts Over Time')
+
+        # Errors
+        axes[1].plot(batch_idx, errors, 'k.-', linewidth=1, markersize=4)
+        axes[1].set_xlabel('Batch index')
+        axes[1].set_ylabel('Registration error')
+        axes[1].grid(True, alpha=0.3)
+        axes[1].set_title('Registration Quality (lower is better)')
+
+        plt.tight_layout()
+        plt.show()
+
     def export_to_h5(
         self,
         output_path=None,
@@ -1088,7 +1251,7 @@ class Core:
         session = pygor.core.gui.methods.NapariViewStack(self, **kwargs)
         session.run()
 
-    def draw_rois(self, attribute = "calculate_image_average", style = "stacked", load_existing_rois=True, overwrite=False, show_correlation=True, **kwargs):
+    def draw_rois(self, attribute = "calculate_image_average", style = "stacked", load_existing_rois=True, overwrite=False, show_correlation=False, **kwargs):
         """
         Draw ROIs on the image stack.
 
