@@ -8,9 +8,12 @@ Submodules
 ----------
 scanm
     SMP/SMH file loading
+registration
+    Motion correction and ROI transfer
 """
 
 from .scanm import read_smh_header, read_smp_data, load_scanm, to_pygor_data, ScanMData
+from .registration import register_stack, compute_batch_shifts, apply_shifts_to_stack, transfer_rois
 
 __all__ = [
     # scanm.py
@@ -19,4 +22,9 @@ __all__ = [
     "load_scanm",
     "to_pygor_data",
     "ScanMData",
+    # registration.py
+    "register_stack",
+    "compute_batch_shifts",
+    "apply_shifts_to_stack",
+    "transfer_rois",
 ]
