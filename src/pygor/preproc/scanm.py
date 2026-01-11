@@ -44,70 +44,10 @@ __all__ = [
     "fill_light_artifact",
     "detrend_stack",
     "preprocess_stack",
-    # "register_stack",
     "detect_triggers",
     "to_pygor_data",
     "ScanMData",
-    "PREPROCESS_DEFAULTS",
-    "REGISTRATION_DEFAULTS",
 ]
-
-
-# -----------------------------------------------------------------------------
-# Default parameters (matching IGOR OS Scripts)
-# -----------------------------------------------------------------------------
-
-PREPROCESS_DEFAULTS = {
-    "artifact_width": 2,
-    "flip_x": True,
-    "detrend": True,
-    "smooth_window_s": 1000.0,
-    "time_bin": 10,
-    "fix_first_frame": True,
-}
-"""
-Default preprocessing parameters matching IGOR OS_Parameters defaults.
-
-These can be overridden via:
-1. User config file: ~/.pygor/config.yaml
-2. Project config file: ./pygor.yaml
-3. Direct function arguments
-
-See Also
---------
-pygor.config : Configuration loading and management
-"""
-
-REGISTRATION_DEFAULTS = {
-    "skip_frames": 5,
-    "average_n_frames": 10,
-    "search_radius": 1,
-    "median_filter_n": 2,
-    "gauss_filter": True,
-    "artifact_width": 2,
-    "register_to_previous": False,
-}
-"""
-Default registration parameters matching IGOR OS_Register defaults.
-
-Parameters
-----------
-skip_frames : int
-    Process every Nth frame (IGOR: skipN). Default 5.
-average_n_frames : int
-    Number of frames to average for reference (IGOR: averageplaneN). Default 10.
-search_radius : int
-    Maximum shift in pixels to search (IGOR: driftlength). Default 1.
-median_filter_n : int
-    Half-width of median filter for drift trace (IGOR: medianN). Default 2.
-gauss_filter : bool
-    Apply 3x3 Gaussian filter before registration. Default True.
-artifact_width : int
-    Pixels at left edge to exclude (IGOR: LightArtifact_cut). Default 2.
-register_to_previous : bool
-    If True, register each frame to previous frame instead of initial reference.
-    Default False (use initial averaged reference).
-"""
 
 
 # -----------------------------------------------------------------------------

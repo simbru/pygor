@@ -213,8 +213,139 @@ Key implementation details:
 
 See `pygor/dev/compare_detrend_params.py` for the verification script.
 
+## Registration (Motion Correction)
+
+Registration corrects for sample drift and motion artifacts using batch-averaged phase cross-correlation. This is optimized for low-SNR calcium imaging data.
+
+### Using Core.register()
+
+```python
+data = Core.from_scanm("recording.smp", preprocess=True)
+
+# Register with defaults
+stats = data.register()
+print(f"Mean drift: {stats['mean_shift']}")
+print(f"Registration quality: {stats['mean_error']:.4f}")
+
+# Register with custom parameters
+stats = data.register(
+    n_reference_frames=500,  # Frames for reference
+    batch_size=20,           # Frames per batch
+    upsample_factor=5,       # Subpixel precision
+)
+
+# Force re-registration
+stats = data.register(force=True)
+```
+
+### Registration Algorithm
+
+The batch-averaged approach dramatically improves registration quality for noisy data:
+
+1. **Create reference**: Average the first `n_reference_frames` (default: 1000)
+2. **Divide into batches**: Group frames into batches of `batch_size` (default: 10)
+3. **Compute shifts**: For each batch:
+   - Average all frames in the batch
+   - Compute shift via phase cross-correlation with reference
+4. **Apply shifts**: Shift all frames in each batch by the batch's computed shift
+
+### Default Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `n_reference_frames` | 1000 | Frames to average for stable reference |
+| `batch_size` | 10 | Frames per batch (higher = better SNR, lower temporal resolution) |
+| `upsample_factor` | 10 | Subpixel precision factor |
+| `normalization` | None | Phase correlation mode (None is crucial for low SNR!) |
+| `artifact_width` | 0 | Pixels to fill at left edge (0 = match preprocessing) |
+| `order` | 1 | Spline interpolation order (0-5) |
+| `mode` | 'reflect' | Edge handling mode |
+
+### Registration Statistics
+
+The `register()` method returns a dictionary with:
+
+```python
+stats = {
+    'mean_shift': (dy, dx),      # Mean shift in pixels
+    'std_shift': (dy, dx),       # Std deviation of shifts
+    'max_shift': (dy, dx),       # Maximum shift
+    'mean_error': 0.024,         # Mean error (lower is better)
+    'shifts': array([[...], ...]),  # Per-batch shifts (n_batches, 2)
+    'errors': array([...]),      # Per-batch errors
+}
+```
+
+### Low-Level Functions
+
+For advanced use cases:
+
+```python
+from pygor.preproc.registration import (
+    register_stack,
+    compute_batch_shifts,
+    apply_shifts_to_stack,
+)
+
+# Compute shifts without applying
+shifts, errors = compute_batch_shifts(stack, batch_size=10)
+
+# Apply pre-computed shifts
+registered = apply_shifts_to_stack(stack, shifts, batch_size=10)
+
+# Or do both in one step
+registered, shifts, errors = register_stack(stack, return_shifts=True)
+```
+
+### ROI Transfer Between Recordings
+
+Transfer ROI masks between tandem recordings using registration:
+
+```python
+from pygor.preproc.registration import transfer_rois
+
+# Load both recordings
+data_a = Core.from_scanm("recording_a.smp", preprocess=True)
+data_b = Core.from_scanm("recording_b.smp", preprocess=True)
+
+# Transfer ROIs from A to B
+shifted_rois, transform = transfer_rois(
+    roi_mask=data_a.rois,
+    ref_projection=data_a.average_stack,
+    target_projection=data_b.average_stack,
+)
+
+print(f"Detected offset: {transform['shift']} pixels")
+print(f"Registration error: {transform['error']:.4f}")
+
+# Apply to recording B
+data_b.rois = shifted_rois
+```
+
+### Important Notes
+
+- **Order of operations**: Always run `preprocess()` before `register()`
+- **normalization=None**: Critical for low-SNR calcium imaging. Using 'phase' mode will give poor results.
+- **Batch size tradeoff**: Larger batches give better shift estimates but lower temporal resolution
+- **Artifact width**: Should match preprocessing settings to handle light artifacts consistently
+
+### Configuration
+
+Defaults can be customized via config files:
+
+```yaml
+# ~/.pygor/config.yaml
+registration:
+  n_reference_frames: 500
+  batch_size: 20
+  upsample_factor: 5
+```
+
+See [Configuration](../configuration.md) for details.
+
 ## See Also
 
 - [Core Data](core_data.md) - The Core class documentation
 - [Configuration](../configuration.md) - Setting up user defaults
-- `pygor.preproc.scanm` - Module source code
+- `pygor.preproc.scanm` - ScanM loading and preprocessing
+- `pygor.preproc.registration` - Registration module source code
