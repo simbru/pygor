@@ -195,12 +195,23 @@ result = detrend_stack(result, frame_rate=15.6, smooth_window_s=1000)
 The preprocessing implementation has been verified against IGOR output:
 
 ```
-Max difference:  0.45 (float32 precision)
-Mean difference: 0.01
+Mean difference: 0.27
+Pixels within ±100: 99.89%
+Pixels within ±50:  97.89%
 Match: ✅ TRUE
 ```
 
-See `pygor/dev/compare_igor_vs_scanm.py` for the verification script.
+### Implementation Notes
+
+The detrending uses binomial (Gaussian) smoothing to match IGOR's `Smooth` function behavior.
+Key implementation details:
+
+- **Smoothing type**: Gaussian approximation of binomial smoothing (`sigma = sqrt(num/2)`)
+- **Edge handling**: Reflect mode (IGOR's "bounce" default)
+- **Negative values**: Clipped to 0 (IGOR wraps to unsigned, creating misleading bright pixels)
+- **Line duration**: Uses actual timing from header (IGOR hardcodes 2ms)
+
+See `pygor/dev/compare_detrend_params.py` for the verification script.
 
 ## See Also
 

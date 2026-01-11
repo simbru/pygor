@@ -1,13 +1,9 @@
-import time
 import pygor
 import pygor.preproc as preproc
-import pygor.filehandling
-import pygor.classes.core_data
-import shutil
-import os 
-import pathlib
-import re
 import timeit
+import napari
+import matplotlib.pyplot as plt
+import tifffile
 
 """
 Imaginative workflow for matching files in a directory based on specific naming patterns, 
@@ -52,13 +48,14 @@ to their imaging data, and then performing a tandem analysis on the matched pair
 def main():
     # start timeit
     time_start = timeit.default_timer()
-    example_path = r"D:\Igor analyses\OSDS\251112 OSDS\0_1_SWN_200_White.smh"
-
+    # example_path = r"D:\Igor analyses\OSDS\251112 OSDS\0_1_SWN_200_White.smh"
+    example_path = r"D:\Igor analyses\OSDS\251112 OSDS\0_1_gradient_contrast_400_white.smh"
     # Test loading directly as Core from ScanM files
     print("Loading ScanM file directly as Core...")
     from pygor.classes.core_data import Core
     
     data = Core.from_scanm(example_path)
+    data_detrend = Core.from_scanm(example_path)
     print(f"  Type: {data.type}")
     print(f"  Images shape: {data.images.shape}")
     print(f"  Frame rate: {data.frame_hz:.2f} Hz")
@@ -90,13 +87,128 @@ def main():
     # Apply preprocessing (light artifact fix, x-flip, optional detrend)
     print("\n--- Applying Preprocessing ---")
     data.preprocess(detrend=False)  # Skip detrend for faster testing
-    print(f"  Preprocessing applied: {data._preprocessed}")
-    print(f"  Preprocessing params: {data.metadata.get('preprocessing', {})}")
-    
-    data.view_images_interactive()
+    data_detrend.preprocess(detrend=True)
 
-    # End timeit
-    time_end = timeit.default_timer()
-    print(f"\nTotal execution time: {time_end - time_start:.2f} seconds")
+    non_detrended_images = data.images
+    detrended_images = data_detrend.images
+    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+
+    # Calculate data ranges and bins
+    avg_no_detrend = non_detrended_images.mean(axis=0)
+    avg_detrend = detrended_images.mean(axis=0)
+    frame_no_detrend = non_detrended_images[100]
+    frame_detrend = detrended_images[100]
+
+    # Create histograms with fine bins and data-limited ranges
+    ax[0, 0].hist(avg_no_detrend.flatten(), bins=100,
+                  range=(avg_no_detrend.min(), avg_no_detrend.max()),
+                  edgecolor='none')
+    ax[0, 0].set_title("Average Image (no detrend)")
+    ax[0, 0].set_xlabel("Pixel Intensity")
+    ax[0, 0].set_ylabel("Count")
+
+    ax[1, 0].hist(avg_detrend.flatten(), bins=100,
+                  range=(avg_detrend.min(), avg_detrend.max()),
+                  edgecolor='none')
+    ax[1, 0].set_title("Average Image (with detrend)")
+    ax[1, 0].set_xlabel("Pixel Intensity")
+    ax[1, 0].set_ylabel("Count")
+
+    ax[0, 1].hist(frame_no_detrend.flatten(), bins=100,
+                  range=(frame_no_detrend.min(), frame_no_detrend.max()),
+                  edgecolor='none')
+    ax[0, 1].set_title("Frame 100 (no detrend)")
+    ax[0, 1].set_xlabel("Pixel Intensity")
+    ax[0, 1].set_ylabel("Count")
+
+    ax[1, 1].hist(frame_detrend.flatten(), bins=100,
+                  range=(frame_detrend.min(), frame_detrend.max()),
+                  edgecolor='none')
+    ax[1, 1].set_title("Frame 100 (with detrend)")
+    ax[1, 1].set_xlabel("Pixel Intensity")
+    ax[1, 1].set_ylabel("Count")
+
+    plt.show()
+
+    # Load Igor detrended version for comparison
+    print("\n--- Comparing with Igor detrended version ---")
+    igor_detrended_path = r"D:\Igor analyses\OSDS\251112 OSDS\wDataCh0_detrended.tif"
+    igor_detrended = tifffile.imread(igor_detrended_path)
+    print(f"  Igor detrended shape: {igor_detrended.shape}")
+
+    # Create comparison figure with histograms
+    fig2, ax2 = plt.subplots(2, 2, figsize=(12, 10))
+
+    # Pygor detrended
+    avg_pygor = detrended_images.mean(axis=0)
+    frame_pygor = detrended_images[100]
+
+    # Igor detrended
+    avg_igor = igor_detrended.mean(axis=0)
+    frame_igor = igor_detrended[100]
+
+    # Determine common range for each comparison
+    avg_min = min(avg_pygor.min(), avg_igor.min())
+    avg_max = max(avg_pygor.max(), avg_igor.max())
+    frame_min = min(frame_pygor.min(), frame_igor.min())
+    frame_max = max(frame_pygor.max(), frame_igor.max())
+
+    # Average image histograms (overlaid)
+    ax2[0, 0].hist(avg_pygor.flatten(), bins=100, range=(avg_min, avg_max),
+                   alpha=0.6, label='Pygor', edgecolor='none')
+    ax2[0, 0].hist(avg_igor.flatten(), bins=100, range=(avg_min, avg_max),
+                   alpha=0.6, label='Igor', edgecolor='none')
+    ax2[0, 0].set_title("Average Image Distribution")
+    ax2[0, 0].set_xlabel("Pixel Intensity")
+    ax2[0, 0].set_ylabel("Count")
+    ax2[0, 0].legend()
+
+    # Frame 100 histograms (overlaid)
+    ax2[0, 1].hist(frame_pygor.flatten(), bins=100, range=(frame_min, frame_max),
+                   alpha=0.6, label='Pygor', edgecolor='none')
+    ax2[0, 1].hist(frame_igor.flatten(), bins=100, range=(frame_min, frame_max),
+                   alpha=0.6, label='Igor', edgecolor='none')
+    ax2[0, 1].set_title("Frame 100 Distribution")
+    ax2[0, 1].set_xlabel("Pixel Intensity")
+    ax2[0, 1].set_ylabel("Count")
+    ax2[0, 1].legend()
+
+    # Difference histograms
+    avg_diff = avg_pygor - avg_igor
+    frame_diff = frame_pygor - frame_igor
+
+    ax2[1, 0].hist(avg_diff.flatten(), bins=100,
+                   range=(avg_diff.min(), avg_diff.max()),
+                   edgecolor='none')
+    ax2[1, 0].set_title("Average Image Difference (Pygor - Igor)")
+    ax2[1, 0].set_xlabel("Difference")
+    ax2[1, 0].set_ylabel("Count")
+    ax2[1, 0].axvline(0, color='red', linestyle='--', alpha=0.7)
+
+    ax2[1, 1].hist(frame_diff.flatten(), bins=100,
+                   range=(frame_diff.min(), frame_diff.max()),
+                   edgecolor='none')
+    ax2[1, 1].set_title("Frame 100 Difference (Pygor - Igor)")
+    ax2[1, 1].set_xlabel("Difference")
+    ax2[1, 1].set_ylabel("Count")
+    ax2[1, 1].axvline(0, color='red', linestyle='--', alpha=0.7)
+
+    plt.tight_layout()
+    plt.show()
+
+
+    # viewer = napari.Viewer()
+    # viewer.add_image(non_detrended_images, name="Preprocessed (no detrend)")
+    # viewer.add_image(detrended_images, name="Preprocessed (with detrend)")
+    
+    # napari.run()
+
+    # print(f"  Preprocessing applied: {data._preprocessed}")
+    # print(f"  Preprocessing params: {data.metadata.get('preprocessing', {})}")
+    
+
+    # # End timeit
+    # time_end = timeit.default_timer()
+    # print(f"\nTotal execution time: {time_end - time_start:.2f} seconds")
 if __name__ == "__main__":
     main()

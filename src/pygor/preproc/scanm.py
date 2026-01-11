@@ -44,10 +44,12 @@ __all__ = [
     "fill_light_artifact",
     "detrend_stack",
     "preprocess_stack",
+    # "register_stack",
     "detect_triggers",
     "to_pygor_data",
     "ScanMData",
     "PREPROCESS_DEFAULTS",
+    "REGISTRATION_DEFAULTS",
 ]
 
 
@@ -74,6 +76,37 @@ These can be overridden via:
 See Also
 --------
 pygor.config : Configuration loading and management
+"""
+
+REGISTRATION_DEFAULTS = {
+    "skip_frames": 5,
+    "average_n_frames": 10,
+    "search_radius": 1,
+    "median_filter_n": 2,
+    "gauss_filter": True,
+    "artifact_width": 2,
+    "register_to_previous": False,
+}
+"""
+Default registration parameters matching IGOR OS_Register defaults.
+
+Parameters
+----------
+skip_frames : int
+    Process every Nth frame (IGOR: skipN). Default 5.
+average_n_frames : int
+    Number of frames to average for reference (IGOR: averageplaneN). Default 10.
+search_radius : int
+    Maximum shift in pixels to search (IGOR: driftlength). Default 1.
+median_filter_n : int
+    Half-width of median filter for drift trace (IGOR: medianN). Default 2.
+gauss_filter : bool
+    Apply 3x3 Gaussian filter before registration. Default True.
+artifact_width : int
+    Pixels at left edge to exclude (IGOR: LightArtifact_cut). Default 2.
+register_to_previous : bool
+    If True, register each frame to previous frame instead of initial reference.
+    Default False (use initial averaged reference).
 """
 
 
@@ -620,13 +653,13 @@ def detrend_stack(
 ) -> np.ndarray:
     """
     Remove slow baseline drift from imaging stack.
-    
+
     For each pixel, subtracts a heavily smoothed version of its time course,
     then adds back the pixel's mean to preserve intensity scale.
-    
+
     This matches IGOR's OS_DetrendStack algorithm:
     ``InputData -= SubtractionStack - Stack_Ave``
-    
+
     Parameters
     ----------
     stack : np.ndarray
@@ -637,40 +670,66 @@ def detrend_stack(
         Smoothing window in seconds. IGOR default is 1000.
     time_bin : int, default=10
         Temporal binning factor for speed. IGOR default is 10.
-        
+
     Returns
     -------
     np.ndarray
         Detrended stack (same shape as input)
+
+    Notes
+    -----
+    IGOR's Smooth function (without /B flag) uses binomial (Gaussian) smoothing,
+    not boxcar smoothing. The relationship between IGOR's smoothing iterations
+    and Gaussian sigma is: sigma = sqrt(num / 2).
+
+    IGOR's default edge handling is "bounce" (reflect), which mirrors values
+    at the boundaries.
+
+    References
+    ----------
+    IGOR Pro Smooth documentation
+    Marchand, P., and L. Marmet, "Binomial smoothing filter",
+    Rev. Sci. Instrum. 54(8), 1034-1041, 1983.
     """
-    from scipy.ndimage import uniform_filter1d
-    
+    from scipy.ndimage import gaussian_filter1d
+
     n_frames, n_lines, n_width = stack.shape
-    
+
     # Compute mean per pixel (to add back after subtracting baseline)
     pixel_mean = stack.mean(axis=0)  # Shape: (n_lines, n_width)
-    
-    # Calculate smoothing window in frames
-    smooth_frames = int(frame_rate * smooth_window_s / time_bin)
-    smooth_frames = min(smooth_frames, 2**15 - 1)  # IGOR limit
-    smooth_frames = max(smooth_frames, 1)
-    
+
+    # Calculate smoothing iterations (IGOR's 'num' parameter)
+    # IGOR: Smoothingfactor = (Framerate * nSeconds_smooth) / nTimeBin
+    smooth_iterations = int(frame_rate * smooth_window_s / time_bin)
+    smooth_iterations = min(smooth_iterations, 2**15 - 1)  # IGOR limit
+    smooth_iterations = max(smooth_iterations, 1)
+
+    # Convert IGOR binomial iterations to Gaussian sigma
+    # For binomial smoothing: sigma = sqrt(num / 2)
+    sigma = np.sqrt(smooth_iterations / 2)
+
     # Temporal binning for speed (IGOR uses simple subsampling)
     binned_stack = stack[::time_bin, :, :]
-    
-    # Apply smoothing along time dimension
-    # IGOR uses Smooth/DIM=2 which is a boxcar/uniform filter
-    smoothed = uniform_filter1d(binned_stack.astype(np.float32), 
-                                 size=smooth_frames, axis=0, mode='nearest')
-    
+
+    # Apply Gaussian (binomial) smoothing along time dimension
+    # IGOR's Smooth uses binomial smoothing by default with 'bounce' (reflect) edge handling
+    smoothed = gaussian_filter1d(binned_stack.astype(np.float32),
+                                  sigma=sigma, axis=0, mode='reflect')
+
     # Upsample back to original frame count by repeating
     # (IGOR: SubtractionStack[p][q][r/nTimeBin])
     baseline = np.repeat(smoothed, time_bin, axis=0)[:n_frames]
-    
+
     # Subtract baseline and add back mean
     # IGOR: InputData -= SubtractionStack - Stack_Ave
     result = stack.astype(np.float32) - baseline + pixel_mean
-    
+
+    # Clip to valid uint16 range (0-65535)
+    # IGOR wraps negative values to unsigned, which creates misleading bright pixels.
+    # Clipping to 0 is more analytically sound - negative values indicate
+    # the baseline was overestimated at those locations.
+    result = np.clip(result, 0, 65535)
+
     return result
 
 
