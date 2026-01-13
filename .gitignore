@@ -14,8 +14,14 @@ local/*
 test_out.txt
 
 # Cellpose models and outputs
-src/pygor/dev/.models/
+models/*
+src/pygor/dev/.models/**
+src/pygor/dev/.models_test/**
+src/pygor/dev/.models_simple/**
 src/pygor/dev/cellpose_*.png
+
+# Dev
+src/pygor/dev/*.png
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

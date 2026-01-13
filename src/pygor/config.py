@@ -53,6 +53,24 @@ TRIGGER_DEFAULTS = {
 }
 """Default trigger detection parameters."""
 
+SEGMENTATION_DEFAULTS = {
+    "cellpose": {
+        "diameter": None,
+        "flow_threshold": 0.9,
+        "cellprob_threshold": 0.5,
+        "min_size": 2,
+    },
+    "postprocess": {
+        "split_large": True,
+        "size_multiplier": 1.25,
+        "min_peak_distance": 1,
+        "min_size_after_split": 4,
+        "shrink_iterations": 1,
+        "shrink_size_threshold": 30,
+    },
+}
+"""Default segmentation parameters for Cellpose and post-processing."""
+
 
 # -----------------------------------------------------------------------------
 # Config loading
