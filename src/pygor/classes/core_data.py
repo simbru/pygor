@@ -1239,6 +1239,40 @@ class Core:
             print(f"Successfully updated ROIs: {num_rois} ROIs saved")
         return success
 
+    def segment_rois(self, mode="cellpose+", **kwargs):
+        """
+        Segment ROIs using automated methods.
+
+        Parameters
+        ----------
+        mode : str
+            Segmentation mode:
+            - "cellpose+": Cellpose with post-processing heuristics (recommended)
+            - "cellpose": Raw Cellpose output only
+        model_path : str or Path, optional
+            Direct path to a trained Cellpose model file
+        model_dir : str or Path, optional
+            Directory to search for trained models
+        preview : bool
+            If True, return masks without updating data.rois
+        overwrite : bool
+            If True, overwrite existing ROIs in H5 file
+        **kwargs
+            Additional parameters (see pygor.segmentation.segment_rois for full list)
+
+        Returns
+        -------
+        masks : ndarray (only if preview=True)
+            ROI mask in pygor format
+
+        Examples
+        --------
+        >>> data.segment_rois(model_dir="./models/synaptic")
+        >>> masks = data.segment_rois(model_dir="./models/synaptic", preview=True)
+        """
+        from pygor.segmentation import segment_rois as _segment_rois
+        return _segment_rois(self, mode=mode, **kwargs)
+
     def view_images_interactive(self, **kwargs):
         """
         View the image stack interactively using Napari.
