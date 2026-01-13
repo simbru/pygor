@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 from pygor.classes.core_data import Core
+from scipy.signal import savgol_filter
 
 
 @dataclass
@@ -42,6 +43,8 @@ class ResponseMapping(Core):
         
         # Use averages from Core
         traces = self.averages
+        traces = savgol_filter(traces, 1500, 5, axis=1)  # Smooth traces
+        print(np.shape(traces))
         
         # Initialize dictionary to build DataFrame
         response_dict = {}
