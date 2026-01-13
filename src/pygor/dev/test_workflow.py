@@ -29,6 +29,7 @@ def main():
     # Run registration (preprocessing already handled artifact removal)
     reference = np.mean(image_stack[:n_reference_frames], axis=0)
     print("Running registration...")
+    time_start = timeit.default_timer()
     stats = data.register(
         n_reference_frames=n_reference_frames,
         batch_size=batch_size,
