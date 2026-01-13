@@ -461,6 +461,8 @@ class Core:
         mode: str = None,
         force: bool = False,
         plot: bool = False,
+        parallel: bool = True,
+        n_jobs: int = -1,
     ) -> dict:
         """
         Apply motion correction (registration) to images in-place.
@@ -490,6 +492,11 @@ class Core:
             If True, re-apply registration even if already done (default: False).
         plot : bool, optional
             If True, display a matplotlib plot of shifts and errors (default: False).
+        parallel : bool, optional
+            Use parallel processing with FFT-based shifting for ~2x speedup
+            (default: True).
+        n_jobs : int, optional
+            Number of parallel jobs. -1 uses all CPU cores (default: -1).
 
         Returns
         -------
@@ -558,6 +565,8 @@ class Core:
                 'normalization': normalization,
                 'order': order,
                 'mode': mode,
+                'parallel': parallel,
+                'n_jobs': n_jobs,
             }.items() if v is not None
         }
 

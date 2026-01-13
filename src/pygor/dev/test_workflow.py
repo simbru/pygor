@@ -12,11 +12,7 @@ Simple batch-averaged registration for calcium imaging.
 """
 
 def main():
-    time_start = timeit.default_timer()
     
-    viewer = napari.Viewer()
-    napari.run()
-
     # Load data
     example_path = pathlib.Path(r"D:\Igor analyses\OSDS\251112 OSDS\1_0_SWN_200_White.smp")
     print("Loading data...")
@@ -31,27 +27,31 @@ def main():
     # Run registration (preprocessing already handled artifact removal)
     reference = np.mean(image_stack[:n_reference_frames], axis=0)
     print("Running registration...")
+    time_start = timeit.default_timer()
     stats = data.register(
         n_reference_frames=n_reference_frames,
         batch_size=batch_size,
         upsample_factor=upsample_factor,
         order = 2, 
         plot = True,
+        parallel=True,
+        n_jobs = -1,
     )
-    
-    if stats["mean_error"] < 0.05:
-        print("Registration successful.")
-    else:
-        print("Warning: Registration error exceeds threshold.")
-        print("Exiting without saving. Adjust parameters and try again.")
-        exit()
 
-    # data.draw_rois()
+    data = Core.from_scanm(example_path)
+    data.preprocess(detrend=False)
+    image_stack = data.images#[:, :, 2:]  # (time, height, width)
+    stats = data.register(
+        n_reference_frames=n_reference_frames,
+        batch_size=batch_size,
+        upsample_factor=upsample_factor,
+        order = 2, 
+        force=True,
+        plot = True,
+        parallel=False,
+    )
 
 
-
-    # Save registered data
-    # data.export_to_h5(example_path.with_suffix('.h5'))
 
 if __name__ == "__main__":
     main()
