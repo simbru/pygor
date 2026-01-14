@@ -455,6 +455,7 @@ class Core:
         self,
         n_reference_frames: int = None,
         batch_size: int = None,
+        artefact_crop: int = None,
         upsample_factor: int = None,
         normalization: str = None,
         order: int = None,
@@ -572,11 +573,12 @@ class Core:
 
         # Merge defaults with user overrides
         params = {**defaults, **user_params}
-
+        
         # Apply registration
         registered, shifts, errors = reg_module.register_stack(
             self.images,
             return_shifts=True,
+            artefact_crop=artefact_crop,
             **params,
         )
 
@@ -608,6 +610,14 @@ class Core:
         if plot:
             self._plot_registration_results(shifts, errors)
 
+        # if stats["mean_error"] < 0.05:
+        print(f"Registration complete.\n"
+            f"  Mean error: {stats['mean_error']:.4f}\n"
+            f"  Max shift: (y={stats['max_shift'][0]:.2f}, x={stats['max_shift'][1]:.2f})\n"
+            f"  Mean shift: (y={stats['mean_shift'][0]:.2f}, x={stats['mean_shift'][1]:.2f})\n"
+            f"  Shift SD: (y={stats['std_shift'][0]:.2f}, x={stats['std_shift'][1]:.2f})")
+        # else:
+        #     print(f"Warning: Registration error exceeds threshold. Mean error: {stats['mean_error']:.4f}")
         return stats
 
     def _plot_registration_results(self, shifts: np.ndarray, errors: np.ndarray):
@@ -1250,7 +1260,7 @@ class Core:
         # check if object is associated with an H5 file
         if self.filename.suffix == '.h5' and overwrite:
             print("Associated H5 file detected, updating 'ROIs' key...")
-            bool = self.update_h5_key('ROIs', roi_mask, overwrite=overwrite)
+            bool = self.update_h5_key('ROIs', roi_mask.T, overwrite=overwrite) #transpose for H5 format
             if not bool:
                 print("H5 file key 'ROIs'not updated, due to overwrite=False.")
         

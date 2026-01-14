@@ -168,7 +168,7 @@ def segment_rois(
     # Extract post-processing parameters
     split_large = kwargs.pop("split_large", True)
     split_params = {
-        "size_multiplier": kwargs.pop("size_multiplier", 1.25),
+        "size_multiplier": kwargs.pop("size_multiplier", 1.5),
         "min_distance": kwargs.pop("min_peak_distance", 1),
         "min_size_after_split": kwargs.pop("min_size_after_split", 4),
     }

@@ -59,6 +59,7 @@ def _shift_frame_fft(frame: np.ndarray, shift_yx: np.ndarray) -> np.ndarray:
 def register_stack(
     stack: np.ndarray,
     n_reference_frames: int = 1000,
+    artefact_crop = 2, 
     batch_size: int = 10,
     upsample_factor: int = 10,
     normalization: Optional[str] = None,
@@ -139,6 +140,11 @@ def register_stack(
     compute_batch_shifts : Compute shifts without applying them
     apply_shifts_to_stack : Apply pre-computed shifts to stack
     """
+    if artefact_crop is not None:
+        # Store original artefact region to restore after registration
+        artefact_region = stack[:, :, 0:artefact_crop].copy()
+        stack = stack[:, :, artefact_crop:]
+
     # Compute shifts
     shifts, errors = compute_batch_shifts(
         stack=stack,
@@ -158,6 +164,10 @@ def register_stack(
         parallel=parallel,
         n_jobs=n_jobs,
     )
+
+    # Restore original artefact region (unregistered, as it's already corrected)
+    if artefact_crop is not None:
+        registered = np.concatenate((artefact_region, registered), axis=2)
 
     if return_shifts:
         return registered, shifts, errors
@@ -256,7 +266,12 @@ def apply_shifts_to_stack(
         Only used when parallel=False.
     mode : str, optional
         Edge handling mode for shifting (default: 'reflect').
-        Only used when parallel=False.
+        Only used when parallel=False. Options:
+        - 'reflect': Reflects at edge, duplicating the edge pixel
+        - 'constant': Pads with zeros
+        - 'nearest': Extends with the nearest edge pixel value
+        - 'mirror': Reflects at edge without duplicating the edge pixel
+        - 'wrap': Wraps around to the opposite edge
     parallel : bool, optional
         Use parallel processing with FFT-based shifting for ~2x speedup
         (default: True)
