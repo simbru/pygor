@@ -12,6 +12,6 @@ Available modes:
     - "cellpose": Raw Cellpose output only
 """
 
-from pygor.segmentation.core import segment_rois
+from pygor.segmentation.functions import segment_rois
 
 __all__ = ["segment_rois"]

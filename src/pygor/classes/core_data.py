@@ -987,7 +987,7 @@ class Core:
         # Use rois_alt for 0-based indexing
         rois_to_use = self.rois_alt
         
-        num_rois = int(np.nanmax(rois_to_use)) + 1  # +1 because 0-based indexing
+        # num_rois = int(np.nanmax(rois_to_use)) + 1  # +1 because 0-based indexing
         color = matplotlib.colormaps["jet_r"]
         
         if func == "average_stack":
@@ -1223,9 +1223,11 @@ class Core:
             print(f"Successfully updated ipl_depths for {len(depths)} ROIs")
         return success
 
-    def update_rois(self, roi_mask, overwrite=False):
+    def update_rois(self, roi_mask, overwrite=True):
         """
-        Update ROIs in the H5 file with a pre-defined ROI mask.
+        Update ROIs in the H5 file with a pre-defined ROI mask. If overwrite=False,
+        existing ROIs will not be modified. If the object is associated with an H5 file,
+        the 'ROIs' key will be updated accordingly.
 
         For interactive ROI drawing, use draw_rois(overwrite=True) instead.
 
@@ -1241,14 +1243,18 @@ class Core:
         bool
             True if update was successful, False otherwise
         """
-        success = self.update_h5_key('ROIs', roi_mask, overwrite)
-        if success:
-            self.rois = roi_mask  # Update the object attribute
-            num_rois = len(np.unique(roi_mask)[np.unique(roi_mask) < 0])
-            print(f"Successfully updated ROIs: {num_rois} ROIs saved")
-        return success
+        self.rois = roi_mask  # Update the object attribute
+        self.num_rois = len(np.unique(roi_mask))-1
+        print(f"Successfully updated object.rois: {self.num_rois} ROIs saved")
 
-    def segment_rois(self, mode="cellpose+", **kwargs):
+        # check if object is associated with an H5 file
+        if self.filename.suffix == '.h5' and overwrite:
+            print("Associated H5 file detected, updating 'ROIs' key...")
+            bool = self.update_h5_key('ROIs', roi_mask, overwrite=overwrite)
+            if not bool:
+                print("H5 file key 'ROIs'not updated, due to overwrite=False.")
+        
+    def segment_rois(self, mode="cellpose+", overwrite = True, **kwargs):
         """
         Segment ROIs using automated methods.
 
@@ -1280,7 +1286,9 @@ class Core:
         >>> masks = data.segment_rois(model_dir="./models/synaptic", preview=True)
         """
         from pygor.segmentation import segment_rois as _segment_rois
-        return _segment_rois(self, mode=mode, **kwargs)
+        roi_mask = _segment_rois(self, mode=mode, overwrite=overwrite, **kwargs)
+        self.update_rois(roi_mask, overwrite=overwrite)
+        return roi_mask
 
     def view_images_interactive(self, **kwargs):
         """
@@ -2091,7 +2099,7 @@ class Core:
 
     @property
     def rois_alt(self):
-        temp_rois = self.rois.copy()
+        temp_rois = self.rois.copy().astype(float)
         temp_rois[temp_rois == 1] = np.nan
         temp_rois *= -1
         temp_rois = temp_rois - 1

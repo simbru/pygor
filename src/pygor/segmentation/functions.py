@@ -70,7 +70,7 @@ def segment_rois(
     mode="cellpose+",
     model_path=None,
     model_dir=None,
-    preview=False,
+    # preview=False,
     overwrite=False,
     verbose=True,
     **kwargs,
@@ -89,10 +89,8 @@ def segment_rois(
         Direct path to a trained Cellpose model file
     model_dir : str or Path, optional
         Directory to search for trained models
-    preview : bool
-        If True, return masks without updating data.rois
     overwrite : bool
-        If True, overwrite existing ROIs in H5 file
+        If True, overwrite existing ROIs in data object
     verbose : bool
         If True, print progress messages
     **kwargs
@@ -123,7 +121,7 @@ def segment_rois(
     >>> data.segment_rois(model_dir="./models/synaptic")
 
     >>> # Preview without saving
-    >>> masks = data.segment_rois(model_dir="./models/synaptic", preview=True)
+    >>> masks = data.segment_rois(model_dir="./models/synaptic")
 
     >>> # Custom parameters
     >>> data.segment_rois(
@@ -144,10 +142,9 @@ def segment_rois(
         image = data.average_stack.astype(np.float32)
 
     # Check for existing ROIs
-    if data.rois is not None and not preview and not overwrite:
+    if data.rois is not None and not overwrite:
         warnings.warn(
-            "ROIs already exist. Use overwrite=True to replace, "
-            "or preview=True to return without saving."
+            "ROIs already exist. Use overwrite=True to replace."
         )
         return None
 
@@ -158,6 +155,7 @@ def segment_rois(
     # Import cellpose functions
     from pygor.segmentation.cellpose.inference import run_cellpose_inference
     from pygor.segmentation.cellpose.postprocess import split_large_rois, shrink_rois
+    from cellpose import models
 
     # Extract cellpose parameters
     cellpose_params = {
@@ -222,12 +220,23 @@ def segment_rois(
     if verbose:
         print(f"  Final ROI count: {n_final}")
 
+    # Clean up ROI label numbers to be consecutive after post-processing
+    # Background is 1, ROIs should be -1, -2, -3, etc.
+    unique_labels = np.unique(pygor_mask)
+    unique_labels = unique_labels[unique_labels != 1]  # Remove background from remapping
+
+    # Create a temporary array to avoid overwriting issues during remapping
+    remapped_mask = pygor_mask.copy()
+    for i, old_label in enumerate(unique_labels, start=1):
+        remapped_mask[pygor_mask == old_label] = -i
+    pygor_mask = remapped_mask
+
     # Return or save
-    if preview:
-        return pygor_mask
-    else:
-        # Update data object and H5 file
-        success = data.update_rois(pygor_mask, overwrite=overwrite)
-        if not success:
-            warnings.warn("Failed to save ROIs to H5 file")
-        return None
+    # if preview:
+    return pygor_mask
+    # else:
+    #     # Update data object and H5 file
+    #     success = data.update_rois(pygor_mask, overwrite=overwrite)
+    #     if not success:
+    #         warnings.warn("Failed to save ROIs to H5 file")
+    #     return None
