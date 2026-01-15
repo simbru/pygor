@@ -64,50 +64,67 @@ class STRF(Core):
         # Post initialise the contents of Data class to be inherited
         #super().__dict__["data_types"].append(self.type)
         super().__post_init__()
-        with h5py.File(self.filename) as HDF5_file:
-            # Get keys for STRF, filter for only STRF + n where n is a number between 0 to 9 
-            # keys = [i for i in HDF5_file.keys() if "?STRF" in i and any(i[4] == np.arange(0, 10).astype("str"))]
-            pattern = re.compile(r"^STRF\d+_\d+_\d+$")
-            keys = [i for i in HDF5_file.keys() if pattern.match(i) and any(i[4] == np.arange(0, 10).astype("str"))]
-            self.strf_keys = natsort.natsorted(keys)
-            # Set bool for multi-colour RFs and ensure multicolour attributes set correctly
-            strf_colour_int_list = [int(n.removeprefix("STRF").split("_")[-1]) for n in keys]
-            if len(np.unique(strf_colour_int_list)) == 1: # only one colour according to STRF keys
-                multicolour_bool = False
-            else:
-                multicolour_bool = True
-            self.strf_dur_ms = try_fetch_os_params(HDF5_file, "Noise_FilterLength_s") * 1000
-            # if True in bool_partofmulticolour_list and False in bool_partofmulticolour_list:
-            #     raise AttributeError("There are both single-coloured and multi-coloured STRFs loaded. Manual fix required.")
-            if multicolour_bool is True:
-                identified_labels = np.unique([(i.split('_')[-1]) for i in self.strf_keys])
-                self.numcolour = len([i for i in identified_labels if i.isdigit()])
-                self.multicolour = True
-            else:
-                self.multicolour = False
-                self.numcolour = 1
-            self.strfs = pygor.data_helpers.load_strf(HDF5_file)
-        self.num_strfs = len(self.strfs)
-        if self.num_rois == 0:
-            print("Number of ROIs not set, likely ROIs array is missing. Setting to number of STRFs divided by number of colours.")
-            self.num_rois = int(self.num_strfs / self.numcolour)
-        self.set_bootstrap_settings_default()
-        if self.bs_settings["do_bootstrap"] == True:
-            self.run_bootstrap()
-        
-        # Validate data consistency
-        self._validate_data_consistency()
+        if self.filename.suffix == ".h5":
+            with h5py.File(self.filename) as HDF5_file:
+                # Get keys for STRF, filter for only STRF + n where n is a number between 0 to 9
+                # keys = [i for i in HDF5_file.keys() if "?STRF" in i and any(i[4] == np.arange(0, 10).astype("str"))]
+                pattern = re.compile(r"^STRF\d+_\d+_\d+$")
+                keys = [i for i in HDF5_file.keys() if pattern.match(i) and any(i[4] == np.arange(0, 10).astype("str"))]
+                self.strf_keys = natsort.natsorted(keys)
+                # Set bool for multi-colour RFs and ensure multicolour attributes set correctly
+                strf_colour_int_list = [int(n.removeprefix("STRF").split("_")[-1]) for n in keys]
+                if len(np.unique(strf_colour_int_list)) == 1: # only one colour according to STRF keys
+                    multicolour_bool = False
+                else:
+                    multicolour_bool = True
+                self.strf_dur_ms = try_fetch_os_params(HDF5_file, "Noise_FilterLength_s") * 1000
+                # if True in bool_partofmulticolour_list and False in bool_partofmulticolour_list:
+                #     raise AttributeError("There are both single-coloured and multi-coloured STRFs loaded. Manual fix required.")
+                if multicolour_bool is True:
+                    identified_labels = np.unique([(i.split('_')[-1]) for i in self.strf_keys])
+                    self.numcolour = len([i for i in identified_labels if i.isdigit()])
+                    self.multicolour = True
+                else:
+                    self.multicolour = False
+                    self.numcolour = 1
+                self.strfs = pygor.data_helpers.load_strf(HDF5_file)
+            self.num_strfs = len(self.strfs)
+            if self.num_rois == 0:
+                print("Number of ROIs not set, likely ROIs array is missing. Setting to number of STRFs divided by number of colours.")
+                self.num_rois = int(self.num_strfs / self.numcolour)
+            self.set_bootstrap_settings_default()
+            if self.bs_settings["do_bootstrap"] == True:
+                self.run_bootstrap()
+            # Validate data consistency (H5 has STRFs to validate)
+            self._validate_data_consistency()
+        else:
+            # ScanM files (.smp/.smh): STRFs don't exist yet, set defaults
+            # These will be populated after STRF calculation
+            strf_defaults = self.params.get_defaults("strf").get("general", {})
+            self.numcolour = strf_defaults.get("num_colours", 1)
+            self.multicolour = self.numcolour > 1
+            self.strfs = None
+            self.strf_keys = []
+            self.num_strfs = 0
+            self.strf_dur_ms = None  # Will be set when STRFs are calculated
 
     def _validate_data_consistency(self):
         """
         Validate data consistency after loading.
-        
+
         Checks:
         1. num_rois matches expected STRF count (num_strfs / numcolour)
         2. ipl_depths length matches num_rois
-        
+
         Raises warnings for inconsistencies that could indicate data problems.
+
+        Note: Only called for H5 files where STRFs exist. ScanM files skip
+        validation since STRFs haven't been calculated yet.
         """
+        # Skip validation if no STRFs loaded (e.g., ScanM files)
+        if self.strfs is None or self.num_strfs == 0:
+            return
+
         expected_rois = int(self.num_strfs / self.numcolour)
         
         # Check 1: num_rois vs STRF count consistency
