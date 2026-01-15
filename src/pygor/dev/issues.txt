@@ -3,7 +3,8 @@
 fix: make this into a parameter or optionally pass an image through the function call (better probably)
 - segmentation.postprocess size_multiplier is unintuitive named. 
 Fix:  Call it median_split_ratio or something similar to make it more obvious what it does
-
+- process stage for segmentation and registration are inconsistent 
+fix: check, write down behaviour, find 
 
 - in this scenario I am running into a lot of issues with how the STRF object assumes the h5 file is configured, which gets triggered also when trying to load scanm smh smp files:
 """
