@@ -59,7 +59,7 @@ def _shift_frame_fft(frame: np.ndarray, shift_yx: np.ndarray) -> np.ndarray:
 def register_stack(
     stack: np.ndarray,
     n_reference_frames: int = 1000,
-    artefact_crop = 2, 
+    artifact_width: int = 0,
     batch_size: int = 10,
     upsample_factor: int = 10,
     normalization: Optional[str] = None,
@@ -87,6 +87,10 @@ def register_stack(
         3D imaging stack (time, height, width)
     n_reference_frames : int, optional
         Number of initial frames to average for reference (default: 1000)
+    artifact_width : int, optional
+        Number of pixels to exclude from left edge during shift computation
+        (default: 0). This region is preserved but not used for registration.
+        Set to match preprocessing artifact_width to exclude the light artifact.
     batch_size : int, optional
         Number of frames to average per batch (default: 10)
     upsample_factor : int, optional
@@ -140,10 +144,10 @@ def register_stack(
     compute_batch_shifts : Compute shifts without applying them
     apply_shifts_to_stack : Apply pre-computed shifts to stack
     """
-    if artefact_crop is not None:
-        # Store original artefact region to restore after registration
-        artefact_region = stack[:, :, 0:artefact_crop].copy()
-        stack = stack[:, :, artefact_crop:]
+    if artifact_width > 0:
+        # Store original artifact region to restore after registration
+        artifact_region = stack[:, :, :artifact_width].copy()
+        stack = stack[:, :, artifact_width:]
 
     # Compute shifts
     shifts, errors = compute_batch_shifts(
@@ -165,9 +169,9 @@ def register_stack(
         n_jobs=n_jobs,
     )
 
-    # Restore original artefact region (unregistered, as it's already corrected)
-    if artefact_crop is not None:
-        registered = np.concatenate((artefact_region, registered), axis=2)
+    # Restore original artifact region (unregistered, as it's already corrected)
+    if artifact_width > 0:
+        registered = np.concatenate((artifact_region, registered), axis=2)
 
     if return_shifts:
         return registered, shifts, errors
@@ -210,6 +214,10 @@ def compute_batch_shifts(
     This function only computes shifts without applying them.
     Use apply_shifts_to_stack() to actually shift the frames.
     """
+    # Handle TOML "None" string (TOML doesn't support Python None)
+    if normalization in ("None", "none", ""):
+        normalization = None
+
     n_frames = len(stack)
     n_batches = int(np.ceil(n_frames / batch_size))
 
