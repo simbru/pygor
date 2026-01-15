@@ -51,20 +51,46 @@ Inside `pygor/src/pygor/` (Python's way of structuring a package with sub-module
 - `pygor/test`: Unittests for Pygor classes
 - `pygor/insert_your_class`: Files containing functions related to your packages!
 
-## Pygor naming conventions for IGOR waves:
+## Custom cellpose models
+Models can be found here: https://drive.proton.me/urls/02GT9HWGC0#Ibd9kXWzOwMQ
+(So far only RibeyeA)
 
-| IGOR Wave          | Pygor core attribute |
-| -------------------- | ---------------------- |
-| wDataCh0_detrended | images               |
-| Traces0_raw          | traces_raw             |
-| traces_znorm          | Traces0_znorm             |
-| ROIs          | rois             |
-| Averages0          | averages             |
-| Snippets0          | snippets             |
-| OS_Parameters[58]  | frame_hz             |
-| OS_Parameters[28]  | trigger_mode             |
-| Triggertimes_Frame          | triggertimes_frame             |
-| Triggertimes          | triggertimes             |
-| Positions          | ipl_depths             |
+## H5/IGOR Wave to Pygor Attribute Mapping
 
-Eventually, it would make sense to create a framework for customising this, such that the pipeline can be adapted more broadly to other H5 files with other naming conventions. For now, this will wait until it is a requested feature. 
+### Data Arrays
+
+| H5 Key | Pygor Attribute | Description |
+|--------|-----------------|-------------|
+| wDataCh0_detrended | images | Preprocessed imaging stack (T, Y, X) |
+| wDataCh2 | trigger_images | Trigger channel images |
+| Traces0_raw | traces_raw | Raw ROI traces |
+| Traces0_znorm | traces_znorm | Z-normalized ROI traces |
+| ROIs | rois | ROI mask array |
+| RoiSizes | roi_sizes | Pixel count per ROI |
+| Averages0 | averages | Epoch-averaged traces |
+| Snippets0 | snippets | Trial snippets |
+| Triggertimes | triggertimes | Stimulus trigger times |
+| Triggertimes_Frame | triggertimes_frame | Trigger times in frame units |
+| Positions | ipl_depths | IPL depth per ROI |
+| QualityCriterion | quality_indices | ROI quality scores |
+| correlation_projection | correlation_projection | Pixel correlation map |
+| Stack_Ave | average_stack | Time-averaged image |
+
+### OS_Parameters (indexed array with named keys)
+
+| OS_Parameters Key | Pygor Attribute | Description |
+|-------------------|-----------------|-------------|
+| Trigger_Mode | trigger_mode | Triggers per stimulus epoch |
+| nPlanes | n_planes | Number of imaging planes |
+| LineDuration | linedur_s | Line scan duration (seconds) |
+| Skip_First_Triggers | _Core__skip_first_frames | Triggers to skip at start |
+| Skip_Last_Triggers | _Core__skip_last_frames | Triggers to skip at end |
+
+Note: `frame_hz` is calculated from `n_planes` and `linedur_s`, not stored directly.
+
+### STRF-specific (strf_data.py)
+
+| H5 Key Pattern | Pygor Attribute | Description |
+|----------------|-----------------|-------------|
+| STRF{n}_{roi}_{colour} | strfs | Receptive field arrays |
+| Noise_FilterLength_s | strf_dur_ms | STRF duration (converted to ms) | 
