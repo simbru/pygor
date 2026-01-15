@@ -1,0 +1,81 @@
+# Pygor Package Defaults
+# Pass config="filepath" to loaders to override any of these values per analysis.
+
+[instrument]
+fish_screen_dist_mm = 160.0
+screen_width_mm = 300.0
+screen_width_pix_au = 1820
+screen_height_pix_au = 1140
+screen_width_visang = 86.306
+lens_to_retina_distance_um = 50.0
+
+[preprocessing]
+artifact_width = 2
+flip_x = true
+detrend = true
+smooth_window_s = 1000.0
+time_bin = 10
+fix_first_frame = true
+
+[registration]
+n_reference_frames = 1000
+batch_size = 100
+upsample_factor = 3
+normalization = "None"
+order = 1
+mode = "reflect"
+parallel = true
+n_jobs = -1
+
+[triggers]
+threshold = 20000
+min_gap_seconds = 0.05
+
+[segmentation.cellpose]
+diameter = 0
+flow_threshold = 0.9
+cellprob_threshold = 0.5
+min_size = 2
+
+[segmentation.postprocess]
+split_large = true
+size_multiplier = 1.25
+min_peak_distance = 2
+min_size_after_split = 4
+shrink_iterations = 1
+shrink_size_threshold = 30
+
+[strf.general]
+num_colours = 1
+
+[strf.contouring]
+global_thresh_val = 1.5
+min_targets = 5
+min_hole_size = 3
+min_object_size = 3
+surround_disksize = 20
+gauss_sigma = 1.0
+
+[strf.spatial]
+snr_threshold = 3.0
+kernel_width = 3
+kernel_depth = 5
+pix_subsample = 1
+time_subsample = 2
+
+[strf.temporal]
+exclude_firstlast = [1, 1]
+extrema_threshold = 3.0
+
+[strf.calculate]
+sta_past_window = 2.0
+sta_future_window = 2.0
+edge_crop = 2
+event_sd_threshold = 2.0
+use_znorm = true
+
+[strf.centsurr]
+n_clusters = 3
+amplitude_ratio_threshold = 3.0
+indices_around_peak = 2
+abs_criteria = 3

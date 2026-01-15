@@ -15,6 +15,7 @@ import pygor.strf.temporal
 import pygor.plotting.basic
 import pygor.utils
 import pygor.core
+from pygor.params import AnalysisParams
 
 # Dependencies
 import operator
@@ -59,6 +60,8 @@ def try_fetch_os_params(file, params_key):
 @dataclass
 class Core:
     filename: str or pathlib.Path
+    config: str | pathlib.Path = None  # Optional path to TOML config file
+    do_preprocess: bool | dict = False  # Preprocessing options (for ScanM files)
     metadata: dict = field(init=False)
     rois: dict = field(init=False)
     type: str = field(init=False)
@@ -68,11 +71,36 @@ class Core:
     ms_dur: int = np.nan
     trigger_mode : int = 1 #defualt value
     num_rois: int = field(init=False)
+    params: AnalysisParams = field(init=False)  # Analysis parameters
 
     def __post_init__(self):
+        """initialize Core by auto-detecting file format and loading data."""
         # Ensure path is pathlib compatible
         if isinstance(self.filename, pathlib.Path) is False:
             self.filename = pathlib.Path(self.filename)
+
+        ext = self.filename.suffix.lower()
+
+        # Auto-detect format based on extension
+        if ext in ['.smp', '.smh']:
+            # ScanM file - delegate to internal loader
+            self._load_from_scanm_internal()
+        elif ext in ['.h5', '.hdf5']:
+            # H5 file - use original loading logic
+            if self.do_preprocess:
+                warnings.warn("do_preprocess parameter is ignored for H5 files (typically already preprocessed). Call manually if needed.", stacklevel=2)
+            self._load_from_h5()
+        else:
+            raise ValueError(
+                f"Unknown file extension '{ext}'. "
+                "Supported formats: .h5/.hdf5 (IGOR export), .smp/.smh (ScanM raw)"
+            )
+
+        # Initialize analysis parameters from config (both paths)
+        self.params = AnalysisParams.from_config(self.config)
+
+    def _load_from_h5(self):
+        """Load data from IGOR-exported H5 file."""
         # Set type attribute
         self.type = self.__class__.__name__
         # Fetch all relevant data from the HDF5 file (if not in file, gets set to None)
@@ -146,6 +174,164 @@ class Core:
             "<=": operator.le,
         }
 
+    def _load_from_scanm_internal(self):
+        """
+        Internal method to load ScanM data when using Core(path) with auto-detection.
+
+        Uses default channel settings. For more control, use Core.from_scanm() directly.
+        """
+        import pygor.preproc.scanm as scanm_module
+
+        # Default channel settings
+        imaging_channel = 0
+        trigger_channel = 2
+        skip_first_triggers = 0
+        skip_last_triggers = 0
+
+        # Load ScanM data
+        channels_to_load = list(set([imaging_channel, trigger_channel]))
+        header, channel_data = scanm_module.load_scanm(self.filename, channels=channels_to_load)
+
+        # Get actual number of frames recorded
+        n_frames_total = header.get("NumberOfFrames", 0)
+        frame_counter = header.get("FrameCounter", 0)
+        stim_buf_per_fr = header.get("StimBufPerFr", 1)
+        actual_frames = (n_frames_total - frame_counter) * stim_buf_per_fr
+
+        # Get imaging data
+        if imaging_channel not in channel_data:
+            raise ValueError(f"Imaging channel {imaging_channel} not found in data")
+        images = channel_data[imaging_channel][:actual_frames]
+
+        # Compute timing parameters
+        timing = scanm_module._compute_timing_params(header, images)
+
+        # Parse datetime
+        exp_date, exp_time = scanm_module._parse_scanm_datetime(header)
+
+        # Detect triggers
+        if trigger_channel in channel_data:
+            trigger_stack = channel_data[trigger_channel][:actual_frames]
+            trigger_frames, trigger_times = scanm_module.detect_triggers(
+                trigger_stack,
+                line_duration=timing["line_duration_s"],
+            )
+
+            # Apply skip settings
+            if skip_last_triggers > 0:
+                trigger_frames = trigger_frames[skip_first_triggers:-skip_last_triggers]
+                trigger_times = trigger_times[skip_first_triggers:-skip_last_triggers]
+            else:
+                trigger_frames = trigger_frames[skip_first_triggers:]
+                trigger_times = trigger_times[skip_first_triggers:]
+        else:
+            trigger_stack = None
+            trigger_frames = np.array([], dtype=int)
+            trigger_times = np.array([], dtype=float)
+
+        # Set all required attributes
+        self.type = self.__class__.__name__
+        self.name = self.filename.stem
+
+        # Image data
+        self.images = images
+        self.trigger_images = trigger_stack
+        self.average_stack = images.mean(axis=0)
+        self.correlation_projection = None
+
+        # Timing
+        self.frame_hz = timing["frame_hz"]
+        self.linedur_s = timing["line_duration_s"]
+        self.n_planes = timing["n_planes"]
+
+        # Triggers
+        self.triggertimes_frame = trigger_frames
+        self.triggertimes = trigger_times
+        self._Core__skip_first_frames = skip_first_triggers
+        self._Core__skip_last_frames = -skip_last_triggers if skip_last_triggers > 0 else 0
+
+        # Metadata
+        self.metadata = {
+            "filename": str(self.filename),
+            "exp_date": exp_date,
+            "exp_time": exp_time,
+            "objectiveXYZ": (
+                header.get("XCoord_um"),
+                header.get("YCoord_um"),
+                header.get("ZCoord_um"),
+            ),
+            "PixelDuration_us": header.get("PixelDuration"),
+            "RetracePixels": header.get("RtrcLen"),
+            "LineOffset": header.get("LineOffSet"),
+            "FrameWidth": header.get("FrameWidth"),
+            "FrameHeight": header.get("FrameHeight"),
+            "NumberOfFrames": header.get("NumberOfFrames"),
+            "FrameCounter": header.get("FrameCounter"),
+            "StimBufPerFr": header.get("StimBufPerFr"),
+            "ScanMode": header.get("ScanMode"),
+            "Zoom": header.get("Zoom"),
+            "Angle": header.get("Angle"),
+            "User": header.get("User"),
+            "Comment": header.get("Comment"),
+        }
+
+        # ROI-related (initially empty)
+        self.rois = None
+        self.num_rois = 0
+        self.roi_sizes = None
+        self.traces_raw = None
+        self.traces_znorm = None
+
+        # Other attributes
+        self.quality_indices = None
+        self.ipl_depths = None
+
+        # Private attributes
+        self._Core__keyword_lables = {"ipl_depths": None}
+        self._Core__compare_ops_map = {
+            "==": operator.eq,
+            ">": operator.gt,
+            "<": operator.lt,
+            ">=": operator.ge,
+            "<=": operator.le,
+        }
+
+        # Store header for export
+        self._scanm_header = header
+
+        # Apply preprocessing if requested
+        if self.do_preprocess:
+            if isinstance(self.do_preprocess, dict):
+                self.preprocess(**self.do_preprocess)
+            else:
+                self.preprocess()
+
+    @classmethod
+    def from_h5(cls, path, config=None):
+        """
+        Load from IGOR-exported H5 file.
+
+        This is an explicit alternative to `Core(path)` for H5 files.
+
+        Parameters
+        ----------
+        path : str or Path
+            Path to .h5 or .hdf5 file
+        config : str or Path, optional
+            Path to a TOML config file to merge with package defaults.
+
+        Returns
+        -------
+        Core
+            A fully initialized Core object.
+
+        Examples
+        --------
+        >>> data = Core.from_h5("recording.h5")
+        >>> data = Core.from_h5("recording.h5", config="configs/myconfig.toml")
+        """
+        return cls(filename=path, config=config)
+
     @classmethod
     def from_scanm(
         cls,
@@ -156,13 +342,14 @@ class Core:
         skip_last_triggers: int = 0,
         trigger_mode: int = 1,
         preprocess: bool | dict = False,
+        config: str | pathlib.Path = None,
     ):
         """
         Create a Core object directly from ScanM SMP/SMH files.
-        
+
         This alternative constructor bypasses the need for an intermediate H5 file,
         loading data directly from ScanM format and populating all Core attributes.
-        
+
         Parameters
         ----------
         path : str or Path
@@ -189,24 +376,30 @@ class Core:
             - smooth_window_s (float): Detrend window (default: 1000.0)
             - time_bin (int): Detrend binning (default: 10)
             - fix_first_frame (bool): Fix first frame (default: True)
-            
+        config : str or Path, optional
+            Path to a TOML config file to merge with package defaults.
+            Use this to apply project-specific parameter presets.
+
         Returns
         -------
         Core
             A fully initialized Core object with all standard methods available.
-            
+
         Examples
         --------
         >>> from pygor.classes.core_data import Core
         >>> # Load raw data
         >>> data = Core.from_scanm("recording.smp")
-        >>> 
+        >>>
         >>> # Load with default preprocessing
         >>> data = Core.from_scanm("recording.smp", preprocess=True)
-        >>> 
+        >>>
         >>> # Load with custom preprocessing
         >>> data = Core.from_scanm("recording.smp", preprocess={"detrend": False})
-        >>> 
+        >>>
+        >>> # Load with a project-specific config
+        >>> data = Core.from_scanm("recording.smp", config="configs/high_zoom.toml")
+        >>>
         >>> # Load raw, then preprocess later
         >>> data = Core.from_scanm("recording.smp")
         >>> data.preprocess(artifact_width=3, detrend=True)
@@ -339,10 +532,10 @@ class Core:
         
         # Store header for export
         instance._scanm_header = header
-        
-        # Preprocessing state tracking
-        instance._preprocessed = False
-        
+
+        # Initialize analysis parameters from config
+        instance.params = AnalysisParams.from_config(config)
+
         # Apply preprocessing if requested
         if preprocess:
             if isinstance(preprocess, dict):
@@ -404,19 +597,22 @@ class Core:
         pygor.config : Configuration management for defaults
         """
         import pygor.preproc.scanm as scanm_module
-        
+
         # Check if already preprocessed
-        if hasattr(self, '_preprocessed') and self._preprocessed and not force:
+        if self.params.preprocessed and not force:
             warnings.warn(
                 "Data has already been preprocessed. Use force=True to re-apply. "
                 "Note: re-preprocessing already-preprocessed data may produce artifacts.",
                 RuntimeWarning
             )
             return
-        
-        # Get defaults from config
-        from pygor.config import get_preprocess_defaults
-        defaults = get_preprocess_defaults()
+
+        # Get defaults from params (loaded from config)
+        defaults = self.params.get_defaults("preprocessing")
+
+        # Use current params.artifact_width as the default (can be modified before calling preprocess)
+        if artifact_width is None:
+            artifact_width = self.params.artifact_width
 
         # Collect user-provided params (filter out None values)
         user_params = {
@@ -439,28 +635,26 @@ class Core:
             frame_rate=self.frame_hz,
             **params,
         )
-        
+
         # Update average_stack to reflect preprocessed data
         self.average_stack = self.images.mean(axis=0)
-        
-        # Mark as preprocessed
-        self._preprocessed = True
-        
-        # Store preprocessing params in metadata
-        if self.metadata is None:
-            self.metadata = {}
-        self.metadata["preprocessing"] = params
+
+        # Record preprocessing in params (sets preprocessed=True and artifact_width)
+        self.params.mark_preprocessing(params)
 
     def register(
         self,
         n_reference_frames: int = None,
         batch_size: int = None,
+        artifact_width: int = None,
         upsample_factor: int = None,
         normalization: str = None,
         order: int = None,
         mode: str = None,
         force: bool = False,
         plot: bool = False,
+        parallel: bool = True,
+        n_jobs: int = -1,
     ) -> dict:
         """
         Apply motion correction (registration) to images in-place.
@@ -490,6 +684,11 @@ class Core:
             If True, re-apply registration even if already done (default: False).
         plot : bool, optional
             If True, display a matplotlib plot of shifts and errors (default: False).
+        parallel : bool, optional
+            Use parallel processing with FFT-based shifting for ~2x speedup
+            (default: True).
+        n_jobs : int, optional
+            Number of parallel jobs. -1 uses all CPU cores (default: -1).
 
         Returns
         -------
@@ -537,17 +736,16 @@ class Core:
         import pygor.preproc.registration as reg_module
 
         # Check if already registered
-        if hasattr(self, '_registered') and self._registered and not force:
+        if self.params.registered and not force:
             warnings.warn(
                 "Data has already been registered. Use force=True to re-apply. "
                 "Note: re-registering already-registered data may produce artifacts.",
                 RuntimeWarning
             )
-            return self.metadata.get("registration", {})
+            return self.params.registration or {}
 
-        # Get defaults from config
-        from pygor.config import get_registration_defaults
-        defaults = get_registration_defaults()
+        # Get defaults from params (loaded from config)
+        defaults = self.params.get_defaults("registration")
 
         # Collect user-provided params (filter out None values)
         user_params = {
@@ -558,16 +756,23 @@ class Core:
                 'normalization': normalization,
                 'order': order,
                 'mode': mode,
+                'parallel': parallel,
+                'n_jobs': n_jobs,
             }.items() if v is not None
         }
 
         # Merge defaults with user overrides
         params = {**defaults, **user_params}
 
+        # Use artifact_width from params (set during preprocessing) if not explicitly provided
+        if artifact_width is None:
+            artifact_width = self.params.artifact_width
+
         # Apply registration
         registered, shifts, errors = reg_module.register_stack(
             self.images,
             return_shifts=True,
+            artifact_width=artifact_width,
             **params,
         )
 
@@ -576,9 +781,6 @@ class Core:
 
         # Update average_stack to reflect registered data
         self.average_stack = self.images.mean(axis=0)
-
-        # Mark as registered
-        self._registered = True
 
         # Compute statistics
         stats = {
@@ -590,15 +792,21 @@ class Core:
             'errors': errors,
         }
 
-        # Store registration params and stats in metadata
-        if self.metadata is None:
-            self.metadata = {}
-        self.metadata["registration"] = {**params, **stats}
+        # Record registration in params (sets registered=True)
+        self.params.mark_registration(params, stats)
 
         # Plot if requested
         if plot:
             self._plot_registration_results(shifts, errors)
 
+        # if stats["mean_error"] < 0.05:
+        print(f"Registration complete.\n"
+            f"  Mean error: {stats['mean_error']:.4f}\n"
+            f"  Max shift: (y={stats['max_shift'][0]:.2f}, x={stats['max_shift'][1]:.2f})\n"
+            f"  Mean shift: (y={stats['mean_shift'][0]:.2f}, x={stats['mean_shift'][1]:.2f})\n"
+            f"  Shift SD: (y={stats['std_shift'][0]:.2f}, x={stats['std_shift'][1]:.2f})")
+        # else:
+        #     print(f"Warning: Registration error exceeds threshold. Mean error: {stats['mean_error']:.4f}")
         return stats
 
     def _plot_registration_results(self, shifts: np.ndarray, errors: np.ndarray):
@@ -978,7 +1186,7 @@ class Core:
         # Use rois_alt for 0-based indexing
         rois_to_use = self.rois_alt
         
-        num_rois = int(np.nanmax(rois_to_use)) + 1  # +1 because 0-based indexing
+        # num_rois = int(np.nanmax(rois_to_use)) + 1  # +1 because 0-based indexing
         color = matplotlib.colormaps["jet_r"]
         
         if func == "average_stack":
@@ -1214,9 +1422,11 @@ class Core:
             print(f"Successfully updated ipl_depths for {len(depths)} ROIs")
         return success
 
-    def update_rois(self, roi_mask, overwrite=False):
+    def update_rois(self, roi_mask, overwrite=True):
         """
-        Update ROIs in the H5 file with a pre-defined ROI mask.
+        Update ROIs in the H5 file with a pre-defined ROI mask. If overwrite=False,
+        existing ROIs will not be modified. If the object is associated with an H5 file,
+        the 'ROIs' key will be updated accordingly.
 
         For interactive ROI drawing, use draw_rois(overwrite=True) instead.
 
@@ -1232,12 +1442,52 @@ class Core:
         bool
             True if update was successful, False otherwise
         """
-        success = self.update_h5_key('ROIs', roi_mask, overwrite)
-        if success:
-            self.rois = roi_mask  # Update the object attribute
-            num_rois = len(np.unique(roi_mask)[np.unique(roi_mask) < 0])
-            print(f"Successfully updated ROIs: {num_rois} ROIs saved")
-        return success
+        self.rois = roi_mask  # Update the object attribute
+        self.num_rois = len(np.unique(roi_mask))-1
+        print(f"Successfully updated object.rois: {self.num_rois} ROIs saved")
+
+        # check if object is associated with an H5 file
+        if self.filename.suffix == '.h5' and overwrite:
+            print("Associated H5 file detected, updating 'ROIs' key...")
+            bool = self.update_h5_key('ROIs', roi_mask.T, overwrite=overwrite) #transpose for H5 format
+            if not bool:
+                print("H5 file key 'ROIs'not updated, due to overwrite=False.")
+        
+    def segment_rois(self, mode="cellpose+", overwrite = True, **kwargs):
+        """
+        Segment ROIs using automated methods.
+
+        Parameters
+        ----------
+        mode : str
+            Segmentation mode:
+            - "cellpose+": Cellpose with post-processing heuristics (recommended)
+            - "cellpose": Raw Cellpose output only
+        model_path : str or Path, optional
+            Direct path to a trained Cellpose model file
+        model_dir : str or Path, optional
+            Directory to search for trained models
+        preview : bool
+            If True, return masks without updating data.rois
+        overwrite : bool
+            If True, overwrite existing ROIs in H5 file
+        **kwargs
+            Additional parameters (see pygor.segmentation.segment_rois for full list)
+
+        Returns
+        -------
+        masks : ndarray (only if preview=True)
+            ROI mask in pygor format
+
+        Examples
+        --------
+        >>> data.segment_rois(model_dir="./models/synaptic")
+        >>> masks = data.segment_rois(model_dir="./models/synaptic", preview=True)
+        """
+        from pygor.segmentation import segment_rois as _segment_rois
+        roi_mask = _segment_rois(self, mode=mode, overwrite=overwrite, **kwargs)
+        self.update_rois(roi_mask, overwrite=overwrite)
+        return roi_mask
 
     def view_images_interactive(self, **kwargs):
         """
@@ -1998,8 +2248,14 @@ class Core:
             )
         return np.floor(np.average(np.diff(self.get_average_markers()))).astype(int)
 
-    def get_correlation_map(self):
-        return pygor.core.methods.correlation_map(self.images)
+    def get_correlation_map(self, recompute=False):
+        """Compute correlation map and store in self.correlation_projection.
+
+        Uses cached value if available, unless recompute=True.
+        """
+        if self.correlation_projection is None or recompute:
+            self.correlation_projection = pygor.core.methods.correlation_map(self.images)
+        return self.correlation_projection
 
     def calc_mean_triggertimes(self, unit = "index"):
         """
@@ -2048,7 +2304,7 @@ class Core:
 
     @property
     def rois_alt(self):
-        temp_rois = self.rois.copy()
+        temp_rois = self.rois.copy().astype(float)
         temp_rois[temp_rois == 1] = np.nan
         temp_rois *= -1
         temp_rois = temp_rois - 1

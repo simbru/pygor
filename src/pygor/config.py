@@ -1,15 +1,15 @@
 """
 Pygor configuration management.
 
-Loads and merges configuration from multiple sources:
-1. Package defaults (built-in)
-2. User config (~/.pygor/config.toml)
+Loads configuration from:
+1. Package defaults (src/pygor/defaults.toml) - always applied
+2. Optional user config file - passed explicitly via config_path
 
-Later sources override earlier ones.
+User config values override package defaults. Only specify values you want to change.
 """
 
 from pathlib import Path
-import os
+from typing import Union
 import warnings
 
 # Try to import tomllib (Python 3.11+) or tomli as fallback
@@ -23,49 +23,26 @@ except ImportError:
     except ImportError:
         HAS_TOML = False
 
+# Try to import tomli_w for TOML writing
+try:
+    import tomli_w
+    HAS_TOML_WRITE = True
+except ImportError:
+    HAS_TOML_WRITE = False
+
+
 # -----------------------------------------------------------------------------
-# Package defaults
+# Path helpers
 # -----------------------------------------------------------------------------
 
-PREPROCESS_DEFAULTS = {
-    "artifact_width": 2,
-    "flip_x": True,
-    "detrend": True,
-    "smooth_window_s": 1000.0,
-    "time_bin": 10,
-    "fix_first_frame": True,
-}
-"""Default preprocessing parameters matching IGOR OS Scripts."""
-
-REGISTRATION_DEFAULTS = {
-    "n_reference_frames": 1000,
-    "batch_size": 10,
-    "upsample_factor": 10,
-    "normalization": None,
-    "order": 1,
-    "mode": "reflect",
-}
-"""Default registration (motion correction) parameters."""
-
-TRIGGER_DEFAULTS = {
-    "threshold": 20000,
-    "min_gap_seconds": 0.05,
-}
-"""Default trigger detection parameters."""
+def _get_defaults_path() -> Path:
+    """Get path to package defaults.toml."""
+    return Path(__file__).parent / "defaults.toml"
 
 
 # -----------------------------------------------------------------------------
 # Config loading
 # -----------------------------------------------------------------------------
-
-def _get_user_config_path() -> Path:
-    """Get path to user config file (~/.pygor/config.toml)."""
-    return Path(__file__).parent.parent.parent / ".pygor" / "config.toml"
-
-# def _get_project_config_path() -> Path:
-#     """Get path to project config file (./pygor.toml)."""
-#     return Path.cwd() / "pygor.toml"
-
 
 def _load_toml_file(path: Path) -> dict:
     """Load a TOML file, returning empty dict if not found or toml not available."""
@@ -99,42 +76,93 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def load_config() -> dict:
+def load_config(config_path: Union[str, Path, None] = None) -> dict:
     """
-    Load merged configuration from all sources.
+    Load configuration from package defaults and optional user config.
+
+    Parameters
+    ----------
+    config_path : str, Path, or None
+        Path to a TOML config file to merge with package defaults.
+        If None, only package defaults are used.
 
     Returns
     -------
     dict
-        Merged configuration with structure:
+        Merged configuration with all sections:
         {
+            "instrument": {...},
             "preprocessing": {...},
             "registration": {...},
             "triggers": {...},
-            ...
+            "segmentation": {...},
+            "strf": {...},
         }
+
+    Examples
+    --------
+    >>> # Use package defaults only
+    >>> config = load_config()
+
+    >>> # Merge with a project-specific config
+    >>> config = load_config("configs/high_zoom.toml")
     """
-    # Start with package defaults
-    config = {
-        "preprocessing": PREPROCESS_DEFAULTS.copy(),
-        "registration": REGISTRATION_DEFAULTS.copy(),
-        "triggers": TRIGGER_DEFAULTS.copy(),
-    }
+    # Load package defaults
+    defaults = _load_toml_file(_get_defaults_path())
 
-    # Merge user config
-    user_config = _load_toml_file(_get_user_config_path())
-    config = _deep_merge(config, user_config)
+    # Merge user config if provided
+    if config_path is not None:
+        user_config = _load_toml_file(Path(config_path))
+        return _deep_merge(defaults, user_config)
 
-    # # Merge project config (highest priority)
-    # project_config = _load_toml_file(_get_project_config_path())
-    # config = _deep_merge(config, project_config)
+    return defaults
 
-    return config
 
+def get_defaults(section: str, config_path: Union[str, Path, None] = None) -> dict:
+    """
+    Get defaults for a specific section.
+
+    Supports nested sections using dot notation (e.g., 'strf.spatial').
+
+    Parameters
+    ----------
+    section : str
+        Section name, e.g., 'preprocessing', 'registration', 'strf.spatial',
+        'segmentation.cellpose'
+    config_path : str, Path, or None
+        Optional path to a config file to merge with defaults.
+
+    Returns
+    -------
+    dict
+        Configuration values for the specified section
+
+    Examples
+    --------
+    >>> get_defaults('preprocessing')
+    {'artifact_width': 2, 'flip_x': True, ...}
+
+    >>> get_defaults('strf.spatial')
+    {'snr_threshold': 3.0, 'kernel_width': 3, ...}
+
+    >>> get_defaults('segmentation.cellpose')
+    {'diameter': 0, 'flow_threshold': 0.9, ...}
+    """
+    config = load_config(config_path)
+    keys = section.split(".")
+    result = config
+    for key in keys:
+        result = result.get(key, {})
+    return result.copy() if isinstance(result, dict) else result
+
+
+# -----------------------------------------------------------------------------
+# Convenience functions (backward compatible)
+# -----------------------------------------------------------------------------
 
 def get_preprocess_defaults() -> dict:
     """
-    Get preprocessing defaults from merged config.
+    Get preprocessing defaults from package config.
 
     Returns
     -------
@@ -147,13 +175,12 @@ def get_preprocess_defaults() -> dict:
         - time_bin: int
         - fix_first_frame: bool
     """
-    config = load_config()
-    return config.get("preprocessing", PREPROCESS_DEFAULTS.copy())
+    return get_defaults("preprocessing")
 
 
 def get_registration_defaults() -> dict:
     """
-    Get registration defaults from merged config.
+    Get registration defaults from package config.
 
     Returns
     -------
@@ -166,13 +193,12 @@ def get_registration_defaults() -> dict:
         - order: int
         - mode: str
     """
-    config = load_config()
-    return config.get("registration", REGISTRATION_DEFAULTS.copy())
+    return get_defaults("registration")
 
 
 def get_trigger_defaults() -> dict:
     """
-    Get trigger detection defaults from merged config.
+    Get trigger detection defaults from package config.
 
     Returns
     -------
@@ -181,56 +207,49 @@ def get_trigger_defaults() -> dict:
         - threshold: int
         - min_gap_seconds: float
     """
-    config = load_config()
-    return config.get("triggers", TRIGGER_DEFAULTS.copy())
+    return get_defaults("triggers")
 
 
-def create_user_config_template():
+def get_segmentation_defaults() -> dict:
     """
-    Create a template config file at ~/.pygor/config.toml.
+    Get segmentation defaults from package config.
 
-    Only creates if the file doesn't already exist.
+    Returns
+    -------
+    dict
+        Segmentation parameters with nested keys:
+        - cellpose: {...}
+        - postprocess: {...}
     """
-    config_path = _get_user_config_path()
+    return get_defaults("segmentation")
 
-    if config_path.exists():
-        print(f"Config file already exists: {config_path}")
-        return config_path
 
-    # Create directory if needed
-    config_path.parent.mkdir(parents=True, exist_ok=True)
+def get_instrument_defaults() -> dict:
+    """
+    Get instrument calibration defaults from package config.
 
-    template = """\
-# Pygor configuration file
-# These values override package defaults.
-# Delete any lines you don't want to customize.
+    Returns
+    -------
+    dict
+        Instrument parameters with keys:
+        - frame_rate_hz: float
+        - fish_screen_dist_mm: float
+        - screen_width_mm: float
+        - screen_width_pix_au: int
+        - screen_height_pix_au: int
+        - screen_width_visang: float
+        - lens_to_retina_distance_um: float
+    """
+    return get_defaults("instrument")
 
-[preprocessing]
-artifact_width = 2        # Pixels affected by light artifact (IGOR: LightArtifact_cut)
-flip_x = true             # X-flip image (standard for ScanM data)
-detrend = true            # Apply temporal baseline subtraction
-smooth_window_s = 1000.0  # Detrending smooth window in seconds
-time_bin = 10             # Temporal binning for detrending speed
-fix_first_frame = true    # Copy frame 2 to frame 1 (first-frame artifact)
 
-[registration]
-n_reference_frames = 1000  # Frames to average for reference
-batch_size = 10            # Frames per batch for shift computation
-upsample_factor = 10       # Subpixel precision factor
-# normalization = "phase"  # Uncomment for high-SNR data (default: none)
-order = 1                  # Spline interpolation order (0-5)
-mode = "reflect"           # Edge handling mode
+# -----------------------------------------------------------------------------
+# Legacy constants for backward compatibility
+# -----------------------------------------------------------------------------
+# These are kept for any code that imports them directly.
+# New code should use get_defaults() or the convenience functions.
 
-[triggers]
-threshold = 20000          # Trigger fires when value < 2^16 - threshold
-min_gap_seconds = 0.1      # Minimum time between triggers (debounce)
-"""
-
-    with open(config_path, "w") as f:
-        f.write(template)
-
-    print(f"Created config template: {config_path}")
-    return config_path
-
-if __name__ == "__main__":
-    create_user_config_template()
+PREPROCESS_DEFAULTS = get_preprocess_defaults()
+REGISTRATION_DEFAULTS = get_registration_defaults()
+TRIGGER_DEFAULTS = get_trigger_defaults()
+SEGMENTATION_DEFAULTS = get_segmentation_defaults()
