@@ -7,7 +7,25 @@ on pygor image data.
 
 import numpy as np
 from pathlib import Path
-from cellpose import models
+
+try:
+    from cellpose import models
+except OSError as e:
+    if "DLL" in str(e) or "c10.dll" in str(e):
+        raise OSError(
+            "Failed to load PyTorch/Cellpose due to a DLL initialization error.\n"
+            "This is a known Windows issue with CUDA/PyTorch compatibility.\n\n"
+            "Try one of these solutions:\n"
+            "  1. Reinstall PyTorch with matching CUDA version:\n"
+            "     pip uninstall torch torchvision torchaudio\n"
+            "     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121\n\n"
+            "  2. Or use CPU-only PyTorch (no GPU acceleration):\n"
+            "     pip uninstall torch torchvision torchaudio\n"
+            "     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu\n\n"
+            "  3. As a workaround, import cellpose before other pygor operations:\n"
+            "     from cellpose import models  # Run this first in your script\n"
+        ) from e
+    raise
 
 
 def find_latest_model(models_dir):
