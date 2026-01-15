@@ -1,0 +1,19 @@
+# Example config - only include values you want to override
+# Package defaults: src/pygor/defaults.toml
+
+[instrument]
+# fish_screen_dist_mm = 160.0
+# screen_width_mm = 300.0
+
+[preprocessing]
+artifact_width = 2
+
+[registration]
+batch_size = 10
+
+# [segmentation.cellpose]
+# diameter = 0
+# flow_threshold = 0.9
+
+# [strf.general]
+# num_colours = 4
