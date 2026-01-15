@@ -1,0 +1,25 @@
+
+- obj.segmentation assumes you will be segmenting on the obj.average_stack (internally, deep in module), but you may want to segment on correlation map or standard deviation projection
+fix: make this into a parameter or optionally pass an image through the function call (better probably)
+- segmentation.postprocess size_multiplier is unintuitive named. 
+Fix:  Call it median_split_ratio or something similar to make it more obvious what it does
+
+
+- in this scenario I am running into a lot of issues with how the STRF object assumes the h5 file is configured, which gets triggered also when trying to load scanm smh smp files:
+"""
+import pathlib
+import pygor.load
+# Path to example data - update this to your file
+EXAMPLE_PATH = pathlib.Path(r"D:\Igor analyses\OSDS\251105 OSDS\1_0_SWN_200_White.smp")
+# Path to a custom config (create one or use the example)
+CUSTOM_CONFIG = r"configs\example.toml"
+obj = pygor.load.STRF(EXAMPLE_PATH, config=CUSTOM_CONFIG)
+"""
+==> Lots of errors at different parts, frequently linked to .num_rois and .numcolours which cannot be known from the raw smh + smp (basically in the h5 these RF keys are pattern matched and then numbers of rfs and their colour index are inferred from the keys)
+fix: Core needs to properly be inherited such that any pygor class (except experiment.py) can use its features. Might be more stuff like this that I didn't catch yet. 
+
+- obj.correlation_projection defaults to None but a correlation map can be computed using obj.get_correlation_map() although it does not populate the .correlation_map
+fix: lazy calculation
+
+- in defaults.toml normalization = "none", but this breaks the call in the registration fails because it is expecting None or "phase" on the skimage API side
+fix: either handle "none" into --> None or similar, unfortunately 'None' in defaults.toml causes error in toml file think. It also breaks html repr if its 'None' instead of '"none"'

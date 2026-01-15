@@ -21,6 +21,7 @@ def main():
     # print("Loading data...")
     data = Core.from_scanm(example_path)
     data.preprocess(detrend=False)
+    data.params.artifact_width = 2
     # compare to h5 load
     # data_h5 = Core(r"D:\Igor analyses\OSDS\251020 different OSDS\clone.h5")
     # data_h5 = r"D:\Igor analyses\OSDS\251020 different OSDS\clone.h5"
@@ -52,24 +53,36 @@ def main():
     viewer = napari.Viewer()
     viewer.add_image(data.images, name="Pre-registration")
     
-    print("Running registration...")
+    # Verify params were initialized
+    print(f"\n=== Params after load ===")
+    print(f"Preprocessed: {data.params.preprocessed}")
+    print(f"Artifact width: {data.params.artifact_width}")
+
+    # Verify preprocessing updated params
+    print(f"\n=== Params after preprocess ===")
+    print(f"Preprocessed: {data.params.preprocessed}")
+    print(f"Artifact width from params: {data.params.artifact_width}")
+    if data.params.preprocessing:
+        print(f"Preprocessing params: {data.params.preprocessing}")
+
+    print("\nRunning registration...")
     time_start = timeit.default_timer()
     stats = data.register(
         n_reference_frames=n_reference_frames,
         batch_size=batch_size,
         upsample_factor=upsample_factor,
-        order = 2,
-        mode = 'nearest',
-        plot = False,
-        artefact_crop = 3,  # Crop edges to remove light artefacts correction
+        order=2,
+        mode='nearest',
+        plot=False,
+        # artifact_width is now automatically read from params.artifact_width
     )
-    
-    """
-    TODO:
-    - Check registration after artefact crop
-    - Add artefact crop factor to some variable 
-    - Check that registration works as intended
-    """
+
+    # Verify registration updated params
+    print(f"\n=== Params after registration ===")
+    print(f"Registered: {data.params.registered}")
+    if data.params.registration:
+        print(f"Mean shift: {data.params.registration.get('mean_shift')}")
+        print(f"Mean error: {data.params.registration.get('mean_error')}")
 
     if stats["mean_error"] < 0.05:
         print("Registration successful.")
