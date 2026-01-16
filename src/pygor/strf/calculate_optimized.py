@@ -59,9 +59,13 @@ def igor_correlate_nodc_optimized(src_wave, dest_waves_2d):
     dest_nodc = dest_waves_2d - dest_means
     
     # Vectorized correlation using scipy (much faster than np.correlate for multiple signals)
+    # NOTE: Argument order reversed to match IGOR's lag convention
+    # IGOR: result[k] = Σ(src[n] × dest[n-k])  (subtraction)
+    # scipy: result[k] = Σ(a[n] × b[n+k])      (addition)
+    # By swapping arguments, we get equivalent temporal ordering
     correlations = []
     for i in range(dest_nodc.shape[0]):
-        corr = correlate(src_nodc, dest_nodc[i], mode='full')
+        corr = correlate(dest_nodc[i], src_nodc, mode='full')
         correlations.append(corr)
     
     return np.array(correlations)
@@ -252,94 +256,99 @@ def calculate_calcium_correlated_average_optimized(strf_obj, noise_array, sta_pa
     
     if verbose:
         print(f"Calculating kernels for {len(roi_list)} ROIs using OPTIMIZED correlation...")
-    
+
+    # Pre-compute noise stimulus mapping BEFORE ROI loop (needed for mean_stim calculation)
+    # Phase 2 fix: Initialize to 0.5 instead of 0 to match IGOR
+    trigger_start = int(triggertimes_frame[skip_first_triggers])
+    noise_stimulus = np.full((n_x_noise-edge_crop*2, n_y_noise-edge_crop*2, n_f_relevant),
+                             0.5, dtype=np.float32)
+
+    # Vectorized trigger-to-noise mapping following IGOR's exact logic
+    trigger_counter = 0
+    for tt in range(skip_first_triggers, n_triggers-skip_last_triggers-1):
+        current_start_frame = int(triggertimes_frame[tt]) - trigger_start
+        current_end_frame = int(triggertimes_frame[tt+1]) - trigger_start
+
+        # Bounds checking
+        if current_start_frame < 0 or current_end_frame >= n_f_relevant:
+            trigger_counter += 1
+            if trigger_counter >= noise_array.shape[2]:
+                trigger_counter = 0
+            continue
+
+        if current_end_frame - current_start_frame > max_frames_per_trigger:
+            current_end_frame = current_start_frame + max_frames_per_trigger
+
+        # Optimized noise pattern mapping
+        if trigger_counter < noise_array.shape[2]:
+            noise_pattern = noise_array[edge_crop:n_y_noise-edge_crop, edge_crop:n_x_noise-edge_crop, trigger_counter]
+            frame_range = np.arange(current_start_frame, current_end_frame + 1)
+            frame_range = frame_range[frame_range < n_f_relevant]
+
+            if len(frame_range) > 0:
+                # Vectorized assignment
+                noise_stimulus[:, :, frame_range] = noise_pattern.T[:, :, np.newaxis]
+
+        trigger_counter += 1
+        if trigger_counter >= noise_array.shape[2]:
+            trigger_counter = 0
+
     # Process each ROI (including -1 for reference filter - direct translation)
     for rr_idx, rr in enumerate([-1] + roi_list):  # rr == -1 is the reference filter computed as random
-        
+
         if rr == -1:  # Reference filter for mean stimulus calculation
             if verbose:
                 print("Computing mean stimulus for normalization: Colours...", end="")
         else:
             # Event counting (direct translation from IGOR)
             roi_idx = roi_list.index(rr)
-            trigger_start = int(triggertimes_frame[skip_first_triggers])
             current_trace = input_traces[trigger_start:trigger_start+n_f_relevant, rr].copy()
-            
+
             # Differentiate (equivalent to IGOR Differentiate)
             current_trace_dif = np.diff(current_trace, prepend=current_trace[0])
-            
+
             # Use first 100 points for baseline if available
             baseline_points = min(100, n_f_relevant)
             current_trace_dif_base = current_trace_dif[:baseline_points]
-            
+
             if np.std(current_trace_dif_base) > 0:  # Avoid division by zero
                 current_trace_dif -= np.mean(current_trace_dif_base)
                 current_trace_dif /= np.std(current_trace_dif_base)
-                
+
                 event_count = np.sum(current_trace_dif > event_sd_threshold)
                 event_counter[roi_idx] = event_count
-            
+
             if verbose:
                 print(f"ROI#{rr+1}/{len(roi_list)}: Colours...", end="")
-        
-        # Extract lookup for current frames
-        trigger_start = int(triggertimes_frame[skip_first_triggers])
-        
+
         # Extract ROI trace once per ROI (outside color loop)
         if rr == -1:
             base_trace = np.ones(n_f_relevant)  # Reference uses constant trace
         else:
             base_trace = input_traces[trigger_start:trigger_start+n_f_relevant, rr].copy()
-        
+
         # Process each color
         for colour in range(n_colours):
             # Create color-filtered trace from base trace (simplified for single color)
             current_trace = base_trace.copy()
-            
+
             # Initialize current filter
             current_filter = np.zeros((n_x_noise, n_y_noise, n_f_filter))
-            
+
             if verbose:
                 print(f"{colour}", end="")
-            
-            if rr == -1:  # compute meanimage with bounds checking
+
+            if rr == -1:  # compute meanimage - Phase 1 fix: proper per-pixel calculation
+                # IGOR: CurrentPX = NoiseStimulus[xx][yy][frames] * CurrentTrace[frames]
+                # MeanStim[xx][yy][colour] = mean(CurrentPX)
                 for xx in range(edge_crop, n_x_noise-edge_crop):
                     for yy in range(edge_crop, n_y_noise-edge_crop):
-                        # Simplified mean calculation for reference
-                        mean_stim[xx, yy, colour] = np.mean(current_trace)
+                        current_px = noise_stimulus[xx-edge_crop, yy-edge_crop, :] * current_trace
+                        mean_stim[xx, yy, colour] = np.mean(current_px)
             else:  # compute filter using OPTIMIZED IGOR-equivalent correlation
-                
-                # OPTIMIZED: Pre-compute noise mapping with vectorized operations
-                noise_stimulus = np.zeros((n_x_noise-edge_crop*2, n_y_noise-edge_crop*2, n_f_relevant), dtype=np.float32)
-                
-                # Vectorized trigger-to-noise mapping following IGOR's exact logic
-                trigger_counter = 0
-                for tt in range(skip_first_triggers, n_triggers-skip_last_triggers-1):
-                    current_start_frame = int(triggertimes_frame[tt]) - trigger_start
-                    current_end_frame = int(triggertimes_frame[tt+1]) - trigger_start
-                    
-                    # Bounds checking
-                    if current_start_frame < 0 or current_end_frame >= n_f_relevant:
-                        continue
-                    
-                    if current_end_frame - current_start_frame > max_frames_per_trigger:
-                        current_end_frame = current_start_frame + max_frames_per_trigger
-                    
-                    # Optimized noise pattern mapping
-                    if trigger_counter < noise_array.shape[2]:
-                        noise_pattern = noise_array[edge_crop:n_y_noise-edge_crop, edge_crop:n_x_noise-edge_crop, trigger_counter]
-                        frame_range = np.arange(current_start_frame, current_end_frame + 1)
-                        frame_range = frame_range[frame_range < n_f_relevant]
-                        
-                        if len(frame_range) > 0:
-                            # Vectorized assignment
-                            noise_stimulus[:, :, frame_range] = noise_pattern.T[:, :, np.newaxis]
-                    
-                    trigger_counter += 1
-                    if trigger_counter >= noise_array.shape[2]:
-                        trigger_counter = 0
-                
-                # OPTIMIZED: Reshape noise for vectorized correlation  
+                # noise_stimulus is pre-computed before ROI loop
+
+                # OPTIMIZED: Reshape noise for vectorized correlation
                 noise_2d = noise_stimulus.reshape((n_x_noise-edge_crop*2) * (n_y_noise-edge_crop*2), n_f_relevant, order='C')
                 
                 # ULTRA-FAST: Compute all correlations simultaneously

@@ -55,8 +55,11 @@ def igor_correlate_nodc(src_wave, dest_wave):
     dest_nodc = dest_wave - np.mean(dest_wave)
     
     # Compute linear correlation (IGOR's default, not circular /C)
-    # IGOR's correlation equation correlates src with dest
-    correlation = np.correlate(src_nodc, dest_nodc, mode='full')
+    # NOTE: Argument order reversed to match IGOR's lag convention
+    # IGOR: result[k] = Σ(src[n] × dest[n-k])  (subtraction)
+    # numpy: result[k] = Σ(a[n] × b[n+k])      (addition)
+    # By swapping arguments, we get equivalent temporal ordering
+    correlation = np.correlate(dest_nodc, src_nodc, mode='full')
     
     return correlation
 
@@ -75,7 +78,8 @@ def correlate_nodc_windowed(trace, stim, window_frames, n_f_filter_past):
     
     # IGOR's Correlate function: Correlate/NODC CurrentTrace, CurrentPX
     # This modifies CurrentPX in place with the correlation result
-    corr = np.correlate(trace_nodc, stim_nodc, mode='full')
+    # NOTE: Argument order reversed to match IGOR's lag convention
+    corr = np.correlate(stim_nodc, trace_nodc, mode='full')
     
     # IGOR's extraction method: start_idx = nF_relevant - nF_Filter_past
     # This extracts from near the end of the correlation, not the center

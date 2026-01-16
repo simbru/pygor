@@ -120,126 +120,97 @@ def calculate_calcium_correlated_average_multicolour_optimized(strf_obj, noise_a
     
     event_counter = np.zeros(len(roi_list))
     mean_stim = np.full((n_x_noise, n_y_noise, n_colours), np.nan)
-    
+
     if verbose:
         print(f"Calculating kernels for {len(roi_list)} ROIs with MULTI-COLOR optimization...")
-    
-    # Process each ROI 
+
+    # Pre-compute noise stimulus mapping BEFORE ROI loop (needed for mean_stim calculation)
+    # Phase 2 fix: Initialize to 0.5 instead of 0 to match IGOR
+    trigger_start = int(triggertimes_frame[skip_first_triggers])
+    noise_stimulus = np.full((n_x_noise-edge_crop*2, n_y_noise-edge_crop*2, n_f_relevant),
+                             0.5, dtype=np.float32)
+
+    # Vectorized trigger-to-noise mapping following IGOR's exact logic
+    trigger_counter = 0
+    for tt in range(skip_first_triggers, n_triggers-skip_last_triggers-1):
+        current_start_frame = int(triggertimes_frame[tt]) - trigger_start
+        current_end_frame = int(triggertimes_frame[tt+1]) - trigger_start
+
+        # Bounds checking
+        if current_start_frame < 0 or current_end_frame >= n_f_relevant:
+            trigger_counter += 1
+            if trigger_counter >= noise_array.shape[2]:
+                trigger_counter = 0
+            continue
+
+        if current_end_frame - current_start_frame > max_frames_per_trigger:
+            current_end_frame = current_start_frame + max_frames_per_trigger
+
+        # Optimized noise pattern mapping
+        if trigger_counter < noise_array.shape[2]:
+            noise_pattern = noise_array[edge_crop:n_y_noise-edge_crop, edge_crop:n_x_noise-edge_crop, trigger_counter]
+            frame_range = np.arange(current_start_frame, current_end_frame + 1)
+            frame_range = frame_range[frame_range < n_f_relevant]
+
+            if len(frame_range) > 0:
+                # Vectorized assignment
+                noise_stimulus[:, :, frame_range] = noise_pattern.T[:, :, np.newaxis]
+
+        trigger_counter += 1
+        if trigger_counter >= noise_array.shape[2]:
+            trigger_counter = 0
+
+    # Pre-reshape noise for correlation computations
+    noise_2d = noise_stimulus.reshape((n_x_noise-edge_crop*2) * (n_y_noise-edge_crop*2), n_f_relevant, order='C')
+
+    # Process each ROI
     for rr_idx, rr in enumerate([-1] + roi_list):
-        
+
         if rr == -1:  # Reference filter
             if verbose:
                 print("Computing mean stimulus: Colours...", end="")
         else:
-            # Event counting (same as before)
+            # Event counting
             roi_idx = roi_list.index(rr)
-            trigger_start = int(triggertimes_frame[skip_first_triggers])
             current_trace = input_traces[trigger_start:trigger_start+n_f_relevant, rr].copy()
-            
+
             # Event detection
             current_trace_dif = np.diff(current_trace, prepend=current_trace[0])
             baseline_points = min(100, n_f_relevant)
             current_trace_dif_base = current_trace_dif[:baseline_points]
-            
+
             if np.std(current_trace_dif_base) > 0:
                 current_trace_dif -= np.mean(current_trace_dif_base)
                 current_trace_dif /= np.std(current_trace_dif_base)
                 event_count = np.sum(current_trace_dif > event_sd_threshold)
                 event_counter[roi_idx] = event_count
-            
+
             if verbose:
                 print(f"ROI#{rr+1}: Colours...", end="")
-        
-        # Extract trigger frames and base trace
-        trigger_start = int(triggertimes_frame[skip_first_triggers])
-        
+
+        # Extract base trace
         if rr == -1:
             base_trace = np.ones(n_f_relevant)
         else:
             base_trace = input_traces[trigger_start:trigger_start+n_f_relevant, rr].copy()
-        
-        # MULTI-COLOR OPTIMIZATION 1: Shared noise mapping computation
-        if rr != -1 and n_colours > 1:
-            if verbose:
-                print("[shared noise mapping]", end="")
-            
-            # Pre-compute noise mapping ONCE for this ROI, shared across all colors
-            shared_noise_stimulus = np.zeros((n_x_noise-edge_crop*2, n_y_noise-edge_crop*2, n_f_relevant), dtype=np.float32)
-            
-            trigger_counter = 0
-            for tt in range(skip_first_triggers, n_triggers-skip_last_triggers-1):
-                current_start_frame = int(triggertimes_frame[tt]) - trigger_start
-                current_end_frame = int(triggertimes_frame[tt+1]) - trigger_start
-                
-                if current_start_frame < 0 or current_end_frame >= n_f_relevant:
-                    continue
-                
-                if current_end_frame - current_start_frame > max_frames_per_trigger:
-                    current_end_frame = current_start_frame + max_frames_per_trigger
-                
-                if trigger_counter < noise_array.shape[2]:
-                    noise_pattern = noise_array[edge_crop:n_y_noise-edge_crop, edge_crop:n_x_noise-edge_crop, trigger_counter]
-                    frame_range = np.arange(current_start_frame, current_end_frame + 1)
-                    frame_range = frame_range[frame_range < n_f_relevant]
-                    
-                    if len(frame_range) > 0:
-                        # Compute once, will be reused for all colors
-                        shared_noise_stimulus[:, :, frame_range] = noise_pattern.T[:, :, np.newaxis]
-                
-                trigger_counter += 1
-                if trigger_counter >= noise_array.shape[2]:
-                    trigger_counter = 0
-            
-            # Pre-reshape for all colors (compute once)
-            shared_noise_2d = shared_noise_stimulus.reshape((n_x_noise-edge_crop*2) * (n_y_noise-edge_crop*2), n_f_relevant, order='C')
-        
-        # MULTI-COLOR OPTIMIZATION 2: Batch processing colors with shared resources
+
+        # Process colors - noise_stimulus and noise_2d are pre-computed before ROI loop
         for colour in range(n_colours):
             current_trace = base_trace.copy()
             current_filter = np.zeros((n_x_noise, n_y_noise, n_f_filter))
-            
+
             if verbose:
                 print(f"{colour}", end="")
-            
-            if rr == -1:  # Reference computation
+
+            if rr == -1:  # Phase 1 fix: proper per-pixel mean stimulus calculation
+                # IGOR: CurrentPX = NoiseStimulus[xx][yy][frames] * CurrentTrace[frames]
+                # MeanStim[xx][yy][colour] = mean(CurrentPX)
                 for xx in range(edge_crop, n_x_noise-edge_crop):
                     for yy in range(edge_crop, n_y_noise-edge_crop):
-                        mean_stim[xx, yy, colour] = np.mean(current_trace)
-            else:  # Main filter computation
-                
-                if n_colours > 1:
-                    # OPTIMIZATION: Use shared noise mapping (no recomputation!)
-                    noise_2d = shared_noise_2d  # Reuse pre-computed noise mapping
-                else:
-                    # Single color: use regular approach (same as before)
-                    noise_stimulus = np.zeros((n_x_noise-edge_crop*2, n_y_noise-edge_crop*2, n_f_relevant), dtype=np.float32)
-                    
-                    trigger_counter = 0
-                    for tt in range(skip_first_triggers, n_triggers-skip_last_triggers-1):
-                        current_start_frame = int(triggertimes_frame[tt]) - trigger_start
-                        current_end_frame = int(triggertimes_frame[tt+1]) - trigger_start
-                        
-                        if current_start_frame < 0 or current_end_frame >= n_f_relevant:
-                            continue
-                        
-                        if current_end_frame - current_start_frame > max_frames_per_trigger:
-                            current_end_frame = current_start_frame + max_frames_per_trigger
-                        
-                        if trigger_counter < noise_array.shape[2]:
-                            noise_pattern = noise_array[edge_crop:n_y_noise-edge_crop, edge_crop:n_x_noise-edge_crop, trigger_counter]
-                            frame_range = np.arange(current_start_frame, current_end_frame + 1)
-                            frame_range = frame_range[frame_range < n_f_relevant]
-                            
-                            if len(frame_range) > 0:
-                                noise_stimulus[:, :, frame_range] = noise_pattern.T[:, :, np.newaxis]
-                        
-                        trigger_counter += 1
-                        if trigger_counter >= noise_array.shape[2]:
-                            trigger_counter = 0
-                    
-                    noise_2d = noise_stimulus.reshape((n_x_noise-edge_crop*2) * (n_y_noise-edge_crop*2), n_f_relevant, order='C')
-                
-                # Correlation computation (same as before - already optimized)
+                        current_px = noise_stimulus[xx-edge_crop, yy-edge_crop, :] * current_trace
+                        mean_stim[xx, yy, colour] = np.mean(current_px)
+            else:  # Main filter computation - use pre-computed noise_2d
+                # Correlation computation using pre-computed noise_2d
                 correlations_2d = igor_correlate_nodc_optimized(current_trace, noise_2d)
                 
                 # STA extraction (same as before)
