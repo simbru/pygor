@@ -48,14 +48,25 @@ def try_fetch(file, key):
         error
     return result
     
-def try_fetch_os_params(file, params_key):
-    """
-    Will always default to fetching given key from file["OS_Parameters"]
-    """
-    keys = np.squeeze(list(file["OS_Parameters"].attrs.items())[0][1])[1:] # this worked :')
-    key_indices = np.arange(len(keys))
-    key_dict = {keys[i]: i for i in key_indices}
-    return file["OS_Parameters"][key_dict[params_key]]
+def try_fetch_table_params(file, params_key, file_key="OS_Parameters"):
+    try:
+        """
+        Will always default to fetching given key from a IGOR table holding parameters. will default to 'OS_Parameters'
+        but can be changed to other tables if needed for specific experiments. 
+        """
+        attr_items = list(file[file_key].attrs.items())
+        if not attr_items:
+            raise KeyError(f"No attributes found under '{file_key}'")
+        keys = np.asarray(attr_items[0][1]).squeeze()[1:]
+        key_dict = {key: idx for idx, key in enumerate(keys)}
+        return file[file_key][key_dict[params_key]]
+    except KeyError as error:
+        # # raise KeyError(f"'{key}' not found in {file.filename}, setting to np.nan") from error
+        warnings.warn(
+            f"'{params_key}' not found in {file.filename}, setting to np.nan", stacklevel=2
+        )
+        error   
+        return np.nan
     
 @dataclass
 class Core:
@@ -126,20 +137,23 @@ class Core:
                 float
             )
             self.triggertimes_frame = try_fetch(HDF5_file, "Triggertimes_Frame")
-            self.__skip_first_frames = int(try_fetch_os_params(HDF5_file, "Skip_First_Triggers")) # Note name mangling to prevent accidents if 
-            self.__skip_last_frames = -int(try_fetch_os_params(HDF5_file, "Skip_Last_Triggers")) # private class attrs share names 
+            self.__skip_first_frames = int(try_fetch_table_params(HDF5_file, "Skip_First_Triggers")) # Note name mangling to prevent accidents if 
+            self.__skip_last_frames = -int(try_fetch_table_params(HDF5_file, "Skip_Last_Triggers")) # private class attrs share names 
             self.ipl_depths = try_fetch(HDF5_file, "Positions")
             self.averages = try_fetch(HDF5_file, "Averages0")
             self.snippets = try_fetch(HDF5_file, "Snippets0")
             self.quality_indices = try_fetch(HDF5_file, "QualityCriterion")
             self.correlation_projection = try_fetch(HDF5_file, "correlation_projection")
-            self.trigger_mode = int(try_fetch_os_params(HDF5_file, "Trigger_Mode"))
-            self.n_planes = int(try_fetch_os_params(HDF5_file, "nPlanes"))
-            self.linedur_s = float(try_fetch_os_params(HDF5_file, "LineDuration"))
+            self.linedur_s = float(try_fetch_table_params(HDF5_file, "LineDuration"))
+            self.trigger_mode = int(try_fetch_table_params(HDF5_file, "Trigger_Mode"))
+            self.n_planes = int(try_fetch_table_params(HDF5_file, "nPlanes"))
             self.average_stack = try_fetch(HDF5_file, "Stack_Ave")
-            # TODO: change the logic to conditionally pull info from OS_Params instead,
-            # because images or averege_stack can sometimes be cropped, leading to 
-            # inaccurate frame_hz. Better to fetch from metadata.
+            exp_params = try_fetch(HDF5_file, "wExpParams")
+            if exp_params is not None:
+                self.stage = try_fetch_table_params(HDF5_file, "stage", 'wExpParams').decode('utf-8')
+                self.orientation = try_fetch_table_params(HDF5_file, "orientation", 'wExpParams').decode('utf-8')
+                self.depth = try_fetch_table_params(HDF5_file, "depth", 'wExpParams').decode('utf-8')
+                self.stimulus = try_fetch_table_params(HDF5_file, "stimulus", 'wExpParams').decode('utf-8')
             if self.images is not None:
                 self.frame_hz = float(1/(self.images.shape[1]/self.n_planes*self.linedur_s))
             else:

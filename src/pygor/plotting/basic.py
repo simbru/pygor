@@ -18,6 +18,7 @@ import pygor.strf.spatial
 import pygor.strf.temporal
 import pygor.strf.contouring
 from . import custom
+from scipy import stats
 
 
 def _legacy_play_movie(d3_arr, **kwargs):
@@ -265,6 +266,51 @@ def basic_stim_overlay(
 #     plt.show()
 
 
+def plot_scatter_density(amps, y_unit):
+
+    '''
+    plots scatter and KDE plot of column-wise measurements in a dataframe. 
+    Parameters
+    ----------  
+    amps : pd.DataFrame
+        DataFrame where each column represents a different parameter to plot on the x axis 
+        and each row represents a measurement for that parameter.
+    y_unit : str
+        Label for the y-axis.
+        '''
+    # Plot response amplitudes for all stimuli on the same x-axis
+    fig, ax = plt.subplots(figsize=(7, 4))
+    stim_cmap = plt.get_cmap('tab20', len(amps.columns))
+
+
+    for stim_idx, (stim_name, stim_amps) in enumerate(amps.items()):
+
+        # Jittered scatter plot using stripplot
+        jitter = np.random.normal(stim_idx, 0.04, size=len(stim_amps))
+        ax.scatter(jitter, stim_amps.values, s=20, alpha=0.4, color=stim_cmap(stim_idx))
+        
+        # Plot distribution (density) on the right side
+        # Use kernel density estimation
+        density = stats.gaussian_kde(stim_amps)
+        y_vals = np.linspace(stim_amps.min(), stim_amps.max(), 200)
+        density_vals = density(y_vals)
+        # Normalize density to span from x_offset+0.2 to x_offset+0.4
+        density_vals = stim_idx + 0.2 + (density_vals / density_vals.max() * 0.2)
+        ax.fill_betweenx(y_vals, stim_idx + 0.2, density_vals, alpha=0.3, color=stim_cmap(stim_idx))
+        
+        # Add median line
+        ax.hlines(np.median(stim_amps), stim_idx - 0.2, stim_idx + 0.4, colors='k', linestyles='-', linewidth=1)
+
+    # Set x-axis labels
+    ax.set_xticks(range(amps.shape[1]))
+    ax.set_xticklabels(amps.columns, rotation=45, ha='right')
+    ax.set_ylabel(y_unit)
+
+    ax.grid(axis='y', alpha=0.3)
+    sns.despine()
+    plt.tight_layout()
+    plt.show()
+
 def plot_traces(
     array_2d, mode=None, on_dur=None, off_dur=None, plot_type="traces", axis=-1
 ):
@@ -305,4 +351,64 @@ def plot_traces(
                             alpha=0.25,
                         )
     plt.subplots_adjust(wspace=0, hspace=0)
+    plt.show()
+
+def plot_roi_preference(rec, exp, df, stimlist):
+
+    '''
+    plots the average image of a recording, and overlays it with ROIS that respond to 
+    specified stimuli above given threshold. Transparency of each ROI 
+    '''
+    fig, ax = plt.subplots(figsize=(6, 6))
+
+    # Show average image on left, spanning all rows
+    avg_img = exp.recording[rec].average_stack
+    p_low, p_high = np.percentile(avg_img, (2, 98))
+    ax.imshow(avg_img, cmap='gray', origin='lower', vmin=p_low, vmax=p_high)
+
+    # Create colormap for ALL amplitude columns
+    all_amp_cols = df.filter(like='amp_').columns.tolist()
+    cmap = plt.get_cmap('jet', len(all_amp_cols))
+    stim_colors = {col: cmap(i)[:3] for i, col in enumerate(all_amp_cols)}
+
+    # ROI label map for this recording
+    rois_to_use = exp.recording[rec].rois
+    
+    # Subset DataFrame to this recording
+    subdf = df[df['recording_id'] == rec].copy()
+
+    # Iterate through each stimulus in stimlist
+    for stim, threshold in stimlist.items():
+        color = stim_colors[stim]
+        
+        # Create RGBA array for this stimulus only
+        rgba = np.zeros(rois_to_use.shape + (4,), dtype=float)
+        #get max and min amplitude of this stimulus across all ROIs
+        max_amp = subdf[stim].max()
+        min_amp = subdf[stim].min()
+        
+        # Find ROIs that respond to this stimulus above threshold
+        mask_rois = subdf[stim] > threshold
+        subdf[mask_rois].index
+        # For each ROI that meets criteria
+        for idx in subdf[mask_rois].index:
+            roi_id = subdf.loc[idx, 'roi_id']
+            amplitude = subdf.loc[idx, stim]
+            
+            # Create spatial mask for this ROI
+            roi_mask = (rois_to_use == -(roi_id + 1))
+            
+            # Normalize amplitude to between min and max amp so it's between 0 and 1
+            normalized_amp = (amplitude - min_amp) / (max_amp - min_amp) 
+            alpha = normalized_amp * 0.8  # Range from 0.2 to 0.8
+            
+            rgba[roi_mask] = [*color, alpha]
+        
+        # Display this stimulus layer (alpha blending happens automatically)
+        ax.imshow(rgba, origin='lower')
+    
+    ax.set_title(exp.recording[rec].name)
+    ax.axis('off')
+    
+    plt.tight_layout()
     plt.show()
