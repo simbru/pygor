@@ -379,15 +379,8 @@ def calculate_calcium_correlated_average_optimized(strf_obj, noise_array, sta_pa
                             if np.isnan(current_filter[xx, yy, tt]):
                                 current_filter[xx, yy, tt] = 0
                 
-                # Step 2: Apply z-normalization based on first frame (as in IGOR)
-                temp_wave = current_filter[:, :, 0]
-                temp_mean = np.mean(temp_wave)
-                temp_std = np.std(temp_wave)
-                
-                if temp_std > 0:
-                    current_filter = (current_filter - temp_mean) / temp_std
-                
-                # Store in concatenated array with bounds checking
+                # Store in concatenated array BEFORE z-normalization (matches IGOR behavior)
+                # IGOR stores mean-normalized filter, NOT z-normalized
                 if rr >= 0:
                     roi_idx = roi_list.index(rr)
                     y_start = n_y_noise * colour
@@ -398,12 +391,13 @@ def calculate_calcium_correlated_average_optimized(strf_obj, noise_array, sta_pa
                     strfs_concatenated[:, y_start:y_end, t_start:t_end] = current_filter[:, :, :]
                 
                 # Calculate SD projections (direct translation)
+                # Z-normalization is applied only to this COPY for polarity/SD calculations
                 current_filter_smth = current_filter.copy()
                 if pre_smooth > 0:
                     # Apply smoothing (equivalent to IGOR Smooth)
                     current_filter_smth = ndimage.gaussian_filter(current_filter_smth, sigma=pre_smooth)
                 
-                # z-normalise based on 1st frame with safety check
+                # z-normalise based on 1st frame with safety check (only for SD/polarity calculations)
                 temp_wave = current_filter_smth[:, :, 0]
                 temp_mean = np.mean(temp_wave)
                 temp_std = np.std(temp_wave)

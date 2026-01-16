@@ -36,7 +36,7 @@ import pygor.strf.centsurr
 import pygor.strf.polarity
 import pygor.strf.calculate
 import pygor.strf.calculate_optimized
-import pygor.strf.calculate_multicolour_optimized
+# import pygor.strf.calculate_multicolour_optimized
 import pygor.utils.helpinfo
 import pygor.utils.unit_conversion as unit_conversion
 from pygor.classes.core_data import Core
@@ -3824,27 +3824,27 @@ class STRF(Core):
         
         # Use multi-colour optimized version for better performance when n_colours > 1
         if n_colours > 1:
-            if verbose:
-                print("Using multi-colour optimized implementation for enhanced performance...")
-            results = pygor.strf.calculate_multicolour_optimized.calculate_calcium_correlated_average_multicolour_optimized(
-                self,
-                noise_array,
-                sta_past_window=sta_past_window,
-                sta_future_window=sta_future_window,
-                n_colours=n_colours,
-                n_triggers_per_colour=n_triggers_per_colour,
-                edge_crop=edge_crop,
-                max_frames_per_trigger=max_frames_per_trigger,
-                event_sd_threshold=event_sd_threshold,
-                use_znorm=use_znorm,
-                adjust_by_polarity=adjust_by_polarity,
-                skip_first_triggers=skip_first_triggers,
-                skip_last_triggers=skip_last_triggers,
-                pre_smooth=pre_smooth,
-                roi=roi,
-                verbose=verbose,
-                **kwargs
-            )
+            # if verbose:
+            raise NotImplementedError("Multi-colour optimized STRF calculation not yet implemented.")    
+            # results = pygor.strf.calculate_multicolour_optimized.calculate_calcium_correlated_average_multicolour_optimized(
+            #     self,
+            #     noise_array,
+            #     sta_past_window=sta_past_window,
+            #     sta_future_window=sta_future_window,
+            #     n_colours=n_colours,
+            #     n_triggers_per_colour=n_triggers_per_colour,
+            #     edge_crop=edge_crop,
+            #     max_frames_per_trigger=max_frames_per_trigger,
+            #     event_sd_threshold=event_sd_threshold,
+            #     use_znorm=use_znorm,
+            #     adjust_by_polarity=adjust_by_polarity,
+            #     skip_first_triggers=skip_first_triggers,
+            #     skip_last_triggers=skip_last_triggers,
+            #     pre_smooth=pre_smooth,
+            #     roi=roi,
+            #     verbose=verbose,
+            #     **kwargs
+            # )
         else:
             # Use regular optimized version for single-colour
             results = pygor.strf.calculate_optimized.calculate_calcium_correlated_average_optimized(
