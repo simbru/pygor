@@ -1,8 +1,10 @@
-# Pygor: Seamless Python integration with IGOR Pro workflows, for Baden-lab members
+# Pygor: OS_scirpts (IGOR) style workflows in Python, for Baden-lab members
 
 Welcome to Pygor!
 
-A Python toolkit for working alongside Baden-lab's IGOR Pro pipeline, seamlessly importing processed data via H5 files and extending analysis capabilities with Python's flexible framework.
+A Python toolkit for working alongside Baden-lab's IGOR Pro pipeline, allowing imports of processed data via H5 files and extending analysis capabilities with Python's flexible framework.
+
+NEW: You can now read directly from .smh/.smp files! This functionality is being tested and validated. 
 
 ## Here are the main points:
 
@@ -14,7 +16,6 @@ A Python toolkit for working alongside Baden-lab's IGOR Pro pipeline, seamlessly
 - Extending the functionality of Pygor is intended to be *simple*. There are certain design principles the user can follow in order to build out their own analyses pipelines, that can be shared and further improved by other users.
 
 ## How do I install Pygor?
-
 
 ### Sync with uv (preferred)
 A new package management framework called uv simplifies installation, but makes 
@@ -88,9 +89,20 @@ Models can be found here: https://drive.proton.me/urls/02GT9HWGC0#Ibd9kXWzOwMQ
 
 Note: `frame_hz` is calculated from `n_planes` and `linedur_s`, not stored directly.
 
-### STRF-specific (strf_data.py)
+<!-- ### STRF-specific (strf_data.py)
 
 | H5 Key Pattern | Pygor Attribute | Description |
 |----------------|-----------------|-------------|
 | STRF{n}_{roi}_{colour} | strfs | Receptive field arrays |
-| Noise_FilterLength_s | strf_dur_ms | STRF duration (converted to ms) | 
+| Noise_FilterLength_s | strf_dur_ms | STRF duration (converted to ms) |  -->
+
+## AI transparency
+The core functionality of Pygor was built before the widespread availability of AI coding assistants. However, functions and modules have since been improved and optimised using LLM tools like ChatGPT, Claude Code, and Github Copilot. I do my best to ensure that all AI-assisted code is properly tested and validated. 
+
+I encourage contributors to follow these guidelines:
+- Clearly comment any sections of code that were entirely generated or significantly assisted by AI tools. Also include in commit messages where large chunks of AI-generated code were added.
+- Snippets or functions that were only lightly edited do not need special comments, unless you feel it is necessary for clarity.
+- Always thoroughly test and validate AI-generated code. You have priors about how the code should behave.
+- Strive to write clear, maintainable code, regardless of whether AI tools were used. Sometimes AI writes less optimal code that needs human refinement, especially with regards to naming conventions. 
+- AI-generated docstring comments should be reviewed and edited for accuracy and clarity.
+- When in doubt, err on the side of transparency about AI assistance.
