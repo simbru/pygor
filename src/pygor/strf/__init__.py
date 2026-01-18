@@ -1,4 +1,4 @@
 from . import calculate
-from . import calculate_optimized
+from . import calculate_strf
 
-__all__ = ['calculate', 'calculate_optimized']
+__all__ = ['calculate', 'calculate_strf']

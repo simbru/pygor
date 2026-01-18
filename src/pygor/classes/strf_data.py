@@ -35,7 +35,7 @@ import pygor.utils
 import pygor.strf.centsurr
 import pygor.strf.polarity
 import pygor.strf.calculate
-import pygor.strf.calculate_optimized
+import pygor.strf.calculate_strf
 # import pygor.strf.calculate_multicolour_optimized
 import pygor.utils.helpinfo
 import pygor.utils.unit_conversion as unit_conversion
@@ -3730,12 +3730,12 @@ class STRF(Core):
             collapse_method=collapse_method, figsize=figsize
         )
 
-    def calculate_strf(self, noise_array, sta_past_window=2.0, sta_future_window=2.0, 
+    def calculate_strf(self, noise_array, sta_past_window=2.0, sta_future_window=2.0,
                     n_colours=1, n_triggers_per_colour=None, edge_crop=2,
-                    max_frames_per_trigger=8, event_sd_threshold=2.0, 
-                    use_znorm=True, adjust_by_polarity=True, 
+                    max_frames_per_trigger=8, event_sd_threshold=2.0,
+                    use_znorm=True, adjust_by_polarity=True,
                     skip_first_triggers=0, skip_last_triggers=0,
-                    pre_smooth=0, roi=None, normalize_strfs=True, verbose=True, **kwargs):
+                    pre_smooth=0, roi=None, n_jobs=1, normalize_strfs=True, verbose=True, **kwargs):
         """
         Calculate spike-triggered averages (STRFs) for all ROIs and colour channels.
         
@@ -3776,6 +3776,11 @@ class STRF(Core):
         roi : int, list, array or None, default None
             ROI indices to calculate STRFs for. If None, calculates for all ROIs.
             Can be a single ROI index (int), a list of indices, or numpy array.
+        n_jobs : int, default 1
+            Number of parallel jobs for ROI processing. Use 1 for sequential 
+            processing, -1 for all available cores, or any positive integer
+            to specify the number of parallel workers. Parallelization is
+            implemented using joblib.
         normalize_strfs : bool, default True
             Whether to apply the same normalization used during H5 loading
             (z-score based on first 1/5 of temporal frames). Set to False
@@ -3822,64 +3827,82 @@ class STRF(Core):
             if verbose:
                 print(f"Multi-colour experiment detected: using {n_colours} colours")
         
-        # Use multi-colour optimized version for better performance when n_colours > 1
-        if n_colours > 1:
-            # if verbose:
-            raise NotImplementedError("Multi-colour optimized STRF calculation not yet implemented.")    
-            # results = pygor.strf.calculate_multicolour_optimized.calculate_calcium_correlated_average_multicolour_optimized(
-            #     self,
-            #     noise_array,
-            #     sta_past_window=sta_past_window,
-            #     sta_future_window=sta_future_window,
-            #     n_colours=n_colours,
-            #     n_triggers_per_colour=n_triggers_per_colour,
-            #     edge_crop=edge_crop,
-            #     max_frames_per_trigger=max_frames_per_trigger,
-            #     event_sd_threshold=event_sd_threshold,
-            #     use_znorm=use_znorm,
-            #     adjust_by_polarity=adjust_by_polarity,
-            #     skip_first_triggers=skip_first_triggers,
-            #     skip_last_triggers=skip_last_triggers,
-            #     pre_smooth=pre_smooth,
-            #     roi=roi,
-            #     verbose=verbose,
-            #     **kwargs
-            # )
-        else:
-            # Use regular optimized version for single-colour
-            results = pygor.strf.calculate_optimized.calculate_calcium_correlated_average_optimized(
-                self,
-                noise_array,
-                sta_past_window=sta_past_window,
-                sta_future_window=sta_future_window,
-                n_colours=n_colours,
-                n_triggers_per_colour=n_triggers_per_colour,
-                edge_crop=edge_crop,
-                max_frames_per_trigger=max_frames_per_trigger,
-                event_sd_threshold=event_sd_threshold,
-                use_znorm=use_znorm,
-                adjust_by_polarity=adjust_by_polarity,
-                skip_first_triggers=skip_first_triggers,
-                skip_last_triggers=skip_last_triggers,
-                pre_smooth=pre_smooth,
-                roi=roi,
-                verbose=verbose,
-                **kwargs
-            )
+        # Use unified optimized version (supports both single and multi-colour via colour masking)
+        results = pygor.strf.calculate_strf.calculate_calcium_correlated_average(
+            self,
+            noise_array,
+            sta_past_window=sta_past_window,
+            sta_future_window=sta_future_window,
+            n_colours=n_colours,
+            n_triggers_per_colour=n_triggers_per_colour,
+            edge_crop=edge_crop,
+            max_frames_per_trigger=max_frames_per_trigger,
+            event_sd_threshold=event_sd_threshold,
+            use_znorm=use_znorm,
+            adjust_by_polarity=adjust_by_polarity,
+            skip_first_triggers=skip_first_triggers,
+            skip_last_triggers=skip_last_triggers,
+            pre_smooth=pre_smooth,
+            roi=roi,
+            n_jobs=n_jobs,
+            verbose=verbose,
+            **kwargs
+        )
         
         # Apply the same normalization as used during H5 loading if requested
         if normalize_strfs and 'strfs' in results:
             if verbose:
                 print("Applying post-processing normalization (same as H5 loading)...")
-            
+
             # Apply post_process_strf_all to the calculated STRFs
-            # The 'strfs' key contains the Pygor format: (n_rois*n_colours, time, y, x)
+            # Calculate returns shape (n_colours, n_rois, time, y, x), but post_process_strf_all
+            # expects (n_rois*n_colours, time, y, x) - need to reshape
+            strfs = results['strfs']
+            original_shape = strfs.shape  # (n_colours, n_rois, time, y, x)
+
+            # Reshape to 4D: (n_colours * n_rois, time, y, x)
+            n_colours, n_rois, n_time, n_y, n_x = original_shape
+            strfs_4d = strfs.reshape(n_colours * n_rois, n_time, n_y, n_x)
+
             results['strfs_unnormalized'] = results['strfs'].copy()  # Keep original for comparison
-            results['strfs'] = pygor.data_helpers.post_process_strf_all(results['strfs'])
-            
+            processed_4d = pygor.data_helpers.post_process_strf_all(strfs_4d)
+
+            # Reshape back to original 5D format
+            results['strfs'] = processed_4d.reshape(original_shape)
+
             if verbose:
                 print("Normalization applied. Original STRFs stored in 'strfs_unnormalized' key.")
-        
+
+        # Update internal object attributes with calculated results
+        # Convert from calculation format (n_colours, n_rois, time, x, y) to storage format (n_rois*n_colours, time, x, y)
+        strfs_calc = results['strfs']
+        n_colours_calc, n_rois_calc, n_time, n_x, n_y = strfs_calc.shape
+
+        # Reshape to match H5 loaded format: (n_rois * n_colours, time, x, y)
+        # Order: ROI0_colour0, ROI0_colour1, ..., ROI1_colour0, ROI1_colour1, ...
+        # But IGOR/H5 order is: ROI0, ROI1, ..., ROIn for colour0, then ROI0, ROI1, ..., ROIn for colour1
+        # So we need: (n_colours, n_rois, time, x, y) -> transpose to (n_rois, n_colours, time, x, y) -> reshape
+        strfs_reordered = np.transpose(strfs_calc, (1, 0, 2, 3, 4))  # (n_rois, n_colours, time, x, y)
+        self.strfs = strfs_reordered.reshape(n_rois_calc * n_colours_calc, n_time, n_x, n_y)
+
+        # Update other internal attributes
+        self.num_strfs = len(self.strfs)
+        self.numcolour = n_colours_calc
+        self.multicolour = n_colours_calc > 1
+        self.strf_dur_ms = (sta_past_window + sta_future_window) * 1000
+
+        # Generate strf_keys to match H5 format
+        self.strf_keys = []
+        for roi_idx in range(n_rois_calc):
+            if n_colours_calc > 1:
+                for colour_idx in range(n_colours_calc):
+                    self.strf_keys.append(f"STRF{colour_idx}_{roi_idx}")
+            else:
+                self.strf_keys.append(f"STRF0_{roi_idx}")
+
+        if verbose:
+            print(f"Updated internal attributes: self.strfs shape={self.strfs.shape}, num_strfs={self.num_strfs}")
+
         return results
 
     def get_npercent_times(self, roi=None, percent=10, incl_borders=False, bidirectional=False, use_percentile=False):
