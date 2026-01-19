@@ -534,12 +534,12 @@ class NapariRoiPrompt():
 
         return polygons
 
-    def convert_napari_mask_to_h5_format(self, napari_mask):
+    def convert_napari_mask_to_igor_format(self, napari_mask):
         """
-        Convert Napari mask format to H5 ROI format.
+        Convert Napari mask format to IGOR ROI format.
 
         Napari format: background=NaN, ROIs=0,1,2,...
-        H5 format: background=1, ROIs=-1,-2,-3,...
+        IGOR format: background=1, ROIs=-1,-2,-3,...
 
         Parameters:
         -----------
@@ -549,9 +549,9 @@ class NapariRoiPrompt():
         Returns:
         --------
         np.ndarray
-            Mask in H5 format (background=1, ROIs=-1,-2,-3,...)
+            Mask in IGOR format (background=1, ROIs=-1,-2,-3,...)
         """
-        h5_mask = np.ones_like(napari_mask)  # Start with all 1s (background)
+        _mask = np.ones_like(napari_mask)  # Start with all 1s (background)
 
         # Get unique ROI values (excluding NaN)
         unique_vals = np.unique(napari_mask)
@@ -560,9 +560,9 @@ class NapariRoiPrompt():
         # Convert each ROI: 0 -> -1, 1 -> -2, 2 -> -3, etc.
         for roi_val in roi_vals:
             roi_pixels = (napari_mask == roi_val)
-            h5_mask[roi_pixels] = -(int(roi_val) + 1)
+            _mask[roi_pixels] = -(int(roi_val) + 1)
 
-        return h5_mask
+        return _mask
         
     def fetch_traces(self, img_stack, roi_mask):
         """Extract traces using the shared parallel extraction function."""
