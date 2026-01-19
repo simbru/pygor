@@ -299,6 +299,14 @@ def calculate_calcium_correlated_average(strf_obj, noise_array, sta_past_window=
     # n_triggers_per_colour=None means single-colour mode (skip colour lookup logic)
     single_colour_mode = (n_colours == 1 and n_triggers_per_colour is None)
 
+    # Validate multi-colour parameters
+    if n_colours > 1 and n_triggers_per_colour is None:
+        raise ValueError(
+            f"n_triggers_per_colour is required when n_colours > 1. "
+            f"Got n_colours={n_colours} but n_triggers_per_colour=None. "
+            f"Specify the number of triggers per colour block."
+        )
+
     if verbose:
         print(f"nColours: {n_colours}")
         if single_colour_mode:

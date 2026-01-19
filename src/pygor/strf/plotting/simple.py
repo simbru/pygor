@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 
 def plot_collapsed_strfs(self, cval=None, channel = None, cmap = "bwr", origin = "upper"):
     if channel is not None:
-        array = pygor.utilities.multicolour_reshape(self.collapse_times(), channel)[channel-1]
+        array = pygor.utilities.multicolour_reshape(self.collapse_times(force_recompute=True), channel)[channel-1]
     else:
-        array = self.collapse_times()
+        array = self.collapse_times(force_recompute=True)
     # Grid layout
     max_x = 10
     num_slices = array.shape[0]
