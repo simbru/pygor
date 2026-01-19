@@ -1036,20 +1036,31 @@ class Core:
                 dtype=object
             )
             
-            #  Optional data 
-            if self.averages is not None:
+            #  Optional data - check for both None and nan
+            def _is_valid(attr):
+                """Check if attribute is valid (not None and not nan)."""
+                if attr is None:
+                    return False
+                if isinstance(attr, np.ndarray):
+                    return attr.size > 0
+                try:
+                    return not np.isnan(attr).all()
+                except (TypeError, ValueError):
+                    return True
+
+            if _is_valid(self.averages):
                 f.create_dataset("Averages0", data=self.averages.T, dtype=np.float32)
-                
-            if self.snippets is not None:
+
+            if _is_valid(self.snippets):
                 f.create_dataset("Snippets0", data=self.snippets.T, dtype=np.float32)
-                
-            if self.ipl_depths is not None:
+
+            if _is_valid(self.ipl_depths):
                 f.create_dataset("Positions", data=self.ipl_depths, dtype=np.float64)
-                
-            if self.correlation_projection is not None:
+
+            if _is_valid(self.correlation_projection):
                 f.create_dataset("correlation_projection", data=self.correlation_projection.T, dtype=np.float32)
-                
-            if self.quality_indices is not None:
+
+            if _is_valid(self.quality_indices):
                 f.create_dataset("QualityCriterion", data=self.quality_indices, dtype=np.float64)
         
         print(f"Exported to: {output_path}")

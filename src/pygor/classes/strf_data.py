@@ -34,7 +34,6 @@ import pygor.strf.spatial_alignment
 import pygor.utils
 import pygor.strf.centsurr
 import pygor.strf.polarity
-import pygor.strf.calculate
 import pygor.strf.calculate_strf
 # import pygor.strf.calculate_multicolour_optimized
 import pygor.utils.helpinfo
@@ -2777,16 +2776,16 @@ class STRF(Core):
     def plot_timecourse(self, roi):
         plt.plot(self.get_timecourses()[roi].T)
 
-    def plot_space(self, roi = None, ax = None, **kwargs):
+    def plot_space(self, roi = None, ax = None, cmap = "Greys_r", **kwargs):
         space = self.collapse_times(roi)
         maxabs = np.max(np.abs(space))
         if "clim" not in kwargs:
             kwargs["clim"] = [-maxabs, maxabs]
         if ax is None:
-            plt.imshow(np.squeeze(space), origin = "lower", cmap = "Greys_r", **kwargs)
+            plt.imshow(np.squeeze(space), origin = "lower", cmap = cmap, **kwargs)
             plt.colorbar()
         else:
-            ax.imshow(np.squeeze(space), origin = "lower", cmap = "Greys_r", **kwargs)
+            ax.imshow(np.squeeze(space), origin = "lower", cmap = cmap, **kwargs)
             plt.colorbar(ax.images[0], ax=ax, orientation="vertical")
 
     def plot_strfs_space(self, roi = None, **kwargs): 
