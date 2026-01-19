@@ -10,7 +10,7 @@ screen_width_visang = 86.306
 lens_to_retina_distance_um = 50.0
 
 [preprocessing]
-artifact_width = 2
+artifact_width = 3
 flip_x = true
 detrend = true
 smooth_window_s = 1000.0
@@ -18,14 +18,17 @@ time_bin = 10
 fix_first_frame = true
 
 [registration]
-n_reference_frames = 1000
-batch_size = 100
-upsample_factor = 3
+n_reference_frames = 100
+batch_size = 10
+upsample_factor = 10
 normalization = "None"
 order = 1
 mode = "reflect"
 parallel = true
 n_jobs = -1
+batch_mode = "std"
+reference_mode = "mean"
+edge_crop = 1
 
 [triggers]
 threshold = 20000

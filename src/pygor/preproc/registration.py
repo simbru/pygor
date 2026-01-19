@@ -17,6 +17,8 @@ Reference
 Based on batch-averaged registration approach, which computes shifts
 on temporally averaged chunks of the stack rather than individual frames.
 This dramatically improves registration quality for noisy calcium imaging.
+
+Note this module is largely written by Claude Code but heavily vetted by me(:
 """
 
 import numpy as np
@@ -56,6 +58,91 @@ def _shift_frame_fft(frame: np.ndarray, shift_yx: np.ndarray) -> np.ndarray:
     return np.real(ifft2(shifted_freq))
 
 
+def _compute_frame_shifts(
+    n_frames: int,
+    n_batches: int,
+    batch_size: int,
+    shifts: np.ndarray,
+    interpolate: bool,
+) -> np.ndarray:
+    """
+    Compute per-frame shifts from batch shifts.
+
+    Parameters
+    ----------
+    n_frames : int
+        Total number of frames
+    n_batches : int
+        Number of batches
+    batch_size : int
+        Frames per batch
+    shifts : ndarray
+        Per-batch shifts (n_batches, 2)
+    interpolate : bool
+        If True, linearly interpolate between batch centers.
+        If False, use step function (all frames in batch get same shift).
+
+    Returns
+    -------
+    frame_shifts : ndarray
+        Per-frame shifts (n_frames, 2)
+    """
+    frame_shifts = np.zeros((n_frames, 2))
+
+    if interpolate and n_batches > 1:
+        # Compute batch center frame indices
+        batch_centers = np.array([
+            (i * batch_size + min((i + 1) * batch_size, n_frames)) // 2
+            for i in range(n_batches)
+        ])
+
+        # Interpolate shifts for each axis
+        frame_indices = np.arange(n_frames)
+        frame_shifts[:, 0] = np.interp(frame_indices, batch_centers, shifts[:, 0])
+        frame_shifts[:, 1] = np.interp(frame_indices, batch_centers, shifts[:, 1])
+    else:
+        # Step function: all frames in batch get same shift
+        for i in range(n_batches):
+            start = i * batch_size
+            end = min((i + 1) * batch_size, n_frames)
+            frame_shifts[start:end] = shifts[i]
+
+    return frame_shifts
+
+
+def _compute_projection(stack: np.ndarray, mode: str) -> np.ndarray:
+    """
+    Compute projection of stack along time axis.
+
+    Parameters
+    ----------
+    stack : ndarray
+        3D stack (time, height, width)
+    mode : str
+        Projection mode: "mean", "std", "var", "median", "max"
+
+    Returns
+    -------
+    projection : ndarray
+        2D projection (height, width)
+    """
+    if mode == "mean":
+        return stack.mean(axis=0)
+    elif mode == "std":
+        return stack.std(axis=0)
+    elif mode == "var":
+        return stack.var(axis=0)
+    elif mode == "median":
+        return np.median(stack, axis=0)
+    elif mode == "max":
+        return stack.max(axis=0)
+    else:
+        raise ValueError(
+            f"Unknown projection mode: '{mode}'. "
+            f"Options: 'mean', 'std', 'var', 'median', 'max'"
+        )
+
+
 def register_stack(
     stack: np.ndarray,
     n_reference_frames: int = 1000,
@@ -68,6 +155,10 @@ def register_stack(
     return_shifts: bool = False,
     parallel: bool = True,
     n_jobs: int = -1,
+    interpolate: bool = True,
+    batch_mode: str = "std",
+    reference_mode: str = "mean",
+    edge_crop: int = 0,
 ) -> np.ndarray | Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Register imaging stack using batch-averaged phase cross-correlation.
@@ -99,16 +190,34 @@ def register_stack(
         Phase correlation normalization mode (default: None).
         For low-SNR data, None is recommended. Use 'phase' for high-SNR.
     order : int, optional
-        Spline interpolation order for shifting (0-5, default: 1)
+        Spline interpolation order for shifting (0-5, default: 1).
+        Higher orders are smoother but slower. 0=nearest, 1=linear.
     mode : str, optional
-        Edge handling mode for shifting (default: 'reflect')
+        Edge handling mode for shifting (default: 'reflect').
+        Options: 'reflect', 'constant', 'nearest', 'mirror', 'wrap'.
     return_shifts : bool, optional
         If True, return (registered, shifts, errors) (default: False)
     parallel : bool, optional
-        Use parallel processing with FFT-based shifting for ~2x speedup
-        (default: True)
+        Use parallel processing for faster shifting (default: True).
+        Uses joblib if available, otherwise ThreadPoolExecutor.
     n_jobs : int, optional
         Number of parallel jobs. -1 uses all cores (default: -1)
+    interpolate : bool, optional
+        If True (default), linearly interpolate shifts between batch centers
+        for smooth frame-to-frame transitions. If False, all frames in a
+        batch get the same shift (step/square-wave behavior).
+    batch_mode : str, optional
+        Projection mode for batch images (default: "std").
+        Options: "mean", "std", "var", "median", "max".
+        Std captures morphology better and is less affected by
+        temporal brightness fluctuations.
+    reference_mode : str, optional
+        Projection mode for reference image (default: "mean").
+        Mean over many frames gives clean, stable structure.
+    edge_crop : int, optional
+        Pixels to crop from all edges before cross-correlation (default: 0).
+        Useful to exclude edge artifacts from shift computation.
+        Does not affect the output dimensions.
 
     Returns
     -------
@@ -156,6 +265,9 @@ def register_stack(
         batch_size=batch_size,
         upsample_factor=upsample_factor,
         normalization=normalization,
+        batch_mode=batch_mode,
+        reference_mode=reference_mode,
+        edge_crop=edge_crop,
     )
 
     # Apply shifts
@@ -167,6 +279,7 @@ def register_stack(
         mode=mode,
         parallel=parallel,
         n_jobs=n_jobs,
+        interpolate=interpolate,
     )
 
     # Restore original artifact region (unregistered, as it's already corrected)
@@ -185,6 +298,9 @@ def compute_batch_shifts(
     batch_size: int = 10,
     upsample_factor: int = 10,
     normalization: Optional[str] = None,
+    batch_mode: str = "std",
+    reference_mode: str = "mean",
+    edge_crop: int = 0,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Compute registration shifts for batches of frames.
@@ -201,6 +317,18 @@ def compute_batch_shifts(
         Subpixel precision factor
     normalization : str or None, optional
         Phase correlation normalization mode
+    batch_mode : str, optional
+        Projection mode for batch images (default: "std").
+        Options: "mean", "std", "var", "median", "max".
+        Std captures morphology better and is less affected by
+        temporal brightness fluctuations.
+    reference_mode : str, optional
+        Projection mode for reference image (default: "mean").
+        Mean over many frames gives clean, stable structure.
+    edge_crop : int, optional
+        Pixels to crop from all edges before cross-correlation (default: 0).
+        Useful to exclude edge artifacts from shift computation.
+        Does not affect the output dimensions.
 
     Returns
     -------
@@ -215,14 +343,18 @@ def compute_batch_shifts(
     Use apply_shifts_to_stack() to actually shift the frames.
     """
     # Handle TOML "None" string (TOML doesn't support Python None)
-    if normalization in ("None", "none", ""):
+    if normalization in ("None", "none", "", None):
         normalization = None
 
     n_frames = len(stack)
     n_batches = int(np.ceil(n_frames / batch_size))
 
     # Create reference from initial frames
-    reference = stack[:n_reference_frames].mean(axis=0)
+    reference = _compute_projection(stack[:n_reference_frames], reference_mode)
+
+    # Apply edge cropping for shift computation
+    if edge_crop > 0:
+        reference = reference[edge_crop:-edge_crop, edge_crop:-edge_crop]
 
     # Compute shifts per batch
     shifts = []
@@ -232,13 +364,17 @@ def compute_batch_shifts(
         start = i * batch_size
         end = min((i + 1) * batch_size, n_frames)
 
-        # Average batch
-        batch_avg = stack[start:end].mean(axis=0)
+        # Compute batch projection
+        batch_proj = _compute_projection(stack[start:end], batch_mode)
+
+        # Apply edge cropping for shift computation
+        if edge_crop > 0:
+            batch_proj = batch_proj[edge_crop:-edge_crop, edge_crop:-edge_crop]
 
         # Compute shift
         shift_yx, error, _ = phase_cross_correlation(
             reference,
-            batch_avg,
+            batch_proj,
             upsample_factor=upsample_factor,
             normalization=normalization,
         )
@@ -257,6 +393,7 @@ def apply_shifts_to_stack(
     mode: str = "reflect",
     parallel: bool = True,
     n_jobs: int = -1,
+    interpolate: bool = True,
 ) -> np.ndarray:
     """
     Apply pre-computed shifts to imaging stack.
@@ -271,20 +408,24 @@ def apply_shifts_to_stack(
         Number of frames per batch (default: 10)
     order : int, optional
         Spline interpolation order for shifting (0-5, default: 1).
-        Only used when parallel=False.
+        Higher orders are smoother but slower. 0=nearest, 1=linear.
     mode : str, optional
         Edge handling mode for shifting (default: 'reflect').
-        Only used when parallel=False. Options:
+        Options:
         - 'reflect': Reflects at edge, duplicating the edge pixel
         - 'constant': Pads with zeros
         - 'nearest': Extends with the nearest edge pixel value
         - 'mirror': Reflects at edge without duplicating the edge pixel
         - 'wrap': Wraps around to the opposite edge
     parallel : bool, optional
-        Use parallel processing with FFT-based shifting for ~2x speedup
-        (default: True)
+        Use parallel processing for faster shifting (default: True).
+        Uses joblib if available, otherwise ThreadPoolExecutor.
     n_jobs : int, optional
         Number of parallel jobs. -1 uses all cores (default: -1)
+    interpolate : bool, optional
+        If True (default), linearly interpolate shifts between batch centers
+        for smooth frame-to-frame transitions. If False, all frames in a
+        batch get the same shift (step/square-wave behavior).
 
     Returns
     -------
@@ -293,31 +434,27 @@ def apply_shifts_to_stack(
 
     Notes
     -----
-    - Each batch of frames gets the same shift applied
-    - When parallel=True, uses FFT-based shifting (faster, ~2x speedup)
-    - When parallel=False, uses spline-based shifting (original behavior)
+    - When interpolate=True, shifts are assigned to batch centers and linearly
+      interpolated to all frames for smooth transitions
+    - When interpolate=False, each batch of frames gets the same shift applied
+    - Uses scipy.ndimage.shift with spline interpolation for subpixel accuracy
     """
     n_frames = len(stack)
     n_batches = len(shifts)
-    
+
     # Store original data range for clipping
     original_min = stack.min()
     original_max = stack.max()
 
+    # Build per-frame shift array
+    frame_shifts = _compute_frame_shifts(n_frames, n_batches, batch_size, shifts, interpolate)
+
     # Choose processing path
     if parallel and n_frames > 100:
-        # Parallel path: uses FFT-based shifting (faster)
-        # Build per-frame shift array for parallel processing
-        frame_shifts = np.zeros((n_frames, 2))
-        for i in range(n_batches):
-            start = i * batch_size
-            end = min((i + 1) * batch_size, n_frames)
-            frame_shifts[start:end] = shifts[i]
-        
         if _HAS_JOBLIB:
             n_workers = os.cpu_count() if n_jobs == -1 else n_jobs
             results = Parallel(n_jobs=n_workers, prefer="threads")(
-                delayed(_shift_frame_fft)(stack[i], frame_shifts[i]) 
+                delayed(_shift_frame)(stack[i], frame_shifts[i], order, mode)
                 for i in range(n_frames)
             )
             registered = np.array(results)
@@ -325,26 +462,21 @@ def apply_shifts_to_stack(
             n_workers = os.cpu_count() if n_jobs == -1 else n_jobs
             with ThreadPoolExecutor(max_workers=n_workers) as executor:
                 results = list(executor.map(
-                    lambda i: _shift_frame_fft(stack[i], frame_shifts[i]),
+                    lambda i: _shift_frame(stack[i], frame_shifts[i], order, mode),
                     range(n_frames)
                 ))
             registered = np.array(results)
-        
+
         # Clip at end
         registered = np.clip(registered, original_min, original_max)
-    
+
     else:
-        # Sequential path: spline-based shifting (original behavior)
+        # Sequential path
         registered = np.zeros_like(stack)
-        
-        for i in range(n_batches):
-            start = i * batch_size
-            end = min((i + 1) * batch_size, n_frames)
-            shift_yx = shifts[i]
-            
-            for j in range(start, end):
-                shifted = scipy_shift(stack[j], shift=shift_yx, order=order, mode=mode)
-                registered[j] = np.clip(shifted, original_min, original_max)
+
+        for i in range(n_frames):
+            shifted = scipy_shift(stack[i], shift=frame_shifts[i], order=order, mode=mode)
+            registered[i] = np.clip(shifted, original_min, original_max)
 
     return registered
 

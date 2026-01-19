@@ -669,6 +669,9 @@ class Core:
         plot: bool = False,
         parallel: bool = True,
         n_jobs: int = -1,
+        batch_mode: str = None,
+        reference_mode: str = None,
+        edge_crop: int = None,
     ) -> dict:
         """
         Apply motion correction (registration) to images in-place.
@@ -694,6 +697,11 @@ class Core:
             Spline interpolation order for shifting (0-5, default: 1).
         mode : str, optional
             Edge handling mode for shifting (default: 'reflect').
+                - 'reflect': Reflects at edge, duplicating the edge pixel
+                - 'constant': Pads with zeros
+                - 'nearest': Extends with the nearest edge pixel value
+                - 'mirror': Reflects at edge without duplicating the edge pixel
+                - 'wrap': Wraps around to the opposite edge
         force : bool, optional
             If True, re-apply registration even if already done (default: False).
         plot : bool, optional
@@ -703,6 +711,18 @@ class Core:
             (default: True).
         n_jobs : int, optional
             Number of parallel jobs. -1 uses all CPU cores (default: -1).
+        batch_mode : str, optional
+            Projection mode for batch images (default: "std").
+            Options: "mean", "std", "var", "median", "max".
+            Std captures morphology better and is less affected by
+            temporal brightness fluctuations.
+        reference_mode : str, optional
+            Projection mode for reference image (default: "mean").
+            Mean over many frames gives clean, stable structure.
+        edge_crop : int, optional
+            Pixels to crop from all edges before cross-correlation (default: 0).
+            Useful to exclude edge artifacts from shift computation.
+            Does not affect the output dimensions.
 
         Returns
         -------
@@ -758,6 +778,9 @@ class Core:
             )
             return self.params.registration or {}
 
+        # Store original for plotting comparison
+        original_stack = self.images.copy() if plot else None
+
         # Get defaults from params (loaded from config)
         defaults = self.params.get_defaults("registration")
 
@@ -772,6 +795,9 @@ class Core:
                 'mode': mode,
                 'parallel': parallel,
                 'n_jobs': n_jobs,
+                'batch_mode': batch_mode,
+                'reference_mode': reference_mode,
+                'edge_crop': edge_crop,
             }.items() if v is not None
         }
 
@@ -811,7 +837,9 @@ class Core:
 
         # Plot if requested
         if plot:
-            self._plot_registration_results(shifts, errors)
+            self._plot_registration_results(
+                shifts, errors, original_stack, params.get('reference_mode', 'std')
+            )
 
         # if stats["mean_error"] < 0.05:
         print(f"Registration complete.\n"
@@ -823,29 +851,64 @@ class Core:
         #     print(f"Warning: Registration error exceeds threshold. Mean error: {stats['mean_error']:.4f}")
         return stats
 
-    def _plot_registration_results(self, shifts: np.ndarray, errors: np.ndarray):
-        """Plot registration shifts and errors."""
+    def _plot_registration_results(
+        self,
+        shifts: np.ndarray,
+        errors: np.ndarray,
+        original_stack: np.ndarray,
+        reference_mode: str,
+    ):
+        """Plot registration results with images and shift traces."""
         import matplotlib.pyplot as plt
+        from pygor.preproc.registration import _compute_projection
 
         batch_idx = np.arange(len(shifts))
 
-        fig, axes = plt.subplots(2, 1, figsize=(10, 6))
+        # Compute projections for comparison
+        proj_original = _compute_projection(original_stack, reference_mode)
+        proj_registered = _compute_projection(self.images, reference_mode)
 
-        # Shifts
-        axes[0].plot(batch_idx, shifts[:, 0], 'b.-', label='Y shift', linewidth=1, markersize=4)
-        axes[0].plot(batch_idx, shifts[:, 1], 'r.-', label='X shift', linewidth=1, markersize=4)
-        axes[0].axhline(0, color='k', linestyle='--', alpha=0.3)
-        axes[0].set_ylabel('Shift (pixels)')
-        axes[0].legend()
-        axes[0].grid(True, alpha=0.3)
-        axes[0].set_title('Registration Shifts Over Time')
+        # Layout: 3 images on top, shift plot below
+        fig = plt.figure(figsize=(12, 7))
+        gs = fig.add_gridspec(2, 3, height_ratios=[1.2, 1], hspace=0.3, wspace=0.3)
 
-        # Errors
-        axes[1].plot(batch_idx, errors, 'k.-', linewidth=1, markersize=4)
-        axes[1].set_xlabel('Batch index')
-        axes[1].set_ylabel('Registration error')
-        axes[1].grid(True, alpha=0.3)
-        axes[1].set_title('Registration Quality (lower is better)')
+        # Top row: images
+        ax_ref = fig.add_subplot(gs[0, 0])
+        ax_orig = fig.add_subplot(gs[0, 1])
+        ax_reg = fig.add_subplot(gs[0, 2])
+
+        # Bottom row: shift plot spanning all columns
+        ax_shifts = fig.add_subplot(gs[1, :])
+
+        # Shared colormap limits for original vs registered
+        vmin = min(proj_original.min(), proj_registered.min())
+        vmax = max(proj_original.max(), proj_registered.max())
+
+        # Reference image (mean of first N frames)
+        ref_image = self.average_stack
+        ax_ref.imshow(ref_image, cmap='gray')
+        ax_ref.set_title('Reference (mean)')
+        ax_ref.axis('off')
+
+        # Original projection
+        ax_orig.imshow(proj_original, cmap='gray', vmin=vmin, vmax=vmax)
+        ax_orig.set_title(f'Before ({reference_mode})')
+        ax_orig.axis('off')
+
+        # Registered projection
+        ax_reg.imshow(proj_registered, cmap='gray', vmin=vmin, vmax=vmax)
+        ax_reg.set_title(f'After ({reference_mode})')
+        ax_reg.axis('off')
+
+        # Shift traces
+        ax_shifts.plot(batch_idx, shifts[:, 0], 'b-', label='Y shift', linewidth=1, alpha=0.8)
+        ax_shifts.plot(batch_idx, shifts[:, 1], 'r-', label='X shift', linewidth=1, alpha=0.8)
+        ax_shifts.axhline(0, color='k', linestyle='--', alpha=0.3)
+        ax_shifts.set_xlabel('Batch index')
+        ax_shifts.set_ylabel('Shift (pixels)')
+        ax_shifts.legend(loc='upper right')
+        ax_shifts.grid(True, alpha=0.3)
+        ax_shifts.set_title('Registration Shifts Over Time')
 
         plt.tight_layout()
         plt.show()
@@ -885,7 +948,7 @@ class Core:
             )
         
         with h5py.File(output_path, "w") as f:
-            # === Image data ===
+            #  Image data 
             # H5 expects (width, height, frames) - transposed from our (frames, height, width)
             images_t = self.images.transpose(2, 1, 0)
             # IGOR stores as uint16 (unsigned), matching raw ADC values
@@ -899,21 +962,21 @@ class Core:
             # Average stack
             f.create_dataset("Stack_Ave", data=self.average_stack.T, dtype=np.float32)
             
-            # === ROIs ===
+            #  ROIs 
             if self.rois is not None:
                 f.create_dataset("ROIs", data=self.rois.T, dtype=np.int16)
                 
             if self.roi_sizes is not None:
                 f.create_dataset("RoiSizes", data=self.roi_sizes, dtype=np.int32)
             
-            # === Traces ===
+            #  Traces 
             if self.traces_raw is not None:
                 f.create_dataset("Traces0_raw", data=self.traces_raw.T, dtype=np.float32)
                 
             if self.traces_znorm is not None:
                 f.create_dataset("Traces0_znorm", data=self.traces_znorm.T, dtype=np.float32)
             
-            # === Trigger times ===
+            #  Trigger times 
             max_triggers = max(len(self.triggertimes_frame) if self.triggertimes_frame is not None else 0, 1000)
             triggertimes = np.full(max_triggers, np.nan)
             if self.triggertimes is not None and len(self.triggertimes) > 0:
@@ -925,7 +988,7 @@ class Core:
                 triggertimes_frame[:len(self.triggertimes_frame)] = self.triggertimes_frame
             f.create_dataset("Triggertimes_Frame", data=triggertimes_frame, dtype=np.float64)
             
-            # === wParamsStr (date/time metadata) ===
+            #  wParamsStr (date/time metadata) 
             exp_date = self.metadata["exp_date"]
             exp_time = self.metadata["exp_time"]
             date_str = f"{exp_date.year}-{exp_date.month:02d}-{exp_date.day:02d}"
@@ -941,7 +1004,7 @@ class Core:
             for i, s in enumerate(params_str):
                 params_str_ds[i] = s.encode("utf-8")
             
-            # === wParamsNum (XYZ position) ===
+            #  wParamsNum (XYZ position) 
             params_num = np.zeros(50, dtype=np.float64)
             xyz = self.metadata.get("objectiveXYZ", (0, 0, 0))
             params_num[26] = xyz[0]
@@ -949,7 +1012,7 @@ class Core:
             params_num[28] = xyz[1]
             f.create_dataset("wParamsNum", data=params_num, dtype=np.float64)
             
-            # === OS_Parameters ===
+            #  OS_Parameters 
             os_params_keys = [
                 "placeholder",
                 "LineDuration",
@@ -973,7 +1036,7 @@ class Core:
                 dtype=object
             )
             
-            # === Optional data ===
+            #  Optional data 
             if self.averages is not None:
                 f.create_dataset("Averages0", data=self.averages.T, dtype=np.float32)
                 
@@ -1515,7 +1578,7 @@ class Core:
         session = pygor.core.gui.methods.NapariViewStack(self, **kwargs)
         session.run()
 
-    def draw_rois(self, attribute = "calculate_image_average", style = "stacked", load_existing_rois=True, overwrite=False, show_correlation=False, **kwargs):
+    def draw_rois(self, attribute = "calculate_image_average", style = "stacked", load_existing_rois=True, overwrite=True, show_correlation=False, **kwargs):
         """
         Draw ROIs on the image stack.
 
@@ -1584,33 +1647,34 @@ class Core:
             else:
                 # ROIs were modified - convert and save
                 napari_mask = session.mask
-                h5_mask = session.convert_napari_mask_to_h5_format(napari_mask)
+                igor_style_mask = session.convert_napari_mask_to_igor_format(napari_mask)
+                # Postpone saving to H5 until user executes save operation, but update object attributes
 
-                success = self.update_h5_key('ROIs', h5_mask, overwrite=True)
-                if success:
-                    self.rois = h5_mask
-                    self.num_rois = len(np.unique(h5_mask)[np.unique(h5_mask) < 0])
-                    print(f"Successfully saved {self.num_rois} ROIs to H5 file")
+                # success = self.update_h5_key('ROIs', h5_mask, overwrite=True)
+                # if success:
+                self.rois = igor_style_mask
+                self.num_rois = len(np.unique(igor_style_mask)[np.unique(igor_style_mask) < 0])
+                print(f"Successfully saved {self.num_rois} ROIs to H5 file")
 
-                    # Recompute dependent data since ROIs changed
-                    print("\nRecomputing traces, snippets, and averages for new ROIs...")
+                # Recompute dependent data since ROIs changed
+                print("\nRecomputing traces, snippets, and averages for new ROIs...")
 
-                    # Compute both raw and z-normalized traces
-                    self.compute_traces_from_rois(overwrite=True)
+                # Compute both raw and z-normalized traces
+                self.compute_traces_from_rois(overwrite=True)
 
-                    # Compute snippets and averages
-                    self.compute_snippets_and_averages(overwrite=True)
+                # Compute snippets and averages
+                self.compute_snippets_and_averages(overwrite=True)
 
-                    # Verify shapes match
-                    print("\nVerifying data integrity:")
-                    print(f"  num_rois: {self.num_rois}")
-                    print(f"  traces_raw shape: {self.traces_raw.shape if self.traces_raw is not None else 'None'}")
-                    print(f"  averages shape: {self.averages.shape if self.averages is not None else 'None'}")
-                    print(f"  snippets shape: {self.snippets.shape if self.snippets is not None else 'None'}")
+                # Verify shapes match
+                print("\nVerifying data integrity:")
+                print(f"  num_rois: {self.num_rois}")
+                print(f"  traces_raw shape: {self.traces_raw.shape if self.traces_raw is not None else 'None'}")
+                print(f"  averages shape: {self.averages.shape if self.averages is not None else 'None'}")
+                print(f"  snippets shape: {self.snippets.shape if self.snippets is not None else 'None'}")
 
-                    print("All dependent data recomputed and saved successfully")
-                else:
-                    print("Failed to save ROIs to H5 file")
+                print("All dependent data recomputed and saved successfully")
+            # else:
+            #     print("Failed to save ROIs to H5 file")
 
         # Plot traces if requested
         if kwargs.get('plot', False):
@@ -1623,7 +1687,7 @@ class Core:
                 # Preview mode: plot from temporary mask
                 target_images = self.images if target is self.images else target
                 self._plot_traces(style=style, session=session,
-                                 roi_mask=session.mask, images=target_images)
+                                roi_mask=session.mask, images=target_images)
             else:
                 print("No ROI data available for plotting")
 
