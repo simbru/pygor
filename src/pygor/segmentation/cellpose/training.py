@@ -11,40 +11,8 @@ Key points:
 
 import numpy as np
 from pathlib import Path
-from scipy.ndimage import label
 import pygor.load
-
-
-def convert_pygor_mask_to_cellpose(pygor_mask):
-    """Convert pygor ROI mask to Cellpose format with sequential relabeling.
-
-    pygor format: background=1, ROIs=-1,-2,-3...
-    Cellpose format: background=0, ROIs=1,2,3... (sequential)
-
-    Uses scipy.ndimage.label to ensure sequential labels.
-
-    Parameters
-    ----------
-    pygor_mask : ndarray
-        Mask in pygor format
-
-    Returns
-    -------
-    cellpose_mask : ndarray
-        Mask in Cellpose format
-    n_rois : int
-        Number of ROIs found
-    """
-    if pygor_mask is None:
-        return None, 0
-
-    # Create binary mask: foreground (any ROI) vs background
-    binary_mask = (pygor_mask != 1).astype(np.uint8)
-
-    # Relabel connected components to get sequential 1,2,3...
-    labeled_mask, n_components = label(binary_mask)
-
-    return labeled_mask.astype(np.uint16), n_components
+from pygor.segmentation.cellpose.masks import from_pygor_relabeled as convert_pygor_mask_to_cellpose
 
 
 def validate_mask(mask, name="mask"):

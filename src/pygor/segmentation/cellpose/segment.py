@@ -1,12 +1,13 @@
 """
-Cellpose inference for ROI segmentation.
+Cellpose segmentation for pygor.
 
-This module handles loading trained Cellpose models and running inference
-on pygor image data.
+This module provides the main segment() function for Cellpose-based ROI detection,
+as well as lower-level inference utilities.
 """
 
 import numpy as np
 from pathlib import Path
+import warnings
 
 try:
     from cellpose import models
@@ -174,3 +175,112 @@ def run_cellpose_inference(
     }
 
     return results
+
+
+def segment(
+    image,
+    *,
+    model_path=None,
+    model_dir=None,
+    postprocess=True,
+    verbose=True,
+    **kwargs,
+):
+    """Segment an image using Cellpose.
+
+    This is the main entry point for Cellpose segmentation. It handles
+    inference and optional post-processing (splitting/shrinking).
+
+    Parameters
+    ----------
+    image : ndarray
+        2D image to segment
+    model_path : str or Path, optional
+        Direct path to a trained model file
+    model_dir : str or Path, optional
+        Directory to search for the latest model
+    postprocess : bool
+        If True, apply splitting/shrinking heuristics (default: True)
+    verbose : bool
+        Print progress messages
+    **kwargs
+        Additional parameters:
+
+        Cellpose parameters:
+        - diameter : float (default: None, auto-detect)
+        - flow_threshold : float (default: 0.9)
+        - cellprob_threshold : float (default: 0.5)
+        - min_size : int (default: 2)
+
+        Post-processing parameters (when postprocess=True):
+        - split_large : bool (default: True)
+        - size_multiplier : float (default: 1.5)
+        - min_peak_distance : int (default: 1)
+        - min_size_after_split : int (default: 4)
+        - shrink_iterations : int (default: 1, 0 to disable)
+        - shrink_size_threshold : int (default: 30)
+
+    Returns
+    -------
+    masks : ndarray
+        ROI mask in Cellpose format (background=0, ROIs=1,2,3...)
+    """
+    # Extract cellpose parameters
+    cellpose_params = {
+        "diameter": kwargs.pop("diameter", None),
+        "flow_threshold": kwargs.pop("flow_threshold", 0.9),
+        "cellprob_threshold": kwargs.pop("cellprob_threshold", 0.5),
+        "min_size": kwargs.pop("min_size", 2),
+    }
+
+    # Extract post-processing parameters
+    split_large = kwargs.pop("split_large", True)
+    split_params = {
+        "size_multiplier": kwargs.pop("size_multiplier", 1.5),
+        "min_distance": kwargs.pop("min_peak_distance", 1),
+        "min_size_after_split": kwargs.pop("min_size_after_split", 4),
+    }
+    shrink_iterations = kwargs.pop("shrink_iterations", 1)
+    shrink_size_threshold = kwargs.pop("shrink_size_threshold", 30)
+
+    # Warn about unused kwargs
+    if kwargs:
+        warnings.warn(f"Unused parameters: {list(kwargs.keys())}")
+
+    # Run inference
+    if verbose:
+        print("Running Cellpose segmentation...")
+
+    results = run_cellpose_inference(
+        image,
+        model_path=model_path,
+        model_dir=model_dir,
+        **cellpose_params,
+    )
+
+    masks = results["masks"]
+    n_cellpose = results["n_rois"]
+
+    if verbose:
+        print(f"  Cellpose detected: {n_cellpose} ROIs")
+
+    # Apply post-processing if requested
+    if postprocess:
+        from .postprocess import split_large_rois, shrink_rois
+
+        # Split large ROIs
+        if split_large:
+            masks, n_splits = split_large_rois(masks, image, **split_params)
+            n_after_split = len(np.unique(masks)) - 1
+            if verbose and n_splits > 0:
+                print(f"  After splitting: {n_after_split} ROIs (+{n_after_split - n_cellpose})")
+
+        # Shrink ROIs
+        if shrink_iterations > 0:
+            masks = shrink_rois(
+                masks, iterations=shrink_iterations, size_threshold=shrink_size_threshold
+            )
+            if verbose:
+                print(f"  Applied ROI shrinking ({shrink_iterations} iteration(s))")
+
+    return masks

@@ -27,7 +27,8 @@ obj.preprocess(detrend=True)
 obj.register(plot=True)
 
 #%%
-obj.segment_rois()
+# obj.segment_rois()
+
 # obj.compute_traces_from_rois()
 
 
