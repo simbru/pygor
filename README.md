@@ -1,8 +1,10 @@
-# Pygor: Seamless Python integration with IGOR Pro workflows, for Baden-lab members
+# Pygor: Python alternative to IGOR Pro workflows, for Baden-lab members
 
 Welcome to Pygor!
 
 A Python toolkit for working alongside Baden-lab's IGOR Pro pipeline, seamlessly importing processed data via H5 files and extending analysis capabilities with Python's flexible framework.
+
+This project is based on and builds on [Euler lab's IGOR scripts](https://github.com/eulerlab/ret_preproc/tree/master/dataProcessing/Igor) and [Baden lab's OS Scripts (IGOR)](https://github.com/BadenLab/Igor_scripts/tree/main).
 
 ## Here are the main points:
 
