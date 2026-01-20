@@ -68,3 +68,5 @@ Here are the images
 ![pygor_strf](..\docs\modules\images\pygor_multicolour_strf.png)
 
 ![igor_strf](..\docs\modules\images\igor_multicolour_strf.png)
+
+Differences are likely due to float precision. Overall, the STRF implementation in pygor appears to be validated against the IGOR Pro implementation.

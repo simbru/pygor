@@ -31,7 +31,6 @@ import math
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import skimage
 
-
 def try_fetch(file, key):
     try:
         result = file[key]
@@ -840,7 +839,7 @@ class Core:
             self._plot_registration_results(
                 shifts, errors, original_stack, params.get('reference_mode', 'std')
             )
-
+            plt.show()
         # if stats["mean_error"] < 0.05:
         print(f"Registration complete.\n"
             f"  Mean error: {stats['mean_error']:.4f}\n"

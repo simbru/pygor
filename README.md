@@ -27,19 +27,39 @@ a local virtual environment that you must use instead of making your own.
 
 More information on [uv by Astral here](https://docs.astral.sh/uv/).
 
-### Build with hatch and install with pip (old method)
-Currently, the package will very likely require you to do your own development. This sounds scary, but it's pretty easy. For that, we need
-to install the latest version of the package in an "editable" state.
+## Using Pygor
 
-1. Install [hatch](https://hatch.pypa.io/latest/) on your computer, either via executable or via pip in your environment.
-2. Download Pygor from the Github repo (I prefer using `git clone https://github.com/simbru/pygor` in my target directory).
-3. Open up your favorite command line (CMD for example) and change directory to your Pygor folder. You will know  you are in the right spot if you see a file called `pyproject.toml`
-4. Simply run `hatch build` from the command line inside the directory. You should see some reference to "building wheels". This means you're on the right track.
-5. Once that is done, simply stay in the directory, activate whatever Python environment you want to use, and type `pip install -e .` -> This will allow you to use Pygor, while changing the contents of Pygor's files (editable).
+### Basic usage
+After installing Pygor, you can import classes like so:
 
-That's it! Activate your environment in your favorite IDE and get going with Pygor! Please flag it if you run across any issues. 
+```python
+import pygor.load
 
-*Alternatively, you should be able to simply download the Git repository, set your working directories correctly, and be on your merry way (but this is completely untested, and you might have to move your Jupyter notebooks around for imports to work properly).*
+# Load Core data object from H5 file or SMH/SMP file
+data = pygor.load.Core("recording.h5") # or use another class name (e.g., STRF, OSDS, or ResponseMapping)
+
+# Access attributes
+print(data.frame_hz)
+print(data.num_rois)
+print(data.traces_znorm.shape)
+
+# Use methods
+data.view_stack_rois()
+data.get_help() # Get contextual help for the loaded class
+```
+
+### Example data and pipelines
+Example pipelines and demo data
+
+To avoid issues with Git LFS, demo data can be downloaded from here: 
+https://drive.google.com/drive/folders/1LtO1XTIgLIYS6jkh-3tXqc7XdXKJ9OSh
+
+
+Usage examples can be found in the `/pygor/examples` folder:
+- `preprocessing_data.py` - Example of loading data and preprocessing steps including detrending, registration, and ROI segementation (using Cellpose).
+- `example_notebook.ipynb` - Walkthrough of basic Pygor functionality in a Jupyter notebook.
+
+Place the strf_demo_data.h5 file into the /pygor/examples folder and you can follow the .ipynb and .py files in there.
 
 ## Pygor design principles
 
@@ -53,10 +73,11 @@ Inside `pygor/src/pygor/` (Python's way of structuring a package with sub-module
 - `pygor/insert_your_class`: Files containing functions related to your packages!
 
 ## Custom cellpose models
-Models can be found here: https://drive.proton.me/urls/02GT9HWGC0#Ibd9kXWzOwMQ
+Pre-trained models can be found here: https://drive.proton.me/urls/02GT9HWGC0#Ibd9kXWzOwMQ
 (So far only RibeyeA)
 
 ## H5/IGOR Wave to Pygor Attribute Mapping
+If you are used to IGOR Pro and OS_scripts, you might have noticed some differences in naming conventions between IGOR Waves and Pygor. This was done to make the code more "Pythonic" and to improve ease of use. Below is a mapping of common H5 keys to their corresponding Pygor attributes, along with brief descriptions.
 
 ### Data Arrays
 
@@ -97,12 +118,6 @@ Note: `frame_hz` is calculated from `n_planes` and `linedur_s`, not stored direc
 | Noise_FilterLength_s | strf_dur_ms | STRF duration (converted to ms) |  -->
 
 ## AI transparency
-The core functionality of Pygor was built before the widespread availability of AI coding assistants. However, functions and modules have since been improved and optimised using LLM tools like ChatGPT, Claude Code, and Github Copilot. I do my best to ensure that all AI-assisted code is properly tested and validated. 
+Pygor's core functionality was built before widespread AI coding tools. Recent development has used ChatGPT, Claude Code, and Github Copilot.
 
-I encourage contributors to follow these guidelines:
-- Clearly comment any sections of code that were entirely generated or significantly assisted by AI tools. Also include in commit messages where large chunks of AI-generated code were added.
-- Snippets or functions that were only lightly edited do not need special comments, unless you feel it is necessary for clarity.
-- Always thoroughly test and validate AI-generated code. You have priors about how the code should behave.
-- Strive to write clear, maintainable code, regardless of whether AI tools were used. Sometimes AI writes less optimal code that needs human refinement, especially with regards to naming conventions. 
-- AI-generated docstring comments should be reviewed and edited for accuracy and clarity.
-- When in doubt, err on the side of transparency about AI assistance.
+Contributors should comment AI-generated code sections and include this in commit messages. Always test and validate AI-assisted code thoroughly.  

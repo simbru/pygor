@@ -4,7 +4,9 @@ pygor.toml
 # Others
 meetingnotes.ipynb
 analysis.ipynb
-old_data_strfs.h5
+**.h5
+**.smh
+**.smp
 meetingnotes.ipynb
 src/pygor/test/test_out.txt
 local/*
