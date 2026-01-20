@@ -1,7 +1,6 @@
 #%%
 import pathlib
 import os
-from re import split
 
 
 os.chdir(pathlib.Path(__file__).parent.parent.parent.parent)  # Go to pygor root
@@ -17,6 +16,28 @@ import pygor.load
 EXAMPLE_PATH = r".\examples\FullFieldFlash_4_colour_demo.smp"
 CUSTOM_CONFIG = r".\configs\example.toml" # Specify custom config if needed
 
+# Shrink for gaps (inline to avoid cellpose import)
+from scipy.ndimage import binary_erosion as _erode, label as _label
+def _shrink_rois(masks, iterations=1, min_size_to_shrink=10):
+    """Shrink ROIs by erosion, but only if they're larger than min_size_to_shrink."""
+    result = np.zeros_like(masks)
+    for roi_id in np.unique(masks):
+        if roi_id == 0:
+            continue
+        roi_mask = masks == roi_id
+        roi_size = roi_mask.sum()
+        # Only shrink if ROI is large enough
+        if roi_size >= min_size_to_shrink:
+            shrunk = _erode(roi_mask, iterations=iterations)
+            if shrunk.any():
+                result[shrunk] = roi_id
+            else:
+                # If erosion removes everything, keep original
+                result[roi_mask] = roi_id
+        else:
+            # Small ROIs: keep as-is
+            result[roi_mask] = roi_id
+    return result
 
 #%%
 obj = pygor.load.Core(EXAMPLE_PATH, config=CUSTOM_CONFIG)
@@ -46,109 +67,6 @@ plt.colorbar(other, ax=ax[1])
 # obj.compute_traces_from_rois()
 
 
-# %%
-# Diagnostic: look at correlation projection statistics and try sharpening
-import numpy as np
-from scipy.ndimage import gaussian_laplace, gaussian_filter
-import matplotlib.pyplot as plt
-
-# correlation_projection = obj.correlation_projection
-correlation_projection = obj.images.mean(axis=0)
-# normalise to 0-1
-correlation_projection = (correlation_projection - correlation_projection.min()) / (correlation_projection.max() - correlation_projection.min())
-print(f"Correlation stats: min={correlation_projection.min():.3f}, max={correlation_projection.max():.3f}, mean={correlation_projection.mean():.3f}")
-
-# Try different enhancements
-fig, axes = plt.subplots(2, 3, figsize=(12, 8))
-
-# Original
-axes[0, 0].imshow(correlation_projection, cmap='gray')
-axes[0, 0].set_title(f'Original corr (range: {correlation_projection.min():.2f}-{correlation_projection.max():.2f})')
-
-# Laplacian of Gaussian (edge detection / sharpening)
-log = -gaussian_laplace(correlation_projection, sigma=1)
-axes[0, 1].imshow(log, cmap='gray')
-axes[0, 1].set_title('Laplacian of Gaussian (sigma=1)')
-
-# Unsharp mask (sharpen)
-blurred = gaussian_filter(correlation_projection, sigma=2)
-unsharp = correlation_projection + 2 * (correlation_projection - blurred)
-axes[0, 2].imshow(unsharp, cmap='gray')
-axes[0, 2].set_title('Unsharp mask')
-
-# Local contrast enhancement
-from skimage import exposure
-equalized = exposure.equalize_adapthist(correlation_projection, clip_limit=0.03)
-axes[1, 0].imshow(equalized, cmap='gray')
-axes[1, 0].set_title('Adaptive histogram eq')
-
-# Average stack for comparison
-axes[1, 1].imshow(obj.average_stack, cmap='gray')
-axes[1, 1].set_title('Average stack')
-
-# Correlation * average (combine structural + functional)
-combined = correlation_projection * (obj.average_stack / obj.average_stack.max())
-axes[1, 2].imshow(combined, cmap='gray')
-axes[1, 2].set_title('Correlation × Average')
-
-plt.tight_layout()
-
-# %% Try segmentation with enhanced image
-from skimage.segmentation import watershed
-from skimage.feature import peak_local_max
-
-# Use the enhanced image for segmentation
-# Try: correlation_projection, unsharp, equalized, or combined
-seg_image = equalized  # <-- change this to try different inputs
-
-threshold = 0.4  # adjust based on which image you use
-min_distance = 2
-
-binary = seg_image > threshold
-coords = peak_local_max(seg_image, min_distance=min_distance, labels=binary.astype(int))
-print(f"Found {len(coords)} peaks")
-
-markers = np.zeros_like(binary, dtype=int)
-for i, (y, x) in enumerate(coords, start=1):
-    markers[y, x] = i
-
-masks = watershed(-seg_image, markers, mask=binary)
-
-# Shrink for gaps (inline to avoid cellpose import)
-from scipy.ndimage import binary_erosion as _erode, label as _label
-def _shrink_rois(masks, iterations=1, min_size_to_shrink=10):
-    """Shrink ROIs by erosion, but only if they're larger than min_size_to_shrink."""
-    result = np.zeros_like(masks)
-    for roi_id in np.unique(masks):
-        if roi_id == 0:
-            continue
-        roi_mask = masks == roi_id
-        roi_size = roi_mask.sum()
-        # Only shrink if ROI is large enough
-        if roi_size >= min_size_to_shrink:
-            shrunk = _erode(roi_mask, iterations=iterations)
-            if shrunk.any():
-                result[shrunk] = roi_id
-            else:
-                # If erosion removes everything, keep original
-                result[roi_mask] = roi_id
-        else:
-            # Small ROIs: keep as-is
-            result[roi_mask] = roi_id
-    return result
-final_masks = _shrink_rois(masks, iterations=1)
-
-n_rois = len(np.unique(final_masks)) - 1
-print(f"Final: {n_rois} ROIs")
-
-# Visualize
-masks_masked = np.ma.masked_where(final_masks == 0, final_masks)
-
-fig, ax = plt.subplots()
-ax.imshow(seg_image, cmap='gray')
-ax.imshow(masks_masked, cmap='prism', alpha=0.3)
-ax.set_title(f'Segmentation on enhanced image ({n_rois} ROIs)')
-
 # %% ==========================================================================
 # SEGMENTATION METHOD COMPARISON
 # Run all methods and compare visually
@@ -156,11 +74,8 @@ ax.set_title(f'Segmentation on enhanced image ({n_rois} ROIs)')
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import label
 from skimage.segmentation import watershed
 from skimage.feature import peak_local_max
-from skimage import exposure
-from skimage.morphology import local_maxima, h_maxima, remove_small_objects
 
 """
 NOTES:
@@ -176,7 +91,7 @@ Combined image (correlation × average) seems to work best as input overall
 # =============================================================================
 # CHOOSE INPUT IMAGE HERE
 # =============================================================================
-INPUT_MODE = "combined"  # Options: "correlation", "average", "combined"
+INPUT_MODE = "average"  # Options: "correlation", "average", "combined"
 
 if INPUT_MODE == "correlation":
     input_img = obj.correlation_projection.copy()
@@ -195,8 +110,20 @@ elif INPUT_MODE == "combined":
 else:
     raise ValueError(f"Unknown INPUT_MODE: {INPUT_MODE}")
 
-# Normalize to 0-1 for consistent thresholding
+# Normalize to 0-1 for consistent thresholding (do this BEFORE masking artifact)
 corr_norm = (input_img - input_img.min()) / (input_img.max() - input_img.min())
+
+# =============================================================================
+# MASK OUT LIGHT c REGION
+# =============================================================================
+# The light artifact region is at the left edge of the image.
+# IGOR fills pixels 0 through artifact_width (inclusive), so we mask artifact_width + 1 columns.
+artifact_width = obj.params.artifact_width
+artifact_fill_width = artifact_width + 1  # IGOR uses inclusive indexing
+
+# Set artifact region to 0 AFTER normalization so it doesn't affect the scaling
+corr_norm[:, :artifact_fill_width] = 0
+print(f"Masked light artifact region: columns 0-{artifact_fill_width-1} (artifact_width={artifact_width})")
 print(f"Using: {input_name}")
 
 # Store results: (masks, title, description)
@@ -227,38 +154,53 @@ def method_watershed_peaks(img, threshold=0.4, min_distance=3, gap_pixels=1, min
         masks = _shrink_rois(masks, iterations=gap_pixels, min_size_to_shrink=min_size_to_shrink)
     return masks
 
-m1 = method_watershed_peaks(corr_norm, threshold=0.1, min_distance=1, gap_pixels=2, min_size_to_shrink=8)
-results.append((m1, "1: Watershed (peaks)", "min_dist=2, gap=1px, thresh=0.2"))
-
+m1 = method_watershed_peaks(corr_norm, threshold=0.1, min_distance=1, 
+                        gap_pixels=2, min_size_to_shrink=10)
+results.append((m1, "1: Watershed (peaks)", "min_dist=1, gap=1px, thresh=0.15"))
+    
 # -----------------------------------------------------------------------------
-# Method 2: H-maxima Watershed - Unituitive, doesnt seem to segment well 
-# Suppress small local maxima, use remaining as seeds
-# -----------------------------------------------------------------------------
-def method_h_maxima_watershed(img, h=.01, threshold=0.2):
-    binary = img > threshold
-    # h-maxima suppresses peaks that are less than h above surroundings
-    hmax = h_maxima(img, h=h)
-    markers, n = label(hmax)
-    masks = watershed(-img, markers, mask=binary)
-    return masks
-
-m2 = method_h_maxima_watershed(corr_norm, h=0.2, threshold=0.5)
-results.append((m2, "2: H-maxima Watershed", "h=0.01, thresh=0.2"))
-# -----------------------------------------------------------------------------
-# Method 3: IGOR-style Flood Fill (region growing)
+# Method 2: IGOR-style Flood Fill (region growing)
 # Grow from peaks, stop at correlation drop or size limit
 # -----------------------------------------------------------------------------
-def method_flood_fill(img, threshold=0.4, min_distance=3, max_size=25, drop_fraction=0.5):
+def method_flood_fill(img, threshold=0.4, min_distance=3, max_size=25, drop_fraction=0.5,
+                      min_gap=1):
     """
     IGOR-style: Start at peaks, grow outward.
     Stop when: pixel < peak * drop_fraction OR region > max_size
+
+    Parameters:
+    - threshold: intensity threshold for foreground
+    - min_distance: minimum distance between seed peaks
+    - max_size: maximum pixels per ROI
+    - drop_fraction: stop growing when intensity drops below peak * drop_fraction
+    - min_gap: minimum gap (in pixels) to maintain from other ROIs
     """
+    from scipy.ndimage import binary_dilation, generate_binary_structure
+
     binary = img > threshold
     coords = peak_local_max(img, min_distance=min_distance, labels=binary.astype(int))
 
+    # Sort peaks by intensity (brightest first get priority)
+    peak_intensities = [img[y, x] for y, x in coords]
+    sorted_indices = np.argsort(peak_intensities)[::-1]
+    coords = coords[sorted_indices]
+
     masks = np.zeros_like(img, dtype=int)
+    # Buffer zone tracks pixels that are too close to existing ROIs
+    buffer_zone = np.zeros_like(img, dtype=bool)
+
+    # Structuring element for buffer dilation
+    if min_gap > 0:
+        struct = generate_binary_structure(2, 2)  # 8-connectivity for buffer
+
+    # 4-connectivity neighbors
+    neighbors = [(-1, 0), (1, 0), (0, -1), (0, 1)]
 
     for roi_id, (py, px) in enumerate(coords, start=1):
+        # Skip if seed is in buffer zone
+        if buffer_zone[py, px]:
+            continue
+
         peak_val = img[py, px]
         stop_val = peak_val * drop_fraction
 
@@ -273,7 +215,9 @@ def method_flood_fill(img, threshold=0.4, min_distance=3, max_size=25, drop_frac
                 continue
             if y < 0 or y >= img.shape[0] or x < 0 or x >= img.shape[1]:
                 continue
-            if masks[y, x] != 0:  # already claimed
+            if masks[y, x] != 0:  # already claimed by another ROI
+                continue
+            if buffer_zone[y, x]:  # in buffer zone of another ROI
                 continue
             if img[y, x] < stop_val:
                 continue
@@ -283,84 +227,58 @@ def method_flood_fill(img, threshold=0.4, min_distance=3, max_size=25, drop_frac
             visited.add((y, x))
             region.append((y, x))
 
-            # Add neighbors (4-connected)
-            for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            # Add neighbors
+            for dy, dx in neighbors:
                 queue.append((y + dy, x + dx))
 
         # Assign region to mask
         for y, x in region:
             masks[y, x] = roi_id
 
+        # Update buffer zone around this ROI
+        if min_gap > 0 and len(region) > 0:
+            roi_mask = masks == roi_id
+            dilated = binary_dilation(roi_mask, structure=struct, iterations=min_gap)
+            buffer_zone = buffer_zone | (dilated & ~roi_mask)
+
     return masks
 
-m3 = method_flood_fill(corr_norm, threshold=0.1, min_distance=1, max_size=20, drop_fraction=0)
-results.append((m3, "3: Flood Fill (IGOR-style)", "max_size=20, drop=0.5"))
+m2 = method_flood_fill(corr_norm, threshold=0.1, min_distance=1, max_size=12,
+                    drop_fraction=.3, min_gap=0)
+results.append((m2, "2: Flood Fill (IGOR-style)", "max=12, drop=0.3"))
+
 
 # -----------------------------------------------------------------------------
-# Method 4: Gradient-based Watershed - meh, merges a lot despite being intuitive to use 
-# Use gradient magnitude to define basins
-# -----------------------------------------------------------------------------
-def method_gradient_watershed(img, threshold=0.4, min_distance=3):
-    from skimage.filters import sobel
-    binary = img > threshold
-    # Gradient magnitude - high at edges
-    gradient = sobel(img)
-    # Seeds from correlation peaks
-    coords = peak_local_max(img, min_distance=min_distance, labels=binary.astype(int))
-    markers = np.zeros_like(img, dtype=int)
-    for i, (y, x) in enumerate(coords, start=1):
-        markers[y, x] = i
-    # Watershed on gradient (finds edges)
-    masks = watershed(gradient, markers, mask=binary)
-    return masks
-
-m4 = method_gradient_watershed(corr_norm, threshold=0.2, min_distance=1)
-results.append((m4, "4: Gradient Watershed", "sobel edges, peak seeds"))
-
-# -----------------------------------------------------------------------------
-# PLOTTING - Compare all methods
+# PLOTTING - Compare methods
 # -----------------------------------------------------------------------------
 n_methods = len(results)
 n_cols = 3
-n_rows = (n_methods + n_cols - 1) // n_cols + 1  # +1 for original at top
+n_rows = (n_methods + 1 + n_cols - 1) // n_cols  # +1 for input image
 
-fig, axes = plt.subplots(n_rows, n_cols, figsize=(12, 4 * n_rows))
+fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 4 * n_rows))
 axes = axes.flatten()
 
-# First row: show the input image
+# Input image
 axes[0].imshow(corr_norm, cmap='gray')
 axes[0].set_title(f'Input: {input_name}')
 axes[0].axis('off')
 
-axes[1].imshow(corr_norm > 0.4, cmap='gray')
-axes[1].set_title('Binary (thresh=0.4)')
-axes[1].axis('off')
-
-# Hide unused in first row
-axes[2].axis('off')
-
 # Plot each method result
 for i, (masks, title, desc) in enumerate(results):
-    ax = axes[i + 3]  # offset by 3 for first row
-
-    # Show correlation as background
+    ax = axes[i + 1]
     ax.imshow(corr_norm, cmap='gray')
-
-    # Overlay ROIs
-    n_rois = len(np.unique(masks)) - 1  # exclude background (0)
+    n_rois = len(np.unique(masks)) - 1
     if n_rois > 0:
         masks_masked = np.ma.masked_where(masks == 0, masks)
         ax.imshow(masks_masked, cmap='prism', alpha=0.4)
-
     ax.set_title(f'{title}\n{desc}\n({n_rois} ROIs)', fontsize=9)
     ax.axis('off')
 
-# Hide any remaining empty subplots
-for j in range(len(results) + 3, len(axes)):
+# Hide unused axes
+for j in range(n_methods + 1, len(axes)):
     axes[j].axis('off')
 
 plt.tight_layout()
-plt.savefig('segmentation_comparison.png', dpi=150, bbox_inches='tight')
 plt.show()
 
 print("\n=== ROI Counts ===")
