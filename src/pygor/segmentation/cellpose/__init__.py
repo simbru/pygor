@@ -15,7 +15,8 @@ from pygor.segmentation.cellpose.segment import (
 )
 from pygor.segmentation.cellpose.postprocess import split_large_rois, shrink_rois
 from pygor.segmentation.cellpose.training import train_model
-from pygor.segmentation.cellpose import masks
+# Use shared masks module for format conversion
+from pygor.segmentation import masks
 
 __all__ = [
     "segment",

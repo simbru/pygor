@@ -6,10 +6,13 @@ Provides automated ROI segmentation using various methods.
 Example usage:
     data = pygor.load.Core("file.h5")
     data.segment_rois(mode="cellpose+")  # Cellpose + post-processing heuristics
+    data.segment_rois(mode="watershed")  # Lightweight, no ML required
 
 Available modes:
-    - "cellpose+": Cellpose with splitting/shrinking heuristics (recommended)
+    - "cellpose+": Cellpose with splitting/shrinking heuristics (recommended for trained models)
     - "cellpose": Raw Cellpose output only
+    - "watershed": Lightweight watershed segmentation (no ML required)
+    - "flood_fill": IGOR-style region growing (no ML required)
 
 To add new segmentation methods, create a submodule with a segment() function
 and add an entry to _METHODS below.
@@ -18,10 +21,16 @@ and add an entry to _METHODS below.
 import numpy as np
 import warnings
 
-# Method registry: mode -> (module_path, postprocess_default)
+# Import shared mask utilities (no cellpose/PyTorch dependency)
+from pygor.segmentation import masks
+
+# Method registry: mode -> (module_path, postprocess_default, pass_data_object)
+# pass_data_object: if True, pass the full data object instead of just the image
 _METHODS = {
-    "cellpose": ("pygor.segmentation.cellpose", False),
-    "cellpose+": ("pygor.segmentation.cellpose", True),
+    "cellpose": ("pygor.segmentation.cellpose", False, False),
+    "cellpose+": ("pygor.segmentation.cellpose", True, False),
+    "watershed": ("pygor.segmentation.lightweight", False, True),
+    "flood_fill": ("pygor.segmentation.lightweight", False, True),
 }
 
 
@@ -49,16 +58,18 @@ def segment_rois(
 
     Parameters
     ----------
-    data : Core
-        Pygor data object with average_stack attribute
+    data : Core or STRF
+        Pygor data object with image data
     mode : str
         Segmentation mode. Use list_methods() for available options:
-        - "cellpose+": Cellpose with post-processing heuristics (recommended)
+        - "cellpose+": Cellpose with post-processing heuristics (recommended for trained models)
         - "cellpose": Raw Cellpose output only
+        - "watershed": Lightweight watershed segmentation (no ML required)
+        - "flood_fill": IGOR-style region growing (no ML required)
     model_path : str or Path, optional
-        Direct path to a trained model file
+        Direct path to a trained model file (Cellpose modes only)
     model_dir : str or Path, optional
-        Directory to search for trained models
+        Directory to search for trained models (Cellpose modes only)
     overwrite : bool
         If True, overwrite existing ROIs in data object
     verbose : bool
@@ -80,6 +91,15 @@ def segment_rois(
         - shrink_iterations : int (default: 1, 0 to disable)
         - shrink_size_threshold : int (default: 30)
 
+        Lightweight parameters (for mode="watershed" or "flood_fill"):
+        - input_mode : str (default: "combined") - "correlation", "average", or "combined"
+        - threshold : float (watershed: 0.1, flood_fill: 0.15)
+        - min_distance : int (default: 1)
+        - min_roi_size : int (default: 3)
+        - gap_pixels : int (watershed only, default: 2)
+        - max_size : int (flood_fill only, default: 20)
+        - drop_fraction : float (flood_fill only, default: 0.2)
+
     Returns
     -------
     masks : ndarray
@@ -88,26 +108,12 @@ def segment_rois(
     Examples
     --------
     >>> data = pygor.load.Core("recording.h5")
-    >>> data.segment_rois(model_dir="./models/synaptic")
+    >>> data.segment_rois(model_dir="./models/synaptic")  # Cellpose
 
-    >>> # Custom parameters
-    >>> data.segment_rois(
-    ...     model_dir="./models/synaptic",
-    ...     flow_threshold=0.8,
-    ...     shrink_iterations=2,
-    ... )
+    >>> # Lightweight segmentation (no ML required)
+    >>> data.segment_rois(mode="watershed", input_mode="combined")
+    >>> data.segment_rois(mode="flood_fill", max_size=15, drop_fraction=0.3)
     """
-    # Validate input
-    if data.average_stack is None:
-        if data.images is not None:
-            if verbose:
-                print("Computing average stack from images...")
-            image = data.images.mean(axis=0).astype(np.float32)
-        else:
-            raise ValueError("No image data available for segmentation")
-    else:
-        image = data.average_stack.astype(np.float32)
-
     # Check for existing ROIs
     if data.rois is not None and not overwrite:
         warnings.warn("ROIs already exist. Use overwrite=True to replace.")
@@ -118,27 +124,51 @@ def segment_rois(
         available = list_methods()
         raise ValueError(f"Unknown mode: '{mode}'. Available: {available}")
 
-    module_path, postprocess_default = _METHODS[mode]
+    module_path, postprocess_default, pass_data_object = _METHODS[mode]
 
     # Lazy import the method module
     import importlib
     method_module = importlib.import_module(module_path)
 
-    # Run segmentation (returns Cellpose format)
-    masks = method_module.segment(
-        image,
-        model_path=model_path,
-        model_dir=model_dir,
-        postprocess=postprocess_default,
-        verbose=verbose,
-        **kwargs,
-    )
+    # Determine what to pass to segment()
+    if pass_data_object:
+        # Lightweight methods: pass the full data object so they can access
+        # params.artifact_width and choose input image
+        # Extract method-specific kwarg for lightweight
+        method_kwarg = kwargs.pop("method", mode)  # "watershed" or "flood_fill"
+        raw_masks = method_module.segment(
+            data,
+            method=method_kwarg,
+            postprocess=postprocess_default,
+            verbose=verbose,
+            **kwargs,
+        )
+    else:
+        # Cellpose methods: pass the image
+        if data.average_stack is None:
+            if data.images is not None:
+                if verbose:
+                    print("Computing average stack from images...")
+                image = data.images.mean(axis=0).astype(np.float32)
+            else:
+                raise ValueError("No image data available for segmentation")
+        else:
+            image = data.average_stack.astype(np.float32)
 
-    # Convert to pygor format using the method's mask converter
-    pygor_mask = method_module.masks.to_pygor(masks)
+        raw_masks = method_module.segment(
+            image,
+            model_path=model_path,
+            model_dir=model_dir,
+            postprocess=postprocess_default,
+            verbose=verbose,
+            **kwargs,
+        )
+
+    # Convert to pygor format using shared mask utilities
+    pygor_mask = masks.to_pygor(raw_masks)
 
     # Clean up ROI labels to be consecutive
-    pygor_mask = method_module.masks.relabel_pygor_consecutive(pygor_mask)
+    pygor_mask = masks.relabel_pygor_consecutive(pygor_mask)
 
     n_final = len(np.unique(pygor_mask)) - 1  # -1 for background
     if verbose:
