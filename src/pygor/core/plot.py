@@ -105,7 +105,7 @@ def plot_averages(
         
         if axs is None:
             fig, axs = plt.subplots(
-                len(rois), figsize=figsize, sharey=True, sharex=True
+                len(rois), figsize=figsize, sharey=not independent_scale, sharex=True
             )
         else:
             # Convert single axis to array format FIRST
@@ -113,6 +113,9 @@ def plot_averages(
                 axs = np.array([axs])
             # Get figure from provided axis
             fig = axs.flat[0].figure
+            if independent_scale:
+                for ax in axs.flat:
+                    ax.get_shared_y_axes().remove(ax)
             
         # Handle single ROI case for internally created axes
         if not provided_axs and len(rois) == 1:
@@ -123,6 +126,24 @@ def plot_averages(
             loop_through = enumerate(zip(axs.flat, rois, roi_labels))
         else:
             loop_through = enumerate(zip(axs.flat, rois[sort_order], roi_labels[sort_order]))
+        # Build alternating x-axis shading edges based on stimulus timing
+        x_max = len(self.averages[0])
+        shade_edges = None
+        try:
+            markers_arr = self.calc_mean_triggertimes()
+        except Exception:
+            markers_arr = None
+        if markers_arr is not None and len(markers_arr) > 0:
+            markers_arr = np.sort(np.unique(markers_arr))
+            shade_edges = np.concatenate(([0], markers_arr, [x_max]))
+        else:
+            if phase_dur_mod != 1:
+                inner_loop = np.arange(self.trigger_mode * (1 / phase_dur_mod))
+            else:
+                inner_loop = np.arange(self.trigger_mode)
+            if len(inner_loop) > 0:
+                shade_edges = np.concatenate((inner_loop * phase_dur, [inner_loop[-1] * phase_dur + phase_dur]))
+
         for n, (ax, roi, label) in loop_through:
             if include_snippets is True and self.snippets is not None:
                 ax.plot(self.snippets[roi].T, c="grey", alpha=0.5)
@@ -131,33 +152,32 @@ def plot_averages(
             if independent_scale is False and self.snippets is not None:
                 ax.set_ylim(np.min(self.snippets[rois]), np.max(self.snippets[rois]))
             else:
+                if independent_scale:
+                    if self.snippets is not None:
+                        y_min = np.min(self.snippets[roi])
+                        y_max = np.max(self.snippets[roi])
+                    else:
+                        y_min = np.min(self.averages[roi])
+                        y_max = np.max(self.averages[roi])
+                    if y_min == y_max:
+                        y_min -= 1
+                        y_max += 1
+                    ax.set_ylim(y_min, y_max)
                 closest_sd = np.ceil(np.max(self.averages[roi])*sd_ratio_scalebar)
                 pygor.plotting.add_scalebar(closest_sd, string = f"{closest_sd.astype(int)} SD",ax=ax, flip_text=True, x=1.015, y = 0.1, text_size = text_size)
             ax.set_yticklabels([])
             ax.set_ylabel(label, rotation=0, verticalalignment="center", fontsize=plt.rcParams['font.size'])
             ax.spines[["top", "bottom", "right"]].set_visible(False)
-            # Now we need to add axvspans (don't think I can avoid for loops inside for loops...)
-            if phase_dur_mod != 1:
-                inner_loop = np.arange(
-                    self.trigger_mode * (1/phase_dur_mod)
-                )
-            else:
-                inner_loop = np.arange(self.trigger_mode)
-            if isinstance(kill_phase, Iterable) is False:
-                kill_phase = [kill_phase]
-            if self.trigger_mode != 1:
-#               for i in self.get_average_markers():
-#                   ax.axvline(i, color="k", lw=2, alpha = 0.33, zorder = 0)
-                for interval in inner_loop[::2][::skip_trigger]:
-                    # ax.axvline(interval*phase_dur, color="k", lw=2, alpha = 0.2, zorder = 0)
-                    if interval in kill_phase:
-                        continue
+            # Alternating shading along x-axis to show stimulus timing
+            if shade_edges is not None:
+                for i in range(0, len(shade_edges) - 1, 2):
                     ax.axvspan(
-                        interval * phase_dur,
-                        (interval + 1) * phase_dur,
-                        alpha=0.2,
+                        shade_edges[i],
+                        shade_edges[i + 1],
+                        alpha=0.12,
                         color="gray",
                         lw=0,
+                        zorder=0,
                     )
 
             ax.grid(False)

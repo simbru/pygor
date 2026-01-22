@@ -6,6 +6,7 @@ except ImportError:
     from collections.abc import Iterable
 # Local imports
 import pygor.core.methods
+import pygor.core.calculations
 import pygor.core.plot
 import pygor.data_helpers
 import pygor.utils.helpinfo
@@ -885,17 +886,17 @@ class Core:
 
         # Reference image (mean of first N frames)
         ref_image = self.average_stack
-        ax_ref.imshow(ref_image, cmap='gray')
+        ax_ref.imshow(ref_image, cmap='gray', origin = "lower")
         ax_ref.set_title('Reference (mean)')
         ax_ref.axis('off')
 
         # Original projection
-        ax_orig.imshow(proj_original, cmap='gray', vmin=vmin, vmax=vmax)
+        ax_orig.imshow(proj_original, cmap='gray', vmin=vmin, vmax=vmax, origin = "lower")
         ax_orig.set_title(f'Before ({reference_mode})')
         ax_orig.axis('off')
 
         # Registered projection
-        ax_reg.imshow(proj_registered, cmap='gray', vmin=vmin, vmax=vmax)
+        ax_reg.imshow(proj_registered, cmap='gray', vmin=vmin, vmax=vmax, origin = "lower")
         ax_reg.set_title(f'After ({reference_mode})')
         ax_reg.axis('off')
 
@@ -1540,36 +1541,182 @@ class Core:
             if not bool:
                 print("H5 file key 'ROIs'not updated, due to overwrite=False.")
         
-    def segment_rois(self, mode="cellpose+", overwrite = True, **kwargs):
+    def segment_rois(self, mode="blob", overwrite=True, **kwargs):
         """
         Segment ROIs using automated methods.
 
         Parameters
         ----------
         mode : str
-            Segmentation mode:
-            - "cellpose+": Cellpose with post-processing heuristics (recommended)
-            - "cellpose": Raw Cellpose output only
-        model_path : str or Path, optional
-            Direct path to a trained Cellpose model file
-        model_dir : str or Path, optional
-            Directory to search for trained models
-        preview : bool
-            If True, return masks without updating data.rois
+            Segmentation mode. Available options:
+            - "cellpose+": Cellpose with post-processing heuristics (default, requires model)
+            - "cellpose": Raw Cellpose output only (requires model)
+            - "blob": Difference of Gaussian blob detection (no ML required)
+            - "watershed": Watershed segmentation (no ML required)
+            - "flood_fill": IGOR-style region growing (no ML required)
         overwrite : bool
-            If True, overwrite existing ROIs in H5 file
-        **kwargs
-            Additional parameters (see pygor.segmentation.segment_rois for full list)
+            If True, overwrite existing ROIs. Default: True
+        verbose : bool
+            Print progress messages. Default: True
+        plot : bool
+            Show segmentation result overlaid on input image. Default: False
+            Displays 3-panel figure: input image, ROI masks, and overlay.
+            Works for all segmentation modes.
+        roi_order : str or None
+            Spatial ordering for ROI numbering. Default: "LR"
+            - "LR": Left-to-right (x primary, y as tiebreaker)
+            - "TB": Top-to-bottom (y primary, x as tiebreaker)
+            - None: Original detection order
+
+        Cellpose Parameters (mode="cellpose" or "cellpose+")
+        ----------------------------------------------------
+        model_path : str or Path
+            Direct path to a trained Cellpose model file
+        model_dir : str or Path
+            Directory to search for trained models
+        diameter : float
+            Expected cell diameter in pixels. None for auto-detect
+        flow_threshold : float
+            Flow error threshold (default: 0.9)
+        cellprob_threshold : float
+            Cell probability threshold (default: 0.5)
+        min_size : int
+            Minimum ROI size in pixels (default: 2)
+
+        Post-processing Parameters (mode="cellpose+" only)
+        --------------------------------------------------
+        split_large : bool
+            Split large ROIs using watershed (default: True)
+        size_multiplier : float
+            ROIs larger than median * this are split (default: 1.5)
+        min_peak_distance : int
+            Min distance between peaks when splitting (default: 1)
+        min_size_after_split : int
+            Remove split fragments smaller than this (default: 4)
+        shrink_iterations : int
+            Erosion iterations to shrink ROIs (default: 1, 0 to disable)
+        shrink_size_threshold : int
+            Only shrink ROIs larger than this (default: 30)
+
+        Lightweight Parameters (mode="watershed", "flood_fill", "blob")
+        ---------------------------------------------------------------
+        input_mode : str
+            Which image representation to use:
+            - "combined": correlation * average (default, recommended)
+            - "correlation": correlation projection only
+            - "average": mean image only
+            - "std": standard deviation image
+            Note: "correlation" and "combined" require compute_correlation_projection() first
+
+        Shared Preprocessing (mode="watershed", "flood_fill", "blob")
+        -------------------------------------------------------------
+        Image enhancement (optional, enabled by default for blob):
+            unsharp_radius : float
+                Radius for unsharp masking (default: None for watershed/flood_fill, 1.0 for blob)
+            unsharp_amount : float
+                Strength of sharpening (default: None for watershed/flood_fill, 2.5 for blob)
+                Both must be set to enable enhancement.
+
+        Anatomy masking (excludes background/border regions):
+            anatomy_threshold : str or float
+                'otsu' for automatic, float for manual (default: None for watershed/flood_fill, 'otsu' for blob)
+                Set to 'otsu' to enable automatic anatomy masking.
+            anatomy_thresh_mult : float
+                Multiply threshold by this, lower = more permissive (default: 0.2)
+            erode_iterations : int
+                Erode mask to exclude edge regions (default: 1, 0 to disable)
+
+        Watershed Parameters (mode="watershed")
+        ---------------------------------------
+        threshold : float
+            Intensity threshold for foreground (default: 0.1)
+        min_distance : int
+            Minimum distance between seed peaks (default: 1)
+        gap_pixels : int
+            Erosion iterations to create gaps between ROIs (default: 2)
+        min_size_to_shrink : int
+            ROIs smaller than this won't be eroded (default: 10)
+        min_roi_size : int
+            Remove ROIs smaller than this (default: 3)
+
+        Flood Fill Parameters (mode="flood_fill")
+        -----------------------------------------
+        threshold : float
+            Intensity threshold for foreground (default: 0.15)
+        min_distance : int
+            Minimum distance between seed peaks (default: 1)
+        max_size : int
+            Maximum pixels per ROI (default: 20)
+        drop_fraction : float
+            Stop growing when intensity < peak * this (default: 0.2)
+        min_gap : int
+            Minimum gap from other ROIs in pixels (default: 0)
+        min_roi_size : int
+            Remove ROIs smaller than this (default: 3)
+
+        Blob Detection Parameters (mode="blob")
+        ---------------------------------------
+        Image enhancement:
+            unsharp_radius : float
+                Radius for unsharp masking (default: 1.0, range: 0.5-2.0)
+            unsharp_amount : float
+                Strength of sharpening (default: 2.5, range: 1.0-5.0)
+
+        Blob detection:
+            min_sigma : float
+                Minimum sigma for DoG, controls min blob size (default: 1)
+            max_sigma : float
+                Maximum sigma for DoG, controls max blob size (default: 2)
+            threshold : float
+                Detection threshold, lower = more blobs (default: 0.01)
+            eliminate_overlap : float
+                Overlap fraction before DoG merges (default: 1.0 = no merging)
+            merge_overlap : float
+                Merge if overlap > this fraction of smaller blob (default: 0.6)
+
+        Anatomy masking (exclude border regions):
+            anatomy_threshold : str or float
+                'otsu' for automatic, or float for manual (default: 'otsu')
+            anatomy_thresh_mult : float
+                Multiply threshold by this, lower = more permissive (default: 0.2)
+            erode_iterations : int
+                Erode mask to exclude edge blobs (default: 1, 0 to disable)
+
+        Mask creation:
+            radius_multiplier : float
+                Scale factor for blob radius (default: 1.5)
+            min_radius : float
+                Minimum radius in pixels (default: 1)
 
         Returns
         -------
-        masks : ndarray (only if preview=True)
-            ROI mask in pygor format
+        masks : ndarray
+            ROI mask in pygor format (background=1, ROIs=-1,-2,-3...)
 
         Examples
         --------
-        >>> data.segment_rois(model_dir="./models/synaptic")
-        >>> masks = data.segment_rois(model_dir="./models/synaptic", preview=True)
+        >>> # Cellpose with trained model
+        >>> data.segment_rois(mode="cellpose+", model_dir="./models/synaptic")
+
+        >>> # Blob detection (no ML) - good for synaptic terminals
+        >>> data.compute_correlation_projection()
+        >>> data.segment_rois(mode="blob", input_mode="combined", plot=True)
+
+        >>> # Blob with custom parameters
+        >>> data.segment_rois(mode="blob", min_sigma=1.5, max_sigma=3, threshold=0.02, plot=True)
+
+        >>> # Watershed segmentation
+        >>> data.segment_rois(mode="watershed", input_mode="average", threshold=0.15)
+
+        >>> # Enable anatomy masking for watershed/flood_fill (excludes background)
+        >>> data.segment_rois(mode="watershed", anatomy_threshold='otsu')
+
+        >>> # Enable image enhancement for weak signals
+        >>> data.segment_rois(mode="flood_fill", unsharp_radius=1.0, unsharp_amount=2.5)
+
+        >>> # Using different image representations
+        >>> data.segment_rois(mode="blob", input_mode="correlation")  # correlation only
+        >>> data.segment_rois(mode="blob", input_mode="std")  # standard deviation
         """
         from pygor.segmentation import segment_rois as _segment_rois
         roi_mask = _segment_rois(self, mode=mode, overwrite=overwrite, **kwargs)
@@ -1670,7 +1817,7 @@ class Core:
                 print("\nRecomputing traces, snippets, and averages for new ROIs...")
 
                 # Compute both raw and z-normalized traces
-                self.compute_traces_from_rois(overwrite=True)
+                self.extract_traces_from_rois(overwrite=True)
 
                 # Compute snippets and averages
                 self.compute_snippets_and_averages(overwrite=True)
@@ -1750,7 +1897,7 @@ class Core:
 
             n_rois, n_frames = traces_raw.shape
 
-            # Compute z-scores using same baseline logic as compute_traces_from_rois()
+            # Compute z-scores using same baseline logic as extract_traces_from_rois
             traces_znorm = np.zeros_like(traces_raw)
 
             # Get baseline parameters
@@ -1800,7 +1947,7 @@ class Core:
         else:
             # SAVED MODE: Use existing computed traces
             if self.traces_znorm is None:
-                print("No traces available - call compute_traces_from_rois() first or provide roi_mask and images for preview")
+                print("No traces available - call extract_traces_from_rois first or provide roi_mask and images for preview")
                 return
 
             # Check if traces shape matches current ROI count (staleness check)
@@ -1809,7 +1956,7 @@ class Core:
                 trace_roi_count = self.traces_znorm.shape[0]  # First dimension is n_rois
                 if trace_roi_count != current_roi_count:
                     print(f"WARNING: Trace count ({trace_roi_count}) doesn't match ROI count ({current_roi_count}).")
-                    print("Traces may be stale from H5 file. Restart kernel or call compute_traces_from_rois(overwrite=True).")
+                    print("Traces may be stale from H5 file. Restart kernel or call extract_traces_from_rois(overwrite=True).")
 
             traces_plot = self.traces_znorm  # Already (n_rois, n_frames) from IGOR convention
             avg_img = np.mean(self.images, axis=0)
@@ -1846,36 +1993,56 @@ class Core:
         plt.tight_layout()
         plt.show()
 
-    def compute_correlation_projection(self, include_diagonals=True, n_jobs=-1, overwrite=False, force_recompute=False):
+    def compute_correlation_projection(
+        self,
+        include_diagonals: bool = True,
+        n_jobs: int = -1,
+        timecompress: int = 1,
+        binpix: int = 1,
+        overwrite: bool = False,
+        force_recompute: bool = False,
+    ):
         """
         Compute pixel-wise temporal correlation with neighboring pixels.
 
-        This creates a correlation map useful for visualizing functional connectivity
-        in 2-photon calcium imaging data. Each pixel's correlation is computed as the
-        average correlation coefficient with its immediate neighbors (4 or 8 neighbors).
+        Creates a correlation map useful for visualizing functional connectivity
+        in 2-photon calcium imaging data. Each pixel's correlation is computed as
+        the average correlation coefficient with its immediate neighbors.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         include_diagonals : bool, optional
             If True, uses 8-neighbor connectivity (including diagonals).
-            If False, uses 4-neighbor connectivity (only cardinal directions).
+            If False, uses 4-neighbor connectivity (cardinal directions only).
             Default: True
         n_jobs : int, optional
             Number of parallel jobs to run. -1 uses all available CPUs.
             Default: -1
+        timecompress : int, optional
+            Temporal downsampling factor. Takes every Nth frame before computing
+            correlations. This reduces noise and speeds up computation.
+            Default: 1 (no downsampling)
+        binpix : int, optional
+            Spatial binning factor. Pixels are averaged in binpix x binpix
+            blocks before computing correlations. The result is expanded back to
+            original resolution. Dramatically speeds up computation.
+            Default: 1 (no binning)
         overwrite : bool, optional
             If True, saves the result to H5 file, overwriting existing data.
             Default: False
         force_recompute : bool, optional
             If True, recomputes even if correlation_projection already exists.
-            Useful for testing or when you want to recompute without saving to H5.
             Default: False
 
-        Returns:
-        --------
+        Returns
+        -------
         np.ndarray
             Correlation projection with shape (height, width).
             Values range from -1 to 1, representing average correlation with neighbors.
+
+        See Also
+        --------
+        pygor.core.calculations.compute_correlation_projection : Standalone function
         """
         # Check if already computed and not forcing recompute
         if not force_recompute and not overwrite and self.correlation_projection is not None:
@@ -1885,55 +2052,14 @@ class Core:
         if self.images is None:
             raise ValueError("No image data available. Cannot compute correlation projection.")
 
-        # Get image dimensions
-        images = self.images
-        n_frames, height, width = images.shape
-
-        # Define neighbor offsets
-        if include_diagonals:
-            # 8-connectivity (all surrounding pixels)
-            neighbor_offsets = [(-1, -1), (-1, 0), (-1, 1),
-                              (0, -1),           (0, 1),
-                              (1, -1),  (1, 0),  (1, 1)]
-        else:
-            # 4-connectivity (cardinal directions only)
-            neighbor_offsets = [(-1, 0), (0, -1), (0, 1), (1, 0)]
-
-        def compute_pixel_correlation(y, x):
-            """Compute correlation for a single pixel with its neighbors."""
-            pixel_trace = images[:, y, x]
-            correlations = []
-
-            for dy, dx in neighbor_offsets:
-                ny, nx = y + dy, x + dx
-                # Check if neighbor is within bounds
-                if 0 <= ny < height and 0 <= nx < width:
-                    neighbor_trace = images[:, ny, nx]
-                    # Compute Pearson correlation
-                    corr = np.corrcoef(pixel_trace, neighbor_trace)[0, 1]
-                    if not np.isnan(corr):
-                        correlations.append(corr)
-
-            # Return mean correlation with neighbors
-            return np.mean(correlations) if correlations else 0.0
-
-        # Create list of all pixel coordinates
-        pixel_coords = [(y, x) for y in range(height) for x in range(width)]
-
-        # Compute correlations in parallel
-        if n_jobs == 1 or len(pixel_coords) <= 100:
-            # Sequential computation for small images or when explicitly requested
-            correlation_values = [compute_pixel_correlation(y, x) for y, x in pixel_coords]
-        else:
-            # Parallel computation using joblib
-            from joblib import Parallel, delayed
-            print(f"Computing correlation projection using {n_jobs if n_jobs > 0 else 'all'} CPU cores...")
-            correlation_values = Parallel(n_jobs=n_jobs, verbose=1)(
-                delayed(compute_pixel_correlation)(y, x) for y, x in pixel_coords
-            )
-
-        # Reshape to 2D image
-        correlation_projection = np.array(correlation_values).reshape(height, width)
+        # Call standalone function
+        correlation_projection = pygor.core.calculations.compute_correlation_projection(
+            images=self.images,
+            include_diagonals=include_diagonals,
+            n_jobs=n_jobs,
+            timecompress=timecompress,
+            binpix=binpix,
+        )
 
         # Save to object attribute
         self.correlation_projection = correlation_projection
@@ -1948,7 +2074,7 @@ class Core:
 
         return correlation_projection
 
-    def compute_traces_from_rois(self, overwrite=False):
+    def extract_traces_from_rois(self, overwrite=False):
         """
         Compute ROI traces from images and ROI mask.
 
@@ -1975,7 +2101,7 @@ class Core:
         # Use pygor.core.gui.methods parallel extraction (fast, handles uint16 overflow)
         import pygor.core.gui.methods
 
-        print(f"Computing traces using parallel extraction...")
+        print("Extracting traces using parallel processing...")
 
         # Extract raw traces using the fast parallel method
         # Returns shape (n_rois, n_frames) - IGOR convention
@@ -2028,9 +2154,11 @@ class Core:
         # Set both attributes
         self.traces_raw = traces_raw.astype(np.float32)
         self.traces_znorm = traces_znorm.astype(np.float32)
-
+        
+        print("Z-normalization complete. Raw and z-normalized traces available: traces_raw, traces_znorm")
+        
         # Save to H5 if requested
-        if overwrite:
+        if overwrite and self.filename.suffix == '.h5':
             success_raw = self.update_h5_key('Traces0_raw', self.traces_raw, overwrite=True)
             success_znorm = self.update_h5_key('Traces0_znorm', self.traces_znorm, overwrite=True)
             if success_raw and success_znorm:
@@ -2039,6 +2167,16 @@ class Core:
                 print("Warning: Some traces failed to save to H5 file")
 
         return self.traces_raw, self.traces_znorm
+
+    def compute_traces_from_rois(self):
+        """
+        Deprecated method. Use extract_traces_from_rois instead.
+        """
+        warnings.warn(
+            "compute_traces_from_rois is deprecated. Use extract_traces_from_rois instead.",
+            DeprecationWarning,
+        )
+        return self.extract_traces_from_rois()
 
     def compute_snippets_and_averages(self, overwrite=False):
         """
@@ -2063,7 +2201,7 @@ class Core:
         # Check prerequisites
         if self.traces_raw is None:
             print("Traces not available, computing them now...")
-            self.compute_traces_from_rois(overwrite=overwrite)
+            self.extract_traces_from_rois(overwrite=overwrite)
 
         if self.triggertimes is None:
             raise ValueError("Triggertimes not available. Cannot compute snippets.")
@@ -2307,14 +2445,29 @@ class Core:
         images_to_average = []
         for frame in rep_start_frames[:reps]:
             images_to_average.append(self.images[frame : frame + rep_delta])
-        images_to_average = np.concatenate(images_to_average, axis=0)
+        if reps <= 0:
+            raise ValueError(
+                "No full repetitions available for averaging. Check trigger settings or skipping parameters."
+            )
+        # Ensure all repetitions have equal length before stacking
+        min_len = min(arr.shape[0] for arr in images_to_average)
+        if min_len == 0:
+            raise ValueError(
+                "One or more repetitions have zero frames; cannot compute average."
+            )
+        if any(arr.shape[0] != min_len for arr in images_to_average):
+            warnings.warn(
+                "Unequal repetition lengths detected; trimming to shortest repetition for averaging."
+            )
+        images_to_average = np.stack(
+            [arr[:min_len] for arr in images_to_average], axis=0
+        )
         # Print results
         print(
             f"{len(triggers_frames)} triggers with a trigger_mode of {self.trigger_mode} gives {reps} full repetitions of {rep_delta} frames each."
         )
         # Average the images
-        split_arr = np.array(np.split(images_to_average, reps))
-        avg_movie = np.average(split_arr, axis=0)
+        avg_movie = np.average(images_to_average, axis=0)
         return avg_movie
 
     def get_average_markers(self):

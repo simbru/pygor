@@ -1,7 +1,4 @@
-import threading
-import time
 import logging
-import sys
 import numpy as np
 from scipy.signal import savgol_filter
 from qtpy.QtCore import QEventLoop
@@ -10,13 +7,10 @@ from skimage.draw import polygon
 from IPython import get_ipython
 import matplotlib.pyplot as plt
 import napari
-import napari
 from qtpy.QtWidgets import QApplication
 from qtpy.QtCore import QEventLoop
 import pygor.strf.spatial
 from joblib import Parallel, delayed
-import multiprocessing as mp
-
 
 def _fetch_traces_parallel(img_stack, roi_mask):
     """
