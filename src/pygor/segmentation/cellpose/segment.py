@@ -110,6 +110,7 @@ def run_cellpose_inference(
     image,
     model_path=None,
     model_dir=None,
+    model_type="cyto3",
     diameter=None,
     flow_threshold=0.9,
     cellprob_threshold=0.5,
@@ -126,6 +127,10 @@ def run_cellpose_inference(
         Direct path to a trained model file
     model_dir : str or Path, optional
         Directory to search for the latest model
+    model_type : str
+        Pretrained model name to use if no custom model specified.
+        Cellpose v4 defaults to "cpsam"; other names must be added as GUI models.
+        Default: "cyto3"
     diameter : float, optional
         Expected cell diameter in pixels (None for auto-detect)
     flow_threshold : float
@@ -147,9 +152,15 @@ def run_cellpose_inference(
         - 'auto_diameter': Auto-detected diameter (if diameter=None)
     """
     # Load model
-    model, model_name = load_cellpose_model(
-        model_path=model_path, model_dir=model_dir, gpu=gpu
-    )
+    print("Loading Cellpose model...")
+    if model_path is not None:
+        model, model_name = load_cellpose_model(
+            model_path=model_path, model_dir=model_dir, gpu=gpu
+        )
+    else:
+        print("  No custom model specified, using Cellpose v4 default model")
+        model_name = "cpsam"
+        model = models.CellposeModel(gpu=gpu)
 
     # Ensure image is float32
     image = np.asarray(image, dtype=np.float32)
@@ -173,17 +184,17 @@ def run_cellpose_inference(
         "auto_diameter": auto_diameter,
         "model_name": model_name,
     }
-
     return results
-
 
 def segment(
     image,
     *,
     model_path=None,
     model_dir=None,
+    model_type="cyto3",
     postprocess=True,
     verbose=True,
+    plot=False,
     **kwargs,
 ):
     """Segment an image using Cellpose.
@@ -199,6 +210,10 @@ def segment(
         Direct path to a trained model file
     model_dir : str or Path, optional
         Directory to search for the latest model
+    model_type : str
+        Pretrained model name to use if no custom model specified.
+        Cellpose v4 defaults to "cpsam"; other names must be added as GUI models.
+        Default: "cyto3"
     postprocess : bool
         If True, apply splitting/shrinking heuristics (default: True)
     verbose : bool
@@ -251,10 +266,14 @@ def segment(
     if verbose:
         print("Running Cellpose segmentation...")
 
+    if model_path is None:
+        model_path = find_latest_model(model_dir) if model_dir is not None else None
+
     results = run_cellpose_inference(
         image,
         model_path=model_path,
         model_dir=model_dir,
+        model_type=model_type,
         **cellpose_params,
     )
 
@@ -282,5 +301,10 @@ def segment(
             )
             if verbose:
                 print(f"  Applied ROI shrinking ({shrink_iterations} iteration(s))")
+
+    # Plot if requested
+    if plot:
+        from pygor.segmentation.plotting import plot_segmentation
+        plot_segmentation(image, masks, input_mode="average", method="cellpose")
 
     return masks

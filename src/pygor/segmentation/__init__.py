@@ -13,6 +13,7 @@ Available modes:
     - "cellpose": Raw Cellpose output only
     - "watershed": Lightweight watershed segmentation (no ML required)
     - "flood_fill": IGOR-style region growing (no ML required)
+    - "blob": Difference of Gaussian blob detection (no ML required)
 
 To add new segmentation methods, create a submodule with a segment() function
 and add an entry to _METHODS below.
@@ -31,6 +32,7 @@ _METHODS = {
     "cellpose+": ("pygor.segmentation.cellpose", True, False),
     "watershed": ("pygor.segmentation.lightweight", False, True),
     "flood_fill": ("pygor.segmentation.lightweight", False, True),
+    "blob": ("pygor.segmentation.blob", False, True),
 }
 
 
@@ -66,6 +68,7 @@ def segment_rois(
         - "cellpose": Raw Cellpose output only
         - "watershed": Lightweight watershed segmentation (no ML required)
         - "flood_fill": IGOR-style region growing (no ML required)
+        - "blob": Difference of Gaussian blob detection (no ML required)
     model_path : str or Path, optional
         Direct path to a trained model file (Cellpose modes only)
     model_dir : str or Path, optional
@@ -76,6 +79,13 @@ def segment_rois(
         If True, print progress messages
     **kwargs
         Additional parameters passed to the segmentation method.
+
+        Common parameters (all modes):
+        - plot : bool (default: False) - show segmentation overlaid on input image
+        - roi_order : str (default: "LR") - spatial ordering for ROI numbering:
+            - "LR": Left-to-right (x primary, y tiebreaker)
+            - "TB": Top-to-bottom (y primary, x tiebreaker)
+            - None: Original detection order
 
         Cellpose parameters:
         - diameter : float (default: None, auto-detect)
@@ -100,6 +110,28 @@ def segment_rois(
         - max_size : int (flood_fill only, default: 20)
         - drop_fraction : float (flood_fill only, default: 0.2)
 
+        Image enhancement (for mode="watershed", "flood_fill", "blob"):
+        - unsharp_radius : float (default: None for watershed/flood_fill, 1.0 for blob)
+        - unsharp_amount : float (default: None for watershed/flood_fill, 2.5 for blob)
+
+        Anatomy masking (for mode="watershed", "flood_fill", "blob"):
+        - anatomy_threshold : str or float (default: None for watershed/flood_fill, 'otsu' for blob)
+        - anatomy_thresh_mult : float (default: 0.2)
+        - erode_iterations : int (default: 1)
+
+        Blob detection parameters (for mode="blob"):
+        - input_mode : str (default: "combined")
+        - unsharp_radius : float (default: 1.0)
+        - unsharp_amount : float (default: 2.5)
+        - min_sigma : float (default: 1)
+        - max_sigma : float (default: 2)
+        - threshold : float (default: 0.01)
+        - merge_overlap : float (default: 0.6)
+        - anatomy_threshold : str or float (default: 'otsu')
+        - anatomy_thresh_mult : float (default: 0.2)
+        - radius_multiplier : float (default: 1.5)
+        - min_radius : float (default: 1)
+
     Returns
     -------
     masks : ndarray
@@ -118,6 +150,27 @@ def segment_rois(
     if data.rois is not None and not overwrite:
         warnings.warn("ROIs already exist. Use overwrite=True to replace.")
         return None
+
+    # Extract common parameters before passing kwargs to segment functions
+    roi_order = kwargs.pop("roi_order", "LR")
+    plot = kwargs.pop("plot", False)  # Handle plotting here, after relabeling
+    input_mode = kwargs.get("input_mode", "combined")  # Keep in kwargs but save for plotting
+
+    # Save enhancement parameters for plotting (they stay in kwargs for segment())
+    # These need to be applied to plot image so user sees what was actually segmented
+    # Apply mode-specific defaults (blob has enhancement/masking enabled by default)
+    if mode == "blob":
+        # Blob defaults: enhancement and anatomy masking ON
+        unsharp_radius = kwargs.get("unsharp_radius", 1.0)
+        unsharp_amount = kwargs.get("unsharp_amount", 2.5)
+        anatomy_threshold = kwargs.get("anatomy_threshold", "otsu")
+    else:
+        # Watershed/flood_fill defaults: enhancement and anatomy masking OFF unless specified
+        unsharp_radius = kwargs.get("unsharp_radius")
+        unsharp_amount = kwargs.get("unsharp_amount")
+        anatomy_threshold = kwargs.get("anatomy_threshold")
+    anatomy_thresh_mult = kwargs.get("anatomy_thresh_mult", 0.2)
+    erode_iterations = kwargs.get("erode_iterations", 1)
 
     # Get method
     if mode not in _METHODS:
@@ -167,12 +220,64 @@ def segment_rois(
     # Convert to pygor format using shared mask utilities
     pygor_mask = masks.to_pygor(raw_masks)
 
-    # Clean up ROI labels to be consecutive
-    pygor_mask = masks.relabel_pygor_consecutive(pygor_mask)
+    # Clean up ROI labels to be consecutive with spatial ordering
+    pygor_mask = masks.relabel_pygor_consecutive(pygor_mask, roi_order=roi_order)
 
     n_final = len(np.unique(pygor_mask)) - 1  # -1 for background
     if verbose:
         print(f"  Final ROI count: {n_final}")
+
+    # Plot if requested (after relabeling so ROI numbers reflect spatial order)
+    if plot:
+        from pygor.segmentation.plotting import plot_segmentation
+        from pygor.segmentation.preprocessing import (
+            prepare_image,
+            enhance_unsharp,
+            create_anatomy_mask,
+        )
+
+        # Use the input_mode we saved earlier (for lightweight methods)
+        # Cellpose uses average stack, so override for those modes
+        plot_input_mode = input_mode if pass_data_object else "average"
+
+        # Get image for plotting based on input_mode
+        try:
+            plot_img, _ = prepare_image(data, input_mode=plot_input_mode)
+        except (ValueError, AttributeError):
+            # Fallback to average stack
+            if data.average_stack is not None:
+                plot_img = data.average_stack
+            elif data.images is not None:
+                plot_img = data.images.mean(axis=0)
+            else:
+                plot_img = None
+
+        if plot_img is not None:
+            # Apply same enhancement as segmentation so user sees what was actually used
+            if unsharp_radius is not None and unsharp_amount is not None:
+                plot_img = enhance_unsharp(plot_img, radius=unsharp_radius, amount=unsharp_amount)
+
+            # Create anatomy mask overlay if it was used
+            anatomy_mask_overlay = None
+            if anatomy_threshold is not None:
+                anatomy_mask_overlay = create_anatomy_mask(
+                    plot_img,
+                    method=anatomy_threshold,
+                    thresh_mult=anatomy_thresh_mult,
+                    erode_iterations=erode_iterations,
+                )
+
+            # Convert pygor mask back to cellpose format for plotting (bg=0, rois=1,2,3...)
+            plot_mask = masks.from_pygor(pygor_mask)
+            was_enhanced = unsharp_radius is not None and unsharp_amount is not None
+            plot_segmentation(
+                plot_img,
+                plot_mask,
+                input_mode=plot_input_mode,
+                method=mode,
+                anatomy_mask=anatomy_mask_overlay,
+                enhanced=was_enhanced,
+            )
 
     return pygor_mask
 

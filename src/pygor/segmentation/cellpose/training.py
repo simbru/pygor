@@ -12,7 +12,7 @@ Key points:
 import numpy as np
 from pathlib import Path
 import pygor.load
-from pygor.segmentation.cellpose.masks import from_pygor_relabeled as convert_pygor_mask_to_cellpose
+from pygor.segmentation.masks import from_pygor_relabeled as convert_pygor_mask_to_cellpose
 
 
 def validate_mask(mask, name="mask"):
