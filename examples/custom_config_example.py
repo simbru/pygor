@@ -12,7 +12,7 @@ import pygor.load
 
  #%%`
 # Path to example data - update this to your file
-EXAMPLE_PATH = r"FullFieldFlash_4_colour_demo.smp"
+EXAMPLE_PATH = r"FullFieldFlash_5_colour_demo.smp"
 CUSTOM_CONFIG = r"configs\example.toml" # Specify custom config if needed
 
 
@@ -29,7 +29,7 @@ obj.register(plot=True)
 #%%
 # obj.segment_rois()
 
-# obj.compute_traces_from_rois()
+# obj.extract_traces_from_rois
 
 
 
