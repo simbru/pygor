@@ -42,7 +42,7 @@ obj.register(batch_size=10, upsample_factor=5, n_reference_frames=10000, force =
 
 #%%
 obj.segment_rois(model_path = r"C:\Users\SimenLab\Git_repos\pygor\models\synaptic\cellpose_rois")
-obj.compute_traces_from_rois()
+obj.extract_traces_from_rois
 
 #%%
 

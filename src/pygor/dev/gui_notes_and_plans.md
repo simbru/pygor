@@ -55,7 +55,7 @@ Open Recording A → Register → Draw ROIs → Extract Traces → Save
 |-----------|----------|-------|
 | **ROI Drawing** | `core.gui.methods.NapariRoiPrompt` | Full Napari GUI, polygon/ellipse, real-time traces |
 | **ROI I/O** | `core.gui.methods` | Load/save to H5, format conversion |
-| **Trace Extraction** | `core.gui.methods.compute_traces_from_rois()` | Parallel, shared memory, overflow-safe |
+| **Trace Extraction** | `core.gui.methods.extract_traces_from_rois` | Parallel, shared memory, overflow-safe |
 | **IPL Depth Selection** | `core.gui.methods.NapariDepthPrompt` | Interactive boundary drawing |
 | **H5 Updates** | `core.methods.update_h5_key()` | Append/overwrite existing H5 |
 | **STRF Spatial Alignment** | `strf.spatial_alignment` | Correlation, Jaccard, centroid comparison |

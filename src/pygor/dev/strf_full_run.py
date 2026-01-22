@@ -19,7 +19,7 @@ obj.register()
 
 obj.segment_rois(mode="cellpose+", overwrite=True, verbose=True, model_path = r"models\synaptic\cellpose_rois")
 
-obj.compute_traces_from_rois()
+obj.extract_traces_from_rois
 
 noise_arr_path = r"C:\Users\SimenLab\OneDrive - University of Sussex\Desktop\jitternoise_SINGLEcolour_100000x6x10_0.25_1.hdf5"
 with h5py.File(noise_arr_path, "r") as f:

@@ -37,7 +37,7 @@ obj.register()
 #%%
 obj.segment_rois(model_path=r"C:\Users\SimenLab\Git_repos\pygor\models\synaptic\cellpose_rois",
     diameter=None, split_large=True, cellprob_threshold=2)
-obj.compute_traces_from_rois()
+obj.extract_traces_from_rois
 
 #%%
 noise_arr_path = r"C:\Users\SimenLab\OneDrive - University of Sussex\Desktop\jitternoise_SINGLEcolour_100000x6x10_0.25_1.hdf5"

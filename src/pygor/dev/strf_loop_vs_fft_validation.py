@@ -22,7 +22,7 @@ obj.register()
 obj_h5 = pygor.load.STRF(load_h5)
 obj.rois = obj_h5.rois  # Ensure same ROIs for fair comparison
 
-obj.compute_traces_from_rois()
+obj.extract_traces_from_rois
 
 # Load noise array
 noise_arr_path = r"C:\Users\SimenLab\OneDrive - University of Sussex\Desktop\jitternoise_SINGLEcolour_100000x6x10_0.25_1.hdf5"
