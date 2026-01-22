@@ -97,25 +97,54 @@ def from_pygor_relabeled(pygor_mask):
     return labeled_mask.astype(np.uint16), n_components
 
 
-def relabel_pygor_consecutive(pygor_mask):
+def relabel_pygor_consecutive(pygor_mask, roi_order="LR"):
     """Ensure ROI labels in a pygor mask are consecutive -1, -2, -3...
 
     After post-processing (splitting, merging), ROI labels may have gaps.
-    This function relabels them to be consecutive.
+    This function relabels them to be consecutive, optionally with spatial ordering.
 
     Parameters
     ----------
     pygor_mask : ndarray
         Mask in pygor format (may have non-consecutive labels)
+    roi_order : str or None
+        Spatial ordering mode for ROI numbering:
+        - "LR": Left-to-right (x primary, y as tiebreaker) - default
+        - "TB": Top-to-bottom (y primary, x as tiebreaker)
+        - None: Original detection order (numerical order from np.unique)
 
     Returns
     -------
     relabeled_mask : ndarray
-        Mask with consecutive ROI labels
+        Mask with consecutive ROI labels ordered spatially
     """
+    from scipy.ndimage import center_of_mass
+
     unique_labels = np.unique(pygor_mask)
     unique_labels = unique_labels[unique_labels != 1]  # Remove background
 
+    if len(unique_labels) == 0:
+        return pygor_mask
+
+    if roi_order is not None:
+        # Calculate centroid for each ROI
+        centroids = []
+        for lbl in unique_labels:
+            # center_of_mass returns (y, x) for 2D arrays
+            cy, cx = center_of_mass(pygor_mask == lbl)
+            centroids.append((lbl, cx, cy))
+
+        # Sort by spatial position
+        if roi_order == "LR":
+            # Primary: x (left-to-right), Secondary: y (top-to-bottom)
+            centroids.sort(key=lambda c: (c[1], c[2]))
+        elif roi_order == "TB":
+            # Primary: y (top-to-bottom), Secondary: x (left-to-right)
+            centroids.sort(key=lambda c: (c[2], c[1]))
+
+        unique_labels = np.array([c[0] for c in centroids])
+
+    # Remap to consecutive -1, -2, -3...
     remapped = pygor_mask.copy()
     for i, old_label in enumerate(unique_labels, start=1):
         remapped[pygor_mask == old_label] = -i

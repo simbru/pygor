@@ -13,6 +13,14 @@ from scipy.ndimage import binary_erosion, binary_dilation, generate_binary_struc
 from skimage.segmentation import watershed
 from skimage.feature import peak_local_max
 
+from pygor.segmentation.preprocessing import (
+    normalize,
+    enhance_unsharp,
+    create_anatomy_mask,
+    filter_points_by_mask,
+    prepare_image,
+)
+
 
 def _shrink_rois(masks, iterations=1, min_size_to_shrink=10):
     """
@@ -76,84 +84,6 @@ def _filter_small_rois(masks, min_size=3):
     return result
 
 
-def prepare_image(data, input_mode="combined", artifact_width=None):
-    """
-    Prepare image for segmentation from a Core/STRF object.
-
-    Extracts the appropriate image based on input_mode, normalizes to 0-1,
-    and masks out the light artifact region.
-
-    Parameters
-    ----------
-    data : Core or STRF
-        Pygor data object with images and/or correlation_projection
-    input_mode : str
-        Which image to use:
-        - "correlation": Use correlation_projection
-        - "average": Use average of images stack
-        - "combined": Correlation weighted by average (recommended)
-    artifact_width : int, optional
-        Override artifact width. If None, uses data.params.artifact_width
-
-    Returns
-    -------
-    img : ndarray
-        Normalized image (0-1) with artifact region masked to 0
-    artifact_fill_width : int
-        Number of columns masked (for reference)
-    """
-    # Validate input_mode
-    valid_modes = ("correlation", "average", "std", "combined")
-    if input_mode not in valid_modes:
-        raise ValueError(f"Unknown input_mode: '{input_mode}'. Use one of {valid_modes}")
-    
-    # Check data availability upfront
-    has_images = data.images is not None
-    has_average_stack = data.average_stack is not None
-    has_correlation = data.correlation_projection is not None
-    
-    needs_correlation = input_mode in ("correlation", "combined")
-    needs_images_stack = input_mode == "std"
-    needs_average = input_mode in ("average", "combined")
-    
-    if needs_correlation and not has_correlation:
-        raise ValueError("correlation_projection not available. Call compute_correlation_projection() first.")
-    if needs_images_stack and not has_images:
-        raise ValueError("Images stack required for 'std' mode but not available.")
-    if needs_average and not (has_images or has_average_stack):
-        raise ValueError("No image data available for computing average.")
-
-    # Extract image based on mode
-    if input_mode == "correlation":
-        img = data.correlation_projection.copy()
-    elif input_mode == "average":
-        img = data.images.mean(axis=0)
-    elif input_mode == "std":
-        img = data.images.std(axis=0)
-    elif input_mode == "combined":
-        # Correlation weighted by average (structural + functional)
-        corr = data.correlation_projection.copy()
-        avg = data.images.mean(axis=0)
-        # Normalize each and multiply
-        corr_n = (corr - corr.min()) / (corr.max() - corr.min() + 1e-10)
-        avg_n = (avg - avg.min()) / (avg.max() - avg.min() + 1e-10)
-        img = corr_n * avg_n
-
-    # Normalize to 0-1 BEFORE masking artifact (so artifact doesn't affect scaling)
-    img = (img - img.min()) / (img.max() - img.min() + 1e-10)
-
-    # Mask out light artifact region
-    if artifact_width is None:
-        artifact_width = data.params.artifact_width
-    # IGOR uses inclusive indexing, so artifact_width=2 means pixels 0,1,2 are affected
-    artifact_fill_width = artifact_width + 1
-
-    # Set artifact region to 0 so it won't be segmented
-    img[:, :artifact_fill_width] = 0
-
-    return img.astype(np.float32), artifact_fill_width
-
-
 def segment_watershed(
     img,
     threshold=0.1,
@@ -161,6 +91,7 @@ def segment_watershed(
     gap_pixels=2,
     min_size_to_shrink=10,
     min_roi_size=3,
+    anatomy_mask=None,
 ):
     """
     Watershed segmentation seeded from local maxima.
@@ -179,6 +110,9 @@ def segment_watershed(
         ROIs smaller than this won't be eroded
     min_roi_size : int
         Remove ROIs smaller than this after segmentation
+    anatomy_mask : ndarray (bool), optional
+        Binary mask where True = valid region for segmentation.
+        If provided, only seeds within this mask are used.
 
     Returns
     -------
@@ -188,13 +122,21 @@ def segment_watershed(
     # Threshold to get foreground
     binary = img > threshold
 
+    # Combine with anatomy mask if provided
+    if anatomy_mask is not None:
+        binary = binary & anatomy_mask
+
     # Find local maxima as seeds
     coords = peak_local_max(img, min_distance=min_distance, labels=binary.astype(int))
+
+    # Filter seeds by anatomy mask if provided (extra safety)
+    if anatomy_mask is not None and len(coords) > 0:
+        coords = filter_points_by_mask(coords, anatomy_mask)
 
     # Create marker image
     markers = np.zeros_like(img, dtype=int)
     for i, (y, x) in enumerate(coords, start=1):
-        markers[y, x] = i
+        markers[int(y), int(x)] = i
 
     # Watershed (use negative image so watershed flows toward peaks)
     masks = watershed(-img, markers, mask=binary)
@@ -218,6 +160,7 @@ def segment_flood_fill(
     drop_fraction=0.2,
     min_gap=0,
     min_roi_size=3,
+    anatomy_mask=None,
 ):
     """
     IGOR-style flood fill segmentation (region growing from peaks).
@@ -243,6 +186,10 @@ def segment_flood_fill(
         Minimum gap (in pixels) to maintain from other ROIs (0 to disable)
     min_roi_size : int
         Remove ROIs smaller than this after segmentation
+    anatomy_mask : ndarray (bool), optional
+        Binary mask where True = valid region for segmentation.
+        If provided, only seeds within this mask are used and
+        flood fill is constrained to the mask region.
 
     Returns
     -------
@@ -252,8 +199,16 @@ def segment_flood_fill(
     # Threshold to get foreground
     binary = img > threshold
 
+    # Combine with anatomy mask if provided
+    if anatomy_mask is not None:
+        binary = binary & anatomy_mask
+
     # Find local maxima as seeds
     coords = peak_local_max(img, min_distance=min_distance, labels=binary.astype(int))
+
+    # Filter seeds by anatomy mask if provided
+    if anatomy_mask is not None and len(coords) > 0:
+        coords = filter_points_by_mask(coords, anatomy_mask)
 
     # Sort peaks by intensity (brightest first get priority)
     peak_intensities = img[coords[:, 0], coords[:, 1]]
@@ -330,6 +285,14 @@ def segment(
     input_mode="combined",
     postprocess=False,
     verbose=True,
+    plot=False,
+    # Image enhancement (optional)
+    unsharp_radius=None,
+    unsharp_amount=None,
+    # Anatomy masking (optional)
+    anatomy_threshold=None,
+    anatomy_thresh_mult=0.2,
+    erode_iterations=1,
     **kwargs,
 ):
     """
@@ -352,9 +315,32 @@ def segment(
         Not used for lightweight methods (kept for API consistency)
     verbose : bool
         Print progress messages
-    **kwargs
-        Method-specific parameters:
+    plot : bool
+        If True, display a figure showing the input image, ROI masks, and overlay
 
+    Image Enhancement Parameters (optional)
+    ---------------------------------------
+    unsharp_radius : float, optional
+        Radius for unsharp masking (0.5-2.0 typical). If None, no enhancement.
+    unsharp_amount : float, optional
+        Strength of sharpening (1.0-5.0 typical). If None, no enhancement.
+        Both radius and amount must be set to enable enhancement.
+
+    Anatomy Masking Parameters (optional)
+    -------------------------------------
+    anatomy_threshold : str or float, optional
+        If set, creates an anatomy mask to exclude background regions.
+        - 'otsu': Automatic threshold using Otsu's method
+        - float: Manual threshold value (0-1 range)
+        If None (default), no anatomy masking is applied.
+    anatomy_thresh_mult : float
+        Multiply threshold by this (lower = more permissive). Default: 0.2
+    erode_iterations : int
+        Erode mask to exclude edge regions. Default: 1
+
+    Method-Specific Parameters
+    --------------------------
+    **kwargs
         Common parameters:
         - threshold : float (watershed: 0.1, flood_fill: 0.15)
         - min_distance : int (default: 1)
@@ -383,6 +369,12 @@ def segment(
     >>> obj = pygor.load.Core("recording.h5")
     >>> obj.segment_rois(mode="watershed", input_mode="combined")
 
+    >>> # With anatomy masking to exclude background
+    >>> obj.segment_rois(mode="watershed", anatomy_threshold='otsu')
+
+    >>> # With image enhancement for weak signals
+    >>> obj.segment_rois(mode="flood_fill", unsharp_radius=1.0, unsharp_amount=2.5)
+
     >>> # With raw image
     >>> from pygor.segmentation.lightweight import segment
     >>> masks = segment(my_image, method="flood_fill", threshold=0.2)
@@ -402,7 +394,7 @@ def segment(
         img = np.asarray(image_or_data, dtype=np.float32)
         # Normalize if not already
         if img.max() > 1.0 or img.min() < 0.0:
-            img = (img - img.min()) / (img.max() - img.min() + 1e-10)
+            img = normalize(img)
         # Handle artifact masking for raw images
         artifact_width = kwargs.pop("artifact_width", 0)
         if artifact_width > 0:
@@ -410,6 +402,27 @@ def segment(
             img[:, :artifact_fill_width] = 0
             if verbose:
                 print(f"  Masked artifact region: columns 0-{artifact_fill_width - 1}")
+
+    # Apply optional image enhancement
+    if unsharp_radius is not None and unsharp_amount is not None:
+        if verbose:
+            print(f"Enhancing image (unsharp: r={unsharp_radius}, a={unsharp_amount})...")
+        img = enhance_unsharp(img, radius=unsharp_radius, amount=unsharp_amount)
+
+    # Create optional anatomy mask
+    anatomy_mask = None
+    if anatomy_threshold is not None:
+        if verbose:
+            print(f"Creating anatomy mask (threshold={anatomy_threshold}, mult={anatomy_thresh_mult})...")
+        anatomy_mask = create_anatomy_mask(
+            img,
+            method=anatomy_threshold,
+            thresh_mult=anatomy_thresh_mult,
+            erode_iterations=erode_iterations
+        )
+        mask_coverage = anatomy_mask.sum() / anatomy_mask.size * 100
+        if verbose:
+            print(f"  Anatomy mask covers {mask_coverage:.1f}% of image")
 
     # Extract common parameters
     min_roi_size = kwargs.pop("min_roi_size", 3)
@@ -425,6 +438,7 @@ def segment(
             gap_pixels=kwargs.pop("gap_pixels", 2),
             min_size_to_shrink=kwargs.pop("min_size_to_shrink", 10),
             min_roi_size=min_roi_size,
+            anatomy_mask=anatomy_mask,
         )
     elif method == "flood_fill":
         if verbose:
@@ -437,6 +451,7 @@ def segment(
             drop_fraction=kwargs.pop("drop_fraction", 0.2),
             min_gap=kwargs.pop("min_gap", 0),
             min_roi_size=min_roi_size,
+            anatomy_mask=anatomy_mask,
         )
     else:
         raise ValueError(f"Unknown method: '{method}'. Use 'watershed' or 'flood_fill'")
@@ -448,5 +463,18 @@ def segment(
     n_rois = len(np.unique(masks)) - 1  # -1 for background
     if verbose:
         print(f"  Found {n_rois} ROIs")
+
+    # Plot if requested
+    if plot:
+        from pygor.segmentation.plotting import plot_segmentation
+        was_enhanced = unsharp_radius is not None and unsharp_amount is not None
+        plot_segmentation(
+            img,
+            masks,
+            input_mode=input_mode,
+            method=method,
+            anatomy_mask=anatomy_mask,
+            enhanced=was_enhanced,
+        )
 
     return masks

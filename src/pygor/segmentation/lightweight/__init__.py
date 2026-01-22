@@ -13,8 +13,10 @@ from pygor.segmentation.lightweight.segment import (
     segment,
     segment_watershed,
     segment_flood_fill,
-    prepare_image,
 )
+
+# Import prepare_image from shared preprocessing (for backwards compatibility)
+from pygor.segmentation.preprocessing import prepare_image
 
 # Use shared mask conversion utilities (no cellpose dependency)
 from pygor.segmentation import masks
