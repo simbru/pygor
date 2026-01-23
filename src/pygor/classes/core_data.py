@@ -672,6 +672,7 @@ class Core:
         batch_mode: str = None,
         reference_mode: str = None,
         edge_crop: int = None,
+        ref_plane: np.ndarray = None,
     ) -> dict:
         """
         Apply motion correction (registration) to images in-place.
@@ -723,6 +724,12 @@ class Core:
             Pixels to crop from all edges before cross-correlation (default: 0).
             Useful to exclude edge artifacts from shift computation.
             Does not affect the output dimensions.
+        ref_plane : ndarray, optional
+            External 2D reference image for registration (default: None).
+            If provided, all frames are aligned to this reference instead of
+            computing one from the first n_reference_frames. Useful for
+            cross-experiment alignment where you want multiple recordings
+            in the same coordinate space.
 
         Returns
         -------
@@ -813,6 +820,7 @@ class Core:
             self.images,
             return_shifts=True,
             artifact_width=artifact_width,
+            ref_plane=ref_plane,
             **params,
         )
 
@@ -1541,6 +1549,247 @@ class Core:
             if not bool:
                 print("H5 file key 'ROIs'not updated, due to overwrite=False.")
         
+    def transfer_rois_from(
+        self,
+        source: "Core",
+        *,
+        max_shift: int = 20,
+        upsample_factor: int = 10,
+        projection_mode: str = "mean",
+        plot: bool = False,
+        overwrite: bool = True,
+        extract_traces: bool = False,
+    ) -> dict:
+        """
+        Transfer ROIs from another experiment to this one using image registration.
+
+        This method computes the spatial offset between two recordings of the same
+        field of view and applies that offset to transfer ROI masks from a source
+        experiment (e.g., with good segmentation) to this experiment.
+
+        Parameters
+        ----------
+        source : Core
+            Source data object containing ROIs to transfer. Must have valid
+            `rois` attribute (not None) and `average_stack` or `images`.
+        max_shift : int, optional
+            Maximum expected shift in pixels (default: 20). A warning is raised
+            if the detected shift exceeds this value.
+        upsample_factor : int, optional
+            Subpixel precision factor for phase cross-correlation (default: 10).
+            Higher values increase precision but slow computation.
+        projection_mode : str, optional
+            How to compute reference images for alignment (default: "mean").
+            Options: "mean", "std", "correlation".
+        plot : bool, optional
+            If True, display a 4-panel comparison figure showing alignment quality
+            (default: False).
+        overwrite : bool, optional
+            If True, save transferred ROIs to H5 file if available (default: True).
+        extract_traces : bool, optional
+            If True, automatically extract traces from transferred ROIs (default: False).
+
+        Returns
+        -------
+        dict
+            Transform information with keys:
+            - 'shift': (dy, dx) shift in pixels
+            - 'error': registration error metric (lower is better)
+            - 'num_rois': number of ROIs transferred
+            - 'source_name': name of source recording
+
+        Raises
+        ------
+        ValueError
+            If source has no ROIs or if image dimensions don't match.
+        RuntimeError
+            If source has no image data to use for alignment.
+
+        Examples
+        --------
+        >>> # Transfer ROIs from STRF to OSDS recording
+        >>> data_ref = STRF("strf_recording.smp")
+        >>> data_ref.preprocess()
+        >>> data_ref.segment_rois()
+        >>>
+        >>> data_dir = OSDS("osds_recording.smp")
+        >>> data_dir.preprocess()
+        >>> result = data_dir.transfer_rois_from(data_ref, plot=True)
+        >>> print(f"Shifted by {result['shift']} pixels")
+
+        See Also
+        --------
+        pygor.preproc.registration.transfer_rois : Low-level transfer function
+        update_rois : Update ROIs with a pre-defined mask
+        segment_rois : Automated ROI segmentation
+        """
+        # Import here to avoid circular imports
+        from pygor.preproc.registration import transfer_rois
+
+        # Validate source has ROIs
+        if source.rois is None:
+            raise ValueError(
+                f"Source '{source.name}' has no ROIs. "
+                "Run segment_rois() or draw_rois() on source first."
+            )
+
+        # Get projections for alignment
+        source_proj = self._get_projection_for_alignment(source, projection_mode)
+        target_proj = self._get_projection_for_alignment(self, projection_mode)
+
+        # Validate dimensions match
+        if source_proj.shape != target_proj.shape:
+            raise ValueError(
+                f"Image dimensions don't match: source {source_proj.shape} vs "
+                f"target {target_proj.shape}. Recordings must have the same field of view size."
+            )
+
+        # Call existing transfer_rois function
+        shifted_mask, transform = transfer_rois(
+            roi_mask=source.rois,
+            ref_projection=source_proj,
+            target_projection=target_proj,
+            max_shift=max_shift,
+            upsample_factor=upsample_factor,
+        )
+
+        # Update self with transferred ROIs
+        self.update_rois(shifted_mask, overwrite=overwrite)
+
+        # Optionally extract traces
+        if extract_traces and self.images is not None:
+            self.extract_traces_from_rois(overwrite=overwrite)
+
+        # Build result dict
+        result = {
+            'shift': transform['shift'],
+            'error': transform['error'],
+            'num_rois': self.num_rois,
+            'source_name': source.name,
+        }
+
+        # Plot if requested
+        if plot:
+            self._plot_roi_transfer(source, shifted_mask, transform, projection_mode)
+
+        # Print summary
+        print(f"ROI Transfer complete.\n"
+              f"  Source: {source.name}\n"
+              f"  Shift: (y={result['shift'][0]:.2f}, x={result['shift'][1]:.2f}) pixels\n"
+              f"  Registration error: {result['error']:.4f}\n"
+              f"  ROIs transferred: {result['num_rois']}")
+
+        return result
+
+    def _get_projection_for_alignment(self, data_obj: "Core", mode: str) -> np.ndarray:
+        """Get appropriate projection image for cross-experiment alignment."""
+        if mode == "mean":
+            if data_obj.average_stack is not None:
+                return data_obj.average_stack
+            elif data_obj.images is not None:
+                return data_obj.images.mean(axis=0)
+            else:
+                raise RuntimeError(
+                    f"'{data_obj.name}' has no image data for alignment. "
+                    "Load images or compute average_stack first."
+                )
+        elif mode == "std":
+            if data_obj.images is not None:
+                return data_obj.images.std(axis=0)
+            else:
+                raise RuntimeError(
+                    f"'{data_obj.name}' has no image stack. Cannot compute std projection."
+                )
+        elif mode == "correlation":
+            if hasattr(data_obj, 'correlation_projection') and data_obj.correlation_projection is not None:
+                return data_obj.correlation_projection
+            else:
+                raise RuntimeError(
+                    f"'{data_obj.name}' has no correlation projection. "
+                    "Call compute_correlation_projection() first."
+                )
+        else:
+            raise ValueError(
+                f"Unknown projection_mode: '{mode}'. Options: 'mean', 'std', 'correlation'"
+            )
+
+    def _plot_roi_transfer(
+        self,
+        source: "Core",
+        shifted_mask: np.ndarray,
+        transform: dict,
+        projection_mode: str,
+    ) -> None:
+        """Plot ROI transfer results with before/after comparison."""
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+
+        # Get projections
+        source_proj = self._get_projection_for_alignment(source, projection_mode)
+        target_proj = self._get_projection_for_alignment(self, projection_mode)
+
+        # Shared colormap limits
+        vmin = min(source_proj.min(), target_proj.min())
+        vmax = max(source_proj.max(), target_proj.max())
+
+        # Top-left: Source with original ROIs
+        ax = axes[0, 0]
+        ax.imshow(source_proj, cmap='gray', vmin=vmin, vmax=vmax, origin='lower')
+        self._overlay_rois_on_axis(ax, source.rois, alpha=0.3)
+        ax.set_title(f'Source: {source.name}\n(original ROIs)')
+        ax.axis('off')
+
+        # Top-right: Target projection (for reference)
+        ax = axes[0, 1]
+        ax.imshow(target_proj, cmap='gray', vmin=vmin, vmax=vmax, origin='lower')
+        ax.set_title(f'Target: {self.name}\n({projection_mode} projection)')
+        ax.axis('off')
+
+        # Bottom-left: Overlay showing alignment (red-cyan composite)
+        ax = axes[1, 0]
+        # Create RGB overlay: source=red, target=cyan
+        rgb = np.zeros((*source_proj.shape, 3))
+        source_norm = (source_proj - vmin) / (vmax - vmin + 1e-10)
+        target_norm = (target_proj - vmin) / (vmax - vmin + 1e-10)
+        rgb[:, :, 0] = source_norm  # Red channel = source
+        rgb[:, :, 1] = target_norm  # Green channel = target
+        rgb[:, :, 2] = target_norm  # Blue channel = target (makes cyan)
+        ax.imshow(np.clip(rgb, 0, 1), origin='lower')
+        shift = transform['shift']
+        ax.set_title(f'Alignment overlay (R=source, C=target)\n'
+                     f'Shift: dy={shift[0]:.2f}, dx={shift[1]:.2f} px')
+        ax.axis('off')
+
+        # Bottom-right: Target with transferred ROIs
+        ax = axes[1, 1]
+        ax.imshow(target_proj, cmap='gray', vmin=vmin, vmax=vmax, origin='lower')
+        self._overlay_rois_on_axis(ax, shifted_mask, alpha=0.3)
+        ax.set_title(f'Target with transferred ROIs\n'
+                     f'({self.num_rois} ROIs, error={transform["error"]:.4f})')
+        ax.axis('off')
+
+        plt.tight_layout()
+        plt.show()
+
+    def _overlay_rois_on_axis(self, ax, roi_mask: np.ndarray, alpha: float = 0.3):
+        """Overlay ROI mask on axes with transparent coloring."""
+        # Get unique ROI values (excluding background=1)
+        unique_rois = np.unique(roi_mask)
+        unique_rois = unique_rois[unique_rois < 0]  # Only negative values (ROIs)
+
+        if len(unique_rois) == 0:
+            return
+
+        # Create colored overlay
+        colored = np.zeros((*roi_mask.shape, 4))  # RGBA
+        cmap = matplotlib.colormaps['jet']
+
+        for i, roi_id in enumerate(unique_rois):
+            color = cmap(i / max(len(unique_rois), 1))
+            mask = roi_mask == roi_id
+            colored[mask] = (*color[:3], alpha)
+
+        ax.imshow(colored, origin='lower')
+
     def segment_rois(self, mode="blob", overwrite=True, **kwargs):
         """
         Segment ROIs using automated methods.

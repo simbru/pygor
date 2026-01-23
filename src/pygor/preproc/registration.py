@@ -159,6 +159,7 @@ def register_stack(
     batch_mode: str = "std",
     reference_mode: str = "mean",
     edge_crop: int = 0,
+    ref_plane: Optional[np.ndarray] = None,
 ) -> np.ndarray | Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Register imaging stack using batch-averaged phase cross-correlation.
@@ -218,6 +219,11 @@ def register_stack(
         Pixels to crop from all edges before cross-correlation (default: 0).
         Useful to exclude edge artifacts from shift computation.
         Does not affect the output dimensions.
+    ref_plane : ndarray, optional
+        External 2D reference image for registration (default: None).
+        If provided, all frames are aligned to this reference instead of
+        computing one from the stack. Useful for cross-experiment alignment
+        where you want multiple recordings in the same coordinate space.
 
     Returns
     -------
@@ -257,6 +263,9 @@ def register_stack(
         # Store original artifact region to restore after registration
         artifact_region = stack[:, :, :artifact_width].copy()
         stack = stack[:, :, artifact_width:]
+        # Also crop ref_plane if provided
+        if ref_plane is not None:
+            ref_plane = ref_plane[:, artifact_width:]
 
     # Compute shifts
     shifts, errors = compute_batch_shifts(
@@ -268,6 +277,7 @@ def register_stack(
         batch_mode=batch_mode,
         reference_mode=reference_mode,
         edge_crop=edge_crop,
+        ref_plane=ref_plane,
     )
 
     # Apply shifts
@@ -301,6 +311,7 @@ def compute_batch_shifts(
     batch_mode: str = "std",
     reference_mode: str = "mean",
     edge_crop: int = 0,
+    ref_plane: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Compute registration shifts for batches of frames.
@@ -310,7 +321,7 @@ def compute_batch_shifts(
     stack : ndarray
         3D imaging stack (time, height, width)
     n_reference_frames : int, optional
-        Number of initial frames to average for reference
+        Number of initial frames to average for reference (ignored if ref_plane provided)
     batch_size : int, optional
         Number of frames to average per batch
     upsample_factor : int, optional
@@ -325,10 +336,15 @@ def compute_batch_shifts(
     reference_mode : str, optional
         Projection mode for reference image (default: "mean").
         Mean over many frames gives clean, stable structure.
+        Ignored if ref_plane is provided.
     edge_crop : int, optional
         Pixels to crop from all edges before cross-correlation (default: 0).
         Useful to exclude edge artifacts from shift computation.
         Does not affect the output dimensions.
+    ref_plane : ndarray, optional
+        External 2D reference image for registration (default: None).
+        If provided, all frames are aligned to this reference instead of
+        computing one from the stack. Useful for cross-experiment alignment.
 
     Returns
     -------
@@ -349,8 +365,11 @@ def compute_batch_shifts(
     n_frames = len(stack)
     n_batches = int(np.ceil(n_frames / batch_size))
 
-    # Create reference from initial frames
-    reference = _compute_projection(stack[:n_reference_frames], reference_mode)
+    # Use external reference or create from initial frames
+    if ref_plane is not None:
+        reference = ref_plane.copy()
+    else:
+        reference = _compute_projection(stack[:n_reference_frames], reference_mode)
 
     # Apply edge cropping for shift computation
     if edge_crop > 0:
@@ -559,3 +578,53 @@ def transfer_rois(
     }
 
     return shifted_mask, transform
+
+
+def transfer_rois_between(source, target, *, plot: bool = False, **kwargs) -> dict:
+    """
+    Transfer ROIs from source data object to target data object.
+
+    This is a convenience wrapper around target.transfer_rois_from(source).
+    Use this for scripting or when the function-style API is preferred.
+
+    Parameters
+    ----------
+    source : Core
+        Source data object containing ROIs to transfer. Must have valid
+        `rois` attribute and image data.
+    target : Core
+        Target data object to receive the ROIs. Will be modified in-place.
+    plot : bool, optional
+        If True, display alignment visualization (default: False).
+    **kwargs
+        Additional arguments passed to transfer_rois_from():
+        - max_shift : int (default: 20)
+        - upsample_factor : int (default: 10)
+        - projection_mode : str (default: "mean")
+        - overwrite : bool (default: True)
+        - extract_traces : bool (default: False)
+
+    Returns
+    -------
+    dict
+        Transform information with keys:
+        - 'shift': (dy, dx) shift in pixels
+        - 'error': registration error metric
+        - 'num_rois': number of ROIs transferred
+        - 'source_name': name of source recording
+
+    Examples
+    --------
+    >>> from pygor.preproc import transfer_rois_between
+    >>> result = transfer_rois_between(source=data_ref, target=data_dir, plot=True)
+
+    >>> # Batch transfer to multiple targets
+    >>> for target in [data1, data2, data3]:
+    ...     transfer_rois_between(source=data_ref, target=target)
+
+    See Also
+    --------
+    Core.transfer_rois_from : Method-style API on data objects
+    transfer_rois : Low-level function for mask transfer
+    """
+    return target.transfer_rois_from(source, plot=plot, **kwargs)
