@@ -154,7 +154,7 @@ def segment_rois(
     # Extract common parameters before passing kwargs to segment functions
     roi_order = kwargs.pop("roi_order", "LR")
     plot = kwargs.pop("plot", False)  # Handle plotting here, after relabeling
-    input_mode = kwargs.get("input_mode", "combined")  # Keep in kwargs but save for plotting
+    input_mode = kwargs.get("input_mode", "average")  # Keep in kwargs but save for plotting
 
     # Save enhancement parameters for plotting (they stay in kwargs for segment())
     # These need to be applied to plot image so user sees what was actually segmented

@@ -171,10 +171,15 @@ Note: `frame_hz` is calculated from `n_planes` and `linedur_s`, not stored direc
 | STRF{n}_{roi}_{colour} | strfs | Receptive field arrays |
 | Noise_FilterLength_s | strf_dur_ms | STRF duration (converted to ms) |  -->
 
-## AI transparency
-Pygor's core functionality was built before widespread AI coding tools. Recent development has used ChatGPT, Claude Code, and Github Copilot.
+## AI transparency and guidelines
+Pygor's core functionality was built before widespread AI coding tools. However, recent development has used ChatGPT, Claude Code, and Github Copilot.
 
-Contributors should comment AI-generated code sections and include this in commit messages. Always test and validate AI-assisted code thoroughly.
+Guidelines:
+- Refrain from committing LLM meta files (e.g., .chatgpt, .claude) to the repository. Do not commit AI conversation logs or markdown files the LLM produced for itself.
+- Formatting, quality, and style standards must be met.
+- Outputs and changes must be removed and assessed by a human.
+- Large sections of AI-generated code should be disclosed and included in commit messages. 
+- Always test and validate AI-assisted code thoroughly.
 
 ## TODO
 - Expand documentation and examples
