@@ -19,7 +19,7 @@ fix_first_frame = true
 
 [registration]
 n_reference_frames = 100
-batch_size = 10
+batch_size = 50
 upsample_factor = 10
 normalization = "None"
 order = 1
