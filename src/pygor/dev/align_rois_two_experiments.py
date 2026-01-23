@@ -61,14 +61,22 @@ data_dir.plot_averages()
 #     plt.colorbar(rfim, ax=ax[1])
 #     plt.show()
 #%%
-roi = 3 #nr 2 is sick
+roi = 12 #nr 2 is sick
 fig, ax = plt.subplots(1, 2, figsize = (15, 5))
 # plot direction tuning for ROI in directional data
 data_dir.plot_tuning_function_with_traces(roi, ax = ax[0])
 # plot STRF for ROI in reference data
 rfim = ax[1].imshow(data_ref.collapse_times(roi)[0], cmap = "bwr", vmin = -np.max(np.abs(data_ref.collapse_times(roi)[0])), vmax = np.max(np.abs(data_ref.collapse_times(roi)[0])))
 plt.colorbar(rfim, ax=ax[1])
-data_ref.play_strf(roi, dur_s = 4)
+stats = data_dir.compute_orientation_selectivity_index(roi)
+print(stats["phase_0"])
+print(stats["phase_1"])
+
+
+# print(f"Phase 1: {phase_1_metrics}")
+# print(f"Phase 2: {phase_2_metrics}")
+
+# data_ref.play_strf(roi, dur_s = 4)
 #%%
 # viewer = napari.Viewer()
 # viewer.add_image(data_dir.images, name = "Reference mean")

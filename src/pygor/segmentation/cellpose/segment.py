@@ -11,6 +11,16 @@ import warnings
 
 try:
     from cellpose import models
+except ImportError as e:
+    raise ImportError(
+        "Cellpose is not installed. It is an optional dependency for pygor.\n\n"
+        "To install cellpose, run:\n"
+        "  uv pip install 'cellpose[gui]>=4.0.8'\n\n"
+        "Or install pygor with the cellpose extra:\n"
+        "  uv pip install 'pygor[cellpose]'\n\n"
+        "Alternatively, use a lightweight segmentation method that doesn't require cellpose:\n"
+        "  data.segment_rois(mode='watershed')  # or 'flood_fill', 'blob'\n"
+    ) from e
 except OSError as e:
     if "DLL" in str(e) or "c10.dll" in str(e):
         raise OSError(

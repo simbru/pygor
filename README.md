@@ -61,6 +61,62 @@ Usage examples can be found in the `/pygor/examples` folder:
 
 Place the strf_demo_data.h5 file into the /pygor/examples folder and you can follow the .ipynb and .py files in there.
 
+### ROI Segmentation
+Pygor provides automated ROI segmentation through `data.segment_rois()`. Several methods are available:
+
+**Lightweight methods (no ML required):**
+- `watershed` - Local maxima seeded watershed segmentation
+- `flood_fill` - IGOR-style region growing from peaks
+- `blob` - Difference of Gaussian blob detection
+
+```python
+data = pygor.load.Core("recording.h5")
+data.segment_rois(mode="watershed")  # or "flood_fill", "blob"
+```
+
+
+**Cellpose:**
+Pygor supports Cellpose and custom models for ROI segmentation. 
+
+See "Cellpose (optional, ML-based)" below.
+
+## Optional dependencies
+
+### Jupyter Notebooks (optional)
+For interactive analysis in Jupyter notebooks, install the notebook extras:
+```bash
+uv pip install 'pygor[notebook]'
+```
+
+This installs `jupyter`, `notebook`, `ipykernel`, and `ipywidgets`. After installation, register the kernel for use in notebooks:
+```bash
+python -m ipykernel install --user --name=pygor --display-name="Pygor"
+```
+
+Then select "Pygor" as your kernel in Jupyter or VS Code.
+
+### Napari GUI (optional)
+For interactive visualization and ROI drawing with napari:
+```bash
+uv pip install 'pygor[gui]'
+```
+
+This enables methods like `data.view_stack()`, `data.view_stack_rois()`, and `data.prompt_ipl_depths()`.
+
+### Cellpose (optional, ML-based):**
+Cellpose provides high-quality ML-based segmentation but is a heavyweight dependency (PyTorch, CUDA). It is **not installed by default**.
+
+To install Cellpose support:
+```bash
+uv pip install 'pygor[cellpose]'
+```
+
+Then use with:
+```python
+data.segment_rois(mode="cellpose+")  # Cellpose with post-processing heuristics
+data.segment_rois(mode="cellpose")   # Raw Cellpose output
+```
+
 ## Pygor design principles
 
 Inside `pygor/src/pygor/` (Python's way of structuring a package with sub-modules), you will find various files and folders.

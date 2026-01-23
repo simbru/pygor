@@ -1,8 +1,8 @@
 [project]
 name = "pygor"
-version = "0.0.2"
+version = "1.0"
 authors = [
-    { name="Simen Bruøygard", email="simen.bruoy@gmail.com" },
+    { name="Simen Bruøygard", email="simen.bruoygard@pm.me" },
 ]
 description = """A package for interacting with Igor Pro, 
 for internal use, for Baden-lab members
@@ -29,21 +29,22 @@ dependencies = [
     "tifffile",
     "natsort",
     "tqdm",
+    "statannotations>=0.4.4",
+]
+
+[project.optional-dependencies]
+gui = [
+    "napari>=0.5.6",
+    "pyqt5>=5.15.11",
+]
+cellpose = [
+    "cellpose[gui]>=4.0.8",
+]
+notebook = [
     "ipywidgets",
     "ipykernel>=6.29.5",
-    "statannotations>=0.4.4",
-    "pywavelets>=1.7.0",
-    "ruff>=0.8.0",
     "notebook>=7.3.2",
-    "tables>=3.10.2",
-    "napari-animated-gif-io>=0.1.2",
     "jupyter>=1.1.1",
-    "igor2>=0.5.12",
-    "napari>=0.5.6",
-    "statsmodels>=0.14.5",
-    "pingouin>=0.5.5",
-    "cellpose[gui]>=4.0.8",
-    "pyqt5>=5.15.11",
 ]
 
 [project.urls]
@@ -54,6 +55,8 @@ Issues = "https://github.com/simbru/pygor/issues"
 package = true
 dev-dependencies = [
     "uv>=0.4.24",
+    "ruff>=0.8.0",
+    "igor2>=0.5.12",
 ]
 
 constraint-dependencies = ["pyqt5-qt5 <=5.15.2"]

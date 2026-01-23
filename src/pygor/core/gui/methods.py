@@ -1,16 +1,29 @@
 import logging
 import numpy as np
 from scipy.signal import savgol_filter
-from qtpy.QtCore import QEventLoop
 import matplotlib
 from skimage.draw import polygon
 from IPython import get_ipython
 import matplotlib.pyplot as plt
-import napari
-from qtpy.QtWidgets import QApplication
-from qtpy.QtCore import QEventLoop
 import pygor.strf.spatial
 from joblib import Parallel, delayed
+
+
+def _import_napari():
+    """Lazy import of napari with helpful error message if not installed."""
+    try:
+        import napari
+        from qtpy.QtCore import QEventLoop
+        from qtpy.QtWidgets import QApplication
+        return napari, QEventLoop, QApplication
+    except ImportError as e:
+        raise ImportError(
+            "Napari is not installed. It is an optional dependency for pygor GUI features.\n\n"
+            "To install napari, run:\n"
+            "  uv pip install 'pygor[gui]'\n\n"
+            "Or install napari directly:\n"
+            "  uv pip install 'napari>=0.5.6' 'pyqt5>=5.15.11'\n"
+        ) from e
 
 def _fetch_traces_parallel(img_stack, roi_mask):
     """
@@ -105,6 +118,8 @@ def _process_single_roi_shared(img_shape, img_dtype, roi_mask, roi_val, shm_name
 
 class NapariViewStack:
     def __init__(self, pygor_object):
+        napari, QEventLoop, _ = _import_napari()
+        self.napari = napari
         self.viewer = napari.Viewer()
         self.pygor_object = pygor_object
         # Create a Qt event loop
@@ -115,7 +130,7 @@ class NapariViewStack:
         avg_movie = np.average(self.pygor_object.images, axis=0)
         std_movie = np.std(self.pygor_object.images, axis=0)
         images_stack = self.pygor_object.images
-        
+
         # Make layers
         self.viewer.add_image(avg_movie, name = "Average", colormap = "Greys_r")
         self.viewer.add_image(std_movie, name = "SD", colormap = "Greys_r")
@@ -123,12 +138,14 @@ class NapariViewStack:
         if hasattr(self.pygor_object, 'trigger_images') and self.pygor_object.trigger_images is not None:
             trigger_stack = self.pygor_object.trigger_images
             self.viewer.add_image(trigger_stack, name = "Trigger channel", colormap = "magma", visible = False)
-        self.viewer.add_image(images_stack, name = "Image stack", colormap = "Greys_r")        
+        self.viewer.add_image(images_stack, name = "Image stack", colormap = "Greys_r")
 
-        napari.run()
+        self.napari.run()
 
 class NapariViewRois:
     def __init__(self, pygor_object):
+        napari, QEventLoop, _ = _import_napari()
+        self.napari = napari
         self.viewer = napari.Viewer()
         self.pygor_object = pygor_object
         # Create a Qt event loop
@@ -146,10 +163,12 @@ class NapariViewRois:
         self.viewer.add_points(self.pygor_object.roi_centroids, name = "ROI centroids", opacity = 1, face_color="orange", size = 1.5)
         self.viewer.add_image(self.pygor_object.rois_alt, name = "ROIs", colormap = "rainbow", opacity = 0.25)
 
-        napari.run()
+        self.napari.run()
         
 class NapariDepthPrompt:
     def __init__(self, pygor_object):
+        napari, QEventLoop, _ = _import_napari()
+        self.napari = napari
         self.result = None  # Store the computed value
         self.viewer = napari.Viewer()
         self.pygor_object = pygor_object
@@ -363,7 +382,7 @@ class NapariDepthPrompt:
         lower_layer.mode = 'add_polyline'
         self.viewer.layers.selection.events.active.connect(self.on_layer_switch)
         self.last_active_layer = self.viewer.layers[-1] #last added layer is always active first, and therefore the last_active_layer on firs layer switch
-        napari.run()
+        self.napari.run()
         # Set the exception hook globally
         # sys.excepthook = self.handle_exception
         self.event_loop.exec_()  # Block until close event triggers
@@ -373,7 +392,8 @@ class NapariRoiPrompt():
     def __init__(self, array_input, traces_plot_style = "stacked", plot = False, existing_roi_mask=None, correlation_projection=None):
         if get_ipython() is not None:
             get_ipython().run_line_magic('matplotlib', 'Qt5Agg')
-        import napari
+        napari, QEventLoop, _ = _import_napari()
+        self.napari = napari
         self.traces_plot_style = traces_plot_style
         self.roi_coordinates = None  # Store the computed value
         self.mask = np.zeros(array_input[0].shape)
@@ -642,7 +662,6 @@ class NapariRoiPrompt():
         plt.draw()
         
     def run(self):
-        import napari
         """Launch Napari and block execution properly."""
         vmin, vmax = np.percentile(self.arr, (1, 99))
 
