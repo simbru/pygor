@@ -118,7 +118,7 @@ class Core:
             self.linedur_s = float(try_fetch_table_params(HDF5_file, "LineDuration"))
             self.average_stack = try_fetch(HDF5_file, "Stack_Ave")
             # TODO: change the logic to conditionally pull info from OS_Params instead,
-            # because images or averege_stack can sometimes be cropped, leading to 
+            # because images or averege_stack can sometimes be cropped, leading to s
             # inaccurate frame_hz. Better to fetch from metadata.
             exp_params = try_fetch(HDF5_file, "wExpParams")
             if exp_params is not None:
@@ -126,6 +126,9 @@ class Core:
                 self.orientation = try_fetch_table_params(HDF5_file, "orientation", 'wExpParams').decode('utf-8')
                 self.depth = try_fetch_table_params(HDF5_file, "depth", 'wExpParams').decode('utf-8')
                 self.stimulus = try_fetch_table_params(HDF5_file, "stimulus", 'wExpParams').decode('utf-8')
+                self.optical_config = try_fetch_table_params(HDF5_file, "optical_config", 'wExpParams')
+                self.zoom = try_fetch_table_params(HDF5_file, "Zoom", 'wParamsNum')
+
             if self.images is not None:
                 self.frame_hz = float(1/(self.images.shape[1]/self.n_planes*self.linedur_s))
             else:

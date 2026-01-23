@@ -26,6 +26,18 @@ class ResponseMapping(Core):
                 "Please provide a stimuli array."
             )
 
+    def calc_roi_sizes(self):
+        """calculate sizes of ROIs in pixels based on their masks"""
+
+        num_rois = self.num_rois
+        roi_sizes = []
+                
+        for roi_idx in range(num_rois):
+            roi_size = len(np.where(self.rois==-(roi_idx+1))[0])
+            roi_sizes.append(roi_size)
+        return pd.DataFrame(roi_sizes, columns=['roisize'])
+
+
     def calc_response_amplitude(self):
         """
         Calculate response amplitude for each presented stimulus.
@@ -43,8 +55,7 @@ class ResponseMapping(Core):
         
         # Use averages from Core
         traces = self.averages
-        traces = savgol_filter(traces, 1500, 5, axis=1)  # Smooth traces
-        print(np.shape(traces))
+        #traces = savgol_filter(traces, 1500, 5, axis=1)  # Smooth traces
         
         # Initialize dictionary to build DataFrame
         response_dict = {}
@@ -78,4 +89,47 @@ class ResponseMapping(Core):
         # Use averages from Core
         average_sd = np.std(self.averages, axis=1)
         return average_sd
+
+
+    def calc_roi_sizes_microns(self):
+        """
+        Calculate sizes of ROIs in microns based on 
+        FoV and zoom level.
         
+        Returns
+        -------
+        pd.Series
+            Series with ROI sizes indexed by ROI number.
+        """
+        num_rois = self.num_rois
+        roi_sizes = []
+        fov_sizes = {
+            'ntc3': {'0.15':539,
+                    '0.21':439,
+                    '0.32':308,
+                    '0.43':206}, 
+            'ntc1': {'0.15': 700,
+                    '0.21': 500,
+                    '0.32': 400,
+                    '0.43': 300}
+        }     
+        for roi_idx in range(num_rois):
+            roi_size = len(np.where(self.rois==-(roi_idx+1))[0])
+            roi_sizes.append(roi_size)
+
+        if pd.isna(self.optical_config):
+            optical_config = 'ntc3'
+            print(f"Optical config not found in metadata, assuming {optical_config}.")
+        else:
+            optical_config = self.optical_config
+
+        img_size = self.average_stack.shape[1]  # Assuming square images
+        zoom_rounded = round(self.zoom, 2)
+
+        fov_size_um = fov_sizes.get(optical_config, {}).get(f"{zoom_rounded:.2f}", None)
+        
+        if fov_size_um is None:
+            raise ValueError(f"FoV size not found for optical config {optical_config} and zoom {self.zoom}")
+        pixel_size_um = fov_size_um / img_size
+        roi_sizes_microns = np.array(roi_sizes) * pixel_size_um * pixel_size_um  # Area in square microns
+        return roi_sizes_microns
