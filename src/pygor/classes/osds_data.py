@@ -5,6 +5,8 @@ import numpy as np
 from pygor.timeseries.osds.plotting import circular_directional_plots
 from pygor.timeseries.osds import tuning_metrics, tuning_computation
 
+import warnings
+
 @dataclass(kw_only=False, repr=False)
 class OSDS(Core):
     dir_num: int = field(default=None, metadata={"required": True})
@@ -156,100 +158,6 @@ class OSDS(Core):
 
         # Result already has the desired shape: (n_directions, n_rois, timepoints_per_direction)
         return split_data
-    
-    # def plot_circular_responses(self, roi_index=-1, figsize=(8, 8)):
-    #     """Plot directional responses in circular arrangement"""
-    #     arr = np.squeeze(self.split_averages_directionally()[:, [roi_index]])
-    #     return circular_directional_plots.plot_directional_responses_circular(arr, self.directions_list, figsize)
-    
-    # def plot_circular_responses_with_polar(self, roi_index=-1, metric='peak', figsize=(10, 10), 
-    #                                     show_trials=True, polar_size=0.3, data_crop=None,
-    #                                     use_phases=None, phase_colors=None):
-    #     """
-    #     Plot directional responses with central polar summary and optional individual trials.
-        
-    #     Parameters:
-    #     -----------
-    #     roi_index : int, optional
-    #         ROI index to plot (default -1 for last ROI)
-    #     metric : str, optional
-    #         Summary metric for polar plot ('peak', 'auc', 'mean', etc.)
-    #     figsize : tuple, optional
-    #         Figure size (width, height)
-    #     show_trials : bool, optional
-    #         Whether to show individual trial traces as faint lines (default False)
-    #     polar_size : float, optional
-    #         Size of the central polar plot as fraction of figure (default 0.3)
-    #     use_phases : bool or None
-    #         If None, uses self.dir_phase_num > 1 to decide
-    #         If True, forces phase analysis with overlay in polar plot
-    #         If False, forces single-phase analysis
-    #     phase_colors : list or None
-    #         Colors for each phase. If None, uses default colors
-        
-    #     Returns:
-    #     --------
-    #     fig, ax_polar : matplotlib objects
-    #         Figure and polar axes objects
-    #     """
-    #     # Automatically use phases if dir_phase_num > 1 and use_phases not specified
-    #     if use_phases is None:
-    #         use_phases = self.dir_phase_num > 1
-        
-    #     # Set default phase colors
-    #     if phase_colors is None:
-    #         phase_colors = ['#2E8B57', '#B8860B', '#8B4513', '#483D8B']  # Default colors for phases
-        
-    #     return circular_directional_plots.plot_directional_responses_circular_with_polar(
-    #         moving_bars_obj=self,
-    #         roi_index=roi_index,
-    #         metric=metric,
-    #         figsize=figsize,
-    #         show_trials=show_trials,
-    #         polar_size=polar_size,
-    #         data_crop=data_crop,
-    #         use_phases=use_phases,
-    #         phase_colors=phase_colors
-    #     )
-    
-    # def plot_dual_phase_responses(self, roi_index=-1, phase_split=3200, metric='peak', 
-    #                         figsize=(12, 10), show_trials=True, polar_kwargs=None,
-    #                         phase_colors=("#2E8B57", "#B8860B")):
-    #     """
-    #     Plot directional responses for two stimulus phases (OFF->ON and ON->OFF) 
-    #     with overlapping polar plots and separate trace arrangements.
-
-    #     Parameters:
-    #     -----------
-    #     phase_split : int, optional
-    #         Frame number where phase 1 ends and phase 2 begins (default 3200)
-    #     roi_index : int, optional
-    #         ROI index to plot (default -1 for last ROI)
-    #     metric : str, optional
-    #         Summary metric for polar plots ('peak', 'auc', 'mean', etc.)
-    #     figsize : tuple, optional
-    #         Figure size (width, height)
-    #     show_trials : bool, optional
-    #         Whether to show individual trial traces (default True)
-    #     polar_kwargs : dict, optional
-    #         Additional keyword arguments for polar plot styling
-    #     phase_colors : tuple, optional
-    #         Colors for (phase1, phase2) plots
-
-    #     Returns:
-    #     --------
-    #     fig, ax_polar : matplotlib objects
-    #         Figure and polar axes objects
-    #     """
-    #     return circular_directional_plots.plot_directional_responses_dual_phase(
-    #         moving_bars_obj=self,
-    #         roi_index=roi_index,
-    #         metric=metric,
-    #         figsize=figsize,
-    #         show_trials=show_trials,
-    #         polar_kwargs=polar_kwargs,
-    #         phase_colors=phase_colors
-    #     )
 
     def compute_tuning_function(self, roi_index=None, window=None, metric='peak', phase_num=None):
         """
@@ -293,542 +201,454 @@ class OSDS(Core):
                 If roi_index is specified: tuning values with shape (n_directions, n_phases).
             Values are ordered according to self.directions_list.
         """
-        # Automatically use dir_phase_num if phase_num not specified
-        if phase_num is None:
+        # Automatically use dir_phase_num if phase_num not specified AND no window is given.
+        # When a window is explicitly provided, skip auto-inference since the caller
+        # wants window-based analysis, not automatic phase splitting.
+        if phase_num is None and window is None:
             phase_num = self.dir_phase_num if self.dir_phase_num > 1 else None
-            
+
         return tuning_computation.compute_tuning_function(
             self, roi_index=roi_index, window=window, metric=metric, phase_num=phase_num
         )
 
-    # def plot_tuning_function(self, rois=None, figsize=(6, 6), colors=None, ax=None, show_title=True, 
-    #                        show_theta_labels=True, show_tuning=True, show_mean_vector=False, 
-    #                        mean_vector_color='red', show_orientation_vector=False, 
-    #                        orientation_vector_color='orange', use_phases=None, 
-    #                        phase_colors=None, overlay_phases=True, legend=True, minimal=False, **kwargs):
-    #     """
-    #     Plot tuning functions as polar plots.
-        
-    #     Parameters:
-    #     -----------
-    #     rois : list of int or None
-    #         ROI indices to plot. If None, plots all ROIs
-    #     figsize : tuple
-    #         Figure size (width, height)
-    #     colors : list or None
-    #         Colors for each ROI. If None, uses default color cycle
-    #     ax : matplotlib.axes.Axes or None
-    #         Existing polar axes to plot on. If None, creates new figure and axes
-    #     show_title : bool
-    #         Whether to show the title on the plot (default True)
-    #     show_theta_labels : bool
-    #         Whether to show the theta (direction) labels on the plot (default True)
-    #     show_tuning : bool
-    #         Whether to show the tuning curve itself (default True). When False, only shows vectors.
-    #     show_mean_vector : bool
-    #         Whether to show mean direction vectors as overlays (default False)
-    #     mean_vector_color : str
-    #         Color for mean direction vector arrows (default 'red')
-    #     show_orientation_vector : bool
-    #         Whether to show mean orientation vectors as overlays (default False)
-    #     orientation_vector_color : str
-    #         Color for mean orientation vector arrows (default 'orange')
-    #     use_phases : bool or None
-    #         If None, uses self.dir_phase_num > 1 to decide
-    #         If True, forces phase analysis
-    #         If False, forces single-phase analysis
-    #     phase_colors : list or None
-    #         Colors for each phase. If None, uses default colors
-    #     overlay_phases : bool
-    #         Whether to overlay phases on same plot (True) or create separate plots (False)
-    #     legend : bool
-    #         Whether to show the legend (default True)
-    #     minimal : bool
-    #         Whether to use minimal plotting (no titles, legends, or labels except axis ticks) (default False)
-    #     **kwargs
-    #         Additional arguments passed to compute_tuning_function.
-        
-    #     Returns:
-    #     --------
-    #     fig : matplotlib.figure.Figure
-    #         The figure object
-    #     ax : matplotlib.axes.Axes
-    #         The polar plot axes object
-    #     """
-    #     # Automatically use phases if dir_phase_num > 1 and use_phases not specified
-    #     if use_phases is None:
-    #         use_phases = self.dir_phase_num > 1
-        
-    #     # Override phase_num in kwargs if use_phases is determined
-    #     if use_phases:
-    #         kwargs['phase_num'] = self.dir_phase_num
-        
-    #     # Handle minimal mode by overriding display options
-    #     if minimal:
-    #         show_title = False
-    #         legend = False
-        
-    #     # Extract parameters from kwargs before passing to compute_tuning_function
-    #     # (compute_tuning_function doesn't accept these parameters)
-    #     tuning_kwargs = {k: v for k, v in kwargs.items() if k not in ['legend', 'minimal']}
-        
-    #     # Get tuning functions for all ROIs
-    #     tuning_functions = self.compute_tuning_function(**tuning_kwargs)
-        
-    #     # Handle phase data
-    #     if use_phases and len(tuning_functions.shape) == 3:  # (n_rois, n_directions, n_phases)
-    #         # Set default phase colors
-    #         if phase_colors is None:
-    #             phase_colors = ['#2E8B57', '#B8860B', '#8B4513', '#483D8B']  # Default colors for phases
-            
-    #         if overlay_phases:
-    #             # Overlay phases on same plot
-    #             return circular_directional_plots.plot_tuning_function_polar_overlay(
-    #                 tuning_functions,
-    #                 self.directions_list,
-    #                 rois=rois,
-    #                 figsize=figsize,
-    #                 colors=colors,
-    #                 phase_colors=phase_colors,
-    #                 ax=ax,
-    #                 show_title=show_title,
-    #                 show_theta_labels=show_theta_labels,
-    #                 show_tuning=show_tuning,
-    #                 show_mean_vector=show_mean_vector,
-    #                 mean_vector_color=mean_vector_color,
-    #                 show_orientation_vector=show_orientation_vector,
-    #                 orientation_vector_color=orientation_vector_color,
-    #                 metric=kwargs.get('metric', 'peak'),
-    #                 legend=legend,
-    #                 minimal=minimal
-    #             )
-    #         else:
-    #             # Create separate plots for each phase
-    #             return circular_directional_plots.plot_tuning_function_multi_phase(
-    #                 tuning_functions=tuning_functions,
-    #                 directions_list=self.directions_list,
-    #                 phase_num=kwargs['phase_num'],
-    #                 rois=rois,
-    #                 figsize=figsize,
-    #                 colors=colors,
-    #                 ax=ax,
-    #                 show_title=show_title,
-    #                 show_theta_labels=show_theta_labels,
-    #                 show_tuning=show_tuning,
-    #                 show_mean_vector=show_mean_vector,
-    #                 mean_vector_color=mean_vector_color,
-    #                 show_orientation_vector=show_orientation_vector,
-    #                 orientation_vector_color=orientation_vector_color,
-    #                 metric=kwargs.get('metric', 'peak'),
-    #                 legend=legend,
-    #                 minimal=minimal
-    #             )
-    #     else:
-    #         # Regular single-phase plotting
-    #         return circular_directional_plots.plot_tuning_function_polar(
-    #             tuning_functions.T,  # Transpose to (n_directions, n_rois)
-    #             self.directions_list,
-    #             rois=rois,
-    #             figsize=figsize,
-    #             colors=colors,
-    #             metric=kwargs.get('metric', 'peak'),
-    #             ax=ax,
-    #             show_title=show_title,
-    #             show_theta_labels=show_theta_labels,
-    #             show_tuning=show_tuning,
-    #             show_mean_vector=show_mean_vector,
-    #             mean_vector_color=mean_vector_color,
-    #             show_orientation_vector=show_orientation_vector,
-    #             orientation_vector_color=orientation_vector_color,
-    #             legend=legend,
-    #             minimal=minimal
-    #         )
-
-    def compute_tuning_metrics(self, roi_indices=None, metric='peak'):
+    def compute_tuning_metrics(self, roi_indices=None, metric='peak', phase_aware=None):
         """
-        Compute directional tuning metrics for ROIs.
-        
-        Computes vector magnitude (r), circular variance (CV), directional 
-        selectivity index (DSI), preferred direction, and mean direction 
-        for each ROI using circular statistics.
-        
-        Parameters:
-        -----------
-        roi_indices : list or None
+        Compute all directional tuning metrics for ROIs.
+
+        This is the recommended method for efficient batch computation of
+        DSI, OSI, vector magnitude, and other directional tuning metrics.
+
+        Parameters
+        ----------
+        roi_indices : list, int, or None
             ROI indices to analyze. If None, analyzes all ROIs.
         metric : str or callable
-            Metric to use for computing tuning functions (default 'peak')
-            
-        Returns:
-        --------
-        dict : Dictionary containing arrays of metrics for each ROI:
-            - 'vector_magnitude': How directionally tuned (0-1)
-            - 'circular_variance': Spread of directional response (0-1)  
-            - 'dsi': Preference for one direction vs opposite (-1 to 1)
-            - 'preferred_direction': Direction with maximum response (degrees)
+            Metric for computing tuning function ('peak', 'mean', 'auc', etc.)
+        phase_aware : bool or None
+            Controls phase-aware analysis:
+            - None (default): Auto-detect from self.dir_phase_num
+              (phase-aware if dir_phase_num > 1, single-phase otherwise)
+            - True: Force phase-aware analysis
+            - False: Force single-phase analysis (ignore dir_phase_num)
+
+        Returns
+        -------
+        dict
+            Dictionary containing arrays of metrics for each ROI:
+
+            - 'dsi': Directional selectivity index (-1 to 1)
+            - 'osi': Orientation selectivity index (0 to 1)
+            - 'vector_magnitude': Circular vector magnitude (0 to 1)
+            - 'circular_variance': 1 - vector_magnitude (0 to 1)
+            - 'preferred_direction': Direction with max response (degrees)
+            - 'preferred_orientation': Orientation with max response (degrees)
             - 'mean_direction': Mean direction from circular stats (degrees)
             - 'roi_indices': ROI indices that were analyzed
+            - 'n_phases': Number of phases (1 if single-phase)
+
+            Array shapes:
+            - Single-phase: (n_rois,)
+            - Multi-phase: (n_phases, n_rois)
+
+        Examples
+        --------
+        >>> metrics = data.compute_tuning_metrics()
+        >>> dsi_values = metrics['dsi']
+        >>> osi_values = metrics['osi']
+
+        >>> # Force single-phase analysis even if dir_phase_num > 1
+        >>> metrics = data.compute_tuning_metrics(phase_aware=False)
         """
         if isinstance(roi_indices, int):
             roi_indices = [roi_indices]
+        if self.averages is None:
+            raise ValueError("Averages data not found. Cannot compute tuning metrics.")
         return tuning_metrics.compute_all_tuning_metrics(
-            self, roi_indices=roi_indices, metric=metric
+            self, roi_indices=roi_indices, metric=metric, phase_aware=phase_aware
         )
-    
-    # def plot_tuning_metrics_histograms(self, roi_indices=None, metric='peak', 
-    #                                  figsize=(15, 10), bins=20):
-    #     """
-    #     Plot histograms of directional tuning metrics.
-        
-    #     Parameters:
-    #     -----------
-    #     roi_indices : list or None
-    #         ROI indices to analyze. If None, analyzes all ROIs.
-    #     metric : str or callable
-    #         Metric to use for computing tuning functions (default 'peak')
-    #     figsize : tuple
-    #         Figure size
-    #     bins : int
-    #         Number of histogram bins
-            
-    #     Returns:
-    #     --------
-    #     fig : matplotlib.figure.Figure
-    #         Figure object
-    #     metrics_dict : dict
-    #         Dictionary of computed metrics
-    #     """
-    #     metrics_dict = self.compute_tuning_metrics(roi_indices=roi_indices, metric=metric)
-    #     fig = tuning_metrics.plot_tuning_metrics_histograms(
-    #         metrics_dict, figsize=figsize, bins=bins
-    #     )
-    #     return fig, metrics_dict
-    
+
+    # =========================================================================
+    # Getter methods - return only the requested metric
+    # =========================================================================
+
+    def get_osi(self, roi_indices=None, metric='peak', phase_aware=None):
+        """
+        Get orientation selectivity index (OSI) for ROIs.
+
+        Convenience method that returns only OSI values. For multiple metrics
+        at once, use compute_tuning_metrics() instead.
+
+        Parameters
+        ----------
+        roi_indices : list, int, or None
+            ROI indices to analyze. If None, analyzes all ROIs.
+        metric : str or callable
+            Metric for computing tuning function ('peak', 'mean', 'auc', etc.)
+        phase_aware : bool or None
+            Controls phase-aware analysis (None=auto-detect, True=force phases,
+            False=force single-phase).
+
+        Returns
+        -------
+        np.ndarray
+            OSI values (0 to 1). Shape: (n_rois,) or (n_phases, n_rois).
+        """
+        return self.compute_tuning_metrics(roi_indices, metric, phase_aware)['osi']
+
+    def get_dsi(self, roi_indices=None, metric='peak', phase_aware=None):
+        """
+        Get directional selectivity index (DSI) for ROIs.
+
+        Convenience method that returns only DSI values. For multiple metrics
+        at once, use compute_tuning_metrics() instead.
+
+        Parameters
+        ----------
+        roi_indices : list, int, or None
+            ROI indices to analyze. If None, analyzes all ROIs.
+        metric : str or callable
+            Metric for computing tuning function ('peak', 'mean', 'auc', etc.)
+        phase_aware : bool or None
+            Controls phase-aware analysis (None=auto-detect, True=force phases,
+            False=force single-phase).
+
+        Returns
+        -------
+        np.ndarray
+            DSI values (-1 to 1). Shape: (n_rois,) or (n_phases, n_rois).
+        """
+        return self.compute_tuning_metrics(roi_indices, metric, phase_aware)['dsi']
+
+    def get_preferred_direction(self, roi_indices=None, metric='peak', phase_aware=None):
+        """
+        Get preferred direction for ROIs.
+
+        Parameters
+        ----------
+        roi_indices : list, int, or None
+            ROI indices to analyze. If None, analyzes all ROIs.
+        metric : str or callable
+            Metric for computing tuning function.
+        phase_aware : bool or None
+            Controls phase-aware analysis.
+
+        Returns
+        -------
+        np.ndarray
+            Preferred direction in degrees (0-360). Shape: (n_rois,) or (n_phases, n_rois).
+        """
+        return self.compute_tuning_metrics(roi_indices, metric, phase_aware)['preferred_direction']
+
+    def get_preferred_orientation(self, roi_indices=None, metric='peak', phase_aware=None):
+        """
+        Get preferred orientation for ROIs.
+
+        Parameters
+        ----------
+        roi_indices : list, int, or None
+            ROI indices to analyze. If None, analyzes all ROIs.
+        metric : str or callable
+            Metric for computing tuning function.
+        phase_aware : bool or None
+            Controls phase-aware analysis.
+
+        Returns
+        -------
+        np.ndarray
+            Preferred orientation in degrees (0-180). Shape: (n_rois,) or (n_phases, n_rois).
+        """
+        return self.compute_tuning_metrics(roi_indices, metric, phase_aware)['preferred_orientation']
+
+    def get_vector_magnitude(self, roi_indices=None, metric='peak', phase_aware=None):
+        """
+        Get vector magnitude (r) for ROIs.
+
+        Vector magnitude measures directional tuning strength (0=no preference, 1=perfect).
+
+        Parameters
+        ----------
+        roi_indices : list, int, or None
+            ROI indices to analyze. If None, analyzes all ROIs.
+        metric : str or callable
+            Metric for computing tuning function.
+        phase_aware : bool or None
+            Controls phase-aware analysis.
+
+        Returns
+        -------
+        np.ndarray
+            Vector magnitude (0 to 1). Shape: (n_rois,) or (n_phases, n_rois).
+        """
+        return self.compute_tuning_metrics(roi_indices, metric, phase_aware)['vector_magnitude']
+
+    def get_circular_variance(self, roi_indices=None, metric='peak', phase_aware=None):
+        """
+        Get circular variance for ROIs.
+
+        Circular variance = 1 - vector_magnitude. Measures spread of directional response.
+
+        Parameters
+        ----------
+        roi_indices : list, int, or None
+            ROI indices to analyze. If None, analyzes all ROIs.
+        metric : str or callable
+            Metric for computing tuning function.
+        phase_aware : bool or None
+            Controls phase-aware analysis.
+
+        Returns
+        -------
+        np.ndarray
+            Circular variance (0 to 1). Shape: (n_rois,) or (n_phases, n_rois).
+        """
+        return self.compute_tuning_metrics(roi_indices, metric, phase_aware)['circular_variance']
+
+    def get_mean_direction(self, roi_indices=None, metric='peak', phase_aware=None):
+        """
+        Get mean direction from circular statistics for ROIs.
+
+        Parameters
+        ----------
+        roi_indices : list, int, or None
+            ROI indices to analyze. If None, analyzes all ROIs.
+        metric : str or callable
+            Metric for computing tuning function.
+        phase_aware : bool or None
+            Controls phase-aware analysis.
+
+        Returns
+        -------
+        np.ndarray
+            Mean direction in degrees (0-360). Shape: (n_rois,) or (n_phases, n_rois).
+        """
+        return self.compute_tuning_metrics(roi_indices, metric, phase_aware)['mean_direction']
+
+    # =========================================================================
+    # Vector extraction methods (for visualization)
+    # =========================================================================
+
+    def _extract_vector_helper(self, roi_index, extract_func, metric='peak', use_phases=None):
+        """
+        Private helper for vector extraction methods.
+
+        Parameters
+        ----------
+        roi_index : int
+            ROI index to analyze.
+        extract_func : callable
+            Function from tuning_metrics to apply (e.g., extract_direction_vectors).
+        metric : str or callable
+            Metric for computing tuning function.
+        use_phases : bool or None
+            Phase handling (None=auto-detect).
+
+        Returns
+        -------
+        dict
+            Single phase: result from extract_func.
+            Multi-phase: dict with 'phase_0', 'phase_1', etc. keys.
+        """
+        if use_phases is None:
+            use_phases = self.dir_phase_num > 1
+
+        if use_phases:
+            responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
+            # responses shape: (n_directions, n_phases)
+            return {
+                f'phase_{i}': extract_func(responses[:, i], self.directions_list)
+                for i in range(responses.shape[1])
+            }
+        else:
+            responses = self.compute_tuning_function(
+                roi_index=roi_index, metric=metric, phase_num=None
+            )
+            return extract_func(responses, self.directions_list)
+
     def extract_direction_vectors(self, roi_index, metric='peak', use_phases=None):
         """
         Extract individual direction vectors for a specific ROI.
-        
-        Parameters:
-        -----------
+
+        Parameters
+        ----------
         roi_index : int
-            ROI index to analyze
+            ROI index to analyze.
         metric : str or callable
-            Metric to use for computing tuning function
+            Metric for computing tuning function.
         use_phases : bool or None
-            If None, uses self.dir_phase_num > 1 to decide
-            If True, forces phase analysis
-            If False, forces single-phase analysis
-            
-        Returns:
-        --------
-        dict : Dictionary containing individual direction vectors
-            If single phase: standard direction vectors
-            If multi-phase: vectors for each phase with keys 'phase_0', 'phase_1', etc.
+            Phase handling (None=auto-detect from dir_phase_num).
+
+        Returns
+        -------
+        dict
+            Contains 'angles', 'magnitudes', 'cartesian_x', 'cartesian_y'.
+            Multi-phase: nested dict with 'phase_0', 'phase_1', etc. keys.
         """
-        # Automatically use phases if dir_phase_num > 1 and use_phases not specified
-        if use_phases is None:
-            use_phases = self.dir_phase_num > 1
-        
-        if use_phases:
-            # Get phase-aware tuning function
-            responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
-            # responses shape: (n_directions, n_phases)
-            phase_vectors = {}
-            for phase_idx in range(responses.shape[1]):
-                phase_vectors[f'phase_{phase_idx}'] = tuning_metrics.extract_direction_vectors(
-                    responses[:, phase_idx], self.directions_list
-                )
-            return phase_vectors
-        else:
-            # Single phase analysis
-            responses = self.compute_tuning_function(roi_index=roi_index, metric=metric, phase_num=None)
-            return tuning_metrics.extract_direction_vectors(responses, self.directions_list)
-    
+        return self._extract_vector_helper(
+            roi_index, tuning_metrics.extract_direction_vectors, metric, use_phases
+        )
+
     def extract_mean_vector(self, roi_index, metric='peak', use_phases=None):
         """
         Extract mean vector for a specific ROI.
-        
-        Parameters:
-        -----------
+
+        Parameters
+        ----------
         roi_index : int
-            ROI index to analyze
+            ROI index to analyze.
         metric : str or callable
-            Metric to use for computing tuning function
+            Metric for computing tuning function.
         use_phases : bool or None
-            If None, uses self.dir_phase_num > 1 to decide
-            If True, forces phase analysis
-            If False, forces single-phase analysis
-            
-        Returns:
-        --------
-        dict : Dictionary containing mean vector information
-            If single phase: standard mean vector
-            If multi-phase: mean vectors for each phase with keys 'phase_0', 'phase_1', etc.
+            Phase handling (None=auto-detect from dir_phase_num).
+
+        Returns
+        -------
+        dict
+            Contains 'angle', 'magnitude', 'cartesian_x', 'cartesian_y'.
+            Multi-phase: nested dict with 'phase_0', 'phase_1', etc. keys.
         """
-        # Automatically use phases if dir_phase_num > 1 and use_phases not specified
-        if use_phases is None:
-            use_phases = self.dir_phase_num > 1
-        
-        if use_phases:
-            # Get phase-aware tuning function
-            responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
-            # responses shape: (n_directions, n_phases)
-            phase_vectors = {}
-            for phase_idx in range(responses.shape[1]):
-                phase_vectors[f'phase_{phase_idx}'] = tuning_metrics.extract_mean_vector(
-                    responses[:, phase_idx], self.directions_list
-                )
-            return phase_vectors
-        else:
-            # Single phase analysis
-            responses = self.compute_tuning_function(roi_index=roi_index, metric=metric, phase_num=None)
-            return tuning_metrics.extract_mean_vector(responses, self.directions_list)
-    
+        return self._extract_vector_helper(
+            roi_index, tuning_metrics.extract_mean_vector, metric, use_phases
+        )
+
     def extract_orientation_vector(self, roi_index, metric='peak', use_phases=None):
         """
         Extract orientation vector for a specific ROI.
-        
-        Parameters:
-        -----------
+
+        Parameters
+        ----------
         roi_index : int
-            ROI index to analyze
+            ROI index to analyze.
         metric : str or callable
-            Metric to use for computing tuning function
+            Metric for computing tuning function.
         use_phases : bool or None
-            If None, uses self.dir_phase_num > 1 to decide
-            If True, forces phase analysis
-            If False, forces single-phase analysis
-            
-        Returns:
-        --------
-        dict : Dictionary containing orientation vector information
-            If single phase: standard orientation vector
-            If multi-phase: orientation vectors for each phase with keys 'phase_0', 'phase_1', etc.
+            Phase handling (None=auto-detect from dir_phase_num).
+
+        Returns
+        -------
+        dict
+            Contains 'angle', 'magnitude', 'cartesian_x', 'cartesian_y'.
+            Multi-phase: nested dict with 'phase_0', 'phase_1', etc. keys.
         """
-        # Automatically use phases if dir_phase_num > 1 and use_phases not specified
+        return self._extract_vector_helper(
+            roi_index, tuning_metrics.extract_orientation_vector, metric, use_phases
+        )
+    
+    # =========================================================================
+    # Deprecated methods (kept for backward compatibility)
+    # =========================================================================
+
+    def _compute_single_roi_metric(self, roi_index, compute_func, metric='peak', use_phases=None):
+        """
+        Private helper for deprecated single-ROI metric computation.
+
+        Parameters
+        ----------
+        roi_index : int
+            ROI index to analyze.
+        compute_func : callable
+            Function from tuning_metrics to apply.
+        metric : str or callable
+            Metric for computing tuning function.
+        use_phases : bool or None
+            Phase handling (None=auto-detect).
+
+        Returns
+        -------
+        dict
+            Single phase: result from compute_func.
+            Multi-phase: dict with 'phase_0', 'phase_1', etc. keys.
+        """
         if use_phases is None:
             use_phases = self.dir_phase_num > 1
-        
+
         if use_phases:
-            # Get phase-aware tuning function
             responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
-            # responses shape: (n_directions, n_phases)
-            phase_vectors = {}
-            for phase_idx in range(responses.shape[1]):
-                phase_vectors[f'phase_{phase_idx}'] = tuning_metrics.extract_orientation_vector(
-                    responses[:, phase_idx], self.directions_list
-                )
-            return phase_vectors
+            return {
+                f'phase_{i}': compute_func(responses[:, i], self.directions_list)
+                for i in range(responses.shape[1])
+            }
         else:
-            # Single phase analysis
-            responses = self.compute_tuning_function(roi_index=roi_index, metric=metric, phase_num=None)
-            return tuning_metrics.extract_orientation_vector(responses, self.directions_list)
-    
+            responses = self.compute_tuning_function(
+                roi_index=roi_index, metric=metric, phase_num=None
+            )
+            return compute_func(responses, self.directions_list)
+
+    def compute_osi(self, roi_index=None, metric='peak', use_phases=None):
+        """
+        DEPRECATED: Use get_osi() or compute_tuning_metrics()['osi'] instead.
+        """
+        warnings.warn(
+            "compute_osi() is deprecated. Use get_osi() for just OSI values, "
+            "or compute_tuning_metrics()['osi'] for all metrics.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        if roi_index is None:
+            return self.compute_tuning_metrics(metric=metric, phase_aware=use_phases)
+        return self._compute_single_roi_metric(
+            roi_index, tuning_metrics.compute_orientation_selectivity_index, metric, use_phases
+        )
+
+    def compute_dsi(self, roi_index=None, metric='peak', use_phases=None):
+        """
+        DEPRECATED: Use get_dsi() or compute_tuning_metrics()['dsi'] instead.
+        """
+        warnings.warn(
+            "compute_dsi() is deprecated. Use get_dsi() for just DSI values, "
+            "or compute_tuning_metrics()['dsi'] for all metrics.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        if roi_index is None:
+            return self.compute_tuning_metrics(metric=metric, phase_aware=use_phases)
+        return self._compute_single_roi_metric(
+            roi_index, tuning_metrics.compute_direction_selectivity_index, metric, use_phases
+        )
+
     def compute_orientation_selectivity_index(self, roi_index, metric='peak', use_phases=None):
         """
-        Compute orientation selectivity index (OSI) for a specific ROI.
-        
-        Parameters:
-        -----------
-        roi_index : int
-            ROI index to analyze
-        metric : str or callable
-            Metric to use for computing tuning function
-        use_phases : bool or None
-            If None, uses self.dir_phase_num > 1 to decide
-            If True, forces phase analysis
-            If False, forces single-phase analysis
-            
-        Returns:
-        --------
-        dict : Dictionary containing OSI calculation results
-            If single phase: standard OSI results
-            If multi-phase: OSI results for each phase with keys 'phase_0', 'phase_1', etc.
+        DEPRECATED: Use get_osi() instead.
         """
-        # Automatically use phases if dir_phase_num > 1 and use_phases not specified
-        if use_phases is None:
-            use_phases = self.dir_phase_num > 1
-        
-        if use_phases:
-            # Get phase-aware tuning function
-            responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
-            # responses shape: (n_directions, n_phases)
-            phase_osi = {}
-            for phase_idx in range(responses.shape[1]):
-                phase_osi[f'phase_{phase_idx}'] = tuning_metrics.compute_orientation_selectivity_index(
-                    responses[:, phase_idx], self.directions_list
-                )
-            return phase_osi
-        else:
-            # Single phase analysis
-            responses = self.compute_tuning_function(roi_index=roi_index, metric=metric, phase_num=None)
-            return tuning_metrics.compute_orientation_selectivity_index(responses, self.directions_list)
-    
-    # def plot_orientation_tuning_cartesian(self, roi_index, metric='peak', use_phases=None, 
-    #                                      phase_colors=None, **kwargs):
-    #     """
-    #     Plot orientation tuning curve in cartesian coordinates for a specific ROI.
-        
-    #     Parameters:
-    #     -----------
-    #     roi_index : int
-    #         ROI index to analyze
-    #     metric : str or callable
-    #         Metric to use for computing tuning function
-    #     use_phases : bool or None
-    #         If None, uses self.dir_phase_num > 1 to decide
-    #         If True, forces phase analysis with overlay
-    #         If False, forces single-phase analysis
-    #     phase_colors : list or None
-    #         Colors for each phase. If None, uses default colors
-    #     **kwargs : additional arguments
-    #         Passed to plot_orientation_tuning_cartesian function
-            
-    #     Returns:
-    #     --------
-    #     fig : matplotlib.figure.Figure
-    #         Figure object
-    #     ax : matplotlib.axes.Axes
-    #         Axes object
-    #     osi_info : dict
-    #         Dictionary containing OSI calculation results
-    #     """
-    #     # Automatically use phases if dir_phase_num > 1 and use_phases not specified
-    #     if use_phases is None:
-    #         use_phases = self.dir_phase_num > 1
-        
-    #     if use_phases:
-    #         # Get phase-aware tuning function
-    #         responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
-    #         # responses shape: (n_directions, n_phases)
-            
-    #         # Set default phase colors
-    #         if phase_colors is None:
-    #             phase_colors = ['#2E8B57', '#B8860B', '#8B4513', '#483D8B']  # Default colors for phases
-            
-    #         return circular_directional_plots.plot_orientation_tuning_cartesian_phases(
-    #             responses, self.directions_list, phase_colors=phase_colors, **kwargs
-    #         )
-    #     else:
-    #         # Single phase analysis
-    #         responses = self.compute_tuning_function(roi_index=roi_index, metric=metric, phase_num=None)
-    #         return circular_directional_plots.plot_orientation_tuning_cartesian(
-    #             responses, self.directions_list, **kwargs
-    #         )
-    
-    # def plot_orientation_tuning_comparison(self, roi_index, metric='peak', use_phases=None,
-    #                                      phase_colors=None, **kwargs):
-    #     """
-    #     Plot side-by-side comparison of polar and cartesian orientation tuning.
-        
-    #     Parameters:
-    #     -----------
-    #     roi_index : int
-    #         ROI index to analyze
-    #     metric : str or callable
-    #         Metric to use for computing tuning function
-    #     use_phases : bool or None
-    #         If None, uses self.dir_phase_num > 1 to decide
-    #         If True, forces phase analysis with overlay
-    #         If False, forces single-phase analysis
-    #     phase_colors : list or None
-    #         Colors for each phase. If None, uses default colors
-    #     **kwargs : additional arguments
-    #         Passed to plot_orientation_tuning_comparison function
-            
-    #     Returns:
-    #     --------
-    #     fig : matplotlib.figure.Figure
-    #         Figure object
-    #     axes : list
-    #         List containing [polar_ax, cartesian_ax]
-    #     osi_info : dict
-    #         Dictionary containing OSI calculation results
-    #     """
-    #     # Automatically use phases if dir_phase_num > 1 and use_phases not specified
-    #     if use_phases is None:
-    #         use_phases = self.dir_phase_num > 1
-        
-    #     if use_phases:
-    #         # Get phase-aware tuning function
-    #         responses = self.compute_tuning_function(roi_index=roi_index, metric=metric)
-    #         # responses shape: (n_directions, n_phases)
-            
-    #         # Set default phase colors
-    #         if phase_colors is None:
-    #             phase_colors = ['#2E8B57', '#B8860B', '#8B4513', '#483D8B']  # Default colors for phases
-            
-    #         return circular_directional_plots.plot_orientation_tuning_comparison_phases(
-    #             responses, self.directions_list, phase_colors=phase_colors, **kwargs
-    #         )
-    #     else:
-    #         # Single phase analysis
-    #         responses = self.compute_tuning_function(roi_index=roi_index, metric=metric, phase_num=None)
-    #         return circular_directional_plots.plot_orientation_tuning_comparison(
-    #             responses, self.directions_list, **kwargs
-    #         )
-    
-    def compute_phase_tuning_metrics(self, metric='peak', roi_indices=None, 
-                                    phase_ranges=None):
+        warnings.warn(
+            "compute_orientation_selectivity_index() is deprecated. Use get_osi() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self._compute_single_roi_metric(
+            roi_index, tuning_metrics.compute_orientation_selectivity_index, metric, use_phases
+        )
+
+    def compute_phase_tuning_metrics(self, metric='peak', roi_indices=None,
+                                      phase_ranges=None):
         """
+        DEPRECATED: Use compute_tuning_metrics(phase_aware=True) instead.
+
         Compute directional tuning metrics with automatic phase analysis.
-        
-        High-performance vectorized computation of all tuning metrics (DSI, OSI, 
-        preferred direction, etc.) with automatic phase-based analysis based on 
-        the object's dir_phase_num setting.
-        
-        Parameters:
-        -----------
+
+        Parameters
+        ----------
         metric : str or callable
-            Metric to use for computing tuning functions (default 'peak')
+            Metric to use for computing tuning functions (default 'peak').
         roi_indices : list or None
             ROI indices to analyze. If None, analyzes all ROIs.
         phase_ranges : list of tuples or None
-            Custom phase ranges to override automatic phase detection.
-            If None, uses automatic phase splitting based on dir_phase_num.
-            Example: [(0, 60), (60, 120)] for custom ranges
-            
-        Returns:
-        --------
-        dict : Dictionary containing tuning metrics
-            When dir_phase_num=1: (n_rois,) arrays 
-            When dir_phase_num>1: (n_phases, n_rois) arrays
-            
-            Keys include:
-            - 'vector_magnitude': Directional tuning strength (0-1)
-            - 'dsi': Directional selectivity index (-1 to 1)
-            - 'osi': Orientation selectivity index (0-1)
-            - 'preferred_direction': Preferred direction in degrees
-            - 'mean_direction': Mean direction from circular statistics
-            - 'roi_indices': ROI indices analyzed
-            - 'phase_ranges': Phase ranges used (if applicable)
-            
-        Examples:
-        ---------
-        # Automatic phase analysis based on dir_phase_num
-        metrics = obj.compute_phase_tuning_metrics()
-        
-        # For dir_phase_num=2 (ON/OFF phases)
-        on_dsi = metrics['dsi'][0, :]   # ON phase DSI
-        off_dsi = metrics['dsi'][1, :]  # OFF phase DSI
-        
-        # Custom phase ranges (override automatic)
-        metrics = obj.compute_phase_tuning_metrics(phase_ranges=[(0, 60), (60, 120)])
+            Ignored in new API. Use compute_tuning_metrics(phase_aware=True).
+
+        Returns
+        -------
+        dict
+            Dictionary containing tuning metrics with (n_phases, n_rois) arrays.
         """
-        if isinstance(roi_indices, int):
-            roi_indices = [roi_indices]
-        
-        # Automatically determine phase ranges based on dir_phase_num
-        if phase_ranges is None:
-            if self.dir_phase_num == 1:
-                # Single phase - use entire response period
-                phase_ranges = None
-            else:
-                # Multi-phase - automatically split using get_epoch_dur()
-                phase_ranges = "auto"
-        
-        return tuning_metrics.compute_all_tuning_metrics(
-            self, metric=metric, roi_indices=roi_indices, phase_ranges=phase_ranges
+        warnings.warn(
+            "compute_phase_tuning_metrics() is deprecated. "
+            "Use compute_tuning_metrics(phase_aware=True) instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        # Map old API to new API
+        # phase_ranges parameter is ignored - always use auto-detection
+        return self.compute_tuning_metrics(
+            roi_indices=roi_indices, metric=metric, phase_aware=True
         )
     
     def plot_tuning_function_with_traces(self, roi_index, ax=None, show_trials=True, 

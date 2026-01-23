@@ -45,6 +45,8 @@ def compute_tuning_function(osds_obj, roi_index=None, window=None, metric='max',
             If roi_index is specified: tuning values with shape (n_directions, n_phases).
         Values are ordered according to osds_obj.directions_list.
     """
+    if np.isnan(osds_obj.averages).all():
+        raise ValueError("Averages not computed. Run compute_snippets_and_averages() first.")
     # Get directionally split averages: (n_directions, n_rois, timepoints_per_direction)
     dir_averages = osds_obj.split_averages_directionally()
 

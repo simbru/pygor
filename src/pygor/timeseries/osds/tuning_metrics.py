@@ -56,48 +56,74 @@ def compute_circular_variance(responses, directions_deg):
     return 1 - r
 
 
-def compute_directional_selectivity_index(responses, directions_deg):
+def compute_direction_selectivity_index(responses, directions_deg):
     """
-    Compute directional selectivity index (DSI).
+    Compute directional selectivity index (DSI) and related metrics, vectorized.
     
-    DSI = (preferred - opposite) / (preferred + opposite)
-    DSI = 1 means strongly directional, DSI = 0 means equal response to opposite directions.
+    DSI = (R_preferred - R_opposite) / (R_preferred + R_opposite)
     
     Parameters:
     -----------
     responses : array-like
-        Response values for each direction
+        Response values. Can be 1D (n_directions), 2D (n_rois, n_directions), 
+        or 3D (n_phases, n_rois, n_directions).
     directions_deg : array-like
-        Direction values in degrees
+        1D array of direction values in degrees.
         
     Returns:
     --------
-    float : DSI value (-1 ≤ DSI ≤ 1)
+    dict : Dictionary containing:
+        - 'dsi': Directional selectivity index (-1 to 1). Shape matches input `responses` without direction axis.
+        - 'preferred_direction': Preferred direction in degrees (0-360).
+        - 'opposite_direction': Opposite direction in degrees (0-360).
+        - 'preferred_response': Response at preferred direction.
+        - 'opposite_response': Response at opposite direction.
     """
     responses = np.array(responses)
     directions_deg = np.array(directions_deg)
     
-    # Find preferred direction
-    preferred_idx = np.argmax(responses)
-    preferred_response = responses[preferred_idx]
-    preferred_dir = directions_deg[preferred_idx]
+    # Ensure at least 1D
+    if responses.ndim == 0:
+        responses = responses[np.newaxis]
+
+    # Find preferred direction responses and indices
+    preferred_indices = np.argmax(responses, axis=-1)
+    preferred_responses = np.max(responses, axis=-1)
     
-    # Find opposite direction (180° away)
-    opposite_dir = (preferred_dir + 180) % 360
+    # Get preferred directions in degrees
+    preferred_dirs = directions_deg[preferred_indices]
     
-    # Find closest direction to opposite
-    dir_diffs = np.abs(directions_deg - opposite_dir)
-    # Handle wrap-around (e.g., 350° vs 10°)
-    dir_diffs = np.minimum(dir_diffs, 360 - dir_diffs)
-    opposite_idx = np.argmin(dir_diffs)
-    opposite_response = responses[opposite_idx]
+    # Calculate target opposite directions (180° away)
+    opposite_dirs_target = (preferred_dirs + 180) % 360
     
+    # Find the actual closest directions available in the data
+    # This requires broadcasting and careful indexing
+    dir_diffs = np.abs(directions_deg - opposite_dirs_target[..., np.newaxis])
+    dir_diffs = np.minimum(dir_diffs, 360 - dir_diffs)  # Handle wrap-around
+    opposite_indices = np.argmin(dir_diffs, axis=-1)
+    
+    # Get opposite responses using advanced indexing
+    # Create indices for all dimensions except the last one
+    if responses.ndim > 1:
+        # Create a meshgrid of indices for the preceding dimensions
+        # For a 3D array (n_phases, n_rois, n_dirs), this creates indices for phases and ROIs
+        indices = np.indices(responses.shape[:-1])
+        opposite_responses = responses[(*indices, opposite_indices)]
+    else:
+        # 1D case is simpler
+        opposite_responses = responses[opposite_indices]
+
     # Compute DSI
-    if preferred_response + opposite_response == 0:
-        return 0
+    denominator = preferred_responses + opposite_responses
+    dsis = np.where(denominator == 0, 0, (preferred_responses - opposite_responses) / denominator)
     
-    dsi = (preferred_response - opposite_response) / (preferred_response + opposite_response)
-    return dsi
+    return {
+        'dsi': dsis,
+        'preferred_direction': preferred_dirs,
+        'opposite_direction': directions_deg[opposite_indices],
+        'preferred_response': preferred_responses,
+        'opposite_response': opposite_responses
+    }
 
 
 def compute_preferred_direction(responses, directions_deg):
@@ -255,44 +281,46 @@ def extract_mean_vector(responses, directions_deg):
 
 def compute_orientation_tuning(responses, directions_deg):
     """
-    Compute orientation tuning by averaging opposite directions.
-    
-    Converts direction selectivity to orientation selectivity by averaging
-    responses to opposite directions (e.g., 0° and 180° become one orientation).
+    Compute orientation tuning by averaging opposite directions (e.g., 0° and 180° become one orientation), vectorized. 
     
     Parameters:
     -----------
     responses : array-like
-        Response values for each direction
+        Response values. Can be 1D, 2D, or 3D. Last axis must be directions.
     directions_deg : array-like
-        Direction values in degrees
+        1D array of direction values in degrees.
         
     Returns:
     --------
     dict : Dictionary containing:
-        - 'orientations': Orientation angles (0-180°)
-        - 'responses': Averaged responses for each orientation
+        - 'orientations': Unique orientation angles (0-180°).
+        - 'responses': Averaged responses for each orientation. Shape matches input `responses`
+                       but last axis is n_orientations.
     """
     responses = np.array(responses)
     directions_deg = np.array(directions_deg)
     
     # Convert directions to orientations (0-180°)
     orientations = directions_deg % 180
+    unique_orientations, inverse_indices = np.unique(orientations, return_inverse=True)
     
-    # Find unique orientations and average opposite directions
-    unique_orientations = np.unique(orientations)
-    orientation_responses = []
+    # Prepare output array
+    output_shape = responses.shape[:-1] + (len(unique_orientations),)
+    orientation_responses = np.zeros(output_shape)
     
-    for orient in unique_orientations:
-        # Find all directions that map to this orientation
-        matching_indices = np.where(orientations == orient)[0]
-        # Average responses for this orientation
-        avg_response = np.mean(responses[matching_indices])
-        orientation_responses.append(avg_response)
+    # Sum responses for each unique orientation
+    # 'add.at' is used for efficient summation based on indices
+    np.add.at(orientation_responses, (..., inverse_indices), responses)
+    
+    # Count how many directions contributed to each orientation
+    counts = np.bincount(inverse_indices)
+    
+    # Divide by counts to get the mean. Use np.where to avoid division by zero.
+    orientation_responses /= np.where(counts == 0, 1, counts)
     
     return {
         'orientations': unique_orientations,
-        'responses': np.array(orientation_responses)
+        'responses': orientation_responses
     }
 
 
@@ -360,19 +388,16 @@ def extract_orientation_vector(responses, directions_deg):
 
 def compute_orientation_selectivity_index(responses, directions_deg):
     """
-    Compute standard orientation selectivity index (OSI).
+    Compute standard orientation selectivity index (OSI), vectorized.
     
     OSI = (R_preferred - R_orthogonal) / (R_preferred + R_orthogonal)
-    
-    Where R_orthogonal is the response 90° away from the preferred orientation.
-    OSI = 1 means perfectly orientation selective, OSI = 0 means no orientation preference.
     
     Parameters:
     -----------
     responses : array-like
-        Response values for each direction
+        Response values. Can be 1D, 2D, or 3D. Last axis must be directions.
     directions_deg : array-like
-        Direction values in degrees
+        1D array of direction values in degrees.
         
     Returns:
     --------
@@ -388,148 +413,121 @@ def compute_orientation_selectivity_index(responses, directions_deg):
     orientations = orientation_data['orientations']
     orientation_responses = orientation_data['responses']
     
-    if len(orientation_responses) == 0:
+    if orientation_responses.shape[-1] == 0:
+        # Create correctly shaped empty outputs
+        output_shape = responses.shape[:-1]
+        nan_array = np.full(output_shape, np.nan)
+        zero_array = np.zeros(output_shape)
         return {
-            'osi': 0,
-            'preferred_orientation': np.nan,
-            'orthogonal_orientation': np.nan,
-            'preferred_response': 0,
-            'orthogonal_response': 0
+            'osi': zero_array,
+            'preferred_orientation': nan_array,
+            'orthogonal_orientation': nan_array,
+            'preferred_response': zero_array,
+            'orthogonal_response': zero_array
         }
     
     # Find preferred orientation
-    preferred_idx = np.argmax(orientation_responses)
-    preferred_orientation = orientations[preferred_idx]
-    preferred_response = orientation_responses[preferred_idx]
+    preferred_indices = np.argmax(orientation_responses, axis=-1)
+    preferred_orientations = orientations[preferred_indices]
+    preferred_responses = np.max(orientation_responses, axis=-1)
     
     # Find orthogonal orientation (90° away)
-    orthogonal_orientation = (preferred_orientation + 90) % 180
+    orthogonal_orientations_target = (preferred_orientations + 90) % 180
     
-    # Find closest orientation to orthogonal
-    orientation_diffs = np.abs(orientations - orthogonal_orientation)
-    # Handle wrap-around for orientation space (0-180°)
+    # Find closest actual orientation to orthogonal target
+    orientation_diffs = np.abs(orientations - orthogonal_orientations_target[..., np.newaxis])
     orientation_diffs = np.minimum(orientation_diffs, 180 - orientation_diffs)
-    orthogonal_idx = np.argmin(orientation_diffs)
-    orthogonal_response = orientation_responses[orthogonal_idx]
+    orthogonal_indices = np.argmin(orientation_diffs, axis=-1)
+    
+    # Get orthogonal responses
+    if responses.ndim > 1:
+        indices = np.indices(orientation_responses.shape[:-1])
+        orthogonal_responses = orientation_responses[(*indices, orthogonal_indices)]
+    else:
+        orthogonal_responses = orientation_responses[orthogonal_indices]
     
     # Compute OSI
-    if preferred_response + orthogonal_response == 0:
-        osi = 0
-    else:
-        osi = (preferred_response - orthogonal_response) / (preferred_response + orthogonal_response)
+    denominator = preferred_responses + orthogonal_responses
+    osis = np.where(denominator == 0, 0, (preferred_responses - orthogonal_responses) / denominator)
     
-    # Ensure OSI is between 0 and 1
-    osi = max(0, osi)
+    # Ensure OSI is non-negative
+    osis = np.maximum(0, osis)
     
     return {
-        'osi': osi,
-        'preferred_orientation': preferred_orientation,
-        'orthogonal_orientation': orientations[orthogonal_idx],  # Use actual orientation, not target
-        'preferred_response': preferred_response,
-        'orthogonal_response': orthogonal_response
+        'osi': osis,
+        'preferred_orientation': preferred_orientations,
+        'orthogonal_orientation': orientations[orthogonal_indices],
+        'preferred_response': preferred_responses,
+        'orthogonal_response': orthogonal_responses
     }
 
 
 
-def compute_all_tuning_metrics(osds_obj, metric='peak', roi_indices=None, phase_ranges=None):
+def compute_all_tuning_metrics(osds_obj, metric='peak', roi_indices=None, phase_aware=None):
     """
     Compute all directional tuning metrics for ROIs in a OSDS object.
-    
-    Parameters:
-    -----------
+
+    Parameters
+    ----------
     osds_obj : OSDS
-        OSDS object containing directional response data
+        OSDS object containing directional response data.
     metric : str or callable
         Metric to use for computing tuning functions:
-        - 'peak': maximum absolute value
+        - 'peak': maximum absolute value (default)
         - 'max': maximum value
         - 'mean': mean value
         - 'auc': area under curve (absolute)
         - callable: custom function
     roi_indices : list or None
         ROI indices to analyze. If None, analyzes all ROIs.
-    phase_ranges : list of tuples or None
-        List of (start_idx, end_idx) index ranges for each phase to analyze separately.
-        If None, analyzes entire response period as single phase.
-        Example: [(0, 60), (60, 120)] for two phases of 60 samples each
-        
-    Returns:
-    --------
-    dict : Dictionary containing arrays of metrics for each ROI:
-        When phase_ranges=None (backward compatibility):
-        - 'vector_magnitude': Vector magnitude (r) for each ROI (n_rois,)
-        - 'circular_variance': Circular variance (CV) for each ROI (n_rois,)
-        - 'dsi': Directional selectivity index for each ROI (n_rois,)
-        - 'osi': Orientation selectivity index for each ROI (n_rois,)
-        - 'preferred_direction': Preferred direction (degrees) for each ROI (n_rois,)
-        - 'preferred_orientation': Preferred orientation (degrees) for each ROI (n_rois,)
-        - 'mean_direction': Mean direction from circular stats (degrees) for each ROI (n_rois,)
+    phase_aware : bool or None
+        Controls phase-aware analysis:
+        - None (default): Auto-detect from osds_obj.dir_phase_num
+          (phase-aware if dir_phase_num > 1, single-phase otherwise)
+        - True: Force phase-aware analysis using dir_phase_num phases
+        - False: Force single-phase analysis (ignore dir_phase_num)
+
+    Returns
+    -------
+    dict
+        Dictionary containing arrays of metrics for each ROI:
+
+        - 'vector_magnitude': Circular vector magnitude (r), 0-1
+        - 'circular_variance': 1 - r, 0-1
+        - 'dsi': Directional selectivity index, -1 to 1
+        - 'osi': Orientation selectivity index, 0-1
+        - 'preferred_direction': Direction with max response (degrees)
+        - 'preferred_orientation': Orientation with max response (degrees)
+        - 'mean_direction': Mean direction from circular stats (degrees)
         - 'roi_indices': ROI indices that were analyzed
-        
-        When phase_ranges is provided:
-        - 'vector_magnitude': Vector magnitude (r) for each phase and ROI (n_phases, n_rois)
-        - 'circular_variance': Circular variance (CV) for each phase and ROI (n_phases, n_rois)
-        - 'dsi': Directional selectivity index for each phase and ROI (n_phases, n_rois)
-        - 'osi': Orientation selectivity index for each phase and ROI (n_phases, n_rois)
-        - 'preferred_direction': Preferred direction (degrees) for each phase and ROI (n_phases, n_rois)
-        - 'preferred_orientation': Preferred orientation (degrees) for each phase and ROI (n_phases, n_rois)
-        - 'mean_direction': Mean direction from circular stats (degrees) for each phase and ROI (n_phases, n_rois)
-        - 'roi_indices': ROI indices that were analyzed
-        - 'phase_ranges': Phase ranges that were used
+        - 'n_phases': Number of phases (1 if single-phase)
+
+        Array shapes:
+        - Single-phase (phase_aware=False or dir_phase_num=1): (n_rois,)
+        - Multi-phase (phase_aware=True and dir_phase_num>1): (n_phases, n_rois)
     """
     # Handle ROI indices
     if roi_indices is None:
         roi_indices = list(range(osds_obj.num_rois))
-    
-    directions_deg = np.array(osds_obj.directions_list)
-    
-    # Handle phase ranges
-    if phase_ranges is None:
-        # Use built-in phase support from compute_tuning_function
-        # This will automatically use self.dir_phase_num if > 1
-        tuning_functions = osds_obj.compute_tuning_function(metric=metric)
-        print(f"tuning_functions shape from compute_tuning_function: {tuning_functions.shape}")
-        print(f"osds_obj.num_rois: {osds_obj.num_rois}")
-        print(f"len(roi_indices): {len(roi_indices)}")
 
-        # Check if phase data was returned
-        if len(tuning_functions.shape) == 3:
-            # Phase data could be: (n_rois, n_directions, n_phases) or (n_directions, n_rois, n_phases)
-            print(f"3D data detected, shape: {tuning_functions.shape}")
-            # Determine correct orientation based on num_rois
-            if tuning_functions.shape[0] == osds_obj.num_rois:
-                # Shape is (n_rois, n_directions, n_phases)
-                if roi_indices != list(range(osds_obj.num_rois)):
-                    tuning_functions = tuning_functions[roi_indices]
-                # Transpose to (n_phases, n_rois, n_directions)
-                all_tuning_functions = tuning_functions.transpose(2, 0, 1)
-            elif tuning_functions.shape[1] == osds_obj.num_rois:
-                # Shape is (n_directions, n_rois, n_phases)
-                # Transpose to (n_rois, n_directions, n_phases) first
-                tuning_functions = tuning_functions.transpose(1, 0, 2)
-                if roi_indices != list(range(osds_obj.num_rois)):
-                    tuning_functions = tuning_functions[roi_indices]
-                # Then transpose to (n_phases, n_rois, n_directions)
-                all_tuning_functions = tuning_functions.transpose(2, 0, 1)
-            else:
-                raise ValueError(f"Cannot determine tuning_functions orientation: shape {tuning_functions.shape}, num_rois {osds_obj.num_rois}")
-            n_phases = all_tuning_functions.shape[0]
-            print(f"Final all_tuning_functions shape: {all_tuning_functions.shape}")
-        else:
-            # Regular 2D data: could be (n_rois, n_directions) or (n_directions, n_rois)
-            print(f"2D data detected, shape: {tuning_functions.shape}")
-            if tuning_functions.shape[0] != osds_obj.num_rois:
-                # Need to transpose
-                tuning_functions = tuning_functions.T
-                print(f"Transposed to: {tuning_functions.shape}")
-            if roi_indices != list(range(osds_obj.num_rois)):
-                tuning_functions = tuning_functions[roi_indices]
-            # Add phase dimension
-            all_tuning_functions = tuning_functions[np.newaxis, :, :]
-            n_phases = 1
-            print(f"Final all_tuning_functions shape: {all_tuning_functions.shape}")
-    elif phase_ranges == "auto":
-        # Automatic phase splitting using get_epoch_dur() and dir_phase_num
+    directions_deg = np.array(osds_obj.directions_list)
+
+    # Determine effective phase_aware setting
+    # None = auto-detect from dir_phase_num
+    # True = force phase-aware
+    # False = force single-phase
+    if phase_aware is None:
+        # Auto-detect: use phases if dir_phase_num > 1
+        effective_phase_aware = osds_obj.dir_phase_num > 1
+    else:
+        effective_phase_aware = phase_aware
+
+    # Initialize phase_ranges_list (only used for multi-phase)
+    phase_ranges_list = None
+
+    # Compute tuning functions based on phase_aware setting
+    if effective_phase_aware and osds_obj.dir_phase_num > 1:
+        # Phase-aware analysis: split each direction into phases using window-based approach
         epoch_dur = osds_obj.get_epoch_dur()
         n_phases = osds_obj.dir_phase_num
         phase_size = epoch_dur // n_phases
@@ -539,44 +537,36 @@ def compute_all_tuning_metrics(osds_obj, metric='peak', roi_indices=None, phase_
             end = (i + 1) * phase_size if i < n_phases - 1 else epoch_dur
             phase_ranges_list.append((start, end))
 
-        # Get all tuning functions for each phase window
+        # Get tuning functions for each phase window
         all_tuning_functions = []
-        for i, phase_range in enumerate(phase_ranges_list):
-            # Specific phase window - vectorized computation
-            # Explicitly set phase_num=None to prevent automatic phase splitting
-            tuning_functions = osds_obj.compute_tuning_function(metric=metric, window=phase_range, phase_num=None)
-            print(f"Phase {i}: tuning_functions shape before transpose: {tuning_functions.shape}")
-            print(f"  osds_obj.num_rois: {osds_obj.num_rois}")
-            print(f"  len(roi_indices): {len(roi_indices)}")
-            # Transpose if needed to ensure (n_rois, n_directions) shape BEFORE indexing
+        for phase_range in phase_ranges_list:
+            # Use window parameter to get specific phase, explicitly disable auto phase splitting
+            tuning_functions = osds_obj.compute_tuning_function(
+                metric=metric, window=phase_range, phase_num=None
+            )
+            # Transpose if needed to ensure (n_rois, n_directions) shape
             if tuning_functions.shape[0] != osds_obj.num_rois:
                 tuning_functions = tuning_functions.T
-                print(f"  Transposed to: {tuning_functions.shape}")
             if roi_indices != list(range(osds_obj.num_rois)):
                 tuning_functions = tuning_functions[roi_indices]
-                print(f"  After indexing: {tuning_functions.shape}")
             all_tuning_functions.append(tuning_functions)
 
         # Stack to get (n_phases, n_rois, n_directions)
         all_tuning_functions = np.array(all_tuning_functions)
-        print(f"Final all_tuning_functions shape: {all_tuning_functions.shape}")
     else:
-        # Manual phase ranges provided
-        n_phases = len(phase_ranges)
-        all_tuning_functions = []
-        for phase_range in phase_ranges:
-            # Specific phase window - vectorized computation
-            # Explicitly set phase_num=None to prevent automatic phase splitting
-            tuning_functions = osds_obj.compute_tuning_function(metric=metric, window=phase_range, phase_num=None)
-            # Transpose if needed to ensure (n_rois, n_directions) shape BEFORE indexing
-            if tuning_functions.shape[0] != osds_obj.num_rois:
-                tuning_functions = tuning_functions.T
-            if roi_indices != list(range(osds_obj.num_rois)):
-                tuning_functions = tuning_functions[roi_indices]
-            all_tuning_functions.append(tuning_functions)
+        # Single-phase analysis: use entire response period
+        # Force single-phase by passing phase_num=1 (or letting it default when dir_phase_num=1)
+        tuning_functions = osds_obj.compute_tuning_function(metric=metric, phase_num=1)
 
-        # Stack to get (n_phases, n_rois, n_directions)
-        all_tuning_functions = np.array(all_tuning_functions)
+        # Handle shape: should be (n_rois, n_directions) for single phase
+        if tuning_functions.shape[0] != osds_obj.num_rois:
+            tuning_functions = tuning_functions.T
+        if roi_indices != list(range(osds_obj.num_rois)):
+            tuning_functions = tuning_functions[roi_indices]
+
+        # Add phase dimension for consistent shape (n_phases, n_rois, n_directions)
+        all_tuning_functions = tuning_functions[np.newaxis, :, :]
+        n_phases = 1
 
     n_rois = len(roi_indices)
     
@@ -610,70 +600,13 @@ def compute_all_tuning_metrics(osds_obj, metric='peak', roi_indices=None, phase_
     mean_directions = np.where(total_responses == 0, np.nan, mean_directions)
     
     # Vectorized DSI computation
-    preferred_indices = np.argmax(all_tuning_functions, axis=2)  # (n_phases, n_rois)
-    preferred_responses = np.max(all_tuning_functions, axis=2)  # (n_phases, n_rois)
-    
-    # Find opposite directions (180° away)
-    preferred_dirs = directions_deg[preferred_indices]
-    opposite_dirs = (preferred_dirs + 180) % 360
-    
-    # Find closest direction indices to opposite directions
-    dir_diffs = np.abs(directions_deg[np.newaxis, np.newaxis, :] - opposite_dirs[:, :, np.newaxis])
-    dir_diffs = np.minimum(dir_diffs, 360 - dir_diffs)  # Handle wrap-around
-    opposite_indices = np.argmin(dir_diffs, axis=2)
-    
-    # Get opposite responses
-    opposite_responses = all_tuning_functions[np.arange(n_phases)[:, np.newaxis], 
-                                            np.arange(n_rois)[np.newaxis, :], 
-                                            opposite_indices]
-    
-    # Compute DSI
-    dsi_denominator = preferred_responses + opposite_responses
-    dsis = np.where(dsi_denominator == 0, 0, 
-                   (preferred_responses - opposite_responses) / dsi_denominator)
-    
-    # Vectorized OSI computation (simplified - compute for all at once)
-    # Convert to orientation space and compute OSI
-    orientations = directions_deg % 180
-    unique_orientations = np.unique(orientations)
-    
-    # For each phase and ROI, compute OSI
-    osis = np.zeros((n_phases, n_rois))
-    preferred_orientations = np.zeros((n_phases, n_rois))
-    
-    for phase_idx in range(n_phases):
-        for roi_idx in range(n_rois):
-            # Get orientation responses by averaging opposite directions
-            orientation_responses = []
-            for orient in unique_orientations:
-                matching_indices = np.where(orientations == orient)[0]
-                avg_response = np.mean(all_tuning_functions[phase_idx, roi_idx, matching_indices])
-                orientation_responses.append(avg_response)
-            
-            orientation_responses = np.array(orientation_responses)
-            
-            if len(orientation_responses) > 0:
-                preferred_idx = np.argmax(orientation_responses)
-                preferred_orientation = unique_orientations[preferred_idx]
-                preferred_response = orientation_responses[preferred_idx]
-                
-                # Find orthogonal orientation (90° away)
-                orthogonal_orientation = (preferred_orientation + 90) % 180
-                orientation_diffs = np.abs(unique_orientations - orthogonal_orientation)
-                orientation_diffs = np.minimum(orientation_diffs, 180 - orientation_diffs)
-                orthogonal_idx = np.argmin(orientation_diffs)
-                orthogonal_response = orientation_responses[orthogonal_idx]
-                
-                # Compute OSI
-                if preferred_response + orthogonal_response > 0:
-                    osis[phase_idx, roi_idx] = max(0, (preferred_response - orthogonal_response) / (preferred_response + orthogonal_response))
-                else:
-                    osis[phase_idx, roi_idx] = 0
-                
-                preferred_orientations[phase_idx, roi_idx] = preferred_orientation
-            else:
-                osis[phase_idx, roi_idx] = 0
-                preferred_orientations[phase_idx, roi_idx] = np.nan
+    dsi_results = compute_direction_selectivity_index(all_tuning_functions, directions_deg)
+    dsis = dsi_results['dsi']
+
+    # Vectorized OSI computation
+    osi_results = compute_orientation_selectivity_index(all_tuning_functions, directions_deg)
+    osis = osi_results['osi']
+    preferred_orientations = osi_results['preferred_orientation']
     
     # Squeeze arrays if single phase for backward compatibility
     if n_phases == 1:
@@ -694,74 +627,12 @@ def compute_all_tuning_metrics(osds_obj, metric='peak', roi_indices=None, phase_
         'preferred_direction': preferred_directions,
         'preferred_orientation': preferred_orientations,
         'mean_direction': mean_directions,
-        'roi_indices': np.array(roi_indices)
+        'roi_indices': np.array(roi_indices),
+        'n_phases': n_phases
     }
 
     # Add phase_ranges to result if multi-phase analysis was performed
-    if phase_ranges == "auto":
+    if n_phases > 1 and phase_ranges_list is not None:
         result['phase_ranges'] = phase_ranges_list
-    elif phase_ranges is not None and n_phases > 1:
-        result['phase_ranges'] = phase_ranges
 
     return result
-
-
-# def plot_tuning_metrics_histograms(metrics_dict, figsize=(15, 10), bins=20):
-#     """
-#     Plot histograms of all tuning metrics.
-    
-#     Parameters:
-#     -----------
-#     metrics_dict : dict
-#         Dictionary returned by compute_all_tuning_metrics
-#     figsize : tuple
-#         Figure size
-#     bins : int
-#         Number of histogram bins
-        
-#     Returns:
-#     --------
-#     fig : matplotlib.figure.Figure
-#         Figure object
-#     """
-#     import matplotlib.pyplot as plt
-    
-#     fig, axes = plt.subplots(2, 4, figsize=figsize)
-#     axes = axes.flatten()
-    
-#     metrics_to_plot = [
-#         ('vector_magnitude', 'Vector Magnitude (r)', (0, 1)),
-#         ('circular_variance', 'Circular Variance (CV)', (0, 1)),
-#         ('dsi', 'Directional Selectivity Index (DSI)', (-1, 1)),
-#         ('osi', 'Orientation Selectivity Index (OSI)', (0, 1)),
-#         ('preferred_direction', 'Preferred Direction (°)', (0, 360)),
-#         ('preferred_orientation', 'Preferred Orientation (°)', (0, 180)),
-#         ('mean_direction', 'Mean Direction (°)', (0, 360))
-#     ]
-    
-#     for i, (metric_key, title, xlim) in enumerate(metrics_to_plot):
-#         if metric_key in metrics_dict:
-#             data = metrics_dict[metric_key]
-#             # Remove NaN values
-#             data_clean = data[~np.isnan(data)]
-            
-#             axes[i].hist(data_clean, bins=bins, alpha=0.7, edgecolor='black')
-#             axes[i].set_title(f'{title}\n(n={len(data_clean)} ROIs)')
-#             axes[i].set_xlabel(title.split('(')[0].strip())
-#             axes[i].set_ylabel('Count')
-#             axes[i].set_xlim(xlim)
-#             axes[i].grid(True, alpha=0.3)
-            
-#             # Add mean line
-#             if len(data_clean) > 0:
-#                 mean_val = np.mean(data_clean)
-#                 axes[i].axvline(mean_val, color='red', linestyle='--', linewidth=2, 
-#                                label=f'Mean: {mean_val:.3f}')
-#                 axes[i].legend()
-    
-#     # Hide unused subplots (we have 7 metrics in 2x4 grid = 8 subplots)
-#     for i in range(len(metrics_to_plot), len(axes)):
-#         axes[i].set_visible(False)
-    
-#     plt.tight_layout()
-#     return fig
