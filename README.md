@@ -2,18 +2,15 @@
 
 Welcome to Pygor!
 
-A Python toolkit for working alongside Baden-lab's IGOR Pro pipeline, allowing imports of processed data via H5 files and extending analysis capabilities with Python's flexible framework.
+Version: 1.0
 
-NEW: You can now read directly from .smh/.smp files! This functionality is being tested and validated. 
+A Python toolkit for working alongside Baden-lab's IGOR Pro pipeline. Pygor allows imports of IGOR-processed data via H5 files or direct reading of .smh/.smp files from ScanM. This allows you to use Python for your data analysis.
 
-## Here are the main points:
+## Key concepts
 
-- Pygor consists of data-objects, data-object-specific directories, and an Experiment (name to be decided) class that allows you to collect data-objects and analyse them using the data-directories.
-- Pygor classes are built using [dataclasses](https://docs.python.org/3/library/dataclasses.html), which are simple Python classes that store information and methods with minimal configuration and templating.
-- The special Pygor class `pygor.classes.experiment.Experiment` provides a handy way to collate Pygor objects, in such a way that analyses can be run on arbitrarily many datasets at a time.
-- Pygor classes can be built by inheriting the `pygor.classes.core_data.Core` object, which comes with handy methods like plotting your scan average, ROI positions, and getting contextual help.
-- Pygor objects can be called simply by passing `from pygor.load import "class name"`, as the import logic dictated by `pygor.load.py` takes care of the potentially confusing (and mostly just annoying) navigation of the directory structure, which can serve as a barrier of entry to novice users.
-- Extending the functionality of Pygor is intended to be *simple*. There are certain design principles the user can follow in order to build out their own analyses pipelines, that can be shared and further improved by other users.
+- **Data classes**: Load recordings via `pygor.load.Core()`, `pygor.load.STRF()`, etc. Classes inherit from `Core` and include built-in methods for visualization and analysis.
+- **Experiment collections**: Group multiple recordings with `pygor.classes.experiment.Experiment` for batch analysis.
+- **Extensible**: Add custom analysis objects by inheriting from existing classes.
 
 ## How do I install Pygor?
 
@@ -113,9 +110,14 @@ uv pip install 'pygor[cellpose]'
 
 Then use with:
 ```python
-data.segment_rois(mode="cellpose+")  # Cellpose with post-processing heuristics
 data.segment_rois(mode="cellpose")   # Raw Cellpose output
+data.segment_rois(mode="cellpose+", model_path="your\path\here")  # Cellpose with custom model and post-processing 
+
 ```
+
+Pre-trained models can be found here: https://drive.proton.me/urls/02GT9HWGC0#Ibd9kXWzOwMQ
+(So far only RibeyeA)
+
 
 ## Pygor design principles
 
@@ -127,10 +129,6 @@ Inside `pygor/src/pygor/` (Python's way of structuring a package with sub-module
 - `pygor/shared`: Other shared scripts
 - `pygor/test`: Unittests for Pygor classes
 - `pygor/insert_your_class`: Files containing functions related to your packages!
-
-## Custom cellpose models
-Pre-trained models can be found here: https://drive.proton.me/urls/02GT9HWGC0#Ibd9kXWzOwMQ
-(So far only RibeyeA)
 
 ## H5/IGOR Wave to Pygor Attribute Mapping
 If you are used to IGOR Pro and OS_scripts, you might have noticed some differences in naming conventions between IGOR Waves and Pygor. This was done to make the code more "Pythonic" and to improve ease of use. Below is a mapping of common H5 keys to their corresponding Pygor attributes, along with brief descriptions.
@@ -176,4 +174,17 @@ Note: `frame_hz` is calculated from `n_planes` and `linedur_s`, not stored direc
 ## AI transparency
 Pygor's core functionality was built before widespread AI coding tools. Recent development has used ChatGPT, Claude Code, and Github Copilot.
 
-Contributors should comment AI-generated code sections and include this in commit messages. Always test and validate AI-assisted code thoroughly.  
+Contributors should comment AI-generated code sections and include this in commit messages. Always test and validate AI-assisted code thoroughly.
+
+## TODO
+- Expand documentation and examples
+- Add tiff reading support and trigger channel deinterleaving
+
+## Acknowledgements
+
+Pygor builds on excellent open-source tools:
+
+- **[Napari](https://napari.org/)** - Multi-dimensional image viewer for Python. Used for interactive visualization and ROI annotation.
+  - Ahlers et al., (2023). napari: a multi-dimensional image viewer for Python. Zenodo. https://doi.org/10.5281/zenodo.8115575
+- **[Cellpose](https://www.cellpose.org/)** - Deep learning-based cell segmentation. Used for automated ROI detection.
+  - Stringer, C., Wang, T., Michaelos, M., & Pachitariu, M. (2021). Cellpose: a generalist algorithm for cellular segmentation. *Nature Methods*, 18(1), 100-106.
