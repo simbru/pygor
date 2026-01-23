@@ -468,7 +468,7 @@ class Core:
             trigger_times = np.array([], dtype=float)
         
         # Create instance without calling __post_init__
-        # We use object.__new__ to bypass dataclass __init__
+        # We use object.__new__ to bypass dataclass __init__, hacky but works
         instance = object.__new__(cls)
         
         # Set all required attributes manually
@@ -567,14 +567,15 @@ class Core:
         smooth_window_s: float = None,
         time_bin: int = None,
         fix_first_frame: bool = None,
+        check_trigger_start: bool = True,
         force: bool = False,
     ) -> None:
         """
         Apply preprocessing to images in-place.
-        
+
         Handles light artifact correction, X-flip, and optional detrending.
         This matches IGOR's OS_DetrendStack preprocessing pipeline.
-        
+
         Parameters
         ----------
         artifact_width : int, optional
@@ -590,24 +591,30 @@ class Core:
             Temporal binning factor for detrending speed (default: 10).
         fix_first_frame : bool, optional
             Copy frame 2 to frame 1 to fix first-frame artifact (default: True).
+        check_trigger_start : bool, optional
+            Check and correct TTL trigger signal if it starts low (default: True).
+            Some recordings start with the trigger signal in LOW state before
+            actual stimuli begin, causing a ghost trigger at index 0. This
+            detects and corrects that condition.
         force : bool, optional
             If True, re-apply preprocessing even if already done (default: False).
-            
+
         Raises
         ------
         RuntimeWarning
             If preprocessing was already applied and force=False.
-            
+
         Examples
         --------
         >>> data = Core.from_scanm("recording.smp")
         >>> data.preprocess()  # Apply with defaults
         >>> data.preprocess(detrend=False)  # Skip detrending
         >>> data.preprocess(artifact_width=3, force=True)  # Re-apply with custom params
-        
+
         See Also
         --------
         pygor.preproc.scanm.preprocess_stack : Underlying preprocessing function
+        pygor.preproc.triggers.correct_ttl_baseline : TTL baseline correction
         pygor.config : Configuration management for defaults
         """
         import pygor.preproc.scanm as scanm_module
@@ -652,6 +659,19 @@ class Core:
 
         # Update average_stack to reflect preprocessed data
         self.average_stack = self.images.mean(axis=0)
+
+        # Check and correct TTL baseline if needed
+        if check_trigger_start and hasattr(self, 'trigger_images') and self.trigger_images is not None:
+            from pygor.preproc.triggers import correct_ttl_baseline
+            self.trigger_images, n_corrected = correct_ttl_baseline(self.trigger_images)
+            if n_corrected > 0:
+                # Re-detect triggers with corrected signal
+                trigger_frames, trigger_times = scanm_module.detect_triggers(
+                    self.trigger_images,
+                    line_duration=self.linedur_s,
+                )
+                self.triggertimes_frame = trigger_frames
+                self.triggertimes = trigger_times
 
         # Record preprocessing in params (sets preprocessed=True and artifact_width)
         self.params.mark_preprocessing(params)
@@ -2140,9 +2160,10 @@ class Core:
                 print("No valid ROIs found - skipping plot")
                 return
 
-            # Extract traces using parallel method
-            traces_raw = pygor.core.gui.methods._fetch_traces_parallel(images, roi_mask)
-            # Returns (n_rois, n_frames) - IGOR convention
+            # Extract traces using vectorized method
+            from pygor.core.trace_extraction import extract_traces
+            traces_raw = extract_traces(images, roi_mask)
+            # Returns (n_rois, n_frames)
 
             n_rois, n_frames = traces_raw.shape
 
@@ -2330,7 +2351,7 @@ class Core:
         Extracts the average fluorescence signal for each ROI across all frames.
         Always computes BOTH raw and z-normalized traces to ensure consistency.
         Mimics IGOR's OS_TracesAndTriggers functionality for trace extraction.
-        Uses parallel processing for speed and IGOR's baseline z-normalization method.
+        Uses vectorized NumPy operations for speed.
 
         Parameters:
         -----------
@@ -2340,27 +2361,22 @@ class Core:
         Returns:
         --------
         tuple
-            (traces_raw, traces_znorm) both with shape (n_frames, n_rois)
+            (traces_raw, traces_znorm) both with shape (n_rois, n_frames)
         """
         if self.images is None:
             raise ValueError("No image data available. Cannot compute traces.")
         if self.rois is None:
             raise ValueError("No ROIs defined. Cannot compute traces.")
 
-        # Use pygor.core.gui.methods parallel extraction (fast, handles uint16 overflow)
-        import pygor.core.gui.methods
+        from pygor.core.trace_extraction import extract_traces, znorm_traces
 
-        print("Extracting traces using parallel processing...")
+        print("Extracting traces...")
 
-        # Extract raw traces using the fast parallel method
-        # Returns shape (n_rois, n_frames) - IGOR convention
-        traces_raw = pygor.core.gui.methods._fetch_traces_parallel(self.images, self.rois)
+        # Extract raw traces using vectorized method
+        # Returns shape (n_rois, n_frames)
+        traces_raw = extract_traces(self.images, self.rois)
 
         n_rois, n_frames = traces_raw.shape
-
-        # Compute z-normalized traces using IGOR's baseline method
-        # IGOR uses first nSeconds_prerun_reference (after ignoring first X seconds) as baseline
-        traces_znorm = np.zeros_like(traces_raw)
 
         # Get baseline parameters from OS_Parameters
         try:
@@ -2384,28 +2400,21 @@ class Core:
 
             print(f"Using baseline window: frames {baseline_start}-{baseline_end} ({n_frames_baseline} frames)")
 
-        except:
+        except Exception:
             # Fallback: use first 10% of recording as baseline
             baseline_start = 0
             baseline_end = max(3, n_frames // 10)
             print(f"Using default baseline: first {baseline_end} frames")
 
-        # Compute z-score for each ROI using its baseline period
-        for roi_idx in range(n_rois):
-            trace = traces_raw[roi_idx, :]  # Shape (n_rois, n_frames), get one ROI
-            baseline = trace[baseline_start:baseline_end]
-            baseline_mean = np.mean(baseline)
-            baseline_std = np.std(baseline)
-
-            # IGOR formula: (trace - baseline_mean) / baseline_std
-            traces_znorm[roi_idx, :] = (trace - baseline_mean) / baseline_std
+        # Compute z-normalized traces using vectorized function
+        traces_znorm = znorm_traces(traces_raw, baseline_start, baseline_end)
 
         # Set both attributes
-        self.traces_raw = traces_raw.astype(np.float32)
-        self.traces_znorm = traces_znorm.astype(np.float32)
-        
-        print("Z-normalization complete. Raw and z-normalized traces available: traces_raw, traces_znorm")
-        
+        self.traces_raw = traces_raw
+        self.traces_znorm = traces_znorm
+
+        print(f"Extracted {n_rois} traces ({n_frames} frames each)")
+
         # Save to H5 if requested
         if overwrite and self.filename.suffix == '.h5':
             success_raw = self.update_h5_key('Traces0_raw', self.traces_raw, overwrite=True)

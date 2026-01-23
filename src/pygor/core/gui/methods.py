@@ -25,96 +25,104 @@ def _import_napari():
             "  uv pip install 'napari>=0.5.6' 'pyqt5>=5.15.11'\n"
         ) from e
 
-def _fetch_traces_parallel(img_stack, roi_mask):
-    """
-    Extract traces from image stack using parallel processing.
-    Standalone function that can be imported and used by Core class.
-
-    Parameters:
-    -----------
-    img_stack : np.ndarray
-        Image stack with shape (n_frames, height, width)
-    roi_mask : np.ndarray
-        ROI mask in H5 format (background=1, ROIs=-1,-2,-3,...)
-
-    Returns:
-    --------
-    np.ndarray
-        Traces with shape (n_rois, n_frames)
-    """
-    import os
-    from multiprocessing import shared_memory
-
-    unique_vals = np.unique(roi_mask)
-    unique_vals = unique_vals[~np.isnan(unique_vals)]
-
-    # Handle both H5 format (ROIs = -1,-2,-3...) and Napari format (ROIs = 0,1,2...)
-    if np.any(unique_vals < 0):
-        # H5 format: negative values are ROIs
-        unique_vals = unique_vals[unique_vals < 0]
-    else:
-        # Napari format: non-negative values are ROIs (background should be NaN)
-        unique_vals = unique_vals[unique_vals >= 0]
-
-    n_rois = len(unique_vals)
-
-    # Use all available CPU cores
-    n_jobs = os.cpu_count()
-
-    # Create shared memory for img_stack to avoid copying to each worker
-    img_stack_c = np.ascontiguousarray(img_stack)  # Ensure contiguous memory
-    shm = shared_memory.SharedMemory(create=True, size=img_stack_c.nbytes)
-
-    # Copy data to shared memory
-    shm_array = np.ndarray(img_stack_c.shape, dtype=img_stack_c.dtype, buffer=shm.buf)
-    np.copyto(shm_array, img_stack_c)
-
-    try:
-        # Process each ROI in parallel - workers access shared memory
-        traces = Parallel(n_jobs=n_jobs, verbose=0)(
-            delayed(_process_single_roi_shared)(
-                img_stack_c.shape, img_stack_c.dtype, roi_mask, roi_val, shm.name
-            )
-            for roi_val in sorted(unique_vals, reverse=True)
-        )
-
-        return np.array(traces)
-
-    finally:
-        # Clean up shared memory
-        shm.close()
-        shm.unlink()
-
-
-# Standalone function for parallel processing (must be picklable)
-def _process_single_roi_shared(img_shape, img_dtype, roi_mask, roi_val, shm_name):
-    """Process a single ROI using shared memory. Standalone function for joblib."""
-    from multiprocessing import shared_memory
-
-    # Attach to existing shared memory
-    shm = shared_memory.SharedMemory(name=shm_name)
-    # Create numpy array view of shared memory
-    img_stack = np.ndarray(img_shape, dtype=img_dtype, buffer=shm.buf)
-
-    mask = (roi_mask == roi_val)
-
-    # CRITICAL: Manual sum to prevent uint16 overflow
-    # einsum with uint16 causes overflow when summing many pixels
-    # (e.g., 50 pixels × 55000 = 2,750,000 which exceeds uint16 max of 65535)
-    count = mask.sum()
-
-    # Extract traces frame by frame with explicit float64 accumulation
-    n_frames = img_shape[0]
-    sum_per_frame = np.zeros(n_frames, dtype=np.float64)
-
-    for frame_idx in range(n_frames):
-        # Sum pixels in this ROI for this frame, converting to float64 first
-        sum_per_frame[frame_idx] = np.sum(img_stack[frame_idx][mask].astype(np.float64))
-
-    # Don't close/unlink - parent will handle that
-    shm.close()
-
-    return sum_per_frame / count
+# =============================================================================
+# DEPRECATED: Parallel trace extraction
+# Moved to pygor.core.trace_extraction.extract_traces()
+# The vectorized version is ~5.6x faster for typical datasets.
+# Kept here for reference only.
+# =============================================================================
+#
+# def _fetch_traces_parallel(img_stack, roi_mask):
+#     """
+#     Extract traces from image stack using parallel processing.
+#     Standalone function that can be imported and used by Core class.
+#
+#     Parameters:
+#     -----------
+#     img_stack : np.ndarray
+#         Image stack with shape (n_frames, height, width)
+#     roi_mask : np.ndarray
+#         ROI mask in H5 format (background=1, ROIs=-1,-2,-3,...)
+#
+#     Returns:
+#     --------
+#     np.ndarray
+#         Traces with shape (n_rois, n_frames)
+#     """
+#     import os
+#     from multiprocessing import shared_memory
+#
+#     unique_vals = np.unique(roi_mask)
+#     unique_vals = unique_vals[~np.isnan(unique_vals)]
+#
+#     # Handle both H5 format (ROIs = -1,-2,-3...) and Napari format (ROIs = 0,1,2...)
+#     if np.any(unique_vals < 0):
+#         # H5 format: negative values are ROIs
+#         unique_vals = unique_vals[unique_vals < 0]
+#     else:
+#         # Napari format: non-negative values are ROIs (background should be NaN)
+#         unique_vals = unique_vals[unique_vals >= 0]
+#
+#     n_rois = len(unique_vals)
+#
+#     # Use all available CPU cores
+#     n_jobs = os.cpu_count()
+#
+#     # Create shared memory for img_stack to avoid copying to each worker
+#     img_stack_c = np.ascontiguousarray(img_stack)  # Ensure contiguous memory
+#     shm = shared_memory.SharedMemory(create=True, size=img_stack_c.nbytes)
+#
+#     # Copy data to shared memory
+#     shm_array = np.ndarray(img_stack_c.shape, dtype=img_stack_c.dtype, buffer=shm.buf)
+#     np.copyto(shm_array, img_stack_c)
+#
+#     try:
+#         # Process each ROI in parallel - workers access shared memory
+#         traces = Parallel(n_jobs=n_jobs, verbose=0)(
+#             delayed(_process_single_roi_shared)(
+#                 img_stack_c.shape, img_stack_c.dtype, roi_mask, roi_val, shm.name
+#             )
+#             for roi_val in sorted(unique_vals, reverse=True)
+#         )
+#
+#         return np.array(traces)
+#
+#     finally:
+#         # Clean up shared memory
+#         shm.close()
+#         shm.unlink()
+#
+#
+# # Standalone function for parallel processing (must be picklable)
+# def _process_single_roi_shared(img_shape, img_dtype, roi_mask, roi_val, shm_name):
+#     """Process a single ROI using shared memory. Standalone function for joblib."""
+#     from multiprocessing import shared_memory
+#
+#     # Attach to existing shared memory
+#     shm = shared_memory.SharedMemory(name=shm_name)
+#     # Create numpy array view of shared memory
+#     img_stack = np.ndarray(img_shape, dtype=img_dtype, buffer=shm.buf)
+#
+#     mask = (roi_mask == roi_val)
+#
+#     # CRITICAL: Manual sum to prevent uint16 overflow
+#     # einsum with uint16 causes overflow when summing many pixels
+#     # (e.g., 50 pixels × 55000 = 2,750,000 which exceeds uint16 max of 65535)
+#     count = mask.sum()
+#
+#     # Extract traces frame by frame with explicit float64 accumulation
+#     n_frames = img_shape[0]
+#     sum_per_frame = np.zeros(n_frames, dtype=np.float64)
+#
+#     for frame_idx in range(n_frames):
+#         # Sum pixels in this ROI for this frame, converting to float64 first
+#         sum_per_frame[frame_idx] = np.sum(img_stack[frame_idx][mask].astype(np.float64))
+#
+#     # Don't close/unlink - parent will handle that
+#     shm.close()
+#
+#     return sum_per_frame / count
+# =============================================================================
 
 class NapariViewStack:
     def __init__(self, pygor_object):
@@ -579,11 +587,12 @@ class NapariRoiPrompt():
         return _mask
         
     def fetch_traces(self, img_stack, roi_mask):
-        """Extract traces using the shared parallel extraction function."""
+        """Extract traces using the vectorized extraction function."""
         print("Extracting traces from image stack...")
 
-        # Use the shared parallel extraction function (handles uint16 overflow)
-        traces = _fetch_traces_parallel(img_stack, roi_mask)
+        # Use the vectorized extraction function (handles uint16 overflow)
+        from pygor.core.trace_extraction import extract_traces
+        traces = extract_traces(img_stack, roi_mask)
 
         print("Trace extraction complete!")
         return traces
