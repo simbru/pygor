@@ -7,6 +7,7 @@ try:
 except ImportError:
     from collections.abc import Iterable
 from collections import defaultdict
+import os
 import pandas as pd
 import pathlib
 import numpy as np
@@ -185,35 +186,63 @@ class Experiment:
 
     def detach_data(self, indices):
         """
-        Detach recordings by index or name.
+        Detach recordings by index, name, or full path.
         
         Parameters
         ----------
         indices : int, list of int, str, or list of str
-            Recording indices or names to detach. If name not found, it's ignored.
+            Recording indices, names, or full paths to detach. If not found, it's ignored.
         """
+        recording_paths = [str(pathlib.Path(rec.metadata["filename"])) for rec in self.recording]
+        recording_paths_norm = [os.path.normcase(os.path.normpath(p)) for p in recording_paths]
+        recording_names = [pathlib.Path(rec.metadata["filename"]).stem for rec in self.recording]
+
+        def _is_pathlike(value):
+            return isinstance(value, (str, pathlib.Path, os.PathLike, np.str_))
+
+        def _to_str(value):
+            if isinstance(value, (pathlib.Path, os.PathLike)):
+                return str(value)
+            return str(value)
+
         # Handle string input (name-based detaching)
-        if isinstance(indices, str):
-            # Find recording index by name
-            recording_names = [pathlib.Path(rec.metadata["filename"]).stem for rec in self.recording]
-            try:
-                index = recording_names.index(indices)
+        if _is_pathlike(indices):
+            target_norm = os.path.normcase(os.path.normpath(indices))
+            if target_norm in recording_paths_norm:
+                index = recording_paths_norm.index(target_norm)
                 indices = [index]
-                print(f"Detaching data by name: {indices}")
-            except ValueError:
-                print(f"Recording '{indices}' not found - skipping")
-                return
-        elif isinstance(indices, list) and len(indices) > 0 and isinstance(indices[0], str):
+                print(f"Detaching data by path: {recording_paths[index]}")
+            else:
+                # Find recording index by name
+                try:
+                    name = pathlib.Path(_to_str(indices)).stem
+                    index = recording_names.index(name)
+                    if recording_names.count(name) > 1:
+                        print(f"Multiple recordings match name '{name}'. Use full path to disambiguate.")
+                    indices = [index]
+                    print(f"Detaching data by name: {indices}")
+                except ValueError:
+                    print(f"Recording '{indices}' not found - skipping")
+                    return
+        elif isinstance(indices, list) and len(indices) > 0 and _is_pathlike(indices[0]):
             # Handle list of names
-            recording_names = [pathlib.Path(rec.metadata["filename"]).stem for rec in self.recording]
             found_indices = []
             not_found = []
-            for name in indices:
-                try:
-                    index = recording_names.index(name)
+            for name_or_path in indices:
+                name_or_path_str = _to_str(name_or_path)
+                target_norm = os.path.normcase(os.path.normpath(name_or_path_str))
+                if target_norm in recording_paths_norm:
+                    index = recording_paths_norm.index(target_norm)
                     found_indices.append(index)
-                except ValueError:
-                    not_found.append(name)
+                else:
+                    try:
+                        name = pathlib.Path(name_or_path_str).stem
+                        index = recording_names.index(name)
+                        if recording_names.count(name) > 1:
+                            print(f"Multiple recordings match name '{name}'. Use full path to disambiguate.")
+                        found_indices.append(index)
+                    except ValueError:
+                        not_found.append(name_or_path_str)
             
             if not_found:
                 print(f"Recordings not found (skipping): {not_found}")
@@ -223,7 +252,7 @@ class Experiment:
             
             indices = found_indices
             names_to_detach = [recording_names[i] for i in indices]
-            print(f"Detaching data by names: {names_to_detach}")
+            print(f"Detaching data by names/paths: {names_to_detach}")
         else:
             # Handle index-based detaching (original behavior)
             to_print = self.recording_id.iloc[indices]["name"]
@@ -250,7 +279,17 @@ class Experiment:
             print("Returning as Numpy array failed, returning as list instead.")
         return all_collated
 
-    def fetch(self, methods, as_dataframe=False, level='recording', include_metadata=True, **global_kwargs):
+    def fetch(
+        self,
+        methods,
+        as_dataframe=False,
+        level="recording",
+        include_metadata=True,
+        unpack_ndarrays=False,
+        unpack_axis=0,
+        concat_unpacked=False,
+        **global_kwargs,
+    ):
         """
         Flexibly fetch any methods/attributes from all recordings.
         
@@ -267,6 +306,15 @@ class Experiment:
             'recording' for one row per recording (default), 'roi' for one row per ROI
         include_metadata : bool, optional
             Whether to include recording metadata (default: True)
+        unpack_ndarrays : bool, optional
+            If True and as_dataframe=False, unpack 2D ndarray outputs into separate keys
+            (default: False)
+        unpack_axis : int, optional
+            Feature axis for unpacking 2D arrays. 0 expects (n_features, n_rois),
+            1 expects (n_rois, n_features) (default: 0)
+        concat_unpacked : bool, optional
+            If True, concatenate per-recording arrays into a single 1D array per feature.
+            If False, keep per-recording lists (default: False)
         **global_kwargs
             Default keyword arguments for methods that don't specify their own
             
@@ -297,79 +345,33 @@ class Experiment:
         w...     'category': 'get_polarity_category_cell'
         ... }, as_dataframe=True, level='roi')
         """
-        
-        # Handle different input formats
-        if isinstance(methods, dict):
-            method_specs = methods
-            result_keys = list(methods.keys())
-        elif isinstance(methods, list):
-            # Convert list to dict format
-            method_specs = {}
-            result_keys = []
-            for method in methods:
-                if isinstance(method, dict):
-                    # Handle mixed format: [{'name': 'method'}, 'simple']
-                    method_specs.update(method)
-                    result_keys.extend(method.keys())
-                else:
-                    # Simple string method
-                    method_specs[method] = method
-                    result_keys.append(method)
-        else:
-            raise ValueError("Methods must be a list or dictionary")
-        
+        method_specs, result_keys, return_single = self._parse_method_specs(methods)
+
+        if unpack_axis not in (0, 1):
+            raise ValueError("unpack_axis must be 0 or 1")
+
         results = {key: [] for key in result_keys}
-        
+
         # Add metadata containers if requested
         if include_metadata and as_dataframe:
-            metadata_keys = ['recording_id', 'name', 'date', 'type', 'num_rois']
-            for key in metadata_keys:
-                if key not in results:
-                    results[key] = []
-        
+            self._init_metadata_results(results)
+
         # Fetch from each recording
         for rec_idx, recording in enumerate(self.recording):
             # Add metadata if requested
             if include_metadata and as_dataframe:
-                results['recording_id'].append(rec_idx)
-                results['name'].append(self.id_dict['name'][rec_idx])
-                results['date'].append(self.id_dict['date'][rec_idx])
-                results['type'].append(self.id_dict['type'][rec_idx])
-                results['num_rois'].append(self.id_dict['num_rois'][rec_idx])
-            
+                self._append_recording_metadata(results, rec_idx)
+
             # Fetch each requested method/attribute
             for result_name, method_spec in method_specs.items():
-                try:
-                    # Parse method specification
-                    if isinstance(method_spec, tuple):
-                        method_name, method_kwargs = method_spec
-                    elif isinstance(method_spec, str):
-                        method_name = method_spec
-                        method_kwargs = global_kwargs
-                    else:
-                        raise ValueError(f"Invalid method spec for {result_name}: {method_spec}")
-                    
-                    # Get the attribute/method
-                    attr = getattr(recording, method_name)
-                    
-                    # Call if it's a method, otherwise just get the attribute
-                    if hasattr(attr, '__call__'):
-                        try:
-                            result = attr(**method_kwargs)
-                        except TypeError:
-                            # Method doesn't accept these kwargs, try without
-                            result = attr()
-                    else:
-                        result = attr
-                    
-                    results[result_name].append(result)
-                    
-                except AttributeError:
-                    print(f"Warning: {recording.type} object has no method/attribute '{method_name}' (recording_id: {rec_idx})")
-                    results[result_name].append(None)
-                except Exception as e:
-                    print(f"Warning: Error calling {method_name} on {recording.name} (recording_id: {rec_idx}): {e}")
-                    results[result_name].append(None)
+                result = self._call_recording_method(
+                    recording,
+                    result_name,
+                    method_spec,
+                    rec_idx,
+                    global_kwargs,
+                )
+                results[result_name].append(result)
         
         # Return as requested format
         if as_dataframe:
@@ -378,127 +380,240 @@ class Experiment:
             # Handle ROI-level analysis
             if level == 'roi':
                 # Explode recording-level data into ROI-level data
-                roi_rows = []
-                
-                for rec_idx, recording in enumerate(self.recording):
-                    num_rois = recording.num_rois
-                    
-                    for roi_idx in range(num_rois):
-                        roi_row = {}
-                        
-                        # Add ROI-specific metadata
-                        if include_metadata:
-                            roi_row['recording_id'] = rec_idx
-                            roi_row['roi_id'] = roi_idx
-                            roi_row['name'] = self.id_dict['name'][rec_idx]
-                            roi_row['date'] = self.id_dict['date'][rec_idx]
-                            roi_row['type'] = self.id_dict['type'][rec_idx]
-                        
-                        #TODO: add warning if longer than 1000 datapoints: likely not a tuning function
-
-                        # Extract ROI-specific data from each method result
-                        for result_name in result_keys:
-                            result_data = df.loc[rec_idx, result_name]
-                            
-                            # Handle different result types
-                            if result_data is None:
-                                roi_row[result_name] = None
-                            elif isinstance(result_data, pd.DataFrame) and len(result_data) == num_rois:
-                                # DataFrame with ROI index - auto-unpack columns
-                                for col_name in result_data.columns:
-                                    column_name = f"{result_name}_{col_name}"
-                                    roi_row[column_name] = result_data.iloc[roi_idx][col_name]
-                            elif isinstance(result_data, (list, np.ndarray)):
-                                handled = False
-                                if hasattr(result_data, 'ndim'):
-                                    # NumPy array - check dimensions
-                                    if result_data.ndim == 1 and len(result_data) == num_rois:
-                                        # Simple 1D case: (num_rois,)
-                                        value = result_data[roi_idx]
-                                        # Convert numpy scalars to Python types
-                                        if isinstance(value, np.ndarray) and value.ndim == 0:
-                                            value = value.item()
-                                        elif isinstance(value, (np.float32, np.float64)):
-                                            value = float(value)
-                                        elif isinstance(value, (np.int32, np.int64)):
-                                            value = int(value)
-                                        roi_row[result_name] = value
-                                        handled = True
-                                    elif result_data.ndim == 2 and result_data.shape[1] == num_rois:
-                                        # 2D case: (n_features, num_rois) - auto-unpack features
-                                        for feature_idx in range(result_data.shape[0]):
-                                            column_name = f"{result_name}_{feature_idx}"
-                                            value = result_data[feature_idx, roi_idx]
-                                            # Convert numpy scalars to Python types
-                                            if isinstance(value, np.ndarray) and value.ndim == 0:
-                                                value = value.item()
-                                            elif isinstance(value, (np.float32, np.float64)):
-                                                value = float(value)
-                                            elif isinstance(value, (np.int32, np.int64)):
-                                                value = int(value)
-                                            roi_row[column_name] = value
-                                        handled = True
-                                    elif result_data.ndim == 2 and result_data.shape[0] == num_rois:
-                                        # 2D case: (num_rois, n_features) - auto-unpack features
-                                        for feature_idx in range(result_data.shape[1]):
-                                            column_name = f"{result_name}_{feature_idx}"
-                                            value = result_data[roi_idx, feature_idx]
-                                            # Convert numpy scalars to Python types
-                                            if isinstance(value, np.ndarray) and value.ndim == 0:
-                                                value = value.item()
-                                            elif isinstance(value, (np.float32, np.float64)):
-                                                value = float(value)
-                                            elif isinstance(value, (np.int32, np.int64)):
-                                                value = int(value)
-                                            roi_row[column_name] = value
-                                        handled = True
-                                else:
-                                    # List - check if it's per-ROI
-                                    if len(result_data) == num_rois:
-                                        roi_row[result_name] = result_data[roi_idx]
-                                        handled = True
-                                
-                                # Only fall back to complex data if not handled
-                                if not handled:
-                                    roi_row[result_name] = result_data
-                            elif np.isscalar(result_data) or (isinstance(result_data, np.ndarray) and result_data.ndim == 0):
-                                # Scalar data - duplicate for all ROIs
-                                value = result_data
-                                # Convert numpy scalars to Python types for better pandas compatibility
-                                if isinstance(value, np.ndarray) and value.ndim == 0:
-                                    value = value.item()
-                                elif isinstance(value, (np.float32, np.float64)):
-                                    value = float(value)
-                                elif isinstance(value, (np.int32, np.int64)):
-                                    value = int(value)
-                                roi_row[result_name] = value
-                            else:
-                                # Complex data - keep as is (might be useful for some methods)
-                                roi_row[result_name] = result_data
-                        
-                        roi_rows.append(roi_row)
-                
-                # Create the final DataFrame
+                roi_rows = self._build_roi_rows(
+                    df,
+                    result_keys,
+                    include_metadata=include_metadata,
+                )
                 roi_df = pd.DataFrame(roi_rows)
-                
-                # Remove any original columns that were successfully unpacked into multiple columns
-                columns_to_remove = []
-                for result_name in result_keys:
-                    # Check if we have unpacked columns for this result
-                    unpacked_columns = [col for col in roi_df.columns if col.startswith(f"{result_name}_")]
-                    if unpacked_columns and result_name in roi_df.columns:
-                        # We successfully unpacked this column, so remove the original
-                        columns_to_remove.append(result_name)
-                
-                # Drop the original columns that were unpacked
-                if columns_to_remove:
-                    roi_df = roi_df.drop(columns=columns_to_remove)
-                
+                roi_df = self._drop_unpacked_columns(roi_df, result_keys)
                 return roi_df
             else:
                 return df
         else:
+            if unpack_ndarrays:
+                results = self._unpack_ndarray_results(
+                    results,
+                    unpack_axis=unpack_axis,
+                    concat_unpacked=concat_unpacked,
+                )
+            if return_single and not self._has_unpacked_keys(results, result_keys[0]):
+                return results[result_keys[0]]
             return results
+
+    def _parse_method_specs(self, methods):
+        """
+        Normalize method specs and determine if single-result shortcut applies.
+        """
+        return_single = False
+        if isinstance(methods, str):
+            method_specs = {methods: methods}
+            result_keys = [methods]
+            return_single = True
+        elif isinstance(methods, dict):
+            method_specs = methods
+            result_keys = list(methods.keys())
+        elif isinstance(methods, list):
+            method_specs = {}
+            result_keys = []
+            for method in methods:
+                if isinstance(method, dict):
+                    method_specs.update(method)
+                    result_keys.extend(method.keys())
+                else:
+                    method_specs[method] = method
+                    result_keys.append(method)
+        else:
+            raise ValueError("Methods must be a list or dictionary")
+        return method_specs, result_keys, return_single
+
+    def _init_metadata_results(self, results):
+        metadata_keys = ["recording_id", "name", "date", "type", "num_rois"]
+        for key in metadata_keys:
+            if key not in results:
+                results[key] = []
+
+    def _append_recording_metadata(self, results, rec_idx):
+        results["recording_id"].append(rec_idx)
+        results["name"].append(self.id_dict["name"][rec_idx])
+        results["date"].append(self.id_dict["date"][rec_idx])
+        results["type"].append(self.id_dict["type"][rec_idx])
+        results["num_rois"].append(self.id_dict["num_rois"][rec_idx])
+
+    def _call_recording_method(
+        self,
+        recording,
+        result_name,
+        method_spec,
+        rec_idx,
+        global_kwargs,
+    ):
+        try:
+            method_name, method_kwargs = self._parse_method_spec(method_spec, result_name, global_kwargs)
+            attr = getattr(recording, method_name)
+            if hasattr(attr, "__call__"):
+                try:
+                    return attr(**method_kwargs)
+                except TypeError:
+                    return attr()
+            return attr
+        except AttributeError:
+            print(
+                f"Warning: {recording.type} object has no method/attribute "
+                f"'{method_name}' (recording_id: {rec_idx})"
+            )
+            return None
+        except Exception as e:
+            print(
+                f"Warning: Error calling {method_name} on {recording.name} "
+                f"(recording_id: {rec_idx}): {e}"
+            )
+            return None
+
+    def _parse_method_spec(self, method_spec, result_name, global_kwargs):
+        if isinstance(method_spec, tuple):
+            return method_spec[0], method_spec[1]
+        if isinstance(method_spec, str):
+            return method_spec, global_kwargs
+        raise ValueError(f"Invalid method spec for {result_name}: {method_spec}")
+
+    def _build_roi_rows(self, df, result_keys, include_metadata=True):
+        roi_rows = []
+        for rec_idx, recording in enumerate(self.recording):
+            num_rois = recording.num_rois
+            for roi_idx in range(num_rois):
+                roi_row = {}
+                if include_metadata:
+                    self._append_roi_metadata(roi_row, rec_idx, roi_idx)
+                # TODO: add warning if longer than 1000 datapoints: likely not a tuning function
+                for result_name in result_keys:
+                    result_data = df.loc[rec_idx, result_name]
+                    self._add_roi_result(roi_row, result_name, result_data, num_rois, roi_idx)
+                roi_rows.append(roi_row)
+        return roi_rows
+
+    def _append_roi_metadata(self, roi_row, rec_idx, roi_idx):
+        roi_row["recording_id"] = rec_idx
+        roi_row["roi_id"] = roi_idx
+        roi_row["name"] = self.id_dict["name"][rec_idx]
+        roi_row["date"] = self.id_dict["date"][rec_idx]
+        roi_row["type"] = self.id_dict["type"][rec_idx]
+
+    def _add_roi_result(self, roi_row, result_name, result_data, num_rois, roi_idx):
+        if result_data is None:
+            roi_row[result_name] = None
+            return
+        if isinstance(result_data, pd.DataFrame) and len(result_data) == num_rois:
+            for col_name in result_data.columns:
+                column_name = f"{result_name}_{col_name}"
+                roi_row[column_name] = result_data.iloc[roi_idx][col_name]
+            return
+        if isinstance(result_data, (list, np.ndarray)):
+            handled = self._try_unpack_array(roi_row, result_name, result_data, num_rois, roi_idx)
+            if not handled:
+                roi_row[result_name] = result_data
+            return
+        if np.isscalar(result_data) or (isinstance(result_data, np.ndarray) and result_data.ndim == 0):
+            roi_row[result_name] = self._coerce_numpy_scalar(result_data)
+            return
+        roi_row[result_name] = result_data
+
+    def _try_unpack_array(self, roi_row, result_name, result_data, num_rois, roi_idx):
+        if hasattr(result_data, "ndim"):
+            if result_data.ndim == 1 and len(result_data) == num_rois:
+                roi_row[result_name] = self._coerce_numpy_scalar(result_data[roi_idx])
+                return True
+            if result_data.ndim == 2 and result_data.shape[1] == num_rois:
+                for feature_idx in range(result_data.shape[0]):
+                    column_name = f"{result_name}_{feature_idx}"
+                    roi_row[column_name] = self._coerce_numpy_scalar(
+                        result_data[feature_idx, roi_idx]
+                    )
+                return True
+            if result_data.ndim == 2 and result_data.shape[0] == num_rois:
+                for feature_idx in range(result_data.shape[1]):
+                    column_name = f"{result_name}_{feature_idx}"
+                    roi_row[column_name] = self._coerce_numpy_scalar(
+                        result_data[roi_idx, feature_idx]
+                    )
+                return True
+            return False
+        if len(result_data) == num_rois:
+            roi_row[result_name] = result_data[roi_idx]
+            return True
+        return False
+
+    def _coerce_numpy_scalar(self, value):
+        if isinstance(value, np.ndarray) and value.ndim == 0:
+            return value.item()
+        if isinstance(value, (np.float32, np.float64)):
+            return float(value)
+        if isinstance(value, (np.int32, np.int64)):
+            return int(value)
+        return value
+
+    def _drop_unpacked_columns(self, roi_df, result_keys):
+        columns_to_remove = []
+        for result_name in result_keys:
+            unpacked_columns = [col for col in roi_df.columns if col.startswith(f"{result_name}_")]
+            if unpacked_columns and result_name in roi_df.columns:
+                columns_to_remove.append(result_name)
+        if columns_to_remove:
+            roi_df = roi_df.drop(columns=columns_to_remove)
+        return roi_df
+
+    def _unpack_ndarray_results(self, results, unpack_axis=0, concat_unpacked=False):
+        """
+        Unpack 2D ndarray results into separate feature keys.
+        """
+        new_results = {}
+        for key, values in results.items():
+            if not values:
+                new_results[key] = values
+                continue
+
+            non_null = [v for v in values if v is not None]
+            if not non_null:
+                new_results[key] = values
+                continue
+
+            arrays = [
+                v for v in non_null if isinstance(v, np.ndarray) and v.ndim == 2
+            ]
+            if len(arrays) != len(non_null):
+                new_results[key] = values
+                continue
+
+            # Determine n_features from the first array
+            n_features = arrays[0].shape[0 if unpack_axis == 0 else 1]
+            if any(
+                a.shape[0 if unpack_axis == 0 else 1] != n_features for a in arrays
+            ):
+                new_results[key] = values
+                continue
+
+            for feat_idx in range(n_features):
+                feature_key = f"{key}_{feat_idx}"
+                series = []
+                for value in values:
+                    if value is None:
+                        series.append(None)
+                    elif unpack_axis == 0:
+                        series.append(value[feat_idx])
+                    else:
+                        series.append(value[:, feat_idx])
+                if concat_unpacked:
+                    concatenable = [v for v in series if v is not None]
+                    new_results[feature_key] = (
+                        np.concatenate(concatenable) if concatenable else np.array([])
+                    )
+                else:
+                    new_results[feature_key] = series
+        return new_results
+
+    def _has_unpacked_keys(self, results, base_key):
+        prefix = f"{base_key}_"
+        return any(key.startswith(prefix) for key in results.keys())
 
     def fetch_averages(self):
         '''
