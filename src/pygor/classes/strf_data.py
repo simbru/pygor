@@ -2791,6 +2791,9 @@ class STRF(Core):
     def plot_strfs_space(self, roi = None, **kwargs): 
         return pygor.strf.plotting.simple.plot_collapsed_strfs(self, **kwargs)
 
+    def plot_strfs_spacetime(self, roi = None, **kwargs):
+        return pygor.strf.plotting.simple.plot_spacetime_strfs(self, roi = roi, **kwargs)
+
     def plot_chromatic_overview(self, roi = None, contours = False, with_times = False, colour_idx=None, **kwargs):
         """
         Plot comprehensive chromatic overview of STRFs showing spatial and temporal components.
@@ -4033,6 +4036,63 @@ class STRF(Core):
         import pygor.strf.gui.methods as gui
         napari_session = gui.NapariSession(self)
         return napari_session.run()
+
+    def get_spatiotemporal_correlation(self, roi=None, method='pearson'):
+        """
+        Calculate spatiotemporal correlation map for STRF data.
+
+        Step by step:
+        1. Get the strongest pixel from the STRF along the time dimension.
+        2. For that pixel, extract its timecourse.
+        3. Compute the correlation between that timecourse and the timecourse of every other pixel
+            in the STRF.
+        4. Return the resulting spatiotemporal correlation map.
+
+        Parameters
+        ----------
+        roi : int, optional
+            ROI index to analyze. If None, analyzes all ROIs.
+        method : str, optional
+            Correlation method: 'pearson' (default) or 'spearman'.
+
+        Returns
+        -------
+        correlation_map : np.ndarray
+            Shape (n_rois, height, width) if roi is None, or (height, width) if single ROI.
+            Correlation values in range [-1, 1].
+        """
+        import pygor.strf.correlation as correlation_module
+        return correlation_module.calculate_spatiotemporal_correlation(self, roi=roi, method=method)
+
+
+def calculate_spatiotemporal_correlation(strf_obj, roi=None, method='pearson'):
+    """
+    Calculate spatiotemporal correlation for a given STRF object and ROI.
+    
+    Step by step:
+    1. Get the strongest pixel from the STRF along the time dimension.
+    2. For that pixel, extract its timecourse.
+    3. Compute the correlation between that timecourse and the timecourse of every other pixel
+        in the STRF.
+    4. Return the resulting spatiotemporal correlation map.
+
+    Parameters
+    ----------
+    strf_obj : STRF
+        STRF object containing the data.
+    roi : int, optional
+        ROI index to analyze. If None, analyzes all ROIs.
+    method : str, optional
+        Correlation method to use ('pearson', 'spearman', etc.). Default is 'pearson'.
+        
+    Returns
+    -------
+    correlation_map : np.ndarray
+        Spatiotemporal correlation map.
+    """
+    import pygor.strf.correlation as correlation_module
+    
+    return correlation_module.calculate_spatiotemporal_correlation(strf_obj, roi=roi, method=method)
 
 
 # Auto-generate _by_channel methods for all callable methods

@@ -1747,6 +1747,12 @@ class Core:
         source_proj = self._get_projection_for_alignment(source, projection_mode)
         target_proj = self._get_projection_for_alignment(self, projection_mode)
 
+        # Compute pearsons correlation for two projections
+        corr = np.corrcoef(
+            source_proj.flatten(),
+            target_proj.flatten()
+        )[0, 1]
+
         # Shared colormap limits
         vmin = min(source_proj.min(), target_proj.min())
         vmax = max(source_proj.max(), target_proj.max())
@@ -1776,7 +1782,7 @@ class Core:
         ax.imshow(np.clip(rgb, 0, 1), origin='lower')
         shift = transform['shift']
         ax.set_title(f'Alignment overlay (R=source, C=target)\n'
-                     f'Shift: dy={shift[0]:.2f}, dx={shift[1]:.2f} px')
+                     f'Shift to apply: dy={shift[0]:.2f}, dx={shift[1]:.2f} px')
         ax.axis('off')
 
         # Bottom-right: Target with transferred ROIs
@@ -1784,7 +1790,7 @@ class Core:
         ax.imshow(target_proj, cmap='gray', vmin=vmin, vmax=vmax, origin='lower')
         self._overlay_rois_on_axis(ax, shifted_mask, alpha=0.3)
         ax.set_title(f'Target with transferred ROIs\n'
-                     f'({self.num_rois} ROIs, error={transform["error"]:.4f})')
+                     f'({self.num_rois} ROIs, error={transform["error"]:.4f}, corr={corr:.4f})')
         ax.axis('off')
 
         plt.tight_layout()
@@ -2344,6 +2350,107 @@ class Core:
 
         return correlation_projection
 
+    def _compute_baseline_window(self, baseline_duration_s=2.0):
+        """
+        Compute baseline window from pre-stimulus period.
+
+        Works backwards from the first trigger to find a clean baseline period.
+        This avoids initial recording artifacts that can skew z-normalization.
+
+        Parameters
+        ----------
+        baseline_duration_s : float, optional
+            Duration of baseline window in seconds (default: 2.0)
+
+        Returns
+        -------
+        tuple
+            (baseline_start_frame, baseline_end_frame) where end is exclusive
+        """
+        # Check for manual override first
+        if hasattr(self, '_baseline_window') and self._baseline_window is not None:
+            return self._baseline_window
+
+        # Fallback if no triggers available
+        if self.triggertimes_frame is None or len(self.triggertimes_frame) == 0:
+            warnings.warn("No triggers found, using first 2s as baseline")
+            n_frames = min(int(2.0 * self.frame_hz), self.images.shape[0] // 4)
+            return 0, max(3, n_frames)
+
+        first_trigger_frame = int(self.triggertimes_frame[0])
+        baseline_frames = int(baseline_duration_s * self.frame_hz)
+
+        # Work backwards from first trigger
+        baseline_end = first_trigger_frame  # exclusive
+        baseline_start = max(0, baseline_end - baseline_frames)
+
+        # Validate minimum window size (need at least 3 frames for std)
+        actual_frames = baseline_end - baseline_start
+        if actual_frames < 3:
+            warnings.warn(
+                f"First trigger at frame {first_trigger_frame} too early for "
+                f"{baseline_duration_s}s baseline. Using frames 0-{first_trigger_frame} "
+                f"({actual_frames} frames)"
+            )
+            baseline_start = 0
+            baseline_end = max(3, first_trigger_frame)
+
+        return baseline_start, baseline_end
+
+    def set_baseline_window(self, start_frame=None, end_frame=None, duration_s=None):
+        """
+        Manually set baseline window (overrides automatic pre-stimulus detection).
+
+        Use this to override the automatic baseline calculation if needed.
+        Call before extract_traces_from_rois() to take effect.
+
+        Parameters
+        ----------
+        start_frame : int, optional
+            Start frame of baseline window (inclusive)
+        end_frame : int, optional
+            End frame of baseline window (exclusive)
+        duration_s : float, optional
+            If provided with only end_frame, calculates start_frame as
+            end_frame - (duration_s * frame_hz)
+
+        Examples
+        --------
+        >>> # Set explicit window
+        >>> data.set_baseline_window(start_frame=100, end_frame=150)
+        >>>
+        >>> # Set window by end frame and duration
+        >>> data.set_baseline_window(end_frame=160, duration_s=2.0)
+        >>>
+        >>> # Clear manual override (revert to automatic)
+        >>> data._baseline_window = None
+        """
+        if start_frame is not None and end_frame is not None:
+            self._baseline_window = (int(start_frame), int(end_frame))
+        elif end_frame is not None and duration_s is not None:
+            start = max(0, int(end_frame - duration_s * self.frame_hz))
+            self._baseline_window = (start, int(end_frame))
+        else:
+            raise ValueError(
+                "Provide (start_frame, end_frame) or (end_frame, duration_s)"
+            )
+
+        duration = (self._baseline_window[1] - self._baseline_window[0]) / self.frame_hz
+        print(f"Baseline window set: frames {self._baseline_window[0]}-{self._baseline_window[1]} "
+              f"({duration:.2f}s)")
+
+    @property
+    def baseline_info(self):
+        """
+        Get information about the baseline window used for z-normalization.
+
+        Returns
+        -------
+        dict or None
+            Dictionary with baseline window info, or None if not yet computed.
+        """
+        return getattr(self, '_baseline_used', None)
+
     def extract_traces_from_rois(self, overwrite=False):
         """
         Compute ROI traces from images and ROI mask.
@@ -2378,36 +2485,27 @@ class Core:
 
         n_rois, n_frames = traces_raw.shape
 
-        # Get baseline parameters from OS_Parameters
-        try:
-            baseline_seconds = self.__baseline_duration if hasattr(self, '_Core__baseline_duration') else 3.0
-            ignore_first_seconds = self.__ignore_first_seconds if hasattr(self, '_Core__ignore_first_seconds') else 0.0
-            frame_duration = 1.0 / self.frame_hz
+        # Compute baseline window from pre-stimulus period (before first trigger)
+        baseline_start, baseline_end = self._compute_baseline_window()
 
-            # Calculate baseline window (in frames)
-            n_frames_ignore = int(ignore_first_seconds / frame_duration)
-            n_frames_baseline = int(baseline_seconds / frame_duration)
+        baseline_frames = baseline_end - baseline_start
+        baseline_duration = baseline_frames / self.frame_hz
+        method = 'manual' if hasattr(self, '_baseline_window') and self._baseline_window else 'pre-stimulus'
 
-            # Need at least 3 frames for SD calculation
-            if n_frames_baseline < 3:
-                n_frames_baseline = 3
-            # Don't use more than half the recording
-            if n_frames_baseline > n_frames // 2:
-                n_frames_baseline = n_frames // 2
-
-            baseline_start = n_frames_ignore
-            baseline_end = baseline_start + n_frames_baseline
-
-            print(f"Using baseline window: frames {baseline_start}-{baseline_end} ({n_frames_baseline} frames)")
-
-        except Exception:
-            # Fallback: use first 10% of recording as baseline
-            baseline_start = 0
-            baseline_end = max(3, n_frames // 10)
-            print(f"Using default baseline: first {baseline_end} frames")
+        print(f"Using {method} baseline: frames {baseline_start}-{baseline_end} "
+              f"({baseline_frames} frames, {baseline_duration:.2f}s)")
 
         # Compute z-normalized traces using vectorized function
         traces_znorm = znorm_traces(traces_raw, baseline_start, baseline_end)
+
+        # Store baseline info for transparency
+        self._baseline_used = {
+            'start_frame': baseline_start,
+            'end_frame': baseline_end,
+            'n_frames': baseline_frames,
+            'duration_s': baseline_duration,
+            'method': method,
+        }
 
         # Set both attributes
         self.traces_raw = traces_raw
