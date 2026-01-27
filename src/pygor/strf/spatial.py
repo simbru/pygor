@@ -14,7 +14,7 @@ import scipy.signal
 
 # Local imports
 import pygor.strf.contouring
-import pygor.strf.contouring
+import pygor.strf.correlation
 import pygor.utilities
 
 def centroid(arr):#
@@ -328,14 +328,14 @@ def corr_spacetime(arr_3d, convolve = True, kernel_width = 3, kernel_depth = 5,
         corr_arr = prod_funct(arr_3d, axis = 0)
     return corr_arr
 
-def collapse_3d(arr_3d, zscore = True, **kwargs):
+def collapse_3d(arr_3d, zscore=True, **kwargs):
     """Collapses a 3D array by applying spatial-temporal correlation and polarity.
-    
+
     This function takes in a 3D array and collapses it by multiplying the result
     of a spatial-temporal correlation operation by a polarity array. If the `zscore`
     flag is set to True, the collapsed array is also transformed by dividing it by
     the standard deviation of its border region.
-    
+
     Parameters
     ----------
     arr_3d : numpy.ndarray
@@ -347,7 +347,7 @@ def collapse_3d(arr_3d, zscore = True, **kwargs):
         *Depricated*
         The width of the border region used to calculate the standard deviation
         (default is 5).
-    
+
     Returns
     -------
     collapsed_to_2d : numpy.ndarray
@@ -356,17 +356,16 @@ def collapse_3d(arr_3d, zscore = True, **kwargs):
     if zscore == True:
         # First we get the mask for which the baseline should be calculated
         if isinstance(arr_3d, np.ma.MaskedArray) == False:
-            # autogen_mask = pygor.utilities.auto_border_mask(arr_3d)
             border_mask = pygor.utilities.auto_border_mask(arr_3d)
-            arr_3d = np.ma.array(arr_3d, mask = border_mask)
-            arr_3d = scipy.stats.zscore(arr_3d, axis = None)
+            arr_3d = np.ma.array(arr_3d, mask=border_mask)
+            arr_3d = scipy.stats.zscore(arr_3d, axis=None)
         else:
-            arr_3d = scipy.stats.zscore(arr_3d, axis = None)
-    # Get the polarity for each pixel in STRF
-    polarity_array = pixel_polarity(arr_3d)
-    # Collapse space via temporal correlation 
+            arr_3d = scipy.stats.zscore(arr_3d, axis=None)
+    # Get the polarity for each pixel via correlation with strongest pixel
+    polarity_array = pygor.strf.correlation.correlation_polarity(arr_3d)
+    # Collapse space via temporal correlation
     corr_map = corr_spacetime(arr_3d, **kwargs)
-    # Put polarity back into the correlation map, 
+    # Put polarity back into the correlation map
     return corr_map * polarity_array
 
 def get_polarity_masks(arr_2d):#, negative_range = (-1, -0.5), positive_range = (0.5, 1)):

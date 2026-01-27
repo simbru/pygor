@@ -98,7 +98,7 @@ def auto_border_mask(array):
     label_zeros = np.where(array == 0, 1, 0).astype(bool)
     # But 0 COULD occur elsewhere, so ensure we remove "small holes" by upping threshold
     mask = skimage.morphology.remove_small_holes(
-        label_zeros, area_threshold=100
+        label_zeros, max_size=100
     )  # very unlikely that a 10x10 region will be 0s
     return mask  # by chance
 

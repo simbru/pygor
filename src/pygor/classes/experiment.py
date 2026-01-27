@@ -615,6 +615,155 @@ class Experiment:
         prefix = f"{base_key}_"
         return any(key.startswith(prefix) for key in results.keys())
 
+    def fetch_raw(self, method, **kwargs):
+        """
+        Fetch raw results from all recordings without any transformations.
+
+        This is the simplest fetch method - returns exactly what each recording
+        returns, as a list. No shape detection, no DataFrame conversion, no
+        unpacking.
+
+        Parameters
+        ----------
+        method : str
+            Method or attribute name to fetch from each recording
+        **kwargs
+            Keyword arguments to pass to the method
+
+        Returns
+        -------
+        list
+            List of raw results from each recording (one per recording).
+            Results may have heterogeneous shapes/types. Recordings where
+            the method fails or doesn't exist will have None in their position.
+
+        Examples
+        --------
+        >>> # Get raw DSI arrays (may have different shapes if phase_aware differs)
+        >>> dsi_list = exp.fetch_raw('get_dsi', metric='peak')
+
+        >>> # Get raw tuning metrics dicts
+        >>> metrics_list = exp.fetch_raw('compute_tuning_metrics')
+
+        >>> # Use phase_idx for consistent shapes
+        >>> dsi_phase0 = exp.fetch_raw('get_dsi', phase_idx=0)
+        """
+        results = []
+        for rec_idx, recording in enumerate(self.recording):
+            try:
+                attr = getattr(recording, method)
+                if callable(attr):
+                    result = attr(**kwargs)
+                else:
+                    result = attr
+                results.append(result)
+            except AttributeError:
+                print(
+                    f"Warning: {recording.type} has no attribute '{method}' "
+                    f"(recording_id: {rec_idx})"
+                )
+                results.append(None)
+            except Exception as e:
+                print(
+                    f"Warning: Error calling {method} on {recording.name} "
+                    f"(recording_id: {rec_idx}): {e}"
+                )
+                results.append(None)
+        return results
+
+    def fetch_concat(self, method, type_filter=None, axis=0, **kwargs):
+        """
+        Fetch and concatenate results from recordings into a single array.
+
+        This method fetches results from all (or filtered) recordings and
+        concatenates them along the specified axis. Useful for population
+        analyses where you want all ROIs pooled together.
+
+        Parameters
+        ----------
+        method : str
+            Method or attribute name to fetch from each recording
+        type_filter : str or list of str, optional
+            Only include recordings of specified type(s). E.g., 'OSDS' or
+            ['OSDS', 'MovingBars']. If None, includes all recordings.
+        axis : int, optional
+            Axis along which to concatenate results (default: 0, typically ROI axis)
+        **kwargs
+            Keyword arguments to pass to the method
+
+        Returns
+        -------
+        np.ndarray or None
+            Concatenated array of results, or None if all results are None/empty
+
+        Raises
+        ------
+        ValueError
+            If results have incompatible shapes for concatenation
+
+        Examples
+        --------
+        >>> # Get all DSI values pooled across OSDS recordings
+        >>> all_dsi = exp.fetch_concat('get_dsi', type_filter='OSDS',
+        ...                             metric='peak', phase_idx=0)
+
+        >>> # Get all ROI depths pooled
+        >>> all_depths = exp.fetch_concat('ipl_depths')
+
+        >>> # Filter by multiple types
+        >>> data = exp.fetch_concat('averages', type_filter=['OSDS', 'FullField'])
+
+        Notes
+        -----
+        - Recordings returning None are skipped
+        - For consistent results with phase-aware OSDS data, use phase_idx
+          parameter in the method kwargs
+        """
+        # Normalize type_filter to list
+        if type_filter is not None:
+            if isinstance(type_filter, str):
+                type_filter = [type_filter]
+
+        results = []
+        for rec_idx, recording in enumerate(self.recording):
+            # Apply type filter
+            if type_filter is not None and recording.type not in type_filter:
+                continue
+
+            try:
+                attr = getattr(recording, method)
+                if callable(attr):
+                    result = attr(**kwargs)
+                else:
+                    result = attr
+
+                if result is not None:
+                    # Ensure result is array-like for concatenation
+                    results.append(np.asarray(result))
+
+            except AttributeError:
+                print(
+                    f"Warning: {recording.type} has no attribute '{method}' "
+                    f"(recording_id: {rec_idx})"
+                )
+            except Exception as e:
+                print(
+                    f"Warning: Error calling {method} on {recording.name} "
+                    f"(recording_id: {rec_idx}): {e}"
+                )
+
+        if not results:
+            return None
+
+        try:
+            return np.concatenate(results, axis=axis)
+        except ValueError as e:
+            shapes = [r.shape for r in results]
+            raise ValueError(
+                f"Cannot concatenate results with shapes {shapes} along axis {axis}. "
+                f"Use phase_idx parameter for consistent OSDS output shapes."
+            ) from e
+
     def fetch_averages(self):
         '''
         gets a numpy array with the average traces of all ROIs from multiple recordings
