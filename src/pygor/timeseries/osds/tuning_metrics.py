@@ -1,37 +1,119 @@
 import numpy as np
 
 
-def compute_vector_magnitude(responses, directions_deg):
+def compute_direction_vector_magnitude(responses, directions_deg):
     """
-    Compute vector magnitude (r) from circular statistics.
-    
-    This measures how directionally tuned the responses are.
-    r = 1 means perfectly tuned, r = 0 means no directional preference.
-    
-    Parameters:
-    -----------
+    Compute direction vector magnitude (r) from circular statistics.
+
+    This measures how directionally tuned the responses are in 360-degree space.
+    r = 1 means perfectly tuned to a single direction, r = 0 means no directional preference.
+
+    This is part of the **circular statistics framework** for direction selectivity:
+    - Use with get_mean_direction() for consistent angle/magnitude pairing
+    - Different from DSI which uses argmax-based pairwise comparison
+
+    Parameters
+    ----------
     responses : array-like
-        Response values for each direction
+        Response values for each direction. Can be 1D (n_directions),
+        2D (n_rois, n_directions), or 3D (n_phases, n_rois, n_directions).
     directions_deg : array-like
-        Direction values in degrees
-        
-    Returns:
+        1D array of direction values in degrees (0-360).
+
+    Returns
+    -------
+    float or np.ndarray
+        Direction vector magnitude (0 <= r <= 1). Shape matches input without direction axis.
+
+    See Also
     --------
-    float : Vector magnitude (0 ≤ r ≤ 1)
+    compute_orientation_vector_magnitude : For orientation selectivity (0-180 space)
+    compute_direction_selectivity_index : For argmax-based DSI (pairwise framework)
+    compute_mean_direction : For the angle component of the circular stats framework
     """
     responses = np.array(responses)
     directions_rad = np.deg2rad(directions_deg)
-    
+
     # Compute weighted mean vector components
-    total_response = np.sum(responses)
-    if total_response == 0:
-        return 0
-    
-    mean_x = np.sum(responses * np.cos(directions_rad)) / total_response
-    mean_y = np.sum(responses * np.sin(directions_rad)) / total_response
-    
+    total_response = np.sum(responses, axis=-1)
+    safe_total = np.where(total_response == 0, 1, total_response)
+
+    if responses.ndim == 1:
+        mean_x = np.sum(responses * np.cos(directions_rad)) / safe_total
+        mean_y = np.sum(responses * np.sin(directions_rad)) / safe_total
+    else:
+        mean_x = np.sum(responses * np.cos(directions_rad), axis=-1) / safe_total
+        mean_y = np.sum(responses * np.sin(directions_rad), axis=-1) / safe_total
+
     # Vector magnitude
     r = np.sqrt(mean_x**2 + mean_y**2)
+    r = np.where(total_response == 0, 0, r)
+    return r
+
+
+# Backward compatibility alias
+compute_vector_magnitude = compute_direction_vector_magnitude
+
+
+def compute_orientation_vector_magnitude(responses, directions_deg):
+    """
+    Compute orientation vector magnitude from circular statistics.
+
+    This measures how orientation-selective the responses are in 180-degree space.
+    Opposite directions (e.g., 0 and 180) are treated as the same orientation.
+    r = 1 means perfectly tuned to a single orientation, r = 0 means no orientation preference.
+
+    Uses the doubled-angle method: orientations are mapped from 0-180 to 0-360 space
+    for proper circular vector computation.
+
+    This is part of the **circular statistics framework** for orientation selectivity:
+    - Use with get_mean_orientation() for consistent angle/magnitude pairing
+    - Different from OSI which uses argmax-based pairwise comparison
+
+    Parameters
+    ----------
+    responses : array-like
+        Response values for each direction. Can be 1D (n_directions),
+        2D (n_rois, n_directions), or 3D (n_phases, n_rois, n_directions).
+    directions_deg : array-like
+        1D array of direction values in degrees (0-360).
+
+    Returns
+    -------
+    float or np.ndarray
+        Orientation vector magnitude (0 <= r <= 1). Shape matches input without direction axis.
+
+    See Also
+    --------
+    compute_direction_vector_magnitude : For direction selectivity (0-360 space)
+    compute_orientation_selectivity_index : For argmax-based OSI (pairwise framework)
+    compute_mean_orientation : For the angle component of the circular stats framework
+    """
+    responses = np.array(responses)
+    directions_deg = np.array(directions_deg)
+
+    # Get orientation tuning (averages opposite directions)
+    orientation_data = compute_orientation_tuning(responses, directions_deg)
+    orientations = orientation_data['orientations']
+    orientation_responses = orientation_data['responses']
+
+    # Double the angles for proper circular stats in orientation space
+    orientations_rad_doubled = np.deg2rad(orientations * 2)
+
+    # Compute weighted mean vector components
+    total_response = np.sum(orientation_responses, axis=-1)
+    safe_total = np.where(total_response == 0, 1, total_response)
+
+    if orientation_responses.ndim == 1:
+        mean_x = np.sum(orientation_responses * np.cos(orientations_rad_doubled)) / safe_total
+        mean_y = np.sum(orientation_responses * np.sin(orientations_rad_doubled)) / safe_total
+    else:
+        mean_x = np.sum(orientation_responses * np.cos(orientations_rad_doubled), axis=-1) / safe_total
+        mean_y = np.sum(orientation_responses * np.sin(orientations_rad_doubled), axis=-1) / safe_total
+
+    # Vector magnitude
+    r = np.sqrt(mean_x**2 + mean_y**2)
+    r = np.where(total_response == 0, 0, r)
     return r
 
 
@@ -151,41 +233,106 @@ def compute_preferred_direction(responses, directions_deg):
 def compute_mean_direction(responses, directions_deg):
     """
     Compute the mean direction using circular statistics.
-    
+
     This gives the direction of the mean vector, which may differ from
     the preferred direction if responses are broadly tuned.
-    
+
     Parameters:
     -----------
     responses : array-like
         Response values for each direction
     directions_deg : array-like
         Direction values in degrees
-        
+
     Returns:
     --------
     float : Mean direction in degrees
     """
     responses = np.array(responses)
     directions_rad = np.deg2rad(directions_deg)
-    
+
     # Compute weighted mean vector components
     total_response = np.sum(responses)
     if total_response == 0:
         return np.nan
-    
+
     mean_x = np.sum(responses * np.cos(directions_rad)) / total_response
     mean_y = np.sum(responses * np.sin(directions_rad)) / total_response
-    
+
     # Convert back to degrees
     mean_direction_rad = np.arctan2(mean_y, mean_x)
     mean_direction_deg = np.rad2deg(mean_direction_rad)
-    
+
     # Ensure positive angle
     if mean_direction_deg < 0:
         mean_direction_deg += 360
-    
+
     return mean_direction_deg
+
+
+def compute_mean_orientation(responses, directions_deg):
+    """
+    Compute the mean orientation using circular statistics.
+
+    This gives the orientation of the mean vector in 0-180 degree space,
+    which may differ from the preferred orientation if responses are broadly tuned.
+
+    Uses the doubled-angle method for proper circular statistics in orientation space.
+    Opposite directions (e.g., 0 and 180) are treated as the same orientation.
+
+    This is part of the **circular statistics framework** for orientation selectivity:
+    - Use with get_orientation_vector_magnitude() for consistent angle/magnitude pairing
+
+    Parameters
+    ----------
+    responses : array-like
+        Response values for each direction. Can be 1D (n_directions),
+        2D (n_rois, n_directions), or 3D (n_phases, n_rois, n_directions).
+    directions_deg : array-like
+        1D array of direction values in degrees (0-360).
+
+    Returns
+    -------
+    float or np.ndarray
+        Mean orientation in degrees (0-180). Shape matches input without direction axis.
+
+    See Also
+    --------
+    compute_mean_direction : For mean direction in 360 space
+    compute_orientation_vector_magnitude : For the magnitude component
+    get_preferred_orientation : For argmax-based preferred orientation
+    """
+    responses = np.array(responses)
+    directions_deg = np.array(directions_deg)
+
+    # Get orientation tuning
+    orientation_data = compute_orientation_tuning(responses, directions_deg)
+    orientations = orientation_data['orientations']
+    orientation_responses = orientation_data['responses']
+
+    # Double angles for circular stats
+    orientations_rad_doubled = np.deg2rad(orientations * 2)
+
+    # Compute weighted mean vector
+    total_response = np.sum(orientation_responses, axis=-1)
+    safe_total = np.where(total_response == 0, 1, total_response)
+
+    if orientation_responses.ndim == 1:
+        mean_x = np.sum(orientation_responses * np.cos(orientations_rad_doubled)) / safe_total
+        mean_y = np.sum(orientation_responses * np.sin(orientations_rad_doubled)) / safe_total
+    else:
+        mean_x = np.sum(orientation_responses * np.cos(orientations_rad_doubled), axis=-1) / safe_total
+        mean_y = np.sum(orientation_responses * np.sin(orientations_rad_doubled), axis=-1) / safe_total
+
+    # Convert back to orientation space
+    mean_orientation_rad_doubled = np.arctan2(mean_y, mean_x)
+    mean_orientation_deg = np.rad2deg(mean_orientation_rad_doubled) / 2
+
+    # Ensure in 0-180 range
+    mean_orientation_deg = np.where(mean_orientation_deg < 0, mean_orientation_deg + 180, mean_orientation_deg)
+    mean_orientation_deg = np.where(total_response == 0, np.nan, mean_orientation_deg)
+
+    return mean_orientation_deg
 
 
 def extract_direction_vectors(responses, directions_deg):
@@ -463,9 +610,33 @@ def compute_orientation_selectivity_index(responses, directions_deg):
 
 
 
-def compute_all_tuning_metrics(osds_obj, metric='peak', roi_indices=None, phase_aware=None):
+def compute_all_tuning_metrics(
+    osds_obj,
+    metric='peak',
+    roi_indices=None,
+    phase_aware=None,
+    include_vonmises=False,
+    r_squared_threshold=0.8,
+):
     """
     Compute all directional tuning metrics for ROIs in a OSDS object.
+
+    This function returns two complementary frameworks for analyzing
+    direction and orientation selectivity:
+
+    **Circular Statistics Framework:**
+    Uses vector averaging to compute selectivity. Provides continuous angles
+    and considers all directions in the calculation.
+
+    - direction_vector_magnitude + mean_direction (for direction in 0-360 space)
+    - orientation_vector_magnitude + mean_orientation (for orientation in 0-180 space)
+
+    **Argmax/Pairwise Framework:**
+    Uses maximum response and pairwise comparison. Traditional neuroscience
+    metrics suitable for classification.
+
+    - dsi + preferred_direction (argmax direction vs opposite)
+    - osi + preferred_orientation (argmax orientation vs orthogonal)
 
     Parameters
     ----------
@@ -486,21 +657,53 @@ def compute_all_tuning_metrics(osds_obj, metric='peak', roi_indices=None, phase_
           (phase-aware if dir_phase_num > 1, single-phase otherwise)
         - True: Force phase-aware analysis using dir_phase_num phases
         - False: Force single-phase analysis (ignore dir_phase_num)
+    include_vonmises : bool
+        If True, compute von Mises preferred direction/orientation and fit quality.
+        Defaults to False to avoid added compute time.
+    r_squared_threshold : float
+        R2 threshold for von Mises fit_valid masks (default 0.8).
 
     Returns
     -------
     dict
         Dictionary containing arrays of metrics for each ROI:
 
-        - 'vector_magnitude': Circular vector magnitude (r), 0-1
-        - 'circular_variance': 1 - r, 0-1
-        - 'dsi': Directional selectivity index, -1 to 1
-        - 'osi': Orientation selectivity index, 0-1
-        - 'preferred_direction': Direction with max response (degrees)
-        - 'preferred_orientation': Orientation with max response (degrees)
-        - 'mean_direction': Mean direction from circular stats (degrees)
+        **Circular Statistics Framework:**
+
+        - 'direction_vector_magnitude': Vector magnitude for direction (0-1)
+        - 'orientation_vector_magnitude': Vector magnitude for orientation (0-1)
+        - 'mean_direction': Mean direction from circular stats (degrees, 0-360)
+        - 'mean_orientation': Mean orientation from circular stats (degrees, 0-180)
+        - 'preferred_direction_vector_sum': Alias of mean_direction (degrees, 0-360)
+        - 'preferred_orientation_vector_sum': Alias of mean_orientation (degrees, 0-180)
+        - 'circular_variance': 1 - direction_vector_magnitude (0-1)
+
+        **Argmax/Pairwise Framework:**
+
+        - 'dsi': Directional selectivity index (-1 to 1)
+        - 'osi': Orientation selectivity index (0 to 1)
+        - 'preferred_direction': Direction with max response (degrees, 0-360)
+        - 'preferred_orientation': Orientation with max response (degrees, 0-180)
+
+        **Metadata:**
+
         - 'roi_indices': ROI indices that were analyzed
         - 'n_phases': Number of phases (1 if single-phase)
+
+        **Backward Compatibility (deprecated):**
+
+        - 'vector_magnitude': Alias for 'direction_vector_magnitude'
+
+        **Optional (von Mises fitting):**
+
+        - 'vm_preferred_direction': Von Mises preferred direction (degrees, 0-360)
+        - 'vm_preferred_orientation': Von Mises preferred orientation (degrees, 0-180)
+        - 'vm_dir_r_squared': Direction fit R2
+        - 'vm_ori_r_squared': Orientation fit R2
+        - 'vm_dir_kappa': Direction concentration (kappa)
+        - 'vm_ori_kappa': Orientation concentration (kappa)
+        - 'vm_dir_fit_valid': Direction fit valid (bool, R2 >= threshold)
+        - 'vm_ori_fit_valid': Orientation fit valid (bool, R2 >= threshold)
 
         Array shapes:
         - Single-phase (phase_aware=False or dir_phase_num=1): (n_rois,)
@@ -607,7 +810,30 @@ def compute_all_tuning_metrics(osds_obj, metric='peak', roi_indices=None, phase_
     osi_results = compute_orientation_selectivity_index(all_tuning_functions, directions_deg)
     osis = osi_results['osi']
     preferred_orientations = osi_results['preferred_orientation']
-    
+
+    # Vectorized orientation vector magnitude and mean orientation
+    # Get orientation tuning data (averages opposite directions)
+    orientation_data = compute_orientation_tuning(all_tuning_functions, directions_deg)
+    orientations = orientation_data['orientations']
+    orientation_responses = orientation_data['responses']
+
+    # Double angles for circular stats in orientation space
+    orientations_rad_doubled = np.deg2rad(orientations * 2)
+
+    # Orientation vector magnitude
+    orientation_total = np.sum(orientation_responses, axis=-1)
+    safe_orientation_total = np.where(orientation_total == 0, 1, orientation_total)
+    orientation_mean_x = np.sum(orientation_responses * np.cos(orientations_rad_doubled), axis=-1) / safe_orientation_total
+    orientation_mean_y = np.sum(orientation_responses * np.sin(orientations_rad_doubled), axis=-1) / safe_orientation_total
+    orientation_vector_magnitudes = np.sqrt(orientation_mean_x**2 + orientation_mean_y**2)
+    orientation_vector_magnitudes = np.where(orientation_total == 0, 0, orientation_vector_magnitudes)
+
+    # Mean orientation
+    mean_orientation_rad_doubled = np.arctan2(orientation_mean_y, orientation_mean_x)
+    mean_orientations = np.rad2deg(mean_orientation_rad_doubled) / 2
+    mean_orientations = np.where(mean_orientations < 0, mean_orientations + 180, mean_orientations)
+    mean_orientations = np.where(orientation_total == 0, np.nan, mean_orientations)
+
     # Squeeze arrays if single phase for backward compatibility
     if n_phases == 1:
         vector_magnitudes = np.squeeze(vector_magnitudes, axis=0)
@@ -617,19 +843,60 @@ def compute_all_tuning_metrics(osds_obj, metric='peak', roi_indices=None, phase_
         preferred_directions = np.squeeze(preferred_directions, axis=0)
         preferred_orientations = np.squeeze(preferred_orientations, axis=0)
         mean_directions = np.squeeze(mean_directions, axis=0)
-    
+        orientation_vector_magnitudes = np.squeeze(orientation_vector_magnitudes, axis=0)
+        mean_orientations = np.squeeze(mean_orientations, axis=0)
+
     # Build return dictionary
     result = {
-        'vector_magnitude': vector_magnitudes,
+        # Circular statistics framework
+        'direction_vector_magnitude': vector_magnitudes,
+        'orientation_vector_magnitude': orientation_vector_magnitudes,
+        'mean_direction': mean_directions,
+        'mean_orientation': mean_orientations,
+        'preferred_direction_vector_sum': mean_directions,
+        'preferred_orientation_vector_sum': mean_orientations,
         'circular_variance': circular_variances,
+
+        # Argmax/pairwise framework
         'dsi': dsis,
         'osi': osis,
         'preferred_direction': preferred_directions,
         'preferred_orientation': preferred_orientations,
-        'mean_direction': mean_directions,
+
+        # Metadata
         'roi_indices': np.array(roi_indices),
-        'n_phases': n_phases
+        'n_phases': n_phases,
+
+        # Backward compatibility alias (deprecated)
+        'vector_magnitude': vector_magnitudes,
     }
+
+    if include_vonmises:
+        from pygor.timeseries.osds import von_mises_fitting
+
+        vm_dir = von_mises_fitting.compute_vonmises_preferred_direction(
+            all_tuning_functions, directions_deg, r_squared_threshold
+        )
+        vm_ori = von_mises_fitting.compute_vonmises_preferred_orientation(
+            all_tuning_functions, directions_deg, r_squared_threshold
+        )
+
+        if n_phases == 1:
+            for key in ('preferred_direction', 'r_squared', 'kappa', 'fit_valid'):
+                vm_dir[key] = np.squeeze(vm_dir[key], axis=0)
+            for key in ('preferred_orientation', 'r_squared', 'kappa', 'fit_valid'):
+                vm_ori[key] = np.squeeze(vm_ori[key], axis=0)
+
+        result.update({
+            'vm_preferred_direction': vm_dir['preferred_direction'],
+            'vm_preferred_orientation': vm_ori['preferred_orientation'],
+            'vm_dir_r_squared': vm_dir['r_squared'],
+            'vm_ori_r_squared': vm_ori['r_squared'],
+            'vm_dir_kappa': vm_dir['kappa'],
+            'vm_ori_kappa': vm_ori['kappa'],
+            'vm_dir_fit_valid': vm_dir['fit_valid'],
+            'vm_ori_fit_valid': vm_ori['fit_valid'],
+        })
 
     # Add phase_ranges to result if multi-phase analysis was performed
     if n_phases > 1 and phase_ranges_list is not None:

@@ -2,49 +2,293 @@ import pygor
 
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from collections.abc import Iterable
 
-def plot_collapsed_strfs(self, cval=None, channel = None, cmap = "bwr", origin = "upper"):
-    if channel is not None:
-        array = pygor.utilities.multicolour_reshape(self.collapse_times(force_recompute=True), channel)[channel-1]
+
+def _normalize_roi_indices(roi, num_slices):
+    if roi is None:
+        return list(range(num_slices))
+    if isinstance(roi, (int, np.integer)):
+        roi_indices = [int(roi)]
+    elif isinstance(roi, Iterable) and not isinstance(roi, (str, bytes)):
+        roi_indices = [int(r) for r in roi]
     else:
-        array = self.collapse_times(force_recompute=True)
-    # Grid layout
-    max_x = 10
+        raise TypeError("roi must be None, an int, or an iterable of ints")
+    for r in roi_indices:
+        if r < 0 or r >= num_slices:
+            raise ValueError(f"roi {r} out of range [0, {num_slices - 1}]")
+    return roi_indices
+
+
+def _build_grid_image(array, max_x):
     num_slices = array.shape[0]
-    num_rows = int(np.ceil(num_slices / max_x))  # Compute number of rows
-
-    # Pad with empty slices if necessary
+    num_rows = int(np.ceil(num_slices / max_x)) if num_slices > 0 else 0
+    if num_rows == 0:
+        return np.zeros((0, 0)), 0, 0
     empty_slices = num_rows * max_x - num_slices
-    pad_array = np.zeros((empty_slices, array.shape[1], array.shape[2]))  # Padding with zeros
-    array_padded = np.vstack([array, pad_array])  # Ensure full rows
-
-    # Reshape into (num_rows, max_x, height, width)
+    if np.ma.isMaskedArray(array):
+        pad_array = np.ma.masked_all((empty_slices, array.shape[1], array.shape[2]))
+        array_padded = (
+            np.ma.vstack([array, pad_array]) if empty_slices > 0 else array
+        )
+    else:
+        pad_array = np.zeros((empty_slices, array.shape[1], array.shape[2]))
+        array_padded = np.vstack([array, pad_array]) if empty_slices > 0 else array
     array_grid = array_padded.reshape(num_rows, max_x, array.shape[1], array.shape[2])
+    blocks = [[array_grid[i, j] for j in range(max_x)] for i in range(num_rows)]
+    if np.ma.isMaskedArray(array_grid):
+        row_blocks = [np.ma.hstack(row) for row in blocks]
+        image = np.ma.vstack(row_blocks)
+    else:
+        image = np.block(blocks)
+    return image, num_rows, num_slices
 
-    # Concatenate along y and x to form a 2D image
-    image = np.block([[array_grid[i, j] for j in range(max_x)] for i in range(num_rows)])
 
-    if cval is None:
+def _normalize_max_x(max_x):
+    if isinstance(max_x, (int, np.integer)) and max_x > 0:
+        return int(max_x)
+    raise ValueError("max_x must be a positive int")
+
+
+def _symmetric_cval(image, cval):
+    if cval is not None:
+        return cval
+    if np.ma.isMaskedArray(image):
+        data = image.compressed()
+        if data.size == 0:
+            raise ValueError("no unmasked data available to compute color limits")
+        percentile = np.percentile(data, [1, 99])
+    else:
         percentile = np.percentile(image, [1, 99])
-        cval = max(abs(percentile[0]), abs(percentile[1]))  # Symmetric color limits
+    return max(abs(percentile[0]), abs(percentile[1]))
 
-    # Display
-    fig, ax = plt.subplots(figsize=(10, 10))
-    ax.imshow(image, cmap=cmap, interpolation="none", clim=(-cval, cval), origin = origin)
-    ax.axis("off")
-    print(max_x, num_slices)
-    # Overlay slice numbers
-    h, w = array.shape[1], array.shape[2]  # Individual block height and width
+
+def _upper_cval(image, cval):
+    if cval is not None:
+        return cval
+    if np.ma.isMaskedArray(image):
+        data = image.compressed()
+        if data.size == 0:
+            raise ValueError("no unmasked data available to compute color limits")
+        return np.percentile(data, 99)
+    return np.percentile(image, 99)
+
+
+def _masked_minmax(image):
+    if np.ma.isMaskedArray(image):
+        data = image.compressed()
+        if data.size == 0:
+            raise ValueError("no unmasked data available to compute color limits")
+        return float(np.min(data)), float(np.max(data))
+    return float(np.min(image)), float(np.max(image))
+
+
+def _masked_percentile(image, lo, hi):
+    if np.ma.isMaskedArray(image):
+        data = image.compressed()
+        if data.size == 0:
+            raise ValueError("no unmasked data available to compute color limits")
+        return tuple(np.percentile(data, [lo, hi]))
+    return tuple(np.percentile(image, [lo, hi]))
+
+
+def _weighted_percentile(values, weights, lo, hi):
+    values = values.ravel()
+    weights = weights.ravel()
+    valid = np.isfinite(values) & np.isfinite(weights) & (weights > 0)
+    values = values[valid]
+    weights = weights[valid]
+    if values.size == 0:
+        raise ValueError("no valid data available to compute weighted percentiles")
+    order = np.argsort(values)
+    values = values[order]
+    weights = weights[order]
+    cdf = np.cumsum(weights)
+    cdf = cdf / cdf[-1]
+    lo_q, hi_q = lo / 100.0, hi / 100.0
+    vmin = np.interp(lo_q, cdf, values)
+    vmax = np.interp(hi_q, cdf, values)
+    return float(vmin), float(vmax)
+
+
+def _annotate_grid(ax, roi_indices, num_rows, max_x, h, w):
+    num_slices = len(roi_indices)
     for i in range(num_rows):
         for j in range(max_x):
-            if channel is not None:
-                slice_idx = i * max_x + j * channel
-            else:
-                slice_idx = i * max_x + j
-            # if slice_idx < num_slices:  # Avoid labeling padded regions
-            x_pos = j * w + 1  # Adjust text position slightly
-            y_pos = i * h + 1  # Adjust for visibility
-            ax.text(x_pos, y_pos, str(slice_idx), fontsize=8, color="black", 
-                    bbox=dict(facecolor='white', alpha=0.5, edgecolor='none'))
-    # plt.show()
+            slice_idx = i * max_x + j
+            if slice_idx >= num_slices:
+                continue
+            x_pos = j * w + 1
+            y_pos = i * h + 1
+            ax.text(
+                x_pos,
+                y_pos,
+                str(roi_indices[slice_idx]),
+                fontsize=8,
+                color="black",
+                bbox=dict(facecolor="white", alpha=0.5, edgecolor="none"),
+            )
+
+
+
+def plot_collapsed_strfs(
+    self,
+    cval=None,
+    channel=None,
+    cmap="bwr",
+    origin="upper",
+    roi=None,
+    max_x=10,
+    show_cbar=True,
+    cbar_kwargs=None,
+    show_labels=True,
+):
+    array = self.collapse_times(force_recompute=True)
+    if channel is not None:
+        array = pygor.utilities.multicolour_reshape(array, channel)[channel - 1]
+    roi_indices = _normalize_roi_indices(roi, array.shape[0])
+    if not roi_indices:
+        raise ValueError("roi selection is empty")
+    array = array[roi_indices]
+
+    # Grid layout
+    max_x = _normalize_max_x(max_x)
+    image, num_rows, num_slices = _build_grid_image(array, max_x)
+
+    cval = _symmetric_cval(image, cval)
+
+    # Display
+    fig, ax = plt.subplots(figsize=(max_x, max(2, num_rows)))
+    im = ax.imshow(image, cmap=cmap, interpolation="none", clim=(-cval, cval), origin=origin)
+    ax.axis("off")
+    print(max_x, num_slices)
+    if show_cbar:
+        cbar_kwargs = {} if cbar_kwargs is None else cbar_kwargs
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="3%", pad=0.05)
+        fig.colorbar(im, cax=cax, **cbar_kwargs)
+
+    # Overlay slice numbers
+    if show_labels:
+        h, w = array.shape[1], array.shape[2]
+        _annotate_grid(ax, roi_indices, num_rows, max_x, h, w)
+    return fig, ax
+
+
+def plot_spacetime_strfs(
+    self,
+    cval=None,
+    channel=None,
+    cmap="jet",
+    origin="upper",
+    roi=None,
+    max_x=10,
+    use_segmentation=True,
+    seg_kwargs=None,
+    bad_color="black",
+    show_cbar=True,
+    cbar_kwargs=None,
+    scale_mode="percentile",
+    scale_percentiles=(5, 95),
+    show_labels=True,
+    alpha_mode="none",
+    alpha_percentiles=(5, 95),
+    alpha_min=0.1,
+    alpha_max=1.0,
+    scale_weighted=False,
+):
+    array = self.get_strf_peak_times()
+    if channel is not None:
+        array = pygor.utilities.multicolour_reshape(array, channel)[channel - 1]
+    roi_indices = _normalize_roi_indices(roi, array.shape[0])
+    if not roi_indices:
+        raise ValueError("roi selection is empty")
+    array = array[roi_indices]
+    if use_segmentation:
+        seg_kwargs = {} if seg_kwargs is None else seg_kwargs
+        seg_masks = self.get_centre_only_seg(**seg_kwargs)[roi_indices]
+        seg_masks = seg_masks.astype(bool)
+        if seg_masks.shape != array.shape:
+            raise ValueError("segmentation masks shape does not match data array")
+        empty_masks = np.sum(seg_masks, axis=(1, 2)) == 0
+        if np.any(empty_masks):
+            seg_masks[empty_masks] = True
+        array = np.ma.array(array, mask=~seg_masks)
+        full_masks = np.sum(seg_masks, axis=(1, 2)) == seg_masks.shape[1] * seg_masks.shape[2]
+        if np.any(full_masks):
+            array[full_masks] = np.ma.masked
+
+    alpha = None
+    alpha_array = None
+    if alpha_mode == "strf_abs":
+        alpha_array = np.abs(self.collapse_times())
+        if channel is not None:
+            alpha_array = pygor.utilities.multicolour_reshape(alpha_array, channel)[
+                channel - 1
+            ]
+        alpha_array = alpha_array[roi_indices]
+        if alpha_array.shape != array.shape:
+            raise ValueError("alpha map shape does not match data array")
+        finite_alpha = alpha_array[np.isfinite(alpha_array)]
+        if finite_alpha.size > 0:
+            alpha_lo, alpha_hi = np.percentile(finite_alpha, alpha_percentiles)
+            if alpha_hi > alpha_lo:
+                alpha_array = np.clip(alpha_array, alpha_lo, alpha_hi)
+                alpha_array = (alpha_array - alpha_lo) / (alpha_hi - alpha_lo)
+                alpha_array = np.clip(alpha_array, 0.0, 1.0)
+                alpha_array = alpha_min + alpha_array * (alpha_max - alpha_min)
+                alpha_array = np.nan_to_num(
+                    alpha_array, nan=0.0, posinf=1.0, neginf=0.0
+                )
+                alpha_array = np.clip(alpha_array, 0.0, 1.0)
+                alpha, _, _ = _build_grid_image(alpha_array, max_x)
+
+    # Grid layout
+    max_x = _normalize_max_x(max_x)
+    image, num_rows, num_slices = _build_grid_image(array, max_x)
+
+    if scale_mode == "percentile":
+        if scale_weighted and alpha_array is not None:
+            vmin, vmax = _weighted_percentile(
+                array, alpha_array, scale_percentiles[0], scale_percentiles[1]
+            )
+        else:
+            vmin, vmax = _masked_percentile(image, scale_percentiles[0], scale_percentiles[1])
+    else:
+        vmin, vmax = _masked_minmax(image)
+    if cval is not None:
+        vmax = cval
+
+    # Display
+    fig, ax = plt.subplots(figsize=(max_x, max(2, num_rows)))
+    if np.ma.isMaskedArray(image):
+        cmap = plt.cm.get_cmap(cmap).copy()
+        cmap.set_bad(color=bad_color)
+    if alpha is not None:
+        alpha = np.nan_to_num(alpha, nan=0.0, posinf=1.0, neginf=0.0)
+    if alpha is not None and np.ma.isMaskedArray(image):
+        mask = np.ma.getmaskarray(image)
+        alpha = np.where(mask, 0.0, alpha)
+    im = ax.imshow(
+        image,
+        cmap=cmap,
+        interpolation="none",
+        vmin=vmin,
+        vmax=vmax,
+        origin=origin,
+        alpha=alpha,
+    )
+    ax.axis("off")
+    print(max_x, num_slices)
+    if show_cbar:
+        cbar_kwargs = {} if cbar_kwargs is None else cbar_kwargs
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="3%", pad=0.05)
+        fig.colorbar(im, cax=cax, **cbar_kwargs)
+
+    # Overlay slice numbers
+    if show_labels:
+        h, w = array.shape[1], array.shape[2]
+        _annotate_grid(ax, roi_indices, num_rows, max_x, h, w)
     return fig, ax

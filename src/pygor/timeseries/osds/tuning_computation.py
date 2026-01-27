@@ -93,7 +93,7 @@ def compute_tuning_function(osds_obj, roi_index=None, window=None, metric='max',
         elif metric == 'range':
             tuning_values = np.max(dir_averages, axis=3) - np.min(dir_averages, axis=3)
         elif metric == 'auc':
-            tuning_values = np.trapz(np.abs(dir_averages), axis=3)
+            tuning_values = np.trapezoid(np.abs(dir_averages), axis=3)
         elif metric == 'peak_positive':
             tuning_values = np.max(dir_averages, axis=3)
         elif metric == 'peak_negative':
@@ -122,7 +122,7 @@ def compute_tuning_function(osds_obj, roi_index=None, window=None, metric='max',
         elif metric == 'range':
             tuning_values = np.max(dir_averages, axis=2) - np.min(dir_averages, axis=2)
         elif metric == 'auc':
-            tuning_values = np.trapz(np.abs(dir_averages), axis=2)
+            tuning_values = np.trapezoid(np.abs(dir_averages), axis=2)
         elif metric == 'peak_positive':
             tuning_values = np.max(dir_averages, axis=2)
         elif metric == 'peak_negative':
