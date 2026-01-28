@@ -2,6 +2,7 @@ import pygor
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import ticker as mticker
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from collections.abc import Iterable
 
@@ -93,6 +94,43 @@ def _masked_percentile(image, lo, hi):
     return tuple(np.percentile(image, [lo, hi]))
 
 
+def _masked_mad(image):
+    if np.ma.isMaskedArray(image):
+        data = image.compressed()
+    else:
+        data = image.ravel()
+    data = data[np.isfinite(data)]
+    if data.size == 0:
+        raise ValueError("no valid data available to compute MAD")
+    median = np.median(data)
+    mad = np.median(np.abs(data - median))
+    return float(median), float(mad)
+
+
+def _weighted_mad(values, weights):
+    values = values.ravel()
+    weights = weights.ravel()
+    valid = np.isfinite(values) & np.isfinite(weights) & (weights > 0)
+    values = values[valid]
+    weights = weights[valid]
+    if values.size == 0:
+        raise ValueError("no valid data available to compute weighted MAD")
+    order = np.argsort(values)
+    values = values[order]
+    weights = weights[order]
+    cdf = np.cumsum(weights)
+    cdf = cdf / cdf[-1]
+    median = np.interp(0.5, cdf, values)
+    abs_dev = np.abs(values - median)
+    order = np.argsort(abs_dev)
+    abs_dev = abs_dev[order]
+    weights = weights[order]
+    cdf = np.cumsum(weights)
+    cdf = cdf / cdf[-1]
+    mad = np.interp(0.5, cdf, abs_dev)
+    return float(median), float(mad)
+
+
 def _weighted_percentile(values, weights, lo, hi):
     values = values.ravel()
     weights = weights.ravel()
@@ -110,6 +148,22 @@ def _weighted_percentile(values, weights, lo, hi):
     vmin = np.interp(lo_q, cdf, values)
     vmax = np.interp(hi_q, cdf, values)
     return float(vmin), float(vmax)
+
+
+def _center_per_slice(array, center):
+    if np.ma.isMaskedArray(array):
+        if center == "mean":
+            centres = np.ma.mean(array, axis=(1, 2))
+        else:
+            centres = np.ma.median(array, axis=(1, 2))
+        centres = np.ma.filled(centres, 0.0)
+    else:
+        if center == "mean":
+            centres = np.nanmean(array, axis=(1, 2))
+        else:
+            centres = np.nanmedian(array, axis=(1, 2))
+        centres = np.nan_to_num(centres, nan=0.0)
+    return array - centres[:, None, None], centres
 
 
 def _annotate_grid(ax, roi_indices, num_rows, max_x, h, w):
@@ -167,7 +221,7 @@ def plot_collapsed_strfs(
         cbar_kwargs = {} if cbar_kwargs is None else cbar_kwargs
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="3%", pad=0.05)
-        fig.colorbar(im, cax=cax, **cbar_kwargs)
+        cbar = fig.colorbar(im, cax=cax, **cbar_kwargs)
 
     # Overlay slice numbers
     if show_labels:
@@ -184,19 +238,18 @@ def plot_spacetime_strfs(
     origin="upper",
     roi=None,
     max_x=10,
-    use_segmentation=True,
+    use_segmentation=False,
     seg_kwargs=None,
     bad_color="black",
     show_cbar=True,
     cbar_kwargs=None,
-    scale_mode="percentile",
-    scale_percentiles=(5, 95),
+    scale_k=2,
     show_labels=True,
-    alpha_mode="none",
-    alpha_percentiles=(5, 95),
-    alpha_min=0.1,
-    alpha_max=1.0,
-    scale_weighted=False,
+    alpha_mode="strf_abs",
+    scale_weighted=True,
+    relative=True,
+    relative_center="median",
+    relative_scale="per_roi",
 ):
     array = self.get_strf_peak_times()
     if channel is not None:
@@ -219,6 +272,12 @@ def plot_spacetime_strfs(
         if np.any(full_masks):
             array[full_masks] = np.ma.masked
 
+    if relative:
+        # Fixed to median; keep arg for backward compatibility.
+        array, _ = _center_per_slice(array, "median")
+        if relative_scale not in {"global", "per_roi"}:
+            raise ValueError("relative_scale must be 'global' or 'per_roi'")
+
     alpha = None
     alpha_array = None
     if alpha_mode == "strf_abs":
@@ -232,12 +291,12 @@ def plot_spacetime_strfs(
             raise ValueError("alpha map shape does not match data array")
         finite_alpha = alpha_array[np.isfinite(alpha_array)]
         if finite_alpha.size > 0:
-            alpha_lo, alpha_hi = np.percentile(finite_alpha, alpha_percentiles)
+            alpha_lo, alpha_hi = np.percentile(finite_alpha, (50, 95))
             if alpha_hi > alpha_lo:
                 alpha_array = np.clip(alpha_array, alpha_lo, alpha_hi)
                 alpha_array = (alpha_array - alpha_lo) / (alpha_hi - alpha_lo)
                 alpha_array = np.clip(alpha_array, 0.0, 1.0)
-                alpha_array = alpha_min + alpha_array * (alpha_max - alpha_min)
+                alpha_array = alpha_array
                 alpha_array = np.nan_to_num(
                     alpha_array, nan=0.0, posinf=1.0, neginf=0.0
                 )
@@ -248,17 +307,45 @@ def plot_spacetime_strfs(
     max_x = _normalize_max_x(max_x)
     image, num_rows, num_slices = _build_grid_image(array, max_x)
 
-    if scale_mode == "percentile":
-        if scale_weighted and alpha_array is not None:
-            vmin, vmax = _weighted_percentile(
-                array, alpha_array, scale_percentiles[0], scale_percentiles[1]
-            )
+    if relative and relative_scale == "per_roi":
+        per_roi_mad = []
+        for roi_idx in range(array.shape[0]):
+            roi_slice = array[roi_idx]
+            if np.ma.isMaskedArray(roi_slice):
+                data = roi_slice.compressed()
+            else:
+                data = roi_slice.ravel()
+            if data.size == 0:
+                per_roi_mad.append(0.0)
+                continue
+            if scale_weighted and alpha_array is not None:
+                _, mad = _weighted_mad(roi_slice, alpha_array[roi_idx])
+            else:
+                _, mad = _masked_mad(roi_slice)
+            per_roi_mad.append(abs(mad))
+        scale = np.median(per_roi_mad) if per_roi_mad else 0.0
+        if not np.isfinite(scale) or scale == 0.0:
+            vmin, vmax = _masked_minmax(image)
+            if relative:
+                max_abs = max(abs(vmin), abs(vmax))
+                vmin, vmax = -max_abs, max_abs
         else:
-            vmin, vmax = _masked_percentile(image, scale_percentiles[0], scale_percentiles[1])
+            max_abs = scale_k * scale
+            vmin, vmax = -max_abs, max_abs
     else:
-        vmin, vmax = _masked_minmax(image)
+        if scale_weighted and alpha_array is not None:
+            _, mad = _weighted_mad(array, alpha_array)
+        else:
+            _, mad = _masked_mad(image)
+        if mad == 0 or not np.isfinite(mad):
+            vmin, vmax = _masked_minmax(image)
+        else:
+            max_abs = scale_k * mad
+            vmin, vmax = -max_abs, max_abs
     if cval is not None:
         vmax = cval
+        if relative:
+            vmin = -cval
 
     # Display
     fig, ax = plt.subplots(figsize=(max_x, max(2, num_rows)))
@@ -270,6 +357,8 @@ def plot_spacetime_strfs(
     if alpha is not None and np.ma.isMaskedArray(image):
         mask = np.ma.getmaskarray(image)
         alpha = np.where(mask, 0.0, alpha)
+    if alpha is not None:
+        alpha = np.clip(alpha, 0.0, 1.0)
     im = ax.imshow(
         image,
         cmap=cmap,
@@ -285,7 +374,22 @@ def plot_spacetime_strfs(
         cbar_kwargs = {} if cbar_kwargs is None else cbar_kwargs
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="3%", pad=0.05)
-        fig.colorbar(im, cax=cax, **cbar_kwargs)
+        cbar = fig.colorbar(im, cax=cax, **cbar_kwargs)
+        if relative:
+            max_abs = max(abs(vmin), abs(vmax))
+            if max_abs < 1:
+                scale = 1000.0
+                unit = "ms"
+            else:
+                scale = 1.0
+                unit = "s"
+            cbar.set_label(f"\u0394t ({unit})")
+            cbar.formatter = mticker.FuncFormatter(
+                lambda x, pos: f"{x * scale:g}"
+            )
+            cbar.update_ticks()
+        else:
+            cbar.set_label("t (s)")
 
     # Overlay slice numbers
     if show_labels:
