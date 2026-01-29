@@ -718,7 +718,7 @@ class STRF(Core):
     def get_timecourses_dominant(self, **kwargs):
         dominant_times = []
         for arr in self.get_timecourses(**kwargs):
-            if np.max(np.abs(arr[0]) > np.max(np.abs(arr[1]))):
+            if np.max(np.abs(arr[0])) > np.max(np.abs(arr[1])):
                 dominant_times.append(arr[0])
             else:
                 dominant_times.append(arr[1])
@@ -728,7 +728,7 @@ class STRF(Core):
     def get_timecourses_secondary(self, **kwargs):
         secondary_times = []
         for arr in self.get_timecourses(**kwargs):
-            if np.max(np.abs(arr[0]) > np.max(np.abs(arr[1]))):
+            if np.max(np.abs(arr[0])) > np.max(np.abs(arr[1])):
                 secondary_times.append(arr[1])
             else:
                 secondary_times.append(arr[0])
@@ -953,6 +953,29 @@ class STRF(Core):
             return pygor.utilities.multicolour_reshape(all_collapsed, self.numcolour)
         if roi is not None:
             return pygor.utilities.multicolour_reshape(all_collapsed, self.numcolour)[:, roi]
+
+    def get_amplitude_weights(self, roi=None):
+        """
+        Get amplitude weights for each pixel based on collapsed STRF magnitude.
+
+        These weights are useful for computing weighted statistics (median, MAD)
+        that emphasize high-signal regions of the receptive field.
+
+        Parameters
+        ----------
+        roi : int or None, optional
+            ROI index to get weights for. If None, returns weights for all ROIs.
+
+        Returns
+        -------
+        weights : np.ndarray
+            - If roi is int: 2D array (height, width)
+            - If roi is None: 3D array (n_rois, height, width)
+        """
+        weights = np.abs(self.collapse_times())
+        if roi is not None:
+            return weights[roi]
+        return weights
 
     def calc_spatial_correlations(self, abs_arrays=True, signal_only=True, single_channel_value=np.nan) -> tuple[pd.DataFrame, list[str]]:
         """
@@ -2458,18 +2481,33 @@ class STRF(Core):
         maxes = np.max(self.collapse_times(), axis = (1, 2))
         return maxes
 
-    def get_time_to_peak(self, dur_s = 1.3) -> np.ndarray:
-        # First get timecourses
-        # Split by polarity 
-        neg_times, pos_times = self.get_timecourses()[:, 0], self.get_timecourses()[:, 1]
-        # Find max position in pos times and neg position in neg times 
-        argmins = np.ma.argmin(neg_times, axis = 1)
-        argmaxs = np.ma.argmax(pos_times, axis = 1) 
-        if dur_s != None:
-            return  (dur_s / neg_times.shape[1]) * np.array([argmins, argmaxs])
-        else:
-            warnings.warn("Time values are in arbitary numbers (frames)")
-            return np.array([argmins, argmaxs])
+    def get_time_to_peak(self) -> np.ndarray:
+        """Return peak times (in seconds) for centre and surround timecourses.
+
+        .. deprecated::
+            Use :meth:`get_peaktimes` instead for dominant component peak times.
+
+        NB: This returns time-from-stimulus-onset (forward in time, 0 = stimulus start).
+        In contrast, :meth:`get_peaktimes` returns latency (backward in time, 0 = spike,
+        i.e. how long before the spike did the stimulus peak occur).
+
+        Returns array of shape (2, n_rois): [centre_peak_times, surround_peak_times].
+        """
+        warnings.warn(
+            "get_time_to_peak is deprecated. Use get_peaktimes() instead, "
+            "which returns latency (time before spike). This function returns "
+            "time from stimulus onset.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        timecourses = self.get_timecourses()
+        centre_times, surround_times = timecourses[:, 0], timecourses[:, 1]
+        # Find strongest response: argmax of absolute value for each
+        centre_peaks = np.ma.argmax(np.ma.abs(centre_times), axis=1)
+        surround_peaks = np.ma.argmax(np.ma.abs(surround_times), axis=1)
+        dur_s = self.strf_dur_ms / 1000
+        scale_factor = dur_s / centre_times.shape[1]
+        return scale_factor * np.array([centre_peaks, surround_peaks])
 
     """
     TODO get these calc_thigny methods to have their own per-ROI equivalents
@@ -2611,14 +2649,29 @@ class STRF(Core):
         else:
             raise AttributeError("Operation cannot be done since object contains no property '.multicolour.")
 
-    def calc_tunings_peaktime(self, dur_s = 1.3) -> np.ndarray:
+    def calc_tunings_peaktime(self) -> np.ndarray:
+        """
+        .. deprecated::
+            Use :meth:`get_peaktimes` instead for dominant component peak times.
+
+        NB: This wraps get_time_to_peak, which returns time-from-stimulus-onset
+        (forward in time, 0 = stimulus start). In contrast, :meth:`get_peaktimes`
+        returns latency (backward in time, 0 = spike).
+        """
+        warnings.warn(
+            "calc_tunings_peaktime is deprecated. Use get_peaktimes() instead, "
+            "which returns latency (time before spike). This function returns "
+            "time from stimulus onset.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if self.multicolour == True:
             peaktimes = self.get_time_to_peak()
-            peakneg = peaktimes[0]
-            peakpos = peaktimes[1]
-            peakneg  = pygor.utilities.multicolour_reshape(peakneg, self.numcolour).T
-            peakpos  = pygor.utilities.multicolour_reshape(peakpos, self.numcolour).T
-            return np.array([peakneg, peakpos])
+            peak_centre = peaktimes[0]
+            peak_surround = peaktimes[1]
+            peak_centre  = pygor.utilities.multicolour_reshape(peak_centre, self.numcolour).T
+            peak_surround  = pygor.utilities.multicolour_reshape(peak_surround, self.numcolour).T
+            return np.array([peak_centre, peak_surround])
         else:
             raise AttributeError("Operation cannot be done since object contains no property '.multicolour.")
 
@@ -2640,6 +2693,14 @@ class STRF(Core):
         return np.where(pass_bool, vals, np.nan)
 
     def get_peaktimes(self) -> np.ndarray:
+        """Return peak latencies (in ms) for the dominant timecourse of each ROI.
+
+        Returns time as latency (backward from spike): 0 = spike time, larger
+        values = further in the past. This is the standard STRF convention.
+
+        NB: This is the inverse of time-from-stimulus-onset. To convert:
+        latency = strf_duration - time_from_onset.
+        """
         # times = self.get_timecourses_dominant()
         # strf_dur = self.strf_dur_ms
         # strf_len = self.strfs.shape[1]
@@ -2742,6 +2803,92 @@ class STRF(Core):
 
         return strf_max_times
 
+    def get_strf_delta_times(self, roi=None, channel=None, use_segmentation=False, seg_kwargs=None):
+        """Get relative timing differences for each pixel in STRF data.
+
+        Computes delta times (peak time minus amplitude-weighted median per ROI),
+        revealing temporal gradients within receptive fields.
+
+        Parameters
+        ----------
+        roi : int, list of int, or None
+            ROI indices to include. None returns all ROIs.
+        channel : int or None
+            Colour channel to select (1-indexed). None uses all channels.
+        use_segmentation : bool
+            If True, mask pixels outside the segmented receptive field centre.
+        seg_kwargs : dict or None
+            Keyword arguments passed to get_centre_only_seg().
+
+        Returns
+        -------
+        delta_times : np.ndarray or np.ma.MaskedArray
+            Shape (n_rois, height, width) — time delta in seconds relative
+            to each ROI's amplitude-weighted median peak time.
+            Positive = later than median, negative = earlier.
+        centres : np.ndarray
+            Shape (n_rois,) — the weighted median peak time per ROI (seconds).
+        """
+        peak_times = self.get_strf_peak_times()  # (n_rois, height, width)
+
+        if channel is not None:
+            peak_times = pygor.utilities.multicolour_reshape(peak_times, channel)[channel - 1]
+
+        # Resolve ROI indices
+        if roi is None:
+            roi_indices = list(range(peak_times.shape[0]))
+        elif isinstance(roi, (int, np.integer)):
+            roi_indices = [int(roi)]
+        else:
+            roi_indices = [int(r) for r in roi]
+        peak_times = peak_times[roi_indices]
+
+        # Apply segmentation mask
+        if use_segmentation:
+            seg_kwargs = {} if seg_kwargs is None else seg_kwargs
+            seg_masks = self.get_centre_only_seg(**seg_kwargs)[roi_indices].astype(bool)
+            if seg_masks.shape != peak_times.shape:
+                raise ValueError("segmentation masks shape does not match data array")
+            # If a mask is entirely empty, include all pixels as fallback
+            empty_masks = np.sum(seg_masks, axis=(1, 2)) == 0
+            if np.any(empty_masks):
+                seg_masks[empty_masks] = True
+            peak_times = np.ma.array(peak_times, mask=~seg_masks)
+            # Fully masked ROIs (no segmentation at all) stay masked
+            full_masks = np.sum(seg_masks, axis=(1, 2)) == seg_masks.shape[1] * seg_masks.shape[2]
+            if np.any(full_masks):
+                peak_times[full_masks] = np.ma.masked
+
+        # Get amplitude weights (matching ROI/channel selection)
+        weights = self.get_amplitude_weights()
+        if channel is not None:
+            weights = pygor.utilities.multicolour_reshape(weights, channel)[channel - 1]
+        weights = weights[roi_indices]
+
+        # Center each ROI by its amplitude-weighted median
+        n_rois = peak_times.shape[0]
+        centres = np.zeros(n_rois)
+        delta_times = peak_times.copy()
+
+        for i in range(n_rois):
+            vals = peak_times[i].ravel()
+            w = weights[i].ravel()
+            valid = np.isfinite(vals) & np.isfinite(w) & (w > 0)
+            if np.ma.isMaskedArray(vals):
+                valid = valid & ~np.ma.getmaskarray(vals.ravel())
+            vals_v = np.asarray(vals[valid])
+            w_v = np.asarray(w[valid])
+            if vals_v.size == 0:
+                centres[i] = 0.0
+                continue
+            order = np.argsort(vals_v)
+            cdf = np.cumsum(w_v[order])
+            cdf = cdf / cdf[-1]
+            centres[i] = float(np.interp(0.5, cdf, vals_v[order]))
+            delta_times[i] = peak_times[i] - centres[i]
+
+        return delta_times
+
     def calc_spectrums(self, roibyroi = False) -> tuple[np.ndarray, np.ndarray]:
         spectrum_neg = np.array([pygor.strf.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 0]])
         spectrum_pos = np.array([pygor.strf.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 1]])
@@ -2788,11 +2935,25 @@ class STRF(Core):
             ax.imshow(np.squeeze(space), origin = "lower", cmap = cmap, **kwargs)
             plt.colorbar(ax.images[0], ax=ax, orientation="vertical")
 
-    def plot_strfs_space(self, roi = None, **kwargs): 
+    def plot_strfs_space(self, roi = None, **kwargs):
         return pygor.strf.plotting.simple.plot_collapsed_strfs(self, **kwargs)
 
-    def plot_strfs_spacetime(self, roi = None, **kwargs):
-        return pygor.strf.plotting.simple.plot_spacetime_strfs(self, roi = roi, **kwargs)
+    def plot_peaktime_strfs(self, roi=None, **kwargs):
+        """Plot raw peak timing values for each ROI.
+
+        Shows when each pixel's response peaked (absolute time, no centering).
+        See pygor.strf.plotting.simple.plot_peaktime_strfs for full documentation.
+        """
+        return pygor.strf.plotting.simple.plot_peaktime_strfs(self, roi=roi, **kwargs)
+
+    def plot_deltatime_strfs(self, roi=None, **kwargs):
+        """Plot relative timing differences for each ROI.
+
+        Shows timing differences relative to each ROI's weighted median,
+        revealing temporal gradients within receptive fields.
+        See pygor.strf.plotting.simple.plot_deltatime_strfs for full documentation.
+        """
+        return pygor.strf.plotting.simple.plot_deltatime_strfs(self, roi=roi, **kwargs)
 
     def plot_chromatic_overview(self, roi = None, contours = False, with_times = False, colour_idx=None, **kwargs):
         """
@@ -2833,22 +2994,26 @@ class STRF(Core):
             warnings.simplefilter("always")
             return pygor.strf.plotting.advanced.chroma_overview(self, roi, contours=contours, with_times=with_times, colour_idx=colour_idx, **kwargs)
 
-    def play_strf(self, roi, **kwargs):
+    def play_strf(self, roi, dur_s = None, **kwargs):
+        if dur_s is None:
+            dur_s = self.strf_dur_ms/1000
         if isinstance(roi, tuple):
             chroma_arr = pygor.utilities.multicolour_reshape(
                 self.strfs, self.numcolour)
             use_map = pygor.plotting.maps_concat[roi[0]]
-            anim = pygor.plotting.play_movie(chroma_arr[roi], cmap = use_map,**kwargs)
+            anim = pygor.plotting.play_movie(chroma_arr[roi], dur_s = dur_s, cmap = use_map,**kwargs)
         else:
-            anim = pygor.plotting.play_movie(np.squeeze(self.strfs[roi]), **kwargs)
+            anim = pygor.plotting.play_movie(np.squeeze(self.strfs[roi]), dur_s = dur_s, **kwargs)
         return anim
 
-    def play_multichrom_strf(self, roi = None, **kwargs):
+    def play_multichrom_strf(self, roi = None, dur_s = None, **kwargs):
         # anim = pygor.strf.plot.multi_chroma_movie(self, roi, **kwargs)
+        if dur_s is None:
+            dur_s = self.strf_dur_ms/1000
         if roi is None:
-            anim = pygor.plotting.play_movie_4d(self.strfs_chroma(), cmap_list =  pygor.plotting.maps_concat, **kwargs)
+            anim = pygor.plotting.play_movie_4d(self.strfs_chroma(), dur_s = dur_s, cmap_list =  pygor.plotting.maps_concat, **kwargs)
         else:
-            anim = pygor.plotting.play_movie_4d(self.strfs_chroma()[:, roi], cmap_list =  pygor.plotting.maps_concat, **kwargs)
+            anim = pygor.plotting.play_movie_4d(self.strfs_chroma()[:, roi], dur_s = dur_s, cmap_list =  pygor.plotting.maps_concat, **kwargs)
         return anim
     # def check_ipl_orientation(self):
     #     raise NotImplementedError("Current implementation does not yield sensible result")

@@ -166,6 +166,92 @@ def _center_per_slice(array, center):
     return array - centres[:, None, None], centres
 
 
+def _weighted_center_per_slice(array, weights):
+    """Center each slice using weighted median.
+
+    Parameters
+    ----------
+    array : ndarray
+        Shape (n_rois, height, width).
+    weights : ndarray
+        Same shape as array, weights for each pixel.
+
+    Returns
+    -------
+    centered : ndarray
+        Array with weighted median subtracted per slice.
+    centres : ndarray
+        The weighted median for each slice.
+    """
+    n_rois = array.shape[0]
+    centres = np.zeros(n_rois)
+    centered = array.copy()
+
+    for i in range(n_rois):
+        roi_slice = array[i]
+        w = weights[i]
+        # Use _weighted_mad to get the weighted median (first return value)
+        weighted_median, _ = _weighted_mad(roi_slice, w)
+        centres[i] = weighted_median
+        centered[i] = roi_slice - weighted_median
+
+    return centered, centres
+
+
+def _normalize_per_roi(array, scale_k=2, alpha_weights=None):
+    """Normalize each ROI independently to [-1, 1] using consistent weighted statistics.
+
+    When alpha_weights are provided, uses BOTH weighted median (for centering)
+    AND weighted MAD (for scaling). This ensures the normalization is consistent -
+    the center and spread are computed from the same weighted distribution.
+
+    Parameters
+    ----------
+    array : ndarray
+        Shape (n_rois, height, width). Will be re-centered using weighted median.
+    scale_k : float
+        Multiplier for MAD to define normalization range. scale_k=2 means
+        values within ±2*MAD map to ±1.
+    alpha_weights : ndarray or None
+        Weights for each pixel (e.g., from collapsed STRF magnitude).
+        Higher weights = more influence on centering and scale calculation.
+
+    Returns
+    -------
+    normalized : ndarray
+        Same shape, values centered and scaled based on high-signal pixels.
+    scales : ndarray
+        Per-ROI scale factors (scale_k * MAD) used for normalization.
+    """
+    n_rois = array.shape[0]
+    if np.ma.isMaskedArray(array):
+        normalized = np.ma.array(array.copy())
+    else:
+        normalized = array.copy()
+    scales = np.zeros(n_rois)
+
+    for i in range(n_rois):
+        roi_slice = array[i]
+
+        if alpha_weights is not None:
+            # Use weighted median and MAD - both from same weighted distribution
+            weights = alpha_weights[i]
+            weighted_median, mad = _weighted_mad(roi_slice, weights)
+            # Re-center using weighted median (not the unweighted one from earlier)
+            roi_centered = roi_slice - weighted_median
+        else:
+            # Unweighted fallback
+            median, mad = _masked_mad(roi_slice)
+            roi_centered = roi_slice - median
+
+        scale = scale_k * mad if mad > 0 and np.isfinite(mad) else 1.0
+
+        scales[i] = scale
+        normalized[i] = np.clip(roi_centered / scale, -1, 1)
+
+    return normalized, scales
+
+
 def _annotate_grid(ax, roi_indices, num_rows, max_x, h, w):
     num_slices = len(roi_indices)
     for i in range(num_rows):
@@ -216,7 +302,6 @@ def plot_collapsed_strfs(
     fig, ax = plt.subplots(figsize=(max_x, max(2, num_rows)))
     im = ax.imshow(image, cmap=cmap, interpolation="none", clim=(-cval, cval), origin=origin)
     ax.axis("off")
-    print(max_x, num_slices)
     if show_cbar:
         cbar_kwargs = {} if cbar_kwargs is None else cbar_kwargs
         divider = make_axes_locatable(ax)
@@ -230,27 +315,59 @@ def plot_collapsed_strfs(
     return fig, ax
 
 
-def plot_spacetime_strfs(
+def plot_peaktime_strfs(
     self,
-    cval=None,
-    channel=None,
-    cmap="jet",
-    origin="upper",
     roi=None,
-    max_x=10,
+    channel=None,
     use_segmentation=False,
     seg_kwargs=None,
-    bad_color="black",
+    cmap="jet",
+    clim=None,
+    origin="upper",
+    max_x=10,
     show_cbar=True,
     cbar_kwargs=None,
-    scale_k=2,
     show_labels=True,
+    bad_color="black",
     alpha_mode="strf_abs",
-    scale_weighted=True,
-    relative=True,
-    relative_center="median",
-    relative_scale="per_roi",
 ):
+    """Plot raw peak timing values for each ROI.
+
+    Shows when each pixel's response peaked (absolute time, no centering).
+
+    Parameters
+    ----------
+    roi : int, list of int, or None
+        ROI indices to plot. None plots all ROIs.
+    channel : int or None
+        Color channel to plot (1-indexed). None uses all channels.
+    use_segmentation : bool
+        If True, mask pixels outside the segmented receptive field.
+    seg_kwargs : dict or None
+        Keyword arguments for get_centre_only_seg().
+    cmap : str
+        Colormap name.
+    clim : tuple of (vmin, vmax) or None
+        Color limits. None auto-scales to data range.
+    origin : str
+        Image origin ('upper' or 'lower').
+    max_x : int
+        Maximum ROIs per row in grid.
+    show_cbar : bool
+        Whether to show colorbar.
+    cbar_kwargs : dict or None
+        Keyword arguments for colorbar.
+    show_labels : bool
+        Whether to show ROI number labels.
+    bad_color : str
+        Color for masked pixels.
+    alpha_mode : str
+        Alpha transparency mode. "strf_abs" uses collapsed STRF magnitude.
+
+    Returns
+    -------
+    fig, ax : matplotlib Figure and Axes
+    """
     array = self.get_strf_peak_times()
     if channel is not None:
         array = pygor.utilities.multicolour_reshape(array, channel)[channel - 1]
@@ -258,6 +375,7 @@ def plot_spacetime_strfs(
     if not roi_indices:
         raise ValueError("roi selection is empty")
     array = array[roi_indices]
+
     if use_segmentation:
         seg_kwargs = {} if seg_kwargs is None else seg_kwargs
         seg_masks = self.get_centre_only_seg(**seg_kwargs)[roi_indices]
@@ -268,90 +386,45 @@ def plot_spacetime_strfs(
         if np.any(empty_masks):
             seg_masks[empty_masks] = True
         array = np.ma.array(array, mask=~seg_masks)
-        full_masks = np.sum(seg_masks, axis=(1, 2)) == seg_masks.shape[1] * seg_masks.shape[2]
-        if np.any(full_masks):
-            array[full_masks] = np.ma.masked
 
-    if relative:
-        # Fixed to median; keep arg for backward compatibility.
-        array, _ = _center_per_slice(array, "median")
-        if relative_scale not in {"global", "per_roi"}:
-            raise ValueError("relative_scale must be 'global' or 'per_roi'")
-
+    # Compute alpha weights for transparency
     alpha = None
-    alpha_array = None
     if alpha_mode == "strf_abs":
-        alpha_array = np.abs(self.collapse_times())
+        alpha_array_raw = self.get_amplitude_weights()
         if channel is not None:
-            alpha_array = pygor.utilities.multicolour_reshape(alpha_array, channel)[
+            alpha_array_raw = pygor.utilities.multicolour_reshape(alpha_array_raw, channel)[
                 channel - 1
             ]
-        alpha_array = alpha_array[roi_indices]
-        if alpha_array.shape != array.shape:
-            raise ValueError("alpha map shape does not match data array")
-        finite_alpha = alpha_array[np.isfinite(alpha_array)]
-        if finite_alpha.size > 0:
-            alpha_lo, alpha_hi = np.percentile(finite_alpha, (50, 95))
-            if alpha_hi > alpha_lo:
-                alpha_array = np.clip(alpha_array, alpha_lo, alpha_hi)
-                alpha_array = (alpha_array - alpha_lo) / (alpha_hi - alpha_lo)
-                alpha_array = np.clip(alpha_array, 0.0, 1.0)
-                alpha_array = alpha_array
-                alpha_array = np.nan_to_num(
-                    alpha_array, nan=0.0, posinf=1.0, neginf=0.0
-                )
-                alpha_array = np.clip(alpha_array, 0.0, 1.0)
-                alpha, _, _ = _build_grid_image(alpha_array, max_x)
+        alpha_array_raw = alpha_array_raw[roi_indices]
+        if alpha_array_raw.shape == array.shape:
+            finite_alpha = alpha_array_raw[np.isfinite(alpha_array_raw)]
+            if finite_alpha.size > 0:
+                alpha_lo, alpha_hi = np.percentile(finite_alpha, (50, 95))
+                if alpha_hi > alpha_lo:
+                    alpha_array = np.clip(alpha_array_raw, alpha_lo, alpha_hi)
+                    alpha_array = (alpha_array - alpha_lo) / (alpha_hi - alpha_lo)
+                    alpha_array = np.clip(alpha_array, 0.0, 1.0)
+                    alpha_array = np.nan_to_num(alpha_array, nan=0.0, posinf=1.0, neginf=0.0)
+                    alpha_array = np.clip(alpha_array, 0.0, 1.0)
+                    alpha, _, _ = _build_grid_image(alpha_array, max_x)
 
     # Grid layout
     max_x = _normalize_max_x(max_x)
     image, num_rows, num_slices = _build_grid_image(array, max_x)
 
-    if relative and relative_scale == "per_roi":
-        per_roi_mad = []
-        for roi_idx in range(array.shape[0]):
-            roi_slice = array[roi_idx]
-            if np.ma.isMaskedArray(roi_slice):
-                data = roi_slice.compressed()
-            else:
-                data = roi_slice.ravel()
-            if data.size == 0:
-                per_roi_mad.append(0.0)
-                continue
-            if scale_weighted and alpha_array is not None:
-                _, mad = _weighted_mad(roi_slice, alpha_array[roi_idx])
-            else:
-                _, mad = _masked_mad(roi_slice)
-            per_roi_mad.append(abs(mad))
-        scale = np.median(per_roi_mad) if per_roi_mad else 0.0
-        if not np.isfinite(scale) or scale == 0.0:
-            vmin, vmax = _masked_minmax(image)
-            if relative:
-                max_abs = max(abs(vmin), abs(vmax))
-                vmin, vmax = -max_abs, max_abs
-        else:
-            max_abs = scale_k * scale
-            vmin, vmax = -max_abs, max_abs
+    # Color limits
+    if clim is not None:
+        vmin, vmax = clim
     else:
-        if scale_weighted and alpha_array is not None:
-            _, mad = _weighted_mad(array, alpha_array)
-        else:
-            _, mad = _masked_mad(image)
-        if mad == 0 or not np.isfinite(mad):
-            vmin, vmax = _masked_minmax(image)
-        else:
-            max_abs = scale_k * mad
-            vmin, vmax = -max_abs, max_abs
-    if cval is not None:
-        vmax = cval
-        if relative:
-            vmin = -cval
+        vmin, vmax = _masked_minmax(image)
 
     # Display
     fig, ax = plt.subplots(figsize=(max_x, max(2, num_rows)))
     if np.ma.isMaskedArray(image):
-        cmap = plt.cm.get_cmap(cmap).copy()
-        cmap.set_bad(color=bad_color)
+        cmap_obj = plt.cm.get_cmap(cmap).copy()
+        cmap_obj.set_bad(color=bad_color)
+    else:
+        cmap_obj = cmap
     if alpha is not None:
         alpha = np.nan_to_num(alpha, nan=0.0, posinf=1.0, neginf=0.0)
     if alpha is not None and np.ma.isMaskedArray(image):
@@ -361,7 +434,7 @@ def plot_spacetime_strfs(
         alpha = np.clip(alpha, 0.0, 1.0)
     im = ax.imshow(
         image,
-        cmap=cmap,
+        cmap=cmap_obj,
         interpolation="none",
         vmin=vmin,
         vmax=vmax,
@@ -369,30 +442,228 @@ def plot_spacetime_strfs(
         alpha=alpha,
     )
     ax.axis("off")
-    print(max_x, num_slices)
+
     if show_cbar:
         cbar_kwargs = {} if cbar_kwargs is None else cbar_kwargs
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="3%", pad=0.05)
         cbar = fig.colorbar(im, cax=cax, **cbar_kwargs)
-        if relative:
-            max_abs = max(abs(vmin), abs(vmax))
-            if max_abs < 1:
-                scale = 1000.0
-                unit = "ms"
-            else:
-                scale = 1.0
-                unit = "s"
-            cbar.set_label(f"\u0394t ({unit})")
-            cbar.formatter = mticker.FuncFormatter(
-                lambda x, pos: f"{x * scale:g}"
-            )
-            cbar.update_ticks()
-        else:
-            cbar.set_label("t (s)")
+        cbar.set_label("Peak time (s)")
 
-    # Overlay slice numbers
     if show_labels:
         h, w = array.shape[1], array.shape[2]
         _annotate_grid(ax, roi_indices, num_rows, max_x, h, w)
+
     return fig, ax
+
+
+def plot_deltatime_strfs(
+    self,
+    roi=None,
+    channel=None,
+    use_segmentation=False,
+    seg_kwargs=None,
+    scale="global",
+    mad_scale=2,
+    cmap="jet",
+    clim=None,
+    origin="upper",
+    max_x=10,
+    show_cbar=True,
+    cbar_kwargs=None,
+    show_labels=True,
+    bad_color="black",
+    alpha_mode="strf_abs",
+):
+    """Plot relative timing differences for each ROI.
+
+    Shows timing differences relative to each ROI's weighted median,
+    revealing temporal gradients within receptive fields.
+
+    Parameters
+    ----------
+    roi : int, list of int, or None
+        ROI indices to plot. None plots all ROIs.
+    channel : int or None
+        Color channel to plot (1-indexed). None uses all channels.
+    use_segmentation : bool
+        If True, mask pixels outside the segmented receptive field.
+    seg_kwargs : dict or None
+        Keyword arguments for get_centre_only_seg().
+    scale : str
+        Scaling mode:
+        - "global": Shared centering and scale across ROIs, colorbar in time units
+        - "global_centered": Per-ROI centering + global scale, colorbar in time units.
+          Best of both worlds: removes baseline differences while keeping comparable scale.
+        - "per_roi": Each ROI normalized independently to [-1, 1]
+    mad_scale : float
+        Colorbar range is ±(mad_scale × MAD). Used for "global" and "global_centered".
+        Ignored for scale="per_roi".
+    cmap : str
+        Colormap name.
+    clim : tuple of (vmin, vmax) or None
+        Override auto scaling with explicit limits.
+    origin : str
+        Image origin ('upper' or 'lower').
+    max_x : int
+        Maximum ROIs per row in grid.
+    show_cbar : bool
+        Whether to show colorbar.
+    cbar_kwargs : dict or None
+        Keyword arguments for colorbar.
+    show_labels : bool
+        Whether to show ROI number labels.
+    bad_color : str
+        Color for masked pixels.
+    alpha_mode : str
+        Alpha transparency mode. "strf_abs" uses collapsed STRF magnitude.
+
+    Returns
+    -------
+    fig, ax : matplotlib Figure and Axes
+    """
+    if scale not in {"global", "global_centered", "per_roi"}:
+        raise ValueError("scale must be 'global', 'global_centered', or 'per_roi'")
+
+    # Get centered delta times from the data method
+    array, _ = self.get_strf_delta_times(
+        roi=roi, channel=channel,
+        use_segmentation=use_segmentation, seg_kwargs=seg_kwargs,
+    )
+    # Ensure 3D even for single ROI
+    if array.ndim == 2:
+        array = array[np.newaxis]
+
+    # Resolve roi_indices for alpha weights (must match array shape)
+    all_weights = self.get_amplitude_weights()
+    if channel is not None:
+        all_weights = pygor.utilities.multicolour_reshape(all_weights, channel)[channel - 1]
+    roi_indices = _normalize_roi_indices(roi, all_weights.shape[0])
+    if not roi_indices:
+        raise ValueError("roi selection is empty")
+
+    # Compute alpha weights for display
+    alpha = None
+    alpha_array_raw = None
+    if alpha_mode == "strf_abs":
+        alpha_array_raw = all_weights[roi_indices]
+        if alpha_array_raw.shape != array.shape:
+            raise ValueError("alpha map shape does not match data array")
+        # Normalized version for display alpha
+        finite_alpha = alpha_array_raw[np.isfinite(alpha_array_raw)]
+        if finite_alpha.size > 0:
+            alpha_lo, alpha_hi = np.percentile(finite_alpha, (50, 95))
+            if alpha_hi > alpha_lo:
+                alpha_array = np.clip(alpha_array_raw, alpha_lo, alpha_hi)
+                alpha_array = (alpha_array - alpha_lo) / (alpha_hi - alpha_lo)
+                alpha_array = np.clip(alpha_array, 0.0, 1.0)
+                alpha_array = np.nan_to_num(alpha_array, nan=0.0, posinf=1.0, neginf=0.0)
+                alpha_array = np.clip(alpha_array, 0.0, 1.0)
+                alpha, _, _ = _build_grid_image(alpha_array, max_x)
+
+    # Display-specific scaling
+    is_normalized = False
+    per_roi_mads = None
+    if scale == "per_roi":
+        # Per-ROI normalization to [-1, 1]
+        array, _ = _normalize_per_roi(array, mad_scale, alpha_array_raw)
+        is_normalized = True
+    elif scale == "global_centered":
+        # Compute per-ROI MADs for color limit scaling
+        per_roi_mads = []
+        for i in range(array.shape[0]):
+            roi_slice = array[i]
+            if alpha_array_raw is not None:
+                _, mad = _weighted_mad(roi_slice, alpha_array_raw[i])
+            else:
+                _, mad = _masked_mad(roi_slice)
+            per_roi_mads.append(mad if np.isfinite(mad) else 0.0)
+        per_roi_mads = np.array(per_roi_mads)
+
+    # Grid layout
+    max_x = _normalize_max_x(max_x)
+    image, num_rows, num_slices = _build_grid_image(array, max_x)
+
+    # Determine color limits
+    if clim is not None:
+        vmin, vmax = clim
+    elif is_normalized:
+        vmin, vmax = -1.0, 1.0
+    elif scale == "global_centered" and per_roi_mads is not None:
+        # Use median of per-ROI MADs as the scale
+        # This represents "typical" within-ROI variance
+        mad = np.median(per_roi_mads[per_roi_mads > 0]) if np.any(per_roi_mads > 0) else 0.0
+        if mad == 0 or not np.isfinite(mad):
+            vmin, vmax = _masked_minmax(image)
+            max_abs = max(abs(vmin), abs(vmax))
+            vmin, vmax = -max_abs, max_abs
+        else:
+            max_abs = mad_scale * mad
+            vmin, vmax = -max_abs, max_abs
+    else:
+        # Global scaling with single weighted MAD across all data
+        if alpha_array_raw is not None:
+            _, mad = _weighted_mad(array, alpha_array_raw)
+        else:
+            _, mad = _masked_mad(image)
+        if mad == 0 or not np.isfinite(mad):
+            vmin, vmax = _masked_minmax(image)
+            max_abs = max(abs(vmin), abs(vmax))
+            vmin, vmax = -max_abs, max_abs
+        else:
+            max_abs = mad_scale * mad
+            vmin, vmax = -max_abs, max_abs
+
+    # Display
+    fig, ax = plt.subplots(figsize=(max_x, max(2, num_rows)))
+    if np.ma.isMaskedArray(image):
+        cmap_obj = plt.cm.get_cmap(cmap).copy()
+        cmap_obj.set_bad(color=bad_color)
+    else:
+        cmap_obj = cmap
+    if alpha is not None:
+        alpha = np.nan_to_num(alpha, nan=0.0, posinf=1.0, neginf=0.0)
+    if alpha is not None and np.ma.isMaskedArray(image):
+        mask = np.ma.getmaskarray(image)
+        alpha = np.where(mask, 0.0, alpha)
+    if alpha is not None:
+        alpha = np.clip(alpha, 0.0, 1.0)
+    im = ax.imshow(
+        image,
+        cmap=cmap_obj,
+        interpolation="none",
+        vmin=vmin,
+        vmax=vmax,
+        origin=origin,
+        alpha=alpha,
+    )
+    ax.axis("off")
+
+    if show_cbar:
+        cbar_kwargs = {} if cbar_kwargs is None else cbar_kwargs
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="3%", pad=0.05)
+        cbar = fig.colorbar(im, cax=cax, **cbar_kwargs)
+        if is_normalized:
+            cbar.set_label("Relative timing (normalized)")
+        else:
+            max_abs = max(abs(vmin), abs(vmax))
+            if max_abs < 1:
+                time_scale = 1000.0
+                unit = "ms"
+            else:
+                time_scale = 1.0
+                unit = "s"
+            cbar.set_label(f"\u0394t ({unit})")
+            cbar.formatter = mticker.FuncFormatter(
+                lambda x, pos: f"{x * time_scale:g}"
+            )
+            cbar.update_ticks()
+
+    if show_labels:
+        h, w = array.shape[1], array.shape[2]
+        _annotate_grid(ax, roi_indices, num_rows, max_x, h, w)
+
+    return fig, ax
+
+

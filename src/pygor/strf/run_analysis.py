@@ -7,9 +7,16 @@ import pandas as pd
 from pygor.classes.experiment import Experiment
 import pygor.strf.analyse
 import pygor.filehandling
+import warnings
+
+warnings.warn(
+    "pygor.strf.run_analysis is deprecated. Use the Experiment class + scripts workflow instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 """
-The programatic way of running your STRF analysis, 
+The programatic way of running your STRF analysis,
 aka the .py version of the analysis notebooks.
 """
 

@@ -247,12 +247,12 @@ def only_spectrum(timecourse_1d, sampling_rate=15.625):
 
 def find_peaktime(arr):
     """
-    Return index(es) of the last local extremum (max or min).
+    Return index(es) of the strongest local extremum (max absolute value among turning points).
     Accepts 1D (T,) or 2D (N, T) arrays. Returns int or ndarray (N,).
     """
     x = np.asarray(arr)
 
-    def last_extremum_1d(y):
+    def strongest_extremum_1d(y):
         y = np.asarray(y)
         if y.size < 3:
             return int(np.nanargmax(np.abs(y))) if np.any(~np.isnan(y)) else 0
@@ -274,7 +274,7 @@ def find_peaktime(arr):
         # Turning points: maxima ( + to - ) or minima ( - to + )
         tp = np.flatnonzero(((s[:-1] > 0) & (s[1:] <= 0)) | ((s[:-1] < 0) & (s[1:] >= 0))) + 1
         if tp.size:
-            return int(tp[-1])
+            return int(tp[np.argmax(np.abs(y[tp]))])
 
         # Fallback: global strongest response by magnitude
         if np.any(~np.isnan(y)):
@@ -282,9 +282,9 @@ def find_peaktime(arr):
         return 0
 
     if x.ndim == 1:
-        return last_extremum_1d(x)
+        return strongest_extremum_1d(x)
     if x.ndim == 2:
-        return np.apply_along_axis(last_extremum_1d, 1, x)
+        return np.apply_along_axis(strongest_extremum_1d, 1, x)
     raise ValueError("arr must be 1D or 2D")
 
 

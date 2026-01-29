@@ -23,6 +23,12 @@ import warnings
 import joblib
 from sklearn import preprocessing
 
+warnings.warn(
+    "pygor.strf.analyse is deprecated. Use the Experiment class + scripts workflow instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 
 def _roi_by_roi_dict(data_strf_obj, df_return=False):  #
     """
