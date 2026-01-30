@@ -1,6 +1,82 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from matplotlib.patches import Patch
+
+def pca_scatter(df, principal_components, exp, color_column, pca, plot_averages=False):
+    """
+    Plot PCA scatter and cluster traces colored by any column in the dataframe.
+    
+    Parameters:
+    - df: dataframe with the data
+    - principal_components: PCA components for scatter plot
+    - exp: Experiment object
+    - color_column: column name to color by (e.g., 'stage', 'cluster', 'depth')
+    - pca: fitted PCA object
+    """
+    # Get unique values and create colormap
+    unique_values = sorted(df[color_column].unique())
+    n_unique = len(unique_values)
+    
+    # Choose colormap based on number of unique values
+    if n_unique <= 10:
+        cmap_name = 'tab10'
+    elif n_unique <= 20:
+        cmap_name = 'tab20'
+    else:
+        cmap_name = 'hsv'
+    
+    value_cmap = plt.get_cmap(cmap_name, n_unique)
+    value_to_color = {val: value_cmap(i) for i, val in enumerate(unique_values)}
+    
+    # Plot 1: Average traces for each unique value
+    n_cols = 3
+    n_rows = int(np.ceil(n_unique / n_cols))
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(9, 2*n_rows))
+    axes = axes.flatten()
+    
+    for idx, value in enumerate(unique_values):
+        ax = axes[idx]
+        value_mask = df[color_column] == value
+        value_traces = exp.fetch_averages()[df.index.values[value_mask]]
+        
+        if len(value_traces) <= 0:
+            continue
+        
+        if plot_averages:
+            ax.plot(value_traces.T, color='grey', alpha=0.3, linewidth=0.8)
+        
+        # Plot average in color
+        ax.plot(np.mean(value_traces, axis=0), color=value_to_color[value], linewidth=1.5)
+        
+        # Add stimulus trigger lines
+        for trig_idx in exp.recording[0].calc_mean_triggertimes():
+            ax.axvline(trig_idx, color='red', linestyle='--', linewidth=0.5, alpha=0.5)
+        ax.set_title(f'{color_column}={value} (n={np.sum(value_mask)})')
+        ax.set_xlabel('Time point')
+        ax.set_ylabel('Signal')
+        sns.despine()
+    plt.tight_layout()
+    plt.show()
+    
+    # Plot 2: Scatter colored by column
+    fig, ax = plt.subplots(figsize=(5, 4))
+    
+    values = df[color_column].values
+    ax.scatter(principal_components[:, 0], principal_components[:, 1], 
+               c=[value_to_color[v] for v in values], 
+               s=15, alpha=0.9, edgecolors='white', linewidth=0.5)
+    ax.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%})')
+    ax.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%})')
+    ax.set_title(f'PCA Visualization (colored by {color_column})')
+    
+    # Create legend
+    legend_elements = [Patch(facecolor=value_to_color[val], label=str(val)) 
+                       for val in unique_values]
+    #ax.legend(handles=legend_elements, loc='best', fontsize=8)
+    plt.tight_layout()
+    plt.show()
 
 def plot_rois_and_traces(rec, exp, df):
     fig = plt.figure(figsize=(6, 6))
