@@ -347,13 +347,16 @@ def merge_cs_corr(
         return times, map
     
     # Check amplitude differences before merging
-    amplitudes = np.max(np.abs(times), axis=1)
+    amplitudes = np.ma.max(np.ma.abs(times), axis=1)
     # Don't merge if one signal is >amplitude_ratio_threshold times stronger
     
     # Filter out pairs with large amplitude differences
     valid_pairs = []
     for pair_idx, (i, j) in enumerate(similar_pairs_index):
-        amp_ratio = max(amplitudes[i], amplitudes[j]) / min(amplitudes[i], amplitudes[j])
+        min_amp = min(amplitudes[i], amplitudes[j])
+        if min_amp < 1e-10:
+            continue
+        amp_ratio = max(amplitudes[i], amplitudes[j]) / min_amp
         if amp_ratio <= amplitude_ratio_threshold:
             valid_pairs.append(pair_idx)
         elif with_debug:
@@ -789,7 +792,7 @@ def keep_largest_only(map):
     labeled_map, num_features = ndi.label(map==0)
     sizes = np.bincount(labeled_map.ravel())
     # print(num_features, sizes)
-    if len(sizes) < 1 or num_features == 0 or len(np.unique(map)) >= 3:
+    if len(sizes) < 2 or num_features == 0 or len(np.unique(map)) >= 3:
         return map
     largest_component = np.argmax(sizes[1:]) + 1
     # print(largest_component)
@@ -808,9 +811,66 @@ def erode_noise_seg(map, iterations = 1, size_diff = 30):
     # Apply binary erosion to the map
     eroded_map = ndi.binary_erosion(map, structure=ndi.generate_binary_structure(2, 1), iterations=iterations)
     map_unique = np.sort(np.unique(map))
-    diff = eroded_map + map==map_unique[-1]
+    diff = (eroded_map + map) == map_unique[-1]
     map[diff] = 2
     return map
+
+def insert_border_zone(segmented_map, border_width=1, centre_label=0, surround_label=1, border_label=2):
+    """
+    Insert an n-pixel border zone between centre and surround regions in the
+    segmentation map. If a border zone already exists naturally (i.e. there are
+    already pixels labelled as `border_label` separating centre from surround),
+    the map is returned unchanged.
+
+    Parameters
+    ----------
+    segmented_map : np.ndarray (2D)
+        The segmentation map with integer cluster labels.
+    border_width : int
+        Width (in pixels) of the border to insert between centre and surround.
+    centre_label : int
+        Label value for the centre cluster.
+    surround_label : int
+        Label value for the surround cluster.
+    border_label : int
+        Label value to assign to the border pixels.
+
+    Returns
+    -------
+    np.ndarray
+        The segmentation map, potentially with a border zone inserted.
+    """
+    unique_labels = np.unique(segmented_map)
+    # Need both centre and surround present to define a border
+    if centre_label not in unique_labels or surround_label not in unique_labels:
+        return segmented_map
+
+    centre_mask = (segmented_map == centre_label)
+    surround_mask = (segmented_map == surround_label)
+    struct = ndi.generate_binary_structure(2, 1)  # 4-connected
+
+    # Check if a border of at least `border_width` already exists between
+    # centre and surround. Dilate the centre by border_width — if it still
+    # doesn't touch the surround, the existing gap is wide enough already.
+    centre_dilated_n = ndi.binary_dilation(centre_mask, structure=struct, iterations=border_width)
+    if not np.any(centre_dilated_n & surround_mask):
+        # Existing separation is already >= border_width — nothing to do
+        return segmented_map
+
+    # Carve the border only from the surround side to preserve the centre.
+    # Any surround pixel within border_width of the centre becomes border.
+    # Also relabel any non-centre, non-surround pixels in the gap (e.g. a
+    # natural third cluster) that fall within the border zone.
+    border_zone = surround_mask & centre_dilated_n
+    # Include existing gap pixels (neither centre nor surround) that are
+    # closer to the centre than border_width
+    gap_mask = ~centre_mask & ~surround_mask
+    border_zone = border_zone | (gap_mask & centre_dilated_n)
+
+    new_map = segmented_map.copy()
+    new_map[border_zone] = border_label
+    return new_map
+
 
 def cs_segment_demo(inputdata_3d, **kwargs):
     segmentation_algorithm(inputdata_3d, plot_demo=True, **kwargs)
@@ -823,7 +883,8 @@ def run(d3_arr, plot=False,
         merge_params : dict = None,
         plot_params : dict = None,
         amplitude_ratio_threshold = 3.0,
-        erode_noise = 2,
+        erode_noise = None,
+        border_width = 2,
         largest_centre_only = True,
         with_debug = False):
     """151, 155, 157, 167, 107, 104, 90, 88, 83, 77, 74
@@ -850,9 +911,14 @@ def run(d3_arr, plot=False,
     plot_params : dict, optional
         Parameters for plotting the output. Defaults to {"ms_dur" : 1300, "degree_visang" : 20, "block_size ": 200}.
     amplitude_ratio_threshold : float, optional
-        Maximum amplitude ratio allowed for merging correlated signals. If one signal is more than 
-        this many times stronger than another, they won't be merged even if highly correlated. 
+        Maximum amplitude ratio allowed for merging correlated signals. If one signal is more than
+        this many times stronger than another, they won't be merged even if highly correlated.
         Prevents averaging strong signals with weak noise. Defaults to 3.0.
+    border_width : int or None, optional
+        If not None, insert a border zone of this many pixels between centre and surround
+        regions, labelled as noise (label 2). If the clustering already produced a natural
+        separation between centre and surround (i.e. they are not directly adjacent), the
+        map is left unchanged. Defaults to None (no border insertion).
     with_debug : bool, optional
         Enable detailed debug output. Defaults to False.
     
@@ -959,7 +1025,8 @@ def run(d3_arr, plot=False,
         segmented_map = keep_largest_only(segmented_map)
     if erode_noise is not None:
         segmented_map = erode_noise_seg(segmented_map, iterations=erode_noise)
-
+    if border_width is not None:
+        segmented_map = insert_border_zone(segmented_map, border_width=border_width)
 
     # Final step: ensure consecutive cluster numbering after all merging operations
     unique_vals = np.unique(segmented_map)
@@ -1134,9 +1201,11 @@ def run(d3_arr, plot=False,
     # Add non-centre time courses to times_extracted
     times_extracted = np.append(times_extracted, np.expand_dims(extract_noncentre(segmented_map, d3_arr), 0), axis = 0)
     times_extracted = np.ma.masked_equal((np.squeeze(times_extracted)), 0)
-    # Make sure everything is squeezed
-    times_extracted = np.squeeze(times_extracted)
-    segmented_map = np.squeeze(segmented_map)
+    # Remove leading singleton dims but preserve (n_clusters, n_timepoints) and (h, w)
+    if times_extracted.ndim > 2:
+        times_extracted = np.squeeze(times_extracted)
+    if segmented_map.ndim > 2:
+        segmented_map = np.squeeze(segmented_map)
     #print("final run function times:", times_extracted.shape)
     return segmented_map, times_extracted
 

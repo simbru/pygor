@@ -2826,8 +2826,6 @@ class STRF(Core):
             Shape (n_rois, height, width) — time delta in seconds relative
             to each ROI's amplitude-weighted median peak time.
             Positive = later than median, negative = earlier.
-        centres : np.ndarray
-            Shape (n_rois,) — the weighted median peak time per ROI (seconds).
         """
         peak_times = self.get_strf_peak_times()  # (n_rois, height, width)
 
@@ -2888,6 +2886,304 @@ class STRF(Core):
             delta_times[i] = peak_times[i] - centres[i]
 
         return delta_times
+
+    def compute_latency_vectors(self, roi=None, use_segmentation=True, coherence_threshold=0,
+                                force_recompute=False):
+        """Compute direction, coherence, and magnitude of latency gradients.
+
+        Results are cached per ``use_segmentation`` setting.  Subsequent calls
+        with the same ``use_segmentation`` return the cached result (the
+        ``coherence_threshold`` is applied on-the-fly so it does not affect
+        the cache key).
+
+        Parameters
+        ----------
+        roi : int, list, or None
+            ROI index/indices. If None, computes for all ROIs.
+        use_segmentation : bool
+            Whether to use segmented latency maps.
+        coherence_threshold : float
+            Minimum coherence to consider propagation reliable.
+        force_recompute : bool
+            If True, recompute even if a cached result exists.
+
+        Returns
+        -------
+        dict with keys: 'direction', 'coherence', 'magnitude', 'reliable'
+            Each value is an array of shape (n_rois,).
+        """
+        if not hasattr(self, '_latency_vectors_cache'):
+            self._latency_vectors_cache = {}
+
+        cache_key = (use_segmentation,)
+
+        if not force_recompute and cache_key in self._latency_vectors_cache:
+            cached = self._latency_vectors_cache[cache_key]
+            result = dict(cached)
+            result['reliable'] = cached['coherence'] >= coherence_threshold
+            if roi is not None:
+                idx = np.atleast_1d(roi)
+                result = {k: v[idx] for k, v in result.items()}
+            return result
+
+        latency_maps = self.get_strf_delta_times(use_segmentation=use_segmentation)
+
+        n_rois = len(latency_maps)
+        directions = np.full(n_rois, np.nan)
+        coherences = np.full(n_rois, np.nan)
+        magnitudes = np.full(n_rois, np.nan)
+        mean_dxs = np.full(n_rois, np.nan)
+        mean_dys = np.full(n_rois, np.nan)
+        centroids_x = np.full(n_rois, np.nan)
+        centroids_y = np.full(n_rois, np.nan)
+
+        for i in range(n_rois):
+            lmap = latency_maps[i]
+            grad_y, grad_x = np.gradient(lmap)
+
+            if hasattr(lmap, 'mask') and lmap.mask.any():
+                mask = ~lmap.mask
+            else:
+                mask = np.ones(lmap.shape, dtype=bool)
+
+            if mask.sum() < 2:
+                continue
+
+            # Coherence (mean resultant length of unit gradient vectors)
+            grad_mag = np.sqrt(grad_x**2 + grad_y**2)
+            grad_mag[grad_mag == 0] = 1
+            ux = grad_x / grad_mag
+            uy = grad_y / grad_mag
+
+            mean_ux = ux[mask].mean()
+            mean_uy = uy[mask].mean()
+            coherences[i] = np.sqrt(mean_ux**2 + mean_uy**2)
+            directions[i] = np.degrees(np.arctan2(mean_uy, mean_ux)) % 360
+
+            # Raw gradient components and magnitude
+            mean_dx = grad_x[mask].mean()
+            mean_dy = grad_y[mask].mean()
+            magnitudes[i] = np.sqrt(mean_dx**2 + mean_dy**2)
+            mean_dxs[i] = mean_dx
+            mean_dys[i] = mean_dy
+
+            # Arrow centroid (weighted by negative latency pixels, or mask center)
+            neg_mask = mask & (np.array(lmap) < 0)
+            if neg_mask.any():
+                ys, xs = np.where(neg_mask)
+                neg_weights = np.abs(np.array(lmap)[neg_mask])
+                centroids_y[i] = np.average(ys, weights=neg_weights)
+                centroids_x[i] = np.average(xs, weights=neg_weights)
+            else:
+                ys, xs = np.where(mask)
+                centroids_y[i] = ys.mean()
+                centroids_x[i] = xs.mean()
+
+        self._latency_vectors_cache[cache_key] = {
+            'direction': directions,
+            'coherence': coherences,
+            'magnitude': magnitudes,
+            'mean_dx': mean_dxs,
+            'mean_dy': mean_dys,
+            'centroid_x': centroids_x,
+            'centroid_y': centroids_y,
+        }
+
+        result = {
+            'direction': directions,
+            'coherence': coherences,
+            'magnitude': magnitudes,
+            'reliable': coherences >= coherence_threshold,
+            'mean_dx': mean_dxs,
+            'mean_dy': mean_dys,
+            'centroid_x': centroids_x,
+            'centroid_y': centroids_y,
+        }
+
+        if roi is not None:
+            idx = np.atleast_1d(roi)
+            result = {k: v[idx] for k, v in result.items()}
+
+        return result
+
+    def get_latency_directions(self, use_segmentation=True):
+        """Get latency gradient directions for all ROIs (degrees, 0–360).
+
+        Returns
+        -------
+        np.ndarray of shape (n_rois,)
+        """
+        results = self.compute_latency_vectors(use_segmentation=use_segmentation)
+        return results['direction']
+
+    def get_latency_coherences(self, use_segmentation=True):
+        """Get latency gradient coherences for all ROIs (0–1).
+
+        Returns
+        -------
+        np.ndarray of shape (n_rois,)
+        """
+        results = self.compute_latency_vectors(use_segmentation=use_segmentation)
+        return results['coherence']
+
+    def get_latency_magnitudes(self, use_segmentation=True):
+        """Get latency gradient magnitudes for all ROIs.
+
+        Returns
+        -------
+        np.ndarray of shape (n_rois,)
+        """
+        results = self.compute_latency_vectors(use_segmentation=use_segmentation)
+        return results['magnitude']
+
+    def get_latency_reliable(self, use_segmentation=True, coherence_threshold=0):
+        """Get boolean mask of ROIs with reliable latency propagation.
+
+        Parameters
+        ----------
+        use_segmentation : bool
+            Whether to use segmented latency maps.
+        coherence_threshold : float
+            Minimum coherence to consider propagation reliable.
+
+        Returns
+        -------
+        np.ndarray of bool, shape (n_rois,)
+        """
+        results = self.compute_latency_vectors(
+            use_segmentation=use_segmentation,
+            coherence_threshold=coherence_threshold
+        )
+        return results['reliable']
+
+    def plot_latency_vectors(self, roi=None, use_segmentation=True, coherence_threshold=0,
+                            arrow_scale=7, ax=None):
+        """Plot latency maps with overlaid gradient arrows.
+
+        Parameters
+        ----------
+        roi : int, list, or None
+            ROI index/indices. If None, plots all ROIs.
+        use_segmentation : bool
+            Whether to use segmented latency maps.
+        coherence_threshold : float
+            Minimum coherence to show arrow.
+        arrow_scale : float
+            Controls arrow length on plot.
+        ax : matplotlib Axes or None
+            If provided, plot onto this axes (only works for a single ROI).
+            If None, creates new figures.
+        """
+        results = self.compute_latency_vectors(
+            roi=roi, use_segmentation=use_segmentation,
+            coherence_threshold=coherence_threshold
+        )
+        latency_maps = self.get_strf_delta_times(use_segmentation=use_segmentation)
+
+        if roi is None:
+            rois = list(range(self.num_roi))
+        elif np.isscalar(roi):
+            rois = [roi]
+        else:
+            rois = list(roi)
+
+        for i, r in enumerate(rois):
+            lmap = latency_maps[r]
+            coh = results['coherence'][i]
+            mag = results['magnitude'][i]
+            reliable = results['reliable'][i]
+
+            if ax is not None:
+                cur_ax = ax
+            else:
+                fig = plt.figure()
+                cur_ax = fig.add_subplot(111)
+
+            # Check for fully masked / empty map
+            compressed = lmap.compressed() if hasattr(lmap, 'compressed') else lmap.ravel()
+            if compressed.size == 0:
+                cur_ax.text(0.5, 0.5, 'No valid pixels', ha='center', va='center',
+                            transform=cur_ax.transAxes, fontsize=10)
+                cur_ax.set_xticks([])
+                cur_ax.set_yticks([])
+                if ax is None:
+                    plt.show()
+                continue
+
+            # 95 th percentile clim to kick outliers
+            vmin = np.percentile(compressed, 2.5)
+            vmax = np.percentile(compressed, 97.5)
+
+            if not use_segmentation:
+                # Use absolute amplitude from collapse_times as alpha channel
+                # Percentile clipping (50th-95th) avoids outlier pixels dominating
+                amp = self.get_amplitude_weights(roi=r)
+                finite_amp = amp[np.isfinite(amp)]
+                if finite_amp.size > 0:
+                    lo, hi = np.percentile(finite_amp, (50, 95))
+                    if hi > lo:
+                        alpha = np.clip((amp - lo) / (hi - lo), 0, 1)
+                    else:
+                        alpha = np.ones_like(amp)
+                else:
+                    alpha = np.ones_like(amp)
+                alpha = np.nan_to_num(alpha, nan=0.0)
+                # Color limits from top 5% amplitude pixels (signal region)
+                lmap_arr = np.array(lmap)
+                amp_threshold = np.percentile(finite_amp, 95) if finite_amp.size > 0 else 0
+                signal_mask = (amp >= amp_threshold) & np.isfinite(lmap_arr)
+                signal_latencies = lmap_arr[signal_mask]
+                if signal_latencies.size > 0:
+                    max_abs = np.max(np.abs(signal_latencies))
+                else:
+                    max_abs = max(abs(vmin), abs(vmax))
+                cmap = plt.cm.jet
+                norm = plt.Normalize(vmin=-max_abs, vmax=max_abs)
+                rgba = cmap(norm(lmap_arr))
+                rgba[..., 3] = alpha
+                cur_ax.imshow(rgba, origin='lower')
+                # Store ScalarMappable for colorbar
+                _cbar_mappable = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+            else:
+                _cbar_mappable = cur_ax.imshow(lmap, origin='lower', cmap="jet", vmin=vmin, vmax=vmax)
+
+
+            if reliable and mag > 0:
+                if hasattr(lmap, 'mask') and lmap.mask.any():
+                    mask = ~lmap.mask
+                else:
+                    mask = np.ones(lmap.shape, dtype=bool)
+
+                neg_mask = mask & (np.array(lmap) < 0)
+                if neg_mask.any():
+                    ys, xs = np.where(neg_mask)
+                    neg_weights = np.abs(np.array(lmap)[neg_mask])
+                    cy = np.average(ys, weights=neg_weights)
+                    cx = np.average(xs, weights=neg_weights)
+                else:
+                    ys, xs = np.where(mask)
+                    cy, cx = ys.mean(), xs.mean()
+
+                grad_y, grad_x = np.gradient(lmap)
+                mean_dx = grad_x[mask].mean()
+                mean_dy = grad_y[mask].mean()
+
+                scale = arrow_scale / mag
+                cur_ax.quiver(cx, cy, mean_dx, mean_dy, scale_units='xy', angles='xy',
+                        scale=1/scale, color='white', width=0.02,
+                        headaxislength=2.5, headlength=2.5,
+                        edgecolor='black', linewidth=1)
+                cur_ax.set_title(f'dir: {results["direction"][i]:.1f}\N{DEGREE SIGN}, coh: {coh:.2f}, mag: {mag:.4f}', fontsize=10)
+            else:
+                cur_ax.set_title(f'No propagation (coh: {coh:.2f})', fontsize=10)
+
+            cur_ax.set_xticks([])
+            cur_ax.set_yticks([])
+
+            plt.colorbar(_cbar_mappable, ax=cur_ax, fraction=0.046, pad=0.04)
+            if ax is None:
+                plt.show()
+
 
     def calc_spectrums(self, roibyroi = False) -> tuple[np.ndarray, np.ndarray]:
         spectrum_neg = np.array([pygor.strf.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 0]])

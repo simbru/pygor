@@ -96,14 +96,41 @@ class Experiment:
         
         # Load files in parallel or sequential
         if n_jobs == 1 or len(file_paths) == 1:
-            # Sequential loading for single file or when explicitly requested
-            results = [load_single_file(fp) for fp in file_paths]
+            # Sequential loading with tqdm progress bar
+            try:
+                from tqdm.auto import tqdm
+                results = [load_single_file(fp) for fp in tqdm(file_paths, desc="Loading files")]
+            except ImportError:
+                results = [load_single_file(fp) for fp in file_paths]
         else:
-            # Parallel loading
+            # Parallel loading with tqdm progress bar via joblib callback
             from joblib import Parallel, delayed
-            results = Parallel(n_jobs=n_jobs, verbose=1)(
-                delayed(load_single_file)(file_path) for file_path in file_paths
-            )
+            try:
+                from tqdm.auto import tqdm
+                import contextlib
+
+                @contextlib.contextmanager
+                def _tqdm_joblib(tqdm_bar):
+                    """Context manager to patch joblib for tqdm progress."""
+                    class _TqdmCallback(joblib.parallel.BatchCompletionCallBack):
+                        def __call__(self, *args, **kwargs):
+                            tqdm_bar.update(n=self.batch_size)
+                            return super().__call__(*args, **kwargs)
+                    old_callback = joblib.parallel.BatchCompletionCallBack
+                    joblib.parallel.BatchCompletionCallBack = _TqdmCallback
+                    try:
+                        yield tqdm_bar
+                    finally:
+                        joblib.parallel.BatchCompletionCallBack = old_callback
+
+                with _tqdm_joblib(tqdm(total=len(file_paths), desc="Loading files")):
+                    results = Parallel(n_jobs=n_jobs)(
+                        delayed(load_single_file)(file_path) for file_path in file_paths
+                    )
+            except ImportError:
+                results = Parallel(n_jobs=n_jobs, verbose=1)(
+                    delayed(load_single_file)(file_path) for file_path in file_paths
+                )
         
         # Process results
         recordings = []
@@ -790,6 +817,65 @@ class Experiment:
             rows.append(truncated)
             
         return(np.vstack(rows))
+
+    def run(self, method, **kwargs):
+        """
+        Run a method on each recording in the experiment.
+
+        Calls ``method`` on every recording object, passing **kwargs.
+        Methods that don't exist on a recording are skipped with a warning.
+        Returns self to enable chaining.
+
+        Parameters
+        ----------
+        method : str
+            Method name to call on each recording (e.g., 'preprocess', 'segment_rois')
+        **kwargs
+            Keyword arguments passed to the method
+
+        Returns
+        -------
+        Experiment
+            Returns self for method chaining
+
+        Examples
+        --------
+        >>> exp.run('preprocess', detrend=True).run('segment_rois', mode='cellpose')
+        >>> exp.run('extract_traces_from_rois')
+        >>> exp.run('compute_snippets_and_averages')
+        """
+        success_count = 0
+        try:
+            from tqdm.auto import tqdm
+            iterator = tqdm(enumerate(self.recording), total=len(self.recording), desc=method)
+        except ImportError:
+            iterator = enumerate(self.recording)
+        for rec_idx, recording in iterator:
+            try:
+                attr = getattr(recording, method)
+            except AttributeError:
+                print(
+                    f"Warning: {recording.type} has no method '{method}' "
+                    f"(recording_id: {rec_idx}, name: {recording.name}) - skipping"
+                )
+                continue
+            try:
+                if callable(attr):
+                    attr(**kwargs)
+                else:
+                    print(
+                        f"Warning: '{method}' on {recording.name} is not callable "
+                        f"(it's an attribute, not a method) - skipping"
+                    )
+                    continue
+                success_count += 1
+            except Exception as e:
+                print(
+                    f"Warning: Error running '{method}' on {recording.name} "
+                    f"(recording_id: {rec_idx}): {e}"
+                )
+        print(f"Ran '{method}' on {success_count}/{len(self.recording)} recordings")
+        return self
 
     def pickle_store(self, save_path, filename, compress=False, protocol=None):
         """

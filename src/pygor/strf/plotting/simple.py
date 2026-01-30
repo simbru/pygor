@@ -526,7 +526,7 @@ def plot_deltatime_strfs(
         raise ValueError("scale must be 'global', 'global_centered', or 'per_roi'")
 
     # Get centered delta times from the data method
-    array, _ = self.get_strf_delta_times(
+    array = self.get_strf_delta_times(
         roi=roi, channel=channel,
         use_segmentation=use_segmentation, seg_kwargs=seg_kwargs,
     )
