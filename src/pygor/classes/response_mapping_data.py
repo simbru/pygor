@@ -36,13 +36,26 @@ class ResponseMapping(Core):
             roi_size = len(np.where(self.rois==-(roi_idx+1))[0])
             roi_sizes.append(roi_size)
         return pd.DataFrame(roi_sizes, columns=['roisize'])
+    
 
-
-    def calc_response_amplitude(self):
+    def calc_response_amplitude(self, response_window_s=8, baseline_window_s=5):
         """
         Calculate response amplitude for each presented stimulus.
         
+        Measures the response (max - start) in a window after stimulus onset,
+        and subtracts the baseline response (max - start) from a window before
+        stimulus onset.
+        
         Needs stimuli as input to creating the object, and inherits averages and triggertimes from Core. 
+        
+        Parameters
+        ----------
+        response_window_s : float, optional
+            Maximum duration in seconds to measure response after stimulus onset.
+            If the next stimulus comes sooner, uses that as the cutoff. Default is 8.
+        baseline_window_s : float, optional
+            Duration in seconds before stimulus onset to measure baseline response.
+            Default is 5.
         
         Returns
         -------
@@ -55,22 +68,52 @@ class ResponseMapping(Core):
         
         # Use averages from Core
         traces = self.averages
-        #traces = savgol_filter(traces, 1500, 5, axis=1)  # Smooth traces
+        
+        # Apply 1 second boxcar filter
+        from scipy.ndimage import uniform_filter1d
+        sampling_rate = int(1 / self.linedur_s)  # Calculate sampling rate from line duration
+        boxcar_window_size = int(1 * sampling_rate)  # 1 second window
+        traces_filtered = uniform_filter1d(traces, size=boxcar_window_size, axis=1, mode='nearest')
+        
+        # Calculate window sizes in samples
+        max_response_samples = int(response_window_s * sampling_rate)
+        baseline_samples = int(baseline_window_s * sampling_rate)
         
         # Initialize dictionary to build DataFrame
         response_dict = {}
         
         for trig_idx, trig in enumerate(triggers[:-1]):  # Exclude last trigger since it's just white
-            startval = traces[:, trig]
-            maxval = np.max(traces[:, trig:triggers[trig_idx + 1]], axis=1)
-            response = maxval - startval
+            # Determine the end of the response window (limited to response_window_s or next trigger)
+            next_trig = triggers[trig_idx + 1]
+            response_window_end = min(trig + max_response_samples, next_trig)
+            
+            # Calculate stimulus response (maxval - startval) in the response window
+            startval_stim = traces_filtered[:, trig]
+            maxval_stim = np.max(traces_filtered[:, trig:response_window_end], axis=1)
+            response_stim = maxval_stim - startval_stim
+            
+            # Calculate baseline response in the pre-stimulus window
+            baseline_start = max(0, trig - baseline_samples)
+            baseline_end = trig
+            
+            # Only subtract baseline if there's a valid pre-stimulus period
+            if baseline_start < baseline_end:
+                startval_baseline = traces_filtered[:, baseline_start]
+                maxval_baseline = np.max(traces_filtered[:, baseline_start:baseline_end], axis=1)
+                response_baseline = maxval_baseline - startval_baseline
+                response = response_stim - response_baseline
+            else:
+                # No pre-stimulus period available, use stimulus response only
+                response = response_stim
+            
             # Add response as a column with stimulus name as key
             stimulus_name = str(self.stimuli[trig_idx])
             response_dict[stimulus_name] = response
+        
         # Create DataFrame from dictionary
         df = pd.DataFrame(response_dict)
         df.index.name = 'ROI'
-        
+    
         return df
 
     def calc_response_sd(self):
