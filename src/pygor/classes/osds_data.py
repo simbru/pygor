@@ -185,6 +185,8 @@ class OSDS(Core):
             - 'peak': alias for 'absmax'
             - 'peak_positive': maximum positive value
             - 'peak_negative': minimum negative value
+            - 'correlation' or 'corr': Pearson correlation with leave-one-out
+              grand-mean template (measures response shape consistency)
             Or pass a callable function that takes 1D array and returns scalar.
             If None, uses self.tuning_metric (default 'auc').
         roi_index : int, optional
@@ -243,8 +245,8 @@ class OSDS(Core):
         roi_indices : list, int, or None
             ROI indices to analyze. If None, analyzes all ROIs.
         metric : str or callable
-            Metric for computing tuning function ('peak', 'mean', 'auc', etc.).
-            If None, uses self.tuning_metric.
+            Metric for computing tuning function ('peak', 'mean', 'auc',
+            'correlation', etc.). If None, uses self.tuning_metric.
         phase_aware : bool or None
             Controls phase-aware analysis:
             - None (default): Auto-detect from self.dir_phase_num
