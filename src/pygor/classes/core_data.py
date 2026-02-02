@@ -110,6 +110,9 @@ class Core:
         # Initialize analysis parameters from config (both paths)
         self.params = AnalysisParams.from_config(self.config)
 
+        # No backup yet — set lazily on first destructive operation
+        self._original_images = None
+
     def _load_from_h5(self):
         """Load data from IGOR-exported H5 file."""
         # Set type attribute
@@ -550,6 +553,9 @@ class Core:
         # Initialize analysis parameters from config
         instance.params = AnalysisParams.from_config(config)
 
+        # No backup yet — set lazily on first destructive operation
+        instance._original_images = None
+
         # Apply preprocessing if requested
         if preprocess:
             if isinstance(preprocess, dict):
@@ -628,6 +634,14 @@ class Core:
             )
             return
 
+        # Backup raw images before first destructive operation
+        if self._original_images is None:
+            self._original_images = self.images.copy()
+
+        # If force=True, restore from backup so we preprocess from raw
+        if force and self._original_images is not None:
+            self.images = self._original_images.copy()
+
         # Get defaults from params (loaded from config)
         defaults = self.params.get_defaults("preprocessing")
 
@@ -673,6 +687,11 @@ class Core:
                 self.triggertimes_frame = trigger_frames
                 self.triggertimes = trigger_times
 
+        # Reduce trigger channel to 2 columns to save memory (matches IGOR)
+        if hasattr(self, 'trigger_images') and self.trigger_images is not None:
+            if self.trigger_images.ndim == 3 and self.trigger_images.shape[-1] > 2:
+                self.trigger_images = self.trigger_images[:, :, :2].copy()
+
         # Record preprocessing in params (sets preprocessed=True and artifact_width)
         self.params.mark_preprocessing(params)
 
@@ -693,6 +712,7 @@ class Core:
         reference_mode: str = None,
         edge_crop: int = None,
         ref_plane: np.ndarray = None,
+        verbose = False,
     ) -> dict:
         """
         Apply motion correction (registration) to images in-place.
@@ -805,7 +825,11 @@ class Core:
             )
             return self.params.registration or {}
 
-        # Store original for plotting comparison
+        # Backup images before first destructive operation
+        if self._original_images is None:
+            self._original_images = self.images.copy()
+
+        # Store pre-registration state for plotting comparison
         original_stack = self.images.copy() if plot else None
 
         # Get defaults from params (loaded from config)
@@ -870,14 +894,44 @@ class Core:
             )
             plt.show()
         # if stats["mean_error"] < 0.05:
-        print(f"Registration complete.\n"
-            f"  Mean error: {stats['mean_error']:.4f}\n"
-            f"  Max shift: (y={stats['max_shift'][0]:.2f}, x={stats['max_shift'][1]:.2f})\n"
-            f"  Mean shift: (y={stats['mean_shift'][0]:.2f}, x={stats['mean_shift'][1]:.2f})\n"
-            f"  Shift SD: (y={stats['std_shift'][0]:.2f}, x={stats['std_shift'][1]:.2f})")
-        # else:
-        #     print(f"Warning: Registration error exceeds threshold. Mean error: {stats['mean_error']:.4f}")
+        if verbose:
+            print(f"Registration complete.\n"
+                f"  Mean error: {stats['mean_error']:.4f}\n"
+                f"  Max shift: (y={stats['max_shift'][0]:.2f}, x={stats['max_shift'][1]:.2f})\n"
+                f"  Mean shift: (y={stats['mean_shift'][0]:.2f}, x={stats['mean_shift'][1]:.2f})\n"
+                f"  Shift SD: (y={stats['std_shift'][0]:.2f}, x={stats['std_shift'][1]:.2f})")
+        if stats["mean_error"] > 0.05:
+            print(f"Warning: Registration error exceeds threshold. Mean error: {stats['mean_error']:.4f}")
         return stats
+
+    def reset_images(self) -> None:
+        """Restore images to the state before any preprocessing or registration.
+
+        Resets `self.images` from the backup taken before the first destructive
+        operation, recomputes `self.average_stack`, and clears the preprocessed
+        and registered flags so the pipeline can be re-run with new parameters.
+
+        Raises
+        ------
+        RuntimeError
+            If no backup exists (data was never preprocessed or registered).
+        """
+        if self._original_images is None:
+            raise RuntimeError(
+                "No original images stored. Cannot reset — data was never "
+                "preprocessed or registered (or discard_original() was called)."
+            )
+        self.images = self._original_images.copy()
+        self.average_stack = self.images.mean(axis=0)
+        self.params.preprocessed = False
+        self.params.registered = False
+
+    def discard_original(self) -> None:
+        """Free the original image backup to reclaim memory.
+
+        After calling this, `reset_images()` will no longer be available.
+        """
+        self._original_images = None
 
     def _plot_registration_results(
         self,
