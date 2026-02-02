@@ -11,6 +11,7 @@ import numpy as np
 import warnings
 from scipy.signal import correlate
 from joblib import Parallel, delayed
+from tqdm.auto import tqdm
 from scipy import ndimage
 from scipy.fft import fft, ifft, next_fast_len
 
@@ -493,11 +494,9 @@ def calculate_calcium_correlated_average(strf_obj, noise_array, sta_past_window=
 
     # STEP 2: Process ROIs (optionally in parallel with joblib)
     if n_jobs == 1:
-        # Sequential processing (original behavior)
-        for rr in roi_list:
-            if verbose:
-                print(f"ROI#{rr+1}/{len(roi_list)}: Colours...", end="")
-
+        # Sequential processing
+        roi_iter = tqdm(roi_list, desc="Computing STRFs", disable=not verbose, leave=False, position=1)
+        for rr in roi_iter:
             result = _process_single_roi(
                 rr, roi_list, input_traces, trigger_start, n_f_relevant,
                 colour_lookup, noise_stimulus, mean_stim, n_colours,
@@ -513,15 +512,9 @@ def calculate_calcium_correlated_average(strf_obj, noise_array, sta_past_window=
             # Store STRF data
             for colour in range(n_colours):
                 strfs_output[colour, result['roi_idx'], :, :, :] = result['strf_data'][colour]
-
-            if verbose:
-                print(".")
     else:
-        # Parallel processing with joblib
-        if verbose:
-            print(f"Processing {len(roi_list)} ROIs in parallel (n_jobs={n_jobs})...")
-
-        results = Parallel(n_jobs=n_jobs, verbose=10 if verbose else 0)(
+        # Parallel processing with joblib + tqdm progress bar
+        results_gen = Parallel(n_jobs=n_jobs, return_as="generator")(
             delayed(_process_single_roi)(
                 rr, roi_list, input_traces, trigger_start, n_f_relevant,
                 colour_lookup, noise_stimulus, mean_stim, n_colours,
@@ -530,17 +523,14 @@ def calculate_calcium_correlated_average(strf_obj, noise_array, sta_past_window=
             ) for rr in roi_list
         )
 
-        # Unpack all results
-        for result in results:
+        # Unpack results as they complete, with tqdm tracking progress
+        for result in tqdm(results_gen, total=len(roi_list), desc="Computing STRFs (parallel)", disable=not verbose, leave=False, position=1):
             event_counter[result['roi_idx']] = result['event_count']
             filter_sds[:, :, result['roi_idx']] = result['filter_sds']
             filter_pols[:, :, result['roi_idx']] = result['filter_pols']
 
             for colour in range(n_colours):
                 strfs_output[colour, result['roi_idx'], :, :, :] = result['strf_data'][colour]
-
-        if verbose:
-            print("Parallel processing complete.")
     
     # Apply polarity adjustment if requested (direct translation)
     if adjust_by_polarity:

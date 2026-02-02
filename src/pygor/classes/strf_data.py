@@ -2888,13 +2888,13 @@ class STRF(Core):
         return delta_times
 
     def compute_latency_vectors(self, roi=None, use_segmentation=True, coherence_threshold=0,
-                                force_recompute=False):
+                                amplitude_weighted=False, force_recompute=False):
         """Compute direction, coherence, and magnitude of latency gradients.
 
-        Results are cached per ``use_segmentation`` setting.  Subsequent calls
-        with the same ``use_segmentation`` return the cached result (the
-        ``coherence_threshold`` is applied on-the-fly so it does not affect
-        the cache key).
+        Results are cached per ``use_segmentation`` and ``amplitude_weighted``
+        setting.  Subsequent calls with the same settings return the cached
+        result (the ``coherence_threshold`` is applied on-the-fly so it does
+        not affect the cache key).
 
         Parameters
         ----------
@@ -2904,18 +2904,23 @@ class STRF(Core):
             Whether to use segmented latency maps.
         coherence_threshold : float
             Minimum coherence to consider propagation reliable.
+        amplitude_weighted : bool
+            If True, weight each pixel's gradient contribution by its RF
+            amplitude (from get_amplitude_weights). This focuses the
+            direction estimate on high-signal regions.
         force_recompute : bool
             If True, recompute even if a cached result exists.
 
         Returns
         -------
-        dict with keys: 'direction', 'coherence', 'magnitude', 'reliable'
+        dict with keys: 'direction', 'coherence', 'magnitude', 'reliable',
+                        'mean_dx', 'mean_dy', 'centroid_x', 'centroid_y'
             Each value is an array of shape (n_rois,).
         """
         if not hasattr(self, '_latency_vectors_cache'):
             self._latency_vectors_cache = {}
 
-        cache_key = (use_segmentation,)
+        cache_key = (use_segmentation, amplitude_weighted)
 
         if not force_recompute and cache_key in self._latency_vectors_cache:
             cached = self._latency_vectors_cache[cache_key]
@@ -2932,10 +2937,11 @@ class STRF(Core):
         directions = np.full(n_rois, np.nan)
         coherences = np.full(n_rois, np.nan)
         magnitudes = np.full(n_rois, np.nan)
-        mean_dxs = np.full(n_rois, np.nan)
-        mean_dys = np.full(n_rois, np.nan)
         centroids_x = np.full(n_rois, np.nan)
         centroids_y = np.full(n_rois, np.nan)
+
+        if amplitude_weighted:
+            weights_all = self.get_amplitude_weights()
 
         for i in range(n_rois):
             lmap = latency_maps[i]
@@ -2949,42 +2955,62 @@ class STRF(Core):
             if mask.sum() < 2:
                 continue
 
-            # Coherence (mean resultant length of unit gradient vectors)
-            grad_mag = np.sqrt(grad_x**2 + grad_y**2)
-            grad_mag[grad_mag == 0] = 1
-            ux = grad_x / grad_mag
-            uy = grad_y / grad_mag
+            # Build per-pixel weights (normalized over valid pixels)
+            if amplitude_weighted:
+                amp = weights_all[i]
+                amp_valid = np.where(mask, amp, 0.0)
+                amp_sum = amp_valid[mask].sum()
+                if amp_sum == 0:
+                    continue
+                w = amp_valid / amp_sum
+            else:
+                n_valid = mask.sum()
+                w = np.where(mask, 1.0 / n_valid, 0.0)
 
-            mean_ux = ux[mask].mean()
-            mean_uy = uy[mask].mean()
+            # Coherence (weighted mean resultant length of unit gradient vectors)
+            grad_mag = np.sqrt(grad_x**2 + grad_y**2)
+            grad_mag_safe = np.where(grad_mag == 0, 1, grad_mag)
+            ux = grad_x / grad_mag_safe
+            uy = grad_y / grad_mag_safe
+
+            mean_ux = (ux * w).sum()
+            mean_uy = (uy * w).sum()
             coherences[i] = np.sqrt(mean_ux**2 + mean_uy**2)
             directions[i] = np.degrees(np.arctan2(mean_uy, mean_ux)) % 360
 
-            # Raw gradient components and magnitude
-            mean_dx = grad_x[mask].mean()
-            mean_dy = grad_y[mask].mean()
+            # Magnitude from weighted raw gradient
+            mean_dx = (grad_x * w).sum()
+            mean_dy = (grad_y * w).sum()
             magnitudes[i] = np.sqrt(mean_dx**2 + mean_dy**2)
-            mean_dxs[i] = mean_dx
-            mean_dys[i] = mean_dy
 
-            # Arrow centroid (weighted by negative latency pixels, or mask center)
-            neg_mask = mask & (np.array(lmap) < 0)
-            if neg_mask.any():
-                ys, xs = np.where(neg_mask)
-                neg_weights = np.abs(np.array(lmap)[neg_mask])
-                centroids_y[i] = np.average(ys, weights=neg_weights)
-                centroids_x[i] = np.average(xs, weights=neg_weights)
-            else:
+            # Arrow centroid
+            if amplitude_weighted:
+                # Use amplitude weights for centroid
                 ys, xs = np.where(mask)
-                centroids_y[i] = ys.mean()
-                centroids_x[i] = xs.mean()
+                pix_weights = amp_valid[mask]
+                if pix_weights.sum() > 0:
+                    centroids_y[i] = np.average(ys, weights=pix_weights)
+                    centroids_x[i] = np.average(xs, weights=pix_weights)
+                else:
+                    centroids_y[i] = ys.mean()
+                    centroids_x[i] = xs.mean()
+            else:
+                # Weight by negative latency pixels, or mask center
+                neg_mask = mask & (np.array(lmap) < 0)
+                if neg_mask.any():
+                    ys, xs = np.where(neg_mask)
+                    neg_weights = np.abs(np.array(lmap)[neg_mask])
+                    centroids_y[i] = np.average(ys, weights=neg_weights)
+                    centroids_x[i] = np.average(xs, weights=neg_weights)
+                else:
+                    ys, xs = np.where(mask)
+                    centroids_y[i] = ys.mean()
+                    centroids_x[i] = xs.mean()
 
         self._latency_vectors_cache[cache_key] = {
             'direction': directions,
             'coherence': coherences,
             'magnitude': magnitudes,
-            'mean_dx': mean_dxs,
-            'mean_dy': mean_dys,
             'centroid_x': centroids_x,
             'centroid_y': centroids_y,
         }
@@ -2994,8 +3020,6 @@ class STRF(Core):
             'coherence': coherences,
             'magnitude': magnitudes,
             'reliable': coherences >= coherence_threshold,
-            'mean_dx': mean_dxs,
-            'mean_dy': mean_dys,
             'centroid_x': centroids_x,
             'centroid_y': centroids_y,
         }
@@ -3056,8 +3080,316 @@ class STRF(Core):
         )
         return results['reliable']
 
+    # -- Amplitude-weighted latency gradient accessors --
+
+    def get_latency_directions_weighted(self, use_segmentation=True):
+        """Get amplitude-weighted latency gradient directions (degrees, 0-360).
+
+        Returns
+        -------
+        np.ndarray of shape (n_rois,)
+        """
+        results = self.compute_latency_vectors(
+            use_segmentation=use_segmentation, amplitude_weighted=True)
+        return results['direction']
+
+    def get_latency_coherences_weighted(self, use_segmentation=True):
+        """Get amplitude-weighted latency gradient coherences (0-1).
+
+        Returns
+        -------
+        np.ndarray of shape (n_rois,)
+        """
+        results = self.compute_latency_vectors(
+            use_segmentation=use_segmentation, amplitude_weighted=True)
+        return results['coherence']
+
+    def get_latency_magnitudes_weighted(self, use_segmentation=True):
+        """Get amplitude-weighted latency gradient magnitudes.
+
+        Returns
+        -------
+        np.ndarray of shape (n_rois,)
+        """
+        results = self.compute_latency_vectors(
+            use_segmentation=use_segmentation, amplitude_weighted=True)
+        return results['magnitude']
+
+    # -- Temporal span --
+
+    def compute_temporal_span(self, roi=None, use_segmentation=True, force_recompute=False):
+        """Compute amplitude-weighted temporal spread of latency maps.
+
+        Uses RF amplitude weights so that noisy low-signal pixels (which
+        can have arbitrary peak times spanning the full STRF window) do not
+        dominate the metric.
+
+        Parameters
+        ----------
+        roi : int, list, or None
+            ROI index/indices. If None, computes for all ROIs.
+        use_segmentation : bool
+            Whether to use segmented latency maps.
+        force_recompute : bool
+            If True, recompute even if cached.
+
+        Returns
+        -------
+        dict with keys:
+            'weighted_sd' : np.ndarray (n_rois,)
+                Amplitude-weighted standard deviation of delta times.
+            'weighted_iqr' : np.ndarray (n_rois,)
+                Amplitude-weighted interquartile range (75th-25th percentile).
+            'raw_span' : np.ndarray (n_rois,)
+                Unweighted max minus min (for reference).
+        """
+        if not hasattr(self, '_temporal_span_cache'):
+            self._temporal_span_cache = {}
+
+        cache_key = (use_segmentation,)
+
+        if not force_recompute and cache_key in self._temporal_span_cache:
+            cached = self._temporal_span_cache[cache_key]
+            result = dict(cached)
+            if roi is not None:
+                idx = np.atleast_1d(roi)
+                result = {k: v[idx] for k, v in result.items()}
+            return result
+
+        latency_maps = self.get_strf_delta_times(use_segmentation=use_segmentation)
+        weights_all = self.get_amplitude_weights()
+        n_rois = len(latency_maps)
+        weighted_sds = np.full(n_rois, np.nan)
+        weighted_iqrs = np.full(n_rois, np.nan)
+        raw_spans = np.full(n_rois, np.nan)
+
+        for i in range(n_rois):
+            lmap = latency_maps[i]
+            amp = weights_all[i]
+            lmap_arr = np.asarray(lmap)
+
+            # Build valid mask
+            if hasattr(lmap, 'mask') and lmap.mask.any():
+                valid = ~lmap.mask & np.isfinite(lmap_arr) & np.isfinite(amp) & (amp > 0)
+            else:
+                valid = np.isfinite(lmap_arr) & np.isfinite(amp) & (amp > 0)
+
+            if valid.sum() < 2:
+                continue
+
+            vals = lmap_arr[valid]
+            w = amp[valid]
+
+            # Raw span for reference
+            raw_spans[i] = vals.max() - vals.min()
+
+            # Weighted SD
+            w_norm = w / w.sum()
+            w_mean = np.sum(w_norm * vals)
+            weighted_sds[i] = np.sqrt(np.sum(w_norm * (vals - w_mean)**2))
+
+            # Weighted IQR via weighted percentiles
+            order = np.argsort(vals)
+            vals_sorted = vals[order]
+            w_sorted = w[order]
+            cdf = np.cumsum(w_sorted)
+            cdf = cdf / cdf[-1]
+            q25 = np.interp(0.25, cdf, vals_sorted)
+            q75 = np.interp(0.75, cdf, vals_sorted)
+            weighted_iqrs[i] = q75 - q25
+
+        self._temporal_span_cache[cache_key] = {
+            'weighted_sd': weighted_sds,
+            'weighted_iqr': weighted_iqrs,
+            'raw_span': raw_spans,
+        }
+
+        result = dict(self._temporal_span_cache[cache_key])
+
+        if roi is not None:
+            idx = np.atleast_1d(roi)
+            result = {k: v[idx] for k, v in result.items()}
+
+        return result
+
+    def get_temporal_span(self, use_segmentation=True):
+        """Get amplitude-weighted SD of delta times per ROI, in seconds.
+
+        Returns
+        -------
+        np.ndarray of shape (n_rois,)
+        """
+        return self.compute_temporal_span(
+            use_segmentation=use_segmentation)['weighted_sd']
+
+    def get_temporal_span_iqr(self, use_segmentation=True):
+        """Get amplitude-weighted IQR of delta times per ROI, in seconds.
+
+        Returns
+        -------
+        np.ndarray of shape (n_rois,)
+        """
+        return self.compute_temporal_span(
+            use_segmentation=use_segmentation)['weighted_iqr']
+
+    def get_temporal_span_raw(self, use_segmentation=True):
+        """Get raw (unweighted) temporal span per ROI, in seconds.
+
+        Returns
+        -------
+        np.ndarray of shape (n_rois,)
+        """
+        return self.compute_temporal_span(
+            use_segmentation=use_segmentation)['raw_span']
+
+    # -- Latency plane fit --
+
+    def compute_latency_plane_fit(self, roi=None, use_segmentation=True,
+                                   force_recompute=False):
+        """Fit a linear plane to the latency map, weighted by RF amplitude.
+
+        Fits ``delta_t = a*x + b*y + c`` using weighted least squares, where
+        weights are the pixel amplitude from :meth:`get_amplitude_weights`.
+        This captures the dominant space-time tilt direction without
+        centre-surround gradient cancellation (Priebe & Ferster 2005 style).
+
+        Parameters
+        ----------
+        roi : int, list, or None
+            ROI index/indices. If None, computes for all ROIs.
+        use_segmentation : bool
+            Whether to use segmented latency maps.
+        force_recompute : bool
+            If True, recompute even if cached.
+
+        Returns
+        -------
+        dict with keys:
+            'direction' : np.ndarray (n_rois,)
+                Direction of steepest descent in degrees (0-360).
+            'slope_magnitude' : np.ndarray (n_rois,)
+                sqrt(a^2 + b^2), latency change rate (seconds/pixel).
+            'r_squared' : np.ndarray (n_rois,)
+                Weighted R-squared of the plane fit (0-1).
+            'coeff_x' : np.ndarray (n_rois,)
+                Plane coefficient a (dt/dx).
+            'coeff_y' : np.ndarray (n_rois,)
+                Plane coefficient b (dt/dy).
+            'intercept' : np.ndarray (n_rois,)
+                Plane intercept c.
+        """
+        if not hasattr(self, '_latency_plane_fit_cache'):
+            self._latency_plane_fit_cache = {}
+
+        cache_key = (use_segmentation,)
+
+        if not force_recompute and cache_key in self._latency_plane_fit_cache:
+            cached = self._latency_plane_fit_cache[cache_key]
+            result = dict(cached)
+            if roi is not None:
+                idx = np.atleast_1d(roi)
+                result = {k: v[idx] for k, v in result.items()}
+            return result
+
+        latency_maps = self.get_strf_delta_times(use_segmentation=use_segmentation)
+        weights_all = self.get_amplitude_weights()
+        n_rois = len(latency_maps)
+
+        directions = np.full(n_rois, np.nan)
+        slope_mags = np.full(n_rois, np.nan)
+        r_squareds = np.full(n_rois, np.nan)
+        coeff_xs = np.full(n_rois, np.nan)
+        coeff_ys = np.full(n_rois, np.nan)
+        intercepts = np.full(n_rois, np.nan)
+
+        for i in range(n_rois):
+            lmap = latency_maps[i]
+            amp = weights_all[i]
+
+            # Build valid pixel mask
+            lmap_arr = np.asarray(lmap)
+            if hasattr(lmap, 'mask') and lmap.mask.any():
+                valid = ~lmap.mask & np.isfinite(lmap_arr) & np.isfinite(amp) & (amp > 0)
+            else:
+                valid = np.isfinite(lmap_arr) & np.isfinite(amp) & (amp > 0)
+
+            if valid.sum() < 3:
+                continue
+
+            ys, xs = np.where(valid)
+            t = lmap_arr[valid]
+            w = np.asarray(amp[valid])
+
+            # Weighted least squares via sqrt(w) transformation
+            sqrt_w = np.sqrt(w)
+            X = np.column_stack([xs * sqrt_w, ys * sqrt_w, sqrt_w])
+            t_w = t * sqrt_w
+
+            beta, _, _, _ = np.linalg.lstsq(X, t_w, rcond=None)
+            a, b, c = beta
+
+            coeff_xs[i] = a
+            coeff_ys[i] = b
+            intercepts[i] = c
+            slope_mags[i] = np.sqrt(a**2 + b**2)
+            directions[i] = np.degrees(np.arctan2(b, a)) % 360
+
+            # Weighted R-squared
+            t_pred = a * xs + b * ys + c
+            ss_res = np.sum(w * (t - t_pred)**2)
+            t_mean = np.average(t, weights=w)
+            ss_tot = np.sum(w * (t - t_mean)**2)
+            r_squareds[i] = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+        self._latency_plane_fit_cache[cache_key] = {
+            'direction': directions,
+            'slope_magnitude': slope_mags,
+            'r_squared': r_squareds,
+            'coeff_x': coeff_xs,
+            'coeff_y': coeff_ys,
+            'intercept': intercepts,
+        }
+
+        result = dict(self._latency_plane_fit_cache[cache_key])
+
+        if roi is not None:
+            idx = np.atleast_1d(roi)
+            result = {k: v[idx] for k, v in result.items()}
+
+        return result
+
+    def get_plane_fit_direction(self, use_segmentation=True):
+        """Get direction of steepest latency descent from plane fit (degrees, 0-360).
+
+        Returns
+        -------
+        np.ndarray of shape (n_rois,)
+        """
+        return self.compute_latency_plane_fit(
+            use_segmentation=use_segmentation)['direction']
+
+    def get_plane_fit_slope(self, use_segmentation=True):
+        """Get plane fit slope magnitude (seconds/pixel).
+
+        Returns
+        -------
+        np.ndarray of shape (n_rois,)
+        """
+        return self.compute_latency_plane_fit(
+            use_segmentation=use_segmentation)['slope_magnitude']
+
+    def get_plane_fit_r_squared(self, use_segmentation=True):
+        """Get R-squared of the latency plane fit (0-1).
+
+        Returns
+        -------
+        np.ndarray of shape (n_rois,)
+        """
+        return self.compute_latency_plane_fit(
+            use_segmentation=use_segmentation)['r_squared']
+
     def plot_latency_vectors(self, roi=None, use_segmentation=True, coherence_threshold=0,
-                            arrow_scale=7, ax=None):
+                            arrow_scale=7, ax=None, amplitude_weighted=False):
         """Plot latency maps with overlaid gradient arrows.
 
         Parameters
@@ -3073,10 +3405,13 @@ class STRF(Core):
         ax : matplotlib Axes or None
             If provided, plot onto this axes (only works for a single ROI).
             If None, creates new figures.
+        amplitude_weighted : bool
+            If True, compute and display amplitude-weighted gradient vectors.
         """
         results = self.compute_latency_vectors(
             roi=roi, use_segmentation=use_segmentation,
-            coherence_threshold=coherence_threshold
+            coherence_threshold=coherence_threshold,
+            amplitude_weighted=amplitude_weighted
         )
         latency_maps = self.get_strf_delta_times(use_segmentation=use_segmentation)
 
@@ -3134,11 +3469,14 @@ class STRF(Core):
                 signal_mask = (amp >= amp_threshold) & np.isfinite(lmap_arr)
                 signal_latencies = lmap_arr[signal_mask]
                 if signal_latencies.size > 0:
-                    max_abs = np.max(np.abs(signal_latencies))
+                    # Use actual data range instead of symmetric limits
+                    data_vmin = np.min(signal_latencies)
+                    data_vmax = np.max(signal_latencies)
                 else:
-                    max_abs = max(abs(vmin), abs(vmax))
+                    data_vmin = vmin
+                    data_vmax = vmax
                 cmap = plt.cm.jet
-                norm = plt.Normalize(vmin=-max_abs, vmax=max_abs)
+                norm = plt.Normalize(vmin=data_vmin, vmax=data_vmax)
                 rgba = cmap(norm(lmap_arr))
                 rgba[..., 3] = alpha
                 cur_ax.imshow(rgba, origin='lower')
@@ -3149,27 +3487,16 @@ class STRF(Core):
 
 
             if reliable and mag > 0:
-                if hasattr(lmap, 'mask') and lmap.mask.any():
-                    mask = ~lmap.mask
-                else:
-                    mask = np.ones(lmap.shape, dtype=bool)
+                cx = results['centroid_x'][i]
+                cy = results['centroid_y'][i]
+                # Use direction (from unit-vector mean) to draw arrow so it
+                # matches the reported direction exactly
+                dir_rad = np.radians(results['direction'][i])
+                arrow_dx = np.cos(dir_rad)
+                arrow_dy = np.sin(dir_rad)
 
-                neg_mask = mask & (np.array(lmap) < 0)
-                if neg_mask.any():
-                    ys, xs = np.where(neg_mask)
-                    neg_weights = np.abs(np.array(lmap)[neg_mask])
-                    cy = np.average(ys, weights=neg_weights)
-                    cx = np.average(xs, weights=neg_weights)
-                else:
-                    ys, xs = np.where(mask)
-                    cy, cx = ys.mean(), xs.mean()
-
-                grad_y, grad_x = np.gradient(lmap)
-                mean_dx = grad_x[mask].mean()
-                mean_dy = grad_y[mask].mean()
-
-                scale = arrow_scale / mag
-                cur_ax.quiver(cx, cy, mean_dx, mean_dy, scale_units='xy', angles='xy',
+                scale = arrow_scale
+                cur_ax.quiver(cx, cy, arrow_dx, arrow_dy, scale_units='xy', angles='xy',
                         scale=1/scale, color='white', width=0.02,
                         headaxislength=2.5, headlength=2.5,
                         edgecolor='black', linewidth=1)
@@ -3180,7 +3507,12 @@ class STRF(Core):
             cur_ax.set_xticks([])
             cur_ax.set_yticks([])
 
-            plt.colorbar(_cbar_mappable, ax=cur_ax, fraction=0.046, pad=0.04)
+            # Convert colorbar from seconds to milliseconds
+            cbar = plt.colorbar(_cbar_mappable, ax=cur_ax, fraction=0.046, pad=0.04)
+            tick_locs = cbar.get_ticks()
+            cbar.set_ticks(tick_locs)
+            cbar.set_ticklabels([f'{t * 1000:.0f}' for t in tick_locs])
+            cbar.set_label('\u0394 time (ms)')
             if ax is None:
                 plt.show()
 
@@ -4198,7 +4530,7 @@ class STRF(Core):
                     max_frames_per_trigger=8, event_sd_threshold=2.0,
                     use_znorm=True, adjust_by_polarity=True,
                     skip_first_triggers=0, skip_last_triggers=0,
-                    pre_smooth=0, roi=None, n_jobs=1, normalize_strfs=True, verbose=True, **kwargs):
+                    pre_smooth=0, roi=None, n_jobs=1, normalize_strfs=True, verbose=False, **kwargs):
         """
         Calculate spike-triggered averages (STRFs) for all ROIs and colour channels.
         
