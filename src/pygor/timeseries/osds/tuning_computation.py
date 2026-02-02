@@ -26,6 +26,8 @@ def compute_tuning_function(osds_obj, roi_index=None, window=None, metric='max',
         - 'peak': alias for 'absmax'
         - 'peak_positive': maximum positive value
         - 'peak_negative': minimum negative value
+        - 'correlation' or 'corr': Pearson correlation with leave-one-out
+          grand-mean template (measures response shape consistency)
         Or pass a callable function that takes 1D array and returns scalar.
     roi_index : int, optional
         If specified, returns tuning for only this ROI as 1D array.
@@ -98,6 +100,34 @@ def compute_tuning_function(osds_obj, roi_index=None, window=None, metric='max',
             tuning_values = np.max(dir_averages, axis=3)
         elif metric == 'peak_negative':
             tuning_values = np.min(dir_averages, axis=3)
+        elif metric in ['correlation', 'corr']:
+            # Correlation metric: for each direction, correlate its trace
+            # with the grand-mean template across all directions.
+            # Measures response shape consistency rather than amplitude.
+            template = dir_averages.mean(axis=0, keepdims=True)  # (1, n_rois, n_phases, phase_length)
+            x = dir_averages - dir_averages.mean(axis=3, keepdims=True)
+            y = template - template.mean(axis=3, keepdims=True)
+            num = (x * y).sum(axis=3)
+            den = np.sqrt((x**2).sum(axis=3) * (y**2).sum(axis=3))
+            tuning_values = np.where(den > 0, num / den, 0.0)
+        elif metric == 'auc_pos':
+            # Positive-only AUC: integrates only excitatory (positive)
+            # deflections. Closest calcium analog to spike counts.
+            tuning_values = np.trapezoid(np.clip(dir_averages, 0, None), axis=3)
+        elif metric == 'r2':
+            # Variance explained: how much of each direction's trace is
+            # explained by the grand-mean template. High R² = similar to
+            # mean, low R² = different from mean.
+            template = dir_averages.mean(axis=0, keepdims=True)
+            ss_res = ((dir_averages - template) ** 2).sum(axis=3)
+            ss_tot = ((dir_averages - dir_averages.mean(axis=3, keepdims=True)) ** 2).sum(axis=3)
+            tuning_values = np.where(ss_tot > 0, 1 - ss_res / ss_tot, 0.0)
+        elif metric in ['distance', 'dist']:
+            # Mean absolute error from grand-mean template. Less sensitive
+            # than RMS because deviations are not squared, so large
+            # fluctuations are not amplified disproportionately.
+            template = dir_averages.mean(axis=0, keepdims=True)
+            tuning_values = np.abs(dir_averages - template).mean(axis=3)
         elif callable(metric):
             # Apply custom function to each direction/ROI/phase combination
             tuning_values = np.array([[[metric(dir_averages[d, r, p, :]) 
@@ -127,6 +157,34 @@ def compute_tuning_function(osds_obj, roi_index=None, window=None, metric='max',
             tuning_values = np.max(dir_averages, axis=2)
         elif metric == 'peak_negative':
             tuning_values = np.min(dir_averages, axis=2)
+        elif metric in ['correlation', 'corr']:
+            # Correlation metric: for each direction, correlate its trace
+            # with the grand-mean template across all directions.
+            # Measures response shape consistency rather than amplitude.
+            template = dir_averages.mean(axis=0, keepdims=True)  # (1, n_rois, timepoints)
+            x = dir_averages - dir_averages.mean(axis=2, keepdims=True)
+            y = template - template.mean(axis=2, keepdims=True)
+            num = (x * y).sum(axis=2)
+            den = np.sqrt((x**2).sum(axis=2) * (y**2).sum(axis=2))
+            tuning_values = np.where(den > 0, num / den, 0.0)
+        elif metric == 'auc_pos':
+            # Positive-only AUC: integrates only excitatory (positive)
+            # deflections. Closest calcium analog to spike counts.
+            tuning_values = np.trapezoid(np.clip(dir_averages, 0, None), axis=2)
+        elif metric == 'r2':
+            # Variance explained: how much of each direction's trace is
+            # explained by the grand-mean template. High R² = similar to
+            # mean, low R² = different from mean.
+            template = dir_averages.mean(axis=0, keepdims=True)
+            ss_res = ((dir_averages - template) ** 2).sum(axis=2)
+            ss_tot = ((dir_averages - dir_averages.mean(axis=2, keepdims=True)) ** 2).sum(axis=2)
+            tuning_values = np.where(ss_tot > 0, 1 - ss_res / ss_tot, 0.0)
+        elif metric in ['distance', 'dist']:
+            # Mean absolute error from grand-mean template. Less sensitive
+            # than RMS because deviations are not squared, so large
+            # fluctuations are not amplified disproportionately.
+            template = dir_averages.mean(axis=0, keepdims=True)
+            tuning_values = np.abs(dir_averages - template).mean(axis=2)
         elif callable(metric):
             # Apply custom function to each direction/ROI combination
             tuning_values = np.array([[metric(dir_averages[d, r, :]) 

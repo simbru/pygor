@@ -568,12 +568,16 @@ def transfer_rois(
             RuntimeWarning
         )
 
-    # Apply shift to ROI mask using nearest-neighbor to preserve labels
-    shifted_mask = scipy_shift(roi_mask, shift=shift_yx, order=0, mode='constant', cval=1)
+    # phase_cross_correlation(reference=source, moving=target) returns the shift
+    # to move TARGET onto SOURCE. We need the opposite: shift SOURCE ROIs onto TARGET.
+    roi_shift = -shift_yx
 
-    # Build transform info
+    # Apply shift to ROI mask using nearest-neighbor to preserve labels
+    shifted_mask = scipy_shift(roi_mask, shift=roi_shift, order=0, mode='constant', cval=1)
+
+    # Build transform info (report the shift applied to the ROI mask)
     transform = {
-        'shift': tuple(shift_yx),
+        'shift': tuple(roi_shift),
         'error': float(error),
     }
 
