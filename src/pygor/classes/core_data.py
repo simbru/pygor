@@ -1592,6 +1592,62 @@ class Core:
             print(f"Successfully updated ipl_depths for {len(depths)} ROIs")
         return success
 
+    def estimate_ipl_depths(self, n_bins=8, upper_percentile=0.0,
+                            lower_percentile=100.0, orientation=None,
+                            overwrite=False, save=False, plot=False):
+        """Automatically estimate IPL depths from ROI positions without GUI.
+
+        Uses percentile-based boundary estimation along the scan axis to
+        approximate the outer (0 %) and inner (100 %) IPL boundaries from
+        the spatial distribution of ROI centroids.
+
+        Parameters
+        ----------
+        n_bins : int, optional
+            Number of bins along the scan axis (default: 15).
+        upper_percentile : float, optional
+            Percentile for the inner (100 %) boundary (default: 5.0).
+        lower_percentile : float, optional
+            Percentile for the outer (0 %) boundary (default: 95.0).
+        orientation : str or None, optional
+            ``"horizontal"`` or ``"vertical"``. Auto-detected if None.
+        overwrite : bool, optional
+            Whether to overwrite existing ipl_depths in H5 (default: False).
+        save : bool, optional
+            Whether to save depths to the H5 file (default: False).
+            Call with ``save=True`` explicitly when ready to persist.
+        plot : bool, optional
+            Whether to show a diagnostic plot with image, boundaries,
+            centroids, and depth KDE (default: True).
+
+        Returns
+        -------
+        np.ndarray, shape (n_rois,)
+            Estimated IPL depth percentages.
+        """
+        from pygor.anatomy.ipl import (
+            estimate_ipl_boundaries, calculate_ipl_depths, plot_ipl_estimation,
+        )
+        upper, lower = estimate_ipl_boundaries(
+            self.roi_centroids,
+            n_bins=n_bins,
+            upper_percentile=upper_percentile,
+            lower_percentile=lower_percentile,
+            orientation=orientation,
+        )
+        depths = calculate_ipl_depths(
+            self.roi_centroids, upper, lower, orientation=orientation,
+        )
+        self.ipl_depths = depths
+        if save:
+            self.update_h5_key('Positions', depths, overwrite)
+        if plot:
+            mean_image = np.average(self.images, axis=0)
+            plot_ipl_estimation(
+                mean_image, self.roi_centroids, upper, lower, depths,
+            )
+        return depths
+
     def update_rois(self, roi_mask, overwrite=True):
         """
         Update ROIs in the H5 file with a pre-defined ROI mask. If overwrite=False,
