@@ -182,8 +182,8 @@ def biphasic_index(timeseries, axis=-1):
         if timeseries[0] != 0:
             timeseries = timeseries - timeseries[0]
         # Get area under curve for negative and positive components
-        a = np.trapz(np.clip(timeseries, np.min(timeseries) - 1, 0))
-        b = np.trapz(np.clip(timeseries, 0, np.max(timeseries) + 1))
+        a = np.trapezoid(np.clip(timeseries, np.min(timeseries) - 1, 0))
+        b = np.trapezoid(np.clip(timeseries, 0, np.max(timeseries) + 1))
         # Get the absolute values
         a = np.abs(a)
         b = np.abs(b)

@@ -3455,7 +3455,7 @@ class STRF(Core):
                 amp = self.get_amplitude_weights(roi=r)
                 finite_amp = amp[np.isfinite(amp)]
                 if finite_amp.size > 0:
-                    lo, hi = np.percentile(finite_amp, (50, 95))
+                    lo, hi = np.percentile(finite_amp, (25, 95))
                     if hi > lo:
                         alpha = np.clip((amp - lo) / (hi - lo), 0, 1)
                     else:
@@ -3510,6 +3510,9 @@ class STRF(Core):
             # Convert colorbar from seconds to milliseconds
             cbar = plt.colorbar(_cbar_mappable, ax=cur_ax, fraction=0.046, pad=0.04)
             tick_locs = cbar.get_ticks()
+            # Filter ticks to the actual colorbar range to avoid white flanks
+            clim = _cbar_mappable.get_clim()
+            tick_locs = tick_locs[(tick_locs >= clim[0]) & (tick_locs <= clim[1])]
             cbar.set_ticks(tick_locs)
             cbar.set_ticklabels([f'{t * 1000:.0f}' for t in tick_locs])
             cbar.set_label('\u0394 time (ms)')
