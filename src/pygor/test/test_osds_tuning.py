@@ -32,6 +32,33 @@ class TestOSDSTuningMetrics(unittest.TestCase):
         r = tuning_metrics.compute_orientation_vector_magnitude(responses, directions)
         self.assertAlmostEqual(r, 0.0, places=7)
 
+    def test_mean_direction_known_input(self):
+        """All weight on 90 degrees should give mean direction of 90."""
+        directions = np.array([0, 90, 180, 270])
+        responses = np.array([0.0, 1.0, 0.0, 0.0])
+        mean_dir = tuning_metrics.compute_mean_direction(responses, directions)
+        self.assertAlmostEqual(mean_dir, 90.0, places=3)
+
+    def test_mean_direction_2d(self):
+        """Test mean direction with 2D input (n_rois, n_directions)."""
+        directions = np.array([0, 90, 180, 270])
+        responses = np.array([
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+        ])
+        mean_dirs = tuning_metrics.compute_mean_direction(responses, directions)
+        self.assertEqual(mean_dirs.shape, (2,))
+        self.assertAlmostEqual(mean_dirs[0], 0.0, places=3)
+        self.assertAlmostEqual(mean_dirs[1], 90.0, places=3)
+
+    def test_negative_responses_clipped(self):
+        """Negative responses should be clipped to zero, not produce r > 1."""
+        directions = np.array([0, 90, 180, 270])
+        responses = np.array([1.0, -2.0, 0.5, -1.0])
+        r = tuning_metrics.compute_direction_vector_magnitude(responses, directions)
+        self.assertGreaterEqual(r, 0.0)
+        self.assertLessEqual(r, 1.0)
+
     def test_compute_all_tuning_metrics_keys_and_alias(self):
         class MockOSDS:
             def __init__(self, tuning_functions, directions_list):
@@ -61,6 +88,9 @@ class TestOSDSTuningMetrics(unittest.TestCase):
         self.assertIn('mean_direction', metrics)
         self.assertIn('mean_orientation', metrics)
         self.assertIn('vector_magnitude', metrics)
+        self.assertIn('rayleigh_z', metrics)
+        self.assertIn('rayleigh_pvalue', metrics)
+        self.assertIn('circular_std', metrics)
 
         np.testing.assert_allclose(
             metrics['direction_vector_magnitude'],
@@ -211,6 +241,74 @@ class TestComputeAllTuningMetricsMultiPhase(unittest.TestCase):
         # Single-phase should return (n_rois,)
         self.assertEqual(metrics['dsi'].shape, (3,))
         self.assertEqual(metrics['osi'].shape, (3,))
+
+
+class TestRayleighTest(unittest.TestCase):
+    """Test Rayleigh test for directional uniformity."""
+
+    def test_perfect_tuning_significant(self):
+        """Perfectly tuned response should give low p-value."""
+        directions = np.array([0, 90, 180, 270])
+        responses = np.array([1.0, 0.0, 0.0, 0.0])
+        result = tuning_metrics.compute_rayleigh_test(responses, directions)
+        self.assertLess(result['pvalue'], 0.05)
+        self.assertGreater(result['z'], 0)
+
+    def test_uniform_not_significant(self):
+        """Uniform response should give high p-value."""
+        directions = np.array([0, 90, 180, 270])
+        responses = np.array([1.0, 1.0, 1.0, 1.0])
+        result = tuning_metrics.compute_rayleigh_test(responses, directions)
+        self.assertGreater(result['pvalue'], 0.05)
+
+    def test_2d_input_shape(self):
+        """Test Rayleigh with 2D (n_rois, n_directions) input."""
+        directions = np.array([0, 90, 180, 270])
+        responses = np.array([
+            [1.0, 0.0, 0.0, 0.0],  # tuned
+            [1.0, 1.0, 1.0, 1.0],  # uniform
+        ])
+        result = tuning_metrics.compute_rayleigh_test(responses, directions)
+        self.assertEqual(result['z'].shape, (2,))
+        self.assertEqual(result['pvalue'].shape, (2,))
+        self.assertLess(result['pvalue'][0], result['pvalue'][1])
+
+    def test_negative_responses_handled(self):
+        """Negative responses should be clipped, not cause errors."""
+        directions = np.array([0, 90, 180, 270])
+        responses = np.array([1.0, -0.5, 0.0, -0.2])
+        result = tuning_metrics.compute_rayleigh_test(responses, directions)
+        self.assertIsInstance(result['pvalue'], float)
+        self.assertTrue(0 <= result['pvalue'] <= 1)
+
+    def test_all_zero_responses(self):
+        """All-zero responses should return p=1."""
+        directions = np.array([0, 90, 180, 270])
+        responses = np.zeros(4)
+        result = tuning_metrics.compute_rayleigh_test(responses, directions)
+        self.assertEqual(result['pvalue'], 1.0)
+        self.assertEqual(result['z'], 0.0)
+
+
+class TestCircularStd(unittest.TestCase):
+    """Test circular standard deviation."""
+
+    def test_concentrated_lower_than_uniform(self):
+        """Concentrated response should have lower std than uniform."""
+        directions = np.array([0, 45, 90, 135, 180, 225, 270, 315])
+        concentrated = np.array([10.0, 5.0, 0.1, 0.1, 0.1, 0.1, 0.1, 5.0])
+        uniform = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+
+        std_conc = tuning_metrics.compute_circular_std(concentrated, directions)
+        std_unif = tuning_metrics.compute_circular_std(uniform, directions)
+        self.assertLess(std_conc, std_unif)
+
+    def test_all_zero_returns_nan(self):
+        """All-zero responses should return NaN."""
+        directions = np.array([0, 90, 180, 270])
+        responses = np.zeros(4)
+        std = tuning_metrics.compute_circular_std(responses, directions)
+        self.assertTrue(np.isnan(std))
 
 
 class TestVonMisesFitting(unittest.TestCase):

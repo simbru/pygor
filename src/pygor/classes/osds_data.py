@@ -621,6 +621,88 @@ class OSDS(Core):
         result = self.compute_tuning_metrics(roi_indices, metric, phase_aware)['circular_variance']
         return self._extract_phase(result, phase_idx)
 
+    def get_circular_std(self, roi_indices=None, metric=None, phase_aware=None, phase_idx=None):
+        """
+        Get circular standard deviation for ROIs (via pycircstat2).
+
+        Parameters
+        ----------
+        roi_indices : list, int, or None
+            ROI indices to analyze. If None, analyzes all ROIs.
+        metric : str or callable
+            Metric for computing tuning function.
+            If None, uses self.tuning_metric.
+        phase_aware : bool or None
+            Controls phase-aware analysis.
+        phase_idx : int or None
+            If specified, extract only this phase from multi-phase results.
+
+        Returns
+        -------
+        np.ndarray
+            Circular standard deviation. Shape: (n_rois,) or (n_phases, n_rois).
+            If phase_idx specified: always (n_rois,).
+        """
+        result = self.compute_tuning_metrics(roi_indices, metric, phase_aware)['circular_std']
+        return self._extract_phase(result, phase_idx)
+
+    def get_rayleigh_pvalue(self, roi_indices=None, metric=None, phase_aware=None, phase_idx=None):
+        """
+        Get Rayleigh test p-value for directional uniformity for ROIs (via pycircstat2).
+
+        Tests the null hypothesis that responses are uniformly distributed
+        around the circle. Low p-values indicate significant directional tuning.
+
+        Parameters
+        ----------
+        roi_indices : list, int, or None
+            ROI indices to analyze. If None, analyzes all ROIs.
+        metric : str or callable
+            Metric for computing tuning function.
+            If None, uses self.tuning_metric.
+        phase_aware : bool or None
+            Controls phase-aware analysis.
+        phase_idx : int or None
+            If specified, extract only this phase from multi-phase results.
+
+        Returns
+        -------
+        np.ndarray
+            Rayleigh test p-values (0 to 1). Shape: (n_rois,) or (n_phases, n_rois).
+            If phase_idx specified: always (n_rois,).
+        """
+        result = self.compute_tuning_metrics(roi_indices, metric, phase_aware)['rayleigh_pvalue']
+        return self._extract_phase(result, phase_idx)
+
+    def get_rayleigh_z(self, roi_indices=None, metric=None, phase_aware=None, phase_idx=None):
+        """
+        Get Rayleigh test z-statistic for directional uniformity for ROIs (via pycircstat2).
+
+        The z-statistic is n * r^2 where n is sample size and r is the
+        mean resultant length. Larger values indicate stronger deviation
+        from uniformity.
+
+        Parameters
+        ----------
+        roi_indices : list, int, or None
+            ROI indices to analyze. If None, analyzes all ROIs.
+        metric : str or callable
+            Metric for computing tuning function.
+            If None, uses self.tuning_metric.
+        phase_aware : bool or None
+            Controls phase-aware analysis.
+        phase_idx : int or None
+            If specified, extract only this phase from multi-phase results.
+
+        Returns
+        -------
+        np.ndarray
+            Rayleigh z-statistics. Shape: (n_rois,) or (n_phases, n_rois).
+            If phase_idx specified: always (n_rois,).
+        """
+        result = self.compute_tuning_metrics(roi_indices, metric, phase_aware)['rayleigh_z']
+        return self._extract_phase(result, phase_idx)
+
     def get_mean_direction(self, roi_indices=None, metric=None, phase_aware=None, phase_idx=None):
         """
         Get mean direction from circular statistics for ROIs.
@@ -807,10 +889,6 @@ class OSDS(Core):
         if meta.get("metric") != metric:
             return False
         if meta.get("phase_aware") != phase_aware:
-            return False
-#         if meta.get("include_vonmises") != include_vonmises:
-            return False
-#         if meta.get("r_squared_threshold") != r_squared_threshold:
             return False
         cached_roi_indices = meta.get("roi_indices")
         if cached_roi_indices is None:

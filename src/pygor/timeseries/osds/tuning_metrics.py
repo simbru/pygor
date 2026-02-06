@@ -1,12 +1,59 @@
 import numpy as np
+from pycircstat2.descriptive import circ_mean, circ_r, circ_var, circ_std
+from pycircstat2.hypothesis import rayleigh_test
+
+
+def _apply_per_element(func, responses, directions_rad, default_value=np.nan):
+    """
+    Apply a scalar circular stats function over all ROIs/phases.
+
+    Iterates over the leading dimensions of ``responses``, calling
+    ``func(directions_rad, weights)`` for each 1-D slice along the last axis.
+    Negative weights are clipped to zero before passing to the function.
+
+    Parameters
+    ----------
+    func : callable
+        Function with signature ``func(alpha, w) -> scalar``.
+    responses : np.ndarray
+        Response values. Last axis is directions. Can be 1D, 2D, or 3D.
+    directions_rad : np.ndarray
+        1D array of direction values in radians.
+    default_value : scalar
+        Value to use when all weights are zero.
+
+    Returns
+    -------
+    float or np.ndarray
+        Result with shape ``responses.shape[:-1]``.
+    """
+    weights = np.clip(responses, 0, None)
+
+    if responses.ndim == 1:
+        if np.sum(weights) == 0:
+            return default_value
+        return float(func(directions_rad, weights))
+
+    original_shape = responses.shape[:-1]
+    flat = weights.reshape(-1, responses.shape[-1])
+    result = np.full(flat.shape[0], default_value, dtype=float)
+    for i in range(flat.shape[0]):
+        w = flat[i]
+        if np.sum(w) == 0:
+            continue
+        result[i] = float(func(directions_rad, w))
+    return result.reshape(original_shape)
 
 
 def compute_direction_vector_magnitude(responses, directions_deg):
     """
-    Compute direction vector magnitude (r) from circular statistics.
+    Compute direction vector magnitude (r) from circular statistics via pycircstat2.
 
     This measures how directionally tuned the responses are in 360-degree space.
     r = 1 means perfectly tuned to a single direction, r = 0 means no directional preference.
+
+    Negative response values are clipped to zero before computing (treating
+    negative z-scored responses as "no response").
 
     This is part of the **circular statistics framework** for direction selectivity:
     - Use with get_mean_direction() for consistent angle/magnitude pairing
@@ -33,22 +80,10 @@ def compute_direction_vector_magnitude(responses, directions_deg):
     """
     responses = np.array(responses)
     directions_rad = np.deg2rad(directions_deg)
-
-    # Compute weighted mean vector components
-    total_response = np.sum(responses, axis=-1)
-    safe_total = np.where(total_response == 0, 1, total_response)
-
-    if responses.ndim == 1:
-        mean_x = np.sum(responses * np.cos(directions_rad)) / safe_total
-        mean_y = np.sum(responses * np.sin(directions_rad)) / safe_total
-    else:
-        mean_x = np.sum(responses * np.cos(directions_rad), axis=-1) / safe_total
-        mean_y = np.sum(responses * np.sin(directions_rad), axis=-1) / safe_total
-
-    # Vector magnitude
-    r = np.sqrt(mean_x**2 + mean_y**2)
-    r = np.where(total_response == 0, 0, r)
-    return r
+    return _apply_per_element(
+        lambda alpha, w: circ_r(alpha=alpha, w=w),
+        responses, directions_rad, default_value=0.0,
+    )
 
 
 # Backward compatibility alias
@@ -57,7 +92,7 @@ compute_vector_magnitude = compute_direction_vector_magnitude
 
 def compute_orientation_vector_magnitude(responses, directions_deg):
     """
-    Compute orientation vector magnitude from circular statistics.
+    Compute orientation vector magnitude from circular statistics via pycircstat2.
 
     This measures how orientation-selective the responses are in 180-degree space.
     Opposite directions (e.g., 0 and 180) are treated as the same orientation.
@@ -65,6 +100,8 @@ def compute_orientation_vector_magnitude(responses, directions_deg):
 
     Uses the doubled-angle method: orientations are mapped from 0-180 to 0-360 space
     for proper circular vector computation.
+
+    Negative response values are clipped to zero before computing.
 
     This is part of the **circular statistics framework** for orientation selectivity:
     - Use with get_mean_orientation() for consistent angle/magnitude pairing
@@ -100,42 +137,126 @@ def compute_orientation_vector_magnitude(responses, directions_deg):
     # Double the angles for proper circular stats in orientation space
     orientations_rad_doubled = np.deg2rad(orientations * 2)
 
-    # Compute weighted mean vector components
-    total_response = np.sum(orientation_responses, axis=-1)
-    safe_total = np.where(total_response == 0, 1, total_response)
-
-    if orientation_responses.ndim == 1:
-        mean_x = np.sum(orientation_responses * np.cos(orientations_rad_doubled)) / safe_total
-        mean_y = np.sum(orientation_responses * np.sin(orientations_rad_doubled)) / safe_total
-    else:
-        mean_x = np.sum(orientation_responses * np.cos(orientations_rad_doubled), axis=-1) / safe_total
-        mean_y = np.sum(orientation_responses * np.sin(orientations_rad_doubled), axis=-1) / safe_total
-
-    # Vector magnitude
-    r = np.sqrt(mean_x**2 + mean_y**2)
-    r = np.where(total_response == 0, 0, r)
-    return r
+    return _apply_per_element(
+        lambda alpha, w: circ_r(alpha=alpha, w=w),
+        orientation_responses, orientations_rad_doubled, default_value=0.0,
+    )
 
 
 def compute_circular_variance(responses, directions_deg):
     """
-    Compute circular variance (CV = 1 - r).
-    
+    Compute circular variance via pycircstat2.
+
     CV = 0 means perfectly tuned, CV = 1 means no directional preference.
-    
-    Parameters:
-    -----------
+
+    Negative response values are clipped to zero before computing.
+
+    Parameters
+    ----------
     responses : array-like
-        Response values for each direction
+        Response values for each direction.
     directions_deg : array-like
-        Direction values in degrees
-        
-    Returns:
-    --------
-    float : Circular variance (0 ≤ CV ≤ 1)
+        Direction values in degrees.
+
+    Returns
+    -------
+    float or np.ndarray
+        Circular variance (0 <= CV <= 1).
     """
-    r = compute_vector_magnitude(responses, directions_deg)
-    return 1 - r
+    responses = np.array(responses)
+    directions_rad = np.deg2rad(directions_deg)
+    return _apply_per_element(
+        lambda alpha, w: circ_var(alpha=alpha, w=w),
+        responses, directions_rad, default_value=1.0,
+    )
+
+
+def compute_circular_std(responses, directions_deg):
+    """
+    Compute circular standard deviation via pycircstat2.
+
+    Negative response values are clipped to zero before computing.
+
+    Parameters
+    ----------
+    responses : array-like
+        Response values for each direction.
+    directions_deg : array-like
+        Direction values in degrees.
+
+    Returns
+    -------
+    float or np.ndarray
+        Circular standard deviation.
+    """
+    responses = np.array(responses)
+    directions_rad = np.deg2rad(directions_deg)
+    return _apply_per_element(
+        lambda alpha, w: circ_std(alpha=alpha, w=w),
+        responses, directions_rad, default_value=np.nan,
+    )
+
+
+def compute_rayleigh_test(responses, directions_deg):
+    """
+    Compute Rayleigh test for uniformity on directional responses via pycircstat2.
+
+    Tests the null hypothesis that responses are uniformly distributed
+    around the circle. Low p-values indicate significant directional tuning.
+
+    Negative response values are clipped to zero before computing.
+
+    Since pycircstat2's ``rayleigh_test`` requires integer frequency weights,
+    we pre-compute the mean resultant length ``r`` via ``circ_r`` (which
+    accepts float weights) and pass ``r`` and ``n`` directly to the test.
+
+    Parameters
+    ----------
+    responses : array-like
+        Response values for each direction. Can be 1D (n_directions),
+        2D (n_rois, n_directions), or 3D (n_phases, n_rois, n_directions).
+    directions_deg : array-like
+        1D array of direction values in degrees (0-360).
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'z': Rayleigh z-statistic. Shape matches input without direction axis.
+        - 'pvalue': Rayleigh test p-value. Shape matches input without direction axis.
+    """
+    responses = np.array(responses)
+    directions_rad = np.deg2rad(np.asarray(directions_deg, dtype=float))
+    weights = np.clip(responses, 0, None)
+    n = len(directions_rad)
+
+    def _rayleigh_single(alpha, w):
+        """Compute Rayleigh test for a single 1D weight vector."""
+        r = float(circ_r(alpha=alpha, w=w))
+        result = rayleigh_test(r=r, n=n)
+        return float(result.z), float(result.pval)
+
+    if responses.ndim == 1:
+        if np.sum(weights) == 0:
+            return {'z': 0.0, 'pvalue': 1.0}
+        z, p = _rayleigh_single(directions_rad, weights)
+        return {'z': z, 'pvalue': p}
+
+    original_shape = responses.shape[:-1]
+    flat = weights.reshape(-1, responses.shape[-1])
+    z_values = np.zeros(flat.shape[0])
+    p_values = np.ones(flat.shape[0])
+
+    for i in range(flat.shape[0]):
+        w = flat[i]
+        if np.sum(w) == 0:
+            continue
+        z_values[i], p_values[i] = _rayleigh_single(directions_rad, w)
+
+    return {
+        'z': z_values.reshape(original_shape),
+        'pvalue': p_values.reshape(original_shape),
+    }
 
 
 def compute_direction_selectivity_index(responses, directions_deg):
@@ -232,53 +353,50 @@ def compute_preferred_direction(responses, directions_deg):
 
 def compute_mean_direction(responses, directions_deg):
     """
-    Compute the mean direction using circular statistics.
+    Compute the mean direction using circular statistics via pycircstat2.
 
     This gives the direction of the mean vector, which may differ from
     the preferred direction if responses are broadly tuned.
 
-    Parameters:
-    -----------
-    responses : array-like
-        Response values for each direction
-    directions_deg : array-like
-        Direction values in degrees
+    Negative response values are clipped to zero before computing.
 
-    Returns:
-    --------
-    float : Mean direction in degrees
+    Parameters
+    ----------
+    responses : array-like
+        Response values for each direction. Can be 1D (n_directions),
+        2D (n_rois, n_directions), or 3D (n_phases, n_rois, n_directions).
+    directions_deg : array-like
+        Direction values in degrees.
+
+    Returns
+    -------
+    float or np.ndarray
+        Mean direction in degrees (0-360). Shape matches input without direction axis.
     """
     responses = np.array(responses)
     directions_rad = np.deg2rad(directions_deg)
 
-    # Compute weighted mean vector components
-    total_response = np.sum(responses)
-    if total_response == 0:
-        return np.nan
+    def _mean_dir(alpha, w):
+        result_rad = circ_mean(alpha=alpha, w=w)
+        result_deg = np.rad2deg(result_rad)
+        if result_deg < 0:
+            result_deg += 360
+        return result_deg
 
-    mean_x = np.sum(responses * np.cos(directions_rad)) / total_response
-    mean_y = np.sum(responses * np.sin(directions_rad)) / total_response
-
-    # Convert back to degrees
-    mean_direction_rad = np.arctan2(mean_y, mean_x)
-    mean_direction_deg = np.rad2deg(mean_direction_rad)
-
-    # Ensure positive angle
-    if mean_direction_deg < 0:
-        mean_direction_deg += 360
-
-    return mean_direction_deg
+    return _apply_per_element(_mean_dir, responses, directions_rad, default_value=np.nan)
 
 
 def compute_mean_orientation(responses, directions_deg):
     """
-    Compute the mean orientation using circular statistics.
+    Compute the mean orientation using circular statistics via pycircstat2.
 
     This gives the orientation of the mean vector in 0-180 degree space,
     which may differ from the preferred orientation if responses are broadly tuned.
 
     Uses the doubled-angle method for proper circular statistics in orientation space.
     Opposite directions (e.g., 0 and 180) are treated as the same orientation.
+
+    Negative response values are clipped to zero before computing.
 
     This is part of the **circular statistics framework** for orientation selectivity:
     - Use with get_orientation_vector_magnitude() for consistent angle/magnitude pairing
@@ -305,34 +423,24 @@ def compute_mean_orientation(responses, directions_deg):
     responses = np.array(responses)
     directions_deg = np.array(directions_deg)
 
-    # Get orientation tuning
+    # Get orientation tuning (averages opposite directions)
     orientation_data = compute_orientation_tuning(responses, directions_deg)
     orientations = orientation_data['orientations']
     orientation_responses = orientation_data['responses']
 
-    # Double angles for circular stats
+    # Double the angles for circular stats in orientation space
     orientations_rad_doubled = np.deg2rad(orientations * 2)
 
-    # Compute weighted mean vector
-    total_response = np.sum(orientation_responses, axis=-1)
-    safe_total = np.where(total_response == 0, 1, total_response)
+    def _mean_ori(alpha, w):
+        result_rad_doubled = circ_mean(alpha=alpha, w=w)
+        result_deg = np.rad2deg(result_rad_doubled) / 2
+        if result_deg < 0:
+            result_deg += 180
+        return result_deg
 
-    if orientation_responses.ndim == 1:
-        mean_x = np.sum(orientation_responses * np.cos(orientations_rad_doubled)) / safe_total
-        mean_y = np.sum(orientation_responses * np.sin(orientations_rad_doubled)) / safe_total
-    else:
-        mean_x = np.sum(orientation_responses * np.cos(orientations_rad_doubled), axis=-1) / safe_total
-        mean_y = np.sum(orientation_responses * np.sin(orientations_rad_doubled), axis=-1) / safe_total
-
-    # Convert back to orientation space
-    mean_orientation_rad_doubled = np.arctan2(mean_y, mean_x)
-    mean_orientation_deg = np.rad2deg(mean_orientation_rad_doubled) / 2
-
-    # Ensure in 0-180 range
-    mean_orientation_deg = np.where(mean_orientation_deg < 0, mean_orientation_deg + 180, mean_orientation_deg)
-    mean_orientation_deg = np.where(total_response == 0, np.nan, mean_orientation_deg)
-
-    return mean_orientation_deg
+    return _apply_per_element(
+        _mean_ori, orientation_responses, orientations_rad_doubled, default_value=np.nan,
+    )
 
 
 def extract_direction_vectors(responses, directions_deg):
@@ -668,7 +776,7 @@ def compute_all_tuning_metrics(
     dict
         Dictionary containing arrays of metrics for each ROI:
 
-        **Circular Statistics Framework:**
+        **Circular Statistics Framework (via pycircstat2):**
 
         - 'direction_vector_magnitude': Vector magnitude for direction (0-1)
         - 'orientation_vector_magnitude': Vector magnitude for orientation (0-1)
@@ -676,7 +784,10 @@ def compute_all_tuning_metrics(
         - 'mean_orientation': Mean orientation from circular stats (degrees, 0-180)
         - 'preferred_direction_vector_sum': Alias of mean_direction (degrees, 0-360)
         - 'preferred_orientation_vector_sum': Alias of mean_orientation (degrees, 0-180)
-        - 'circular_variance': 1 - direction_vector_magnitude (0-1)
+        - 'circular_variance': Circular variance (0-1)
+        - 'circular_std': Circular standard deviation
+        - 'rayleigh_z': Rayleigh test z-statistic
+        - 'rayleigh_pvalue': Rayleigh test p-value (low = significant tuning)
 
         **Argmax/Pairwise Framework:**
 
@@ -772,67 +883,25 @@ def compute_all_tuning_metrics(
         n_phases = 1
 
     n_rois = len(roi_indices)
-    
-    # Vectorized computation of all metrics
-    vector_magnitudes = np.zeros((n_phases, n_rois))
-    circular_variances = np.zeros((n_phases, n_rois))
-    dsis = np.zeros((n_phases, n_rois))
-    osis = np.zeros((n_phases, n_rois))
-    preferred_directions = np.zeros((n_phases, n_rois))
-    preferred_orientations = np.zeros((n_phases, n_rois))
-    mean_directions = np.zeros((n_phases, n_rois))
-    
-    # Vectorized computation of all metrics - no loops!
-    directions_rad = np.deg2rad(directions_deg)
-    
-    # Vectorized vector magnitude and circular variance
-    total_responses = np.sum(all_tuning_functions, axis=2)  # (n_phases, n_rois)
-    mean_x = np.sum(all_tuning_functions * np.cos(directions_rad), axis=2) / np.where(total_responses == 0, 1, total_responses)
-    mean_y = np.sum(all_tuning_functions * np.sin(directions_rad), axis=2) / np.where(total_responses == 0, 1, total_responses)
-    vector_magnitudes = np.sqrt(mean_x**2 + mean_y**2)
-    vector_magnitudes = np.where(total_responses == 0, 0, vector_magnitudes)
-    circular_variances = 1 - vector_magnitudes
-    
-    # Vectorized preferred direction (argmax across directions)
+
+    # --- Circular statistics (via pycircstat2, negative values clipped to zero) ---
+    vector_magnitudes = compute_direction_vector_magnitude(all_tuning_functions, directions_deg)
+    mean_directions = compute_mean_direction(all_tuning_functions, directions_deg)
+    circular_variances = compute_circular_variance(all_tuning_functions, directions_deg)
+    orientation_vector_magnitudes = compute_orientation_vector_magnitude(all_tuning_functions, directions_deg)
+    mean_orientations = compute_mean_orientation(all_tuning_functions, directions_deg)
+    rayleigh_results = compute_rayleigh_test(all_tuning_functions, directions_deg)
+    rayleigh_z = rayleigh_results['z']
+    rayleigh_pvalue = rayleigh_results['pvalue']
+    circ_stds = compute_circular_std(all_tuning_functions, directions_deg)
+
+    # --- Argmax/pairwise framework (uses raw values including negatives) ---
     preferred_directions = directions_deg[np.argmax(all_tuning_functions, axis=2)]
-    
-    # Vectorized mean direction
-    mean_direction_rad = np.arctan2(mean_y, mean_x)
-    mean_directions = np.rad2deg(mean_direction_rad)
-    mean_directions = np.where(mean_directions < 0, mean_directions + 360, mean_directions)
-    mean_directions = np.where(total_responses == 0, np.nan, mean_directions)
-    
-    # Vectorized DSI computation
     dsi_results = compute_direction_selectivity_index(all_tuning_functions, directions_deg)
     dsis = dsi_results['dsi']
-
-    # Vectorized OSI computation
     osi_results = compute_orientation_selectivity_index(all_tuning_functions, directions_deg)
     osis = osi_results['osi']
     preferred_orientations = osi_results['preferred_orientation']
-
-    # Vectorized orientation vector magnitude and mean orientation
-    # Get orientation tuning data (averages opposite directions)
-    orientation_data = compute_orientation_tuning(all_tuning_functions, directions_deg)
-    orientations = orientation_data['orientations']
-    orientation_responses = orientation_data['responses']
-
-    # Double angles for circular stats in orientation space
-    orientations_rad_doubled = np.deg2rad(orientations * 2)
-
-    # Orientation vector magnitude
-    orientation_total = np.sum(orientation_responses, axis=-1)
-    safe_orientation_total = np.where(orientation_total == 0, 1, orientation_total)
-    orientation_mean_x = np.sum(orientation_responses * np.cos(orientations_rad_doubled), axis=-1) / safe_orientation_total
-    orientation_mean_y = np.sum(orientation_responses * np.sin(orientations_rad_doubled), axis=-1) / safe_orientation_total
-    orientation_vector_magnitudes = np.sqrt(orientation_mean_x**2 + orientation_mean_y**2)
-    orientation_vector_magnitudes = np.where(orientation_total == 0, 0, orientation_vector_magnitudes)
-
-    # Mean orientation
-    mean_orientation_rad_doubled = np.arctan2(orientation_mean_y, orientation_mean_x)
-    mean_orientations = np.rad2deg(mean_orientation_rad_doubled) / 2
-    mean_orientations = np.where(mean_orientations < 0, mean_orientations + 180, mean_orientations)
-    mean_orientations = np.where(orientation_total == 0, np.nan, mean_orientations)
 
     # Squeeze arrays if single phase for backward compatibility
     if n_phases == 1:
@@ -845,10 +914,13 @@ def compute_all_tuning_metrics(
         mean_directions = np.squeeze(mean_directions, axis=0)
         orientation_vector_magnitudes = np.squeeze(orientation_vector_magnitudes, axis=0)
         mean_orientations = np.squeeze(mean_orientations, axis=0)
+        rayleigh_z = np.squeeze(rayleigh_z, axis=0)
+        rayleigh_pvalue = np.squeeze(rayleigh_pvalue, axis=0)
+        circ_stds = np.squeeze(circ_stds, axis=0)
 
     # Build return dictionary
     result = {
-        # Circular statistics framework
+        # Circular statistics framework (via pycircstat2)
         'direction_vector_magnitude': vector_magnitudes,
         'orientation_vector_magnitude': orientation_vector_magnitudes,
         'mean_direction': mean_directions,
@@ -856,6 +928,9 @@ def compute_all_tuning_metrics(
         'preferred_direction_vector_sum': mean_directions,
         'preferred_orientation_vector_sum': mean_orientations,
         'circular_variance': circular_variances,
+        'circular_std': circ_stds,
+        'rayleigh_z': rayleigh_z,
+        'rayleigh_pvalue': rayleigh_pvalue,
 
         # Argmax/pairwise framework
         'dsi': dsis,
