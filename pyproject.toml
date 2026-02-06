@@ -7,14 +7,14 @@ authors = [
 description = """A package for interacting with Igor Pro, 
 for internal use, for Baden-lab members
 """
+license = "AGPL-3.0-or-later"
 readme = "README.md"
 requires-python = ">=3.12"
-# Uncomment classifiers if needed
-# classifiers = [
-#     "Programming Language :: Python :: 3",
-#     "License :: OSI Approved :: MIT License",
-#     "Operating System :: OS Independent",
-# ]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Operating System :: OS Independent",
+]
 
 dependencies = [
     "numpy>=2.1",
