@@ -188,7 +188,9 @@ Guidelines:
 ## Acknowledgements
 
 Pygor builds on excellent open-source tools:
-
+- **[Euler lab ret_preproc](https://github.com/eulerlab/ret_preproc)** - Pygor's ScanM file reader (`pygor.preproc.scanm`) is derived from the Euler lab's IGOR and Python implementations.
+  - ScM_FileIO.ipf by Thomas Euler (MPImF/Heidelberg, CIN/Uni Tübingen)
+  - [readScanM.py](https://github.com/eulerlab/ret_preproc/tree/master/dataProcessing/Python/read_scanm_python) by Andre Chagas (processing_pypeline)
 - **[Napari](https://napari.org/)** - Multi-dimensional image viewer for Python. Used for interactive visualization and ROI annotation.
   - Ahlers et al., (2023). napari: a multi-dimensional image viewer for Python. Zenodo. https://doi.org/10.5281/zenodo.8115575
 - **[Cellpose](https://www.cellpose.org/)** - Deep learning-based cell segmentation. Used for automated ROI detection.
