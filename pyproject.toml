@@ -30,6 +30,7 @@ dependencies = [
     "natsort",
     "tqdm",
     "statannotations>=0.4.4",
+    "pycircstat2",
 ]
 
 [project.optional-dependencies]
