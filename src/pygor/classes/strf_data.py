@@ -512,7 +512,9 @@ class STRF(Core):
 
     @property
     def strfs_no_border(self) -> np.ndarray:
-        return pygor.utilities.auto_remove_border(self.strfs)
+        if not hasattr(self, '_strfs_no_border_cache') or self._strfs_no_border_cache is None:
+            self._strfs_no_border_cache = pygor.utilities.auto_remove_border(self.strfs)
+        return self._strfs_no_border_cache
 
     def fit_contours(self, roi = None, force = True) -> np.ndarray[list[list[list[float, float]]]]:
         """
