@@ -84,8 +84,14 @@ class AnalysisParams:
     # Store defaults for reference
     _defaults: dict = field(default_factory=dict, repr=False)
 
+    # Analysis type this params instance is tracking (matches class name, e.g. "STRF", "CenterSurround")
+    analysis_type: str = field(default="Core", repr=False)
+
+    # General pipeline steps (for methods without dedicated mark_* methods)
+    steps: dict = field(default_factory=dict, repr=False)
+
     @classmethod
-    def from_config(cls, config_path: Union[str, Path, None] = None) -> "AnalysisParams":
+    def from_config(cls, config_path: Union[str, Path, None] = None, analysis_type: str = "Core") -> "AnalysisParams":
         """
         Create AnalysisParams with defaults loaded from config.
 
@@ -94,6 +100,10 @@ class AnalysisParams:
         config_path : str, Path, or None
             Path to a TOML config file to merge with package defaults.
             If None, only package defaults are used.
+        analysis_type : str, optional
+            The analysis class name (e.g. "STRF", "CenterSurround", "OSDS").
+            Used to load analysis-specific defaults from config and to label
+            the analysis section in the repr. Default: "Core".
 
         Returns
         -------
@@ -107,6 +117,9 @@ class AnalysisParams:
 
         >>> # Use a project-specific config
         >>> params = AnalysisParams.from_config("configs/high_zoom.toml")
+
+        >>> # For a specific analysis type
+        >>> params = AnalysisParams.from_config(analysis_type="CenterSurround")
         """
         from pygor.config import get_defaults
 
@@ -117,20 +130,27 @@ class AnalysisParams:
         preprocess_defaults = get_defaults("preprocessing", config_path)
         artifact_width = preprocess_defaults.get("artifact_width", 2)
 
-        # Store all defaults for reference
+        # Common pipeline defaults (shared by all analysis types)
         defaults = {
             "preprocessing": preprocess_defaults,
             "registration": get_defaults("registration", config_path),
             "segmentation": get_defaults("segmentation", config_path),
             "triggers": get_defaults("triggers", config_path),
             "instrument": get_defaults("instrument", config_path),
-            "strf": get_defaults("strf", config_path),
         }
+
+        # Load analysis-type-specific defaults using lowercase TOML section name
+        # e.g. "STRF" -> [strf], "CenterSurround" -> [centersurround]
+        config_key = analysis_type.lower()
+        analysis_defaults = get_defaults(config_key, config_path)
+        if analysis_defaults:
+            defaults[config_key] = analysis_defaults
 
         return cls(
             artifact_width=artifact_width,
             _config_source=config_source,
             _defaults=defaults,
+            analysis_type=analysis_type,
         )
 
     def get_defaults(self, step: str) -> dict:
@@ -140,8 +160,10 @@ class AnalysisParams:
         Parameters
         ----------
         step : str
-            One of: "preprocessing", "registration", "segmentation", "triggers",
-            "instrument", "strf"
+            A pipeline step name. Common keys: "preprocessing", "registration",
+            "segmentation", "triggers", "instrument". The analysis-specific
+            key (e.g. "strf", "osds") depends on the analysis_type.
+            Use ``list(self._defaults.keys())`` to see available keys.
 
         Returns
         -------
@@ -153,7 +175,7 @@ class AnalysisParams:
         >>> params = AnalysisParams.from_config()
         >>> params.get_defaults("preprocessing")
         {'artifact_width': 2, 'flip_x': True, ...}
-        >>> params.get_defaults("strf")
+        >>> params.get_defaults(params.analysis_type)  # analysis-specific defaults
         {'contouring': {...}, 'spatial': {...}, ...}
         """
         if step not in self._defaults:
@@ -248,6 +270,22 @@ class AnalysisParams:
         """
         self.triggers = params.copy()
 
+    def mark_step(self, step_name: str, params: dict) -> None:
+        """
+        Record parameters for a named pipeline step.
+
+        For steps that don't have dedicated mark_* methods (e.g.,
+        correlation projection, trace extraction, snippet computation).
+
+        Parameters
+        ----------
+        step_name : str
+            Name identifying this step (e.g., "correlation_projection")
+        params : dict
+            Parameters that were used for this step
+        """
+        self.steps[step_name] = params.copy()
+
     def to_dict(self) -> dict:
         """
         Export all parameters as a nested dictionary.
@@ -257,7 +295,7 @@ class AnalysisParams:
         dict
             All parameters in a serializable format
         """
-        return {
+        result = {
             "state": {
                 "preprocessed": self.preprocessed,
                 "registered": self.registered,
@@ -266,12 +304,18 @@ class AnalysisParams:
             "shared": {
                 "artifact_width": self.artifact_width,
             },
+            "analysis_type": self.analysis_type,
             "preprocessing": self.preprocessing,
             "registration": self._clean_for_export(self.registration),
             "segmentation": self.segmentation,
             "triggers": self.triggers,
             "_config_source": self._config_source,
         }
+        if self.steps:
+            result["steps"] = {
+                k: self._clean_for_export(v) for k, v in self.steps.items()
+            }
+        return result
 
     def _clean_for_export(self, params: Optional[dict]) -> Optional[dict]:
         """Remove non-serializable items (like numpy arrays) from params."""
@@ -361,7 +405,10 @@ class AnalysisParams:
             segmented=state.get("segmented", False),
             artifact_width=shared.get("artifact_width", 2),
             _config_source=data.get("_config_source", "loaded"),
+            analysis_type=data.get("analysis_type", "Core"),
         )
+        if "steps" in data:
+            instance.steps = data["steps"]
         return instance
 
     def save_toml(self, path: Union[str, Path]) -> Path:
@@ -434,16 +481,19 @@ class AnalysisParams:
 
         # Define categories and their state
         categories = [
-            ("instrument", None, None),  # No applied state for instrument
+            ("instrument", None, None),
             ("preprocessing", self.preprocessing, self.preprocessed),
             ("registration", self.registration, self.registered),
-            ("triggers", self.triggers, None),  # No state flag for triggers
+            ("triggers", self.triggers, None),
             ("segmentation", self.segmentation, self.segmented),
-            ("strf", None, None),  # STRF has nested structure, no applied state
         ]
+        # Add analysis-specific section if defaults exist for it
+        analysis_config_key = self.analysis_type.lower()
+        if analysis_config_key in self._defaults:
+            categories.append((analysis_config_key, None, None))
 
         for i, (cat_name, applied, state_flag) in enumerate(categories):
-            is_last_category = (i == len(categories) - 1)
+            is_last_category = (i == len(categories) - 1) and not self.steps
             prefix = "└── " if is_last_category else "├── "
             child_prefix = "    " if is_last_category else "│   "
 
@@ -462,34 +512,51 @@ class AnalysisParams:
             # Get defaults for this category
             defaults = self._defaults.get(cat_name, {})
 
-            # Handle nested structure (strf has sub-categories)
-            if cat_name == "strf" and defaults:
-                sub_cats = list(defaults.keys())
-                for j, sub_cat in enumerate(sub_cats):
-                    is_last_sub = (j == len(sub_cats) - 1)
-                    sub_prefix = "└── " if is_last_sub else "├── "
-                    sub_child_prefix = "    " if is_last_sub else "│   "
+            if defaults:
+                # Separate nested sub-categories from flat params
+                nested = {k: v for k, v in defaults.items() if isinstance(v, dict)}
+                flat = {k: v for k, v in defaults.items() if not isinstance(v, dict)}
 
-                    lines.append(f"{child_prefix}{sub_prefix}{sub_cat}")
-                    sub_defaults = defaults[sub_cat]
-                    if show_all:
-                        self._add_params_to_tree(
-                            lines, sub_defaults, None,
-                            child_prefix + sub_child_prefix
-                        )
-                    else:
-                        param_count = len(sub_defaults)
-                        lines.append(f"{child_prefix}{sub_child_prefix}... ({param_count} params)")
-            elif defaults:
-                if show_all or applied:
-                    self._add_params_to_tree(lines, defaults, applied, child_prefix)
-                else:
-                    # Collapse to count
-                    param_count = len(defaults)
-                    lines.append(f"{child_prefix}... ({param_count} params, use show_all=True)")
+                # Show flat params first (if any)
+                if flat:
+                    if show_all or applied:
+                        self._add_params_to_tree(lines, flat, applied, child_prefix)
+                    elif not nested:
+                        param_count = len(flat)
+                        lines.append(f"{child_prefix}... ({param_count} params, use show_all=True)")
 
-            if not is_last_category:
+                # Show nested sub-categories
+                if nested:
+                    sub_cats = list(nested.keys())
+                    for j, sub_cat in enumerate(sub_cats):
+                        is_last_sub = (j == len(sub_cats) - 1) and not flat
+                        sub_prefix = "└── " if is_last_sub else "├── "
+                        sub_child_prefix = "    " if is_last_sub else "│   "
+
+                        lines.append(f"{child_prefix}{sub_prefix}{sub_cat}")
+                        sub_defaults = nested[sub_cat]
+                        if show_all:
+                            self._add_params_to_tree(
+                                lines, sub_defaults, None,
+                                child_prefix + sub_child_prefix
+                            )
+                        else:
+                            param_count = len(sub_defaults)
+                            lines.append(f"{child_prefix}{sub_child_prefix}... ({param_count} params)")
+
+            if not is_last_category or self.steps:
                 lines.append("│")
+
+        # Show pipeline steps if any have been recorded
+        if self.steps:
+            lines.append("└── pipeline steps")
+            step_items = list(self.steps.items())
+            for i, (step_name, step_params) in enumerate(step_items):
+                is_last = (i == len(step_items) - 1)
+                step_prefix = "    └── " if is_last else "    ├── "
+                step_child = "        " if is_last else "    │   "
+                lines.append(f"{step_prefix}{step_name} ✓")
+                self._add_params_to_tree(lines, step_params, None, step_child)
 
         return "\n".join(lines)
 
@@ -622,8 +689,13 @@ class AnalysisParams:
             ("registration", "Registration", self.registration, self.registered),
             ("triggers", "Triggers", self.triggers, None),
             ("segmentation", "Segmentation", self.segmentation, self.segmented),
-            ("strf", "STRF Analysis", None, None),
         ]
+        # Add analysis-specific section if defaults exist for it
+        analysis_config_key = self.analysis_type.lower()
+        if analysis_config_key in self._defaults:
+            categories.append(
+                (analysis_config_key, self.analysis_type, None, None)
+            )
 
         for cat_key, cat_name, applied, state_flag in categories:
             # Status badge
@@ -642,23 +714,40 @@ class AnalysisParams:
 
             defaults = self._defaults.get(cat_key, {})
 
-            # Handle nested STRF structure
-            if cat_key == "strf" and defaults:
+            if defaults:
+                # Separate nested sub-categories from flat params
+                nested = {k: v for k, v in defaults.items() if isinstance(v, dict)}
+                flat = {k: v for k, v in defaults.items() if not isinstance(v, dict)}
+
                 html_parts.append(f'<details {open_attr}>')
                 html_parts.append(f'<summary>{cat_name}{status_html}</summary>')
 
-                for sub_key, sub_defaults in defaults.items():
-                    html_parts.append(f'<details>')
+                # Show flat params first (if any)
+                if flat:
+                    html_parts.append(self._params_to_html_table(flat, applied))
+
+                # Show nested sub-categories
+                for sub_key, sub_defaults in nested.items():
+                    html_parts.append('<details>')
                     html_parts.append(f'<summary>{sub_key}</summary>')
                     html_parts.append(self._params_to_html_table(sub_defaults, None))
                     html_parts.append('</details>')
 
                 html_parts.append('</details>')
-            elif defaults:
-                html_parts.append(f'<details {open_attr}>')
-                html_parts.append(f'<summary>{cat_name}{status_html}</summary>')
-                html_parts.append(self._params_to_html_table(defaults, applied))
+
+        # Show pipeline steps if any have been recorded
+        if self.steps:
+            html_parts.append('<details open>')
+            html_parts.append('<summary>Pipeline Steps</summary>')
+            for step_name, step_params in self.steps.items():
+                html_parts.append('<details open>')
+                html_parts.append(
+                    f'<summary>{step_name}'
+                    f'<span class="status-applied"> ✓</span></summary>'
+                )
+                html_parts.append(self._params_to_html_table(step_params, None))
                 html_parts.append('</details>')
+            html_parts.append('</details>')
 
         html_parts.append('</div>')
         return "\n".join(html_parts)
@@ -712,7 +801,7 @@ class AnalysisParams:
 
     def __repr__(self) -> str:
         """Pretty-print current state for inspection."""
-        lines = ["AnalysisParams:"]
+        lines = [f"AnalysisParams ({self.analysis_type}):"]
         lines.append(f"  Config source: {self._config_source}")
         lines.append(f"  Artifact width: {self.artifact_width}")
         lines.append("")
@@ -751,5 +840,13 @@ class AnalysisParams:
             lines.append("  Trigger params:")
             for k, v in self.triggers.items():
                 lines.append(f"    {k}: {v}")
+            lines.append("")
+
+        if self.steps:
+            lines.append("  Pipeline steps:")
+            for step_name, step_params in self.steps.items():
+                lines.append(f"    {step_name}:")
+                for k, v in step_params.items():
+                    lines.append(f"      {k}: {v}")
 
         return "\n".join(lines)
