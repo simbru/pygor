@@ -16,6 +16,7 @@ import pygor.strf.temporal
 import pygor.plotting.basic
 import pygor.utils
 import pygor.core
+import pygor.core.gui
 from pygor.params import AnalysisParams
 
 # Dependencies
@@ -108,10 +109,11 @@ class Core:
             )
 
         # Initialize analysis parameters from config (both paths)
-        self.params = AnalysisParams.from_config(self.config)
+        self.params = AnalysisParams.from_config(self.config, analysis_type=self.type)
 
         # No backup yet — set lazily on first destructive operation
         self._original_images = None
+        self._pre_registration_images = None
 
     def _load_from_h5(self):
         """Load data from IGOR-exported H5 file."""
@@ -641,6 +643,7 @@ class Core:
         # If force=True, restore from backup so we preprocess from raw
         if force and self._original_images is not None:
             self.images = self._original_images.copy()
+            self._pre_registration_images = None  # invalidate, preprocessing changed
 
         # Get defaults from params (loaded from config)
         defaults = self.params.get_defaults("preprocessing")
@@ -829,6 +832,15 @@ class Core:
         if self._original_images is None:
             self._original_images = self.images.copy()
 
+        # Backup pre-registration state (preserves preprocessing)
+        if self._pre_registration_images is None:
+            self._pre_registration_images = self.images.copy()
+
+        # If force=True, restore from pre-registration backup so we don't
+        # re-register already-registered data (while preserving preprocessing)
+        if force and self._pre_registration_images is not None:
+            self.images = self._pre_registration_images.copy()
+
         # Store pre-registration state for plotting comparison
         original_stack = self.images.copy() if plot else None
 
@@ -868,6 +880,9 @@ class Core:
             **params,
         )
 
+        # Include artifact_width in params so it gets stored
+        params['artifact_width'] = artifact_width
+
         # Update images
         self.images = registered
 
@@ -899,9 +914,8 @@ class Core:
                 f"  Mean error: {stats['mean_error']:.4f}\n"
                 f"  Max shift: (y={stats['max_shift'][0]:.2f}, x={stats['max_shift'][1]:.2f})\n"
                 f"  Mean shift: (y={stats['mean_shift'][0]:.2f}, x={stats['mean_shift'][1]:.2f})\n"
-                f"  Shift SD: (y={stats['std_shift'][0]:.2f}, x={stats['std_shift'][1]:.2f})")
-        if stats["mean_error"] > 0.05:
-            print(f"Warning: Registration error exceeds threshold. Mean error: {stats['mean_error']:.4f}")
+                f"  Shift SD: (y={stats['std_shift'][0]:.2f}, x={stats['std_shift'][1]:.2f})\n"
+                f"  Registration error: {stats['mean_error']:.4f}")
         return stats
 
     def reset_images(self) -> None:
@@ -922,6 +936,7 @@ class Core:
                 "preprocessed or registered (or discard_original() was called)."
             )
         self.images = self._original_images.copy()
+        self._pre_registration_images = None
         self.average_stack = self.images.mean(axis=0)
         self.params.preprocessed = False
         self.params.registered = False
@@ -932,6 +947,7 @@ class Core:
         After calling this, `reset_images()` will no longer be available.
         """
         self._original_images = None
+        self._pre_registration_images = None
 
     def _plot_registration_results(
         self,
@@ -966,10 +982,11 @@ class Core:
         vmin = min(proj_original.min(), proj_registered.min())
         vmax = max(proj_original.max(), proj_registered.max())
 
-        # Reference image (mean of first N frames)
-        ref_image = self.average_stack
+        # Reference image: recompute from the original stack to show what was actually used
+        n_ref = self.params.registration.get('n_reference_frames', 100) if self.params.registration else 100
+        ref_image = _compute_projection(original_stack[:n_ref], reference_mode)
         ax_ref.imshow(ref_image, cmap='gray', origin = "lower")
-        ax_ref.set_title('Reference (mean)')
+        ax_ref.set_title(f'Reference ({reference_mode}, n={n_ref})')
         ax_ref.axis('off')
 
         # Original projection
@@ -1157,6 +1174,11 @@ class Core:
         # For pretty printing
         return f"{self.__class__}"
     
+    @property
+    def is_registered(self):
+        """Whether registration has been applied to the images."""
+        return self.params.registered
+
     @property
     def frametime_ms(self):
         time_arr = np.arange(self.traces_raw.shape[1]) / self.frame_hz
@@ -2106,6 +2128,10 @@ class Core:
         from pygor.segmentation import segment_rois as _segment_rois
         roi_mask = _segment_rois(self, mode=mode, overwrite=overwrite, **kwargs)
         self.update_rois(roi_mask, overwrite=overwrite)
+
+        # Record segmentation in params
+        self.params.mark_segmentation({"mode": mode, **kwargs})
+
         return roi_mask
 
     def view_images_interactive(self, **kwargs):
@@ -2386,7 +2412,7 @@ class Core:
         timecompress: int = 1,
         binpix: int = 1,
         overwrite: bool = False,
-        force_recompute: bool = False,
+        force: bool = False,
     ):
         """
         Compute pixel-wise temporal correlation with neighboring pixels.
@@ -2416,7 +2442,7 @@ class Core:
         overwrite : bool, optional
             If True, saves the result to H5 file, overwriting existing data.
             Default: False
-        force_recompute : bool, optional
+        force : bool, optional
             If True, recomputes even if correlation_projection already exists.
             Default: False
 
@@ -2431,8 +2457,8 @@ class Core:
         pygor.core.calculations.compute_correlation_projection : Standalone function
         """
         # Check if already computed and not forcing recompute
-        if not force_recompute and not overwrite and self.correlation_projection is not None:
-            print("Correlation projection already exists. Use force_recompute=True or overwrite=True to recompute.")
+        if not force and not overwrite and self.correlation_projection is not None:
+            print("Correlation projection already exists. Use force=True or overwrite=True to recompute.")
             return self.correlation_projection
 
         if self.images is None:
@@ -2449,6 +2475,13 @@ class Core:
 
         # Save to object attribute
         self.correlation_projection = correlation_projection
+
+        # Record step in params
+        self.params.mark_step("correlation_projection", {
+            "include_diagonals": include_diagonals,
+            "timecompress": timecompress,
+            "binpix": binpix,
+        })
 
         # Optionally save to H5 file if overwrite is True
         if overwrite:
@@ -2621,6 +2654,15 @@ class Core:
         self.traces_raw = traces_raw
         self.traces_znorm = traces_znorm
 
+        # Record step in params
+        self.params.mark_step("trace_extraction", {
+            "n_rois": n_rois,
+            "n_frames": n_frames,
+            "baseline_start": baseline_start,
+            "baseline_end": baseline_end,
+            "baseline_method": method,
+        })
+
         print(f"Extracted {n_rois} traces ({n_frames} frames each)")
 
         # Save to H5 if requested
@@ -2788,6 +2830,14 @@ class Core:
         self.averages = averages  # Shape: (n_rois, snippet_length)
         self.quality_indices = quality_criterion
 
+        # Record step in params
+        self.params.mark_step("snippets_and_averages", {
+            "n_loops": int(n_loops),
+            "n_triggers": int(n_triggers),
+            "snippet_duration_frames": int(snippet_duration_frames),
+            "trigger_mode": int(trigger_mode),
+        })
+
         # Save to H5 file if requested
         if overwrite:
             success_snip = self.update_h5_key('Snippets0', snippets_for_h5, overwrite=True)
@@ -2844,7 +2894,147 @@ class Core:
             warnings.warn("Averages do not exist.")
             return
         return pygor.core.plot.plot_averages(self, rois, figsize, figsize_scale, axs, independent_scale, n_rois_raster, sort_order, **kwargs)
-    
+
+    def plot_filter_preview(self, roi_indices, figsize=(16, 6), title_prefix=""):
+        """
+        Quick side-by-side visualization: ROI map + filtered averages raster.
+        
+        Useful for previewing ROI filtering before committing changes with keep_rois().
+        
+        Parameters
+        ----------
+        roi_indices : array-like
+            0-indexed ROI indices to preview
+        figsize : tuple, optional
+            Figure size (width, height). Default (16, 6).
+        title_prefix : str, optional
+            Optional prefix for the title (e.g., filter criteria description)
+            
+        Returns
+        -------
+        fig, (ax_map, ax_avg)
+            Figure and axes tuple
+            
+        Examples
+        --------
+        >>> spatial_pass = obj.rois_in_range(x_range=(40, 80))
+        >>> qc_pass = np.argwhere(obj.quality_indices > 0.25).ravel()
+        >>> preview_rois = np.intersect1d(spatial_pass, qc_pass)
+        >>> obj.plot_filter_preview(preview_rois, title_prefix="QC>0.25, x:40-80")
+        """
+        roi_indices = np.asarray(roi_indices).ravel()
+        
+        fig, (ax_map, ax_avg) = plt.subplots(1, 2, figsize=figsize)
+        
+        # Left: ROI overlay on correlation projection
+        if self.correlation_projection is not None:
+            temp_mask = np.isin(self.rois_alt, roi_indices)
+            rois_map = np.where(temp_mask, self.rois_alt, np.nan)
+            ax_map.imshow(self.correlation_projection, cmap='gray')
+            im = ax_map.imshow(rois_map, cmap='jet', alpha=0.5)
+            plt.colorbar(im, ax=ax_map, label='ROI ID')
+        else:
+            # Fallback to just ROI mask if no correlation projection
+            temp_mask = np.isin(self.rois_alt, roi_indices)
+            rois_map = np.where(temp_mask, self.rois_alt, np.nan)
+            im = ax_map.imshow(rois_map, cmap='jet')
+            plt.colorbar(im, ax=ax_map, label='ROI ID')
+            
+        title = f"{len(roi_indices)} ROIs"
+        if title_prefix:
+            title = f"{title_prefix}: {title}"
+        ax_map.set_title(title)
+        ax_map.axis('off')
+        
+        # Right: averages raster (always use imshow for preview speed)
+        if self.averages is not None and len(roi_indices) > 0:
+            ax_avg.imshow(self.averages[roi_indices], aspect='auto', cmap='Greys_r', interpolation='none')
+            ax_avg.set_title("Averages (raster)")
+            ax_avg.set_xlabel("Time (samples)")
+            ax_avg.set_ylabel("ROI")
+        else:
+            ax_avg.text(0.5, 0.5, "No averages available", 
+                       ha='center', va='center', transform=ax_avg.transAxes)
+            ax_avg.axis('off')
+        
+        plt.tight_layout()
+        return fig, (ax_map, ax_avg)
+
+    def plot_traces(self, rois=None, n_rois_imshow=50, figsize=None, cmap="inferno", unit="seconds", **kwargs):
+        """
+        Plot traces_znorm as stacked line traces or as an imshow heatmap.
+
+        When the number of ROIs is <= n_rois_imshow, each ROI gets its own
+        subplot axis with independent y-scaling. Axes are squashed together
+        with no gaps so the result looks like one continuous stacked plot.
+        When the number exceeds n_rois_imshow, falls back to imshow.
+
+        Parameters
+        ----------
+        rois : array-like, optional
+            Indices of ROIs to plot. If None, plots all.
+        n_rois_imshow : int
+            Threshold number of ROIs above which imshow is used instead
+            of individual line traces. Default 50.
+        figsize : tuple, optional
+            Figure size (width, height). Auto-calculated if None.
+        cmap : str
+            Colormap for the imshow fallback. Default "inferno".
+        unit : str
+            X-axis unit: "seconds" (or "s") to convert frames via
+            self.frame_hz, or "frames" (or "f") to keep raw frame indices.
+            Default "seconds".
+        **kwargs
+            Passed to plt.plot (line mode) or ax.imshow (imshow mode).
+        """
+        if self.traces_znorm is None:
+            warnings.warn("traces_znorm is None, nothing to plot.")
+            return
+        traces = self.traces_znorm  # (n_rois, n_timepoints)
+        if rois is not None:
+            traces = traces[np.asarray(rois)]
+        n_rois = traces.shape[0]
+        n_frames = traces.shape[1]
+        # Build x-axis
+        if unit in ("seconds", "s"):
+            x = np.arange(n_frames) / self.frame_hz
+            xlabel = "Time (s)"
+        else:
+            x = np.arange(n_frames)
+            xlabel = "Time (frames)"
+        if n_rois > n_rois_imshow:
+            # --- imshow mode ---
+            if figsize is None:
+                figsize = (8, max(3, n_rois / 10))
+            fig, ax = plt.subplots(figsize=figsize)
+            extent = [x[0], x[-1], n_rois - 0.5, -0.5]
+            ax.imshow(traces, cmap=cmap, interpolation="none", extent=extent, **kwargs)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel("ROI")
+            return fig, ax
+        # --- line trace mode ---
+        if figsize is None:
+            figsize = (8, max(3, n_rois * 0.4))
+        fig, axs = plt.subplots(
+            n_rois, 1, figsize=figsize, sharex=True,
+            gridspec_kw={"hspace": 0},
+        )
+        if n_rois == 1:
+            axs = [axs]
+        colors = plt.cm.jet(np.linspace(0, 1, n_rois))
+        for i, ax in enumerate(axs):
+            ax.plot(x, traces[i], color=colors[i], linewidth=0.7, **kwargs)
+            ax.set_xlim(x[0], x[-1])
+            ax.axis("off")
+        # Re-enable x-axis on bottom subplot only
+        axs[-1].axis("on")
+        axs[-1].spines["top"].set_visible(False)
+        axs[-1].spines["right"].set_visible(False)
+        axs[-1].spines["left"].set_visible(False)
+        axs[-1].tick_params(left=False, labelleft=False)
+        axs[-1].set_xlabel(xlabel)
+        return fig, axs
+
     def calculate_image_average(self, ignore_skip=False):
         """
         Calculate the average image from a series of trigger frames.
@@ -3074,3 +3264,113 @@ class Core:
             labels = labels[~np.isnan(labels)]
             centroids = scipy.ndimage.center_of_mass(self.rois, self.rois, labels)
         return np.array(centroids)
+
+    def rois_in_range(self, x_range=None, y_range=None):
+        """
+        Return ROI indices whose centroids fall within the provided ranges.
+
+        Parameters
+        ----------
+        x_range : tuple or None
+            (xmin, xmax) in pixel coordinates, inclusive. If None, no x filter.
+        y_range : tuple or None
+            (ymin, ymax) in pixel coordinates, inclusive. If None, no y filter.
+
+        Returns
+        -------
+        numpy.ndarray
+            0-indexed ROI indices (matching averages/traces ordering).
+        """
+        if self.rois is None:
+            raise ValueError("No ROIs defined. Impossible operation.")
+
+        centroids = self.roi_centroids
+        roi_indices = np.arange(centroids.shape[0])
+
+        keep = np.ones(centroids.shape[0], dtype=bool)
+        if x_range is not None:
+            xmin, xmax = x_range
+            keep &= (centroids[:, 1] >= xmin) & (centroids[:, 1] <= xmax)
+        if y_range is not None:
+            ymin, ymax = y_range
+            keep &= (centroids[:, 0] >= ymin) & (centroids[:, 0] <= ymax)
+
+        return roi_indices[keep]
+    
+    def keep_rois(self, roi_indices, update_dependent=True):
+        """
+        Keep only the specified ROIs and set the rest to background.
+
+        Parameters
+        ----------
+        roi_indices : list or array-like
+            0-indexed ROI indices to keep (e.g. [0, 1, 2] for the first 3 ROIs).
+            These match the indexing used by quality_indices, traces, averages,
+            and rois_alt. Internally, ROI mask values are -(index + 1).
+        update_dependent : bool, optional
+            If True, subset dependent arrays (traces, averages, snippets,
+            quality_indices, roi_sizes) to keep indexing consistent.
+
+        Returns
+        -------
+        numpy.ndarray
+            Updated ROI mask with only specified ROIs retained.
+        """
+        if self.rois is None:
+            raise ValueError("No ROIs defined. Impossible operation.")
+        roi_indices = np.asarray(roi_indices).astype(int).ravel()
+
+        if roi_indices.size == 0:
+            self.rois = np.ones_like(self.rois)
+            self.num_rois = 0
+            if update_dependent:
+                if isinstance(self.traces_raw, np.ndarray):
+                    self.traces_raw = self.traces_raw[:0]
+                if isinstance(self.traces_znorm, np.ndarray):
+                    self.traces_znorm = self.traces_znorm[:0]
+                if isinstance(self.averages, np.ndarray):
+                    self.averages = self.averages[:0]
+                if isinstance(self.snippets, np.ndarray):
+                    self.snippets = self.snippets[:0]
+                if isinstance(self.quality_indices, np.ndarray):
+                    self.quality_indices = self.quality_indices[:0]
+                if hasattr(self, "roi_sizes") and isinstance(self.roi_sizes, np.ndarray):
+                    self.roi_sizes = self.roi_sizes[:0]
+            return self.rois
+
+        roi_indices = np.unique(roi_indices)
+
+        # Convert 0-indexed indices to internal mask values: 0 -> -1, 1 -> -2, etc.
+        roi_values = -(roi_indices + 1)
+
+        # Keep only matching ROIs, set everything else to background (1)
+        self.rois = np.where(np.isin(self.rois, roi_values), self.rois, 1)
+
+        if update_dependent:
+            def _subset_first_dim(array_value):
+                if not isinstance(array_value, np.ndarray):
+                    return array_value
+                if array_value.shape[0] < roi_indices.max() + 1:
+                    return array_value
+                return array_value[roi_indices]
+
+            self.traces_raw = _subset_first_dim(self.traces_raw)
+            self.traces_znorm = _subset_first_dim(self.traces_znorm)
+            self.averages = _subset_first_dim(self.averages)
+            self.snippets = _subset_first_dim(self.snippets)
+            self.quality_indices = _subset_first_dim(self.quality_indices)
+            if hasattr(self, "roi_sizes"):
+                self.roi_sizes = _subset_first_dim(self.roi_sizes)
+
+        # Reindex remaining ROI labels to keep indices contiguous (-1, -2, ...)
+        roi_ids = np.unique(self.rois)
+        roi_ids = roi_ids[roi_ids < 0]
+        roi_ids = np.sort(roi_ids)[::-1]  # -1, -2, -3, ...
+        if roi_ids.size:
+            remapped = self.rois.copy()
+            for new_idx, old_id in enumerate(roi_ids):
+                remapped[self.rois == old_id] = -(new_idx + 1)
+            self.rois = remapped
+
+        self.num_rois = np.unique(self.rois).size - 1  # Update num_rois based on unique values (excluding background)
+        return self.rois

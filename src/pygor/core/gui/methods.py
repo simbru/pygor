@@ -1,5 +1,7 @@
 import logging
+import warnings
 import numpy as np
+import h5py
 
 import matplotlib
 from skimage.draw import polygon
@@ -147,8 +149,34 @@ class NapariViewStack:
             trigger_stack = self.pygor_object.trigger_images
             self.viewer.add_image(trigger_stack, name = "Trigger channel", colormap = "magma", visible = False)
         self.viewer.add_image(images_stack, name = "Image stack", colormap = "Greys_r")
+        # Add pre-registration image stack if available (post-preprocessing, pre-registration)
+        if self.pygor_object._pre_registration_images is not None:
+            self.viewer.add_image(self.pygor_object._pre_registration_images, name="Pre-registration", colormap="Greys_r", visible=False)
+        # Add original images backup (before any preprocessing/registration)
+        if self.pygor_object._original_images is not None:
+            self.viewer.add_image(self.pygor_object._original_images, name="Original (before processing)", colormap="Greys_r", visible=False)
+        # Add raw unprocessed image stack from H5 file (before detrending)
+        self._add_raw_images()
 
         self.napari.run()
+
+    def _add_raw_images(self):
+        """Load and add raw (undetrended) images from the H5 file."""
+        obj = self.pygor_object
+        if not hasattr(obj, 'filename') or obj.filename is None:
+            return
+        filename = str(obj.filename)
+        if not filename.endswith(('.h5', '.hdf5')):
+            return
+        try:
+            with h5py.File(filename, "r") as f:
+                if "wDataCh0" in f.keys():
+                    raw = np.array(f["wDataCh0"]).T
+                    self.viewer.add_image(raw, name="Raw (unprocessed)", colormap="Greys_r", visible=False)
+                else:
+                    logging.info(f"No 'wDataCh0' key in {filename}. Available keys: {list(f.keys())}")
+        except Exception as e:
+            warnings.warn(f"Could not load raw images: {e}")
 
 class NapariViewRois:
     def __init__(self, pygor_object):
