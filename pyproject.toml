@@ -31,6 +31,8 @@ dependencies = [
     "tqdm",
     "statannotations>=0.4.4",
     "pycircstat2",
+    "ipykernel>=6.29.5",
+    "ipywidgets>=8.1.5",
 ]
 
 [project.optional-dependencies]
