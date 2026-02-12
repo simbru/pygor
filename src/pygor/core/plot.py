@@ -121,6 +121,8 @@ def plot_averages(
         if not provided_axs and len(rois) == 1:
             axs = np.array([axs])
         sd_ratio_scalebar = 1
+        # Calculate mean SD across all rois for consistent scalebars
+        mean_sd = np.round(np.mean(np.max(np.abs(self.averages[rois]), axis=1)*sd_ratio_scalebar))
         phase_dur = self.ms_dur / self.trigger_mode * phase_dur_mod
         if sort_order is None:
             loop_through = enumerate(zip(axs.flat, rois, roi_labels))
@@ -163,8 +165,8 @@ def plot_averages(
                         y_min -= 1
                         y_max += 1
                     ax.set_ylim(y_min, y_max)
-                closest_sd = np.ceil(np.max(self.averages[roi])*sd_ratio_scalebar)
-                pygor.plotting.add_scalebar(closest_sd, string = f"{closest_sd.astype(int)} SD",ax=ax, flip_text=True, x=1.015, y = 0.1, text_size = text_size)
+                # Add scalebar without text
+                pygor.plotting.add_scalebar(mean_sd, string = "", ax=ax, flip_text=True, x=1.015, y = 0.1, text_size = text_size)
             ax.set_yticklabels([])
             ax.set_ylabel(label, rotation=0, verticalalignment="center", fontsize=plt.rcParams['font.size'])
             ax.spines[["top", "bottom", "right"]].set_visible(False)
@@ -174,16 +176,15 @@ def plot_averages(
                     ax.axvspan(
                         shade_edges[i],
                         shade_edges[i + 1],
-                        alpha=0.12,
+                        alpha=0.25,
                         color="gray",
                         lw=0,
                         zorder=0,
                     )
 
             ax.grid(False)
-        if independent_scale is False:
-            closest_sd = np.ceil(np.max(np.abs(self.averages[rois])*sd_ratio_scalebar))
-            pygor.plotting.add_scalebar(closest_sd, string = f"{closest_sd.astype(int)} SD",ax=axs.flat[-1], flip_text=True, x=1.015, y = 0.1, text_size = text_size)
+        # Add scalebar with text label to last axis
+        pygor.plotting.add_scalebar(mean_sd, string = f"{mean_sd.astype(int)} SD", ax=axs.flat[-1], flip_text=True, x=1.015, y = 0.1, text_size = text_size)
         # ax.set_xlabel("Time (ms)")
         fig.subplots_adjust(hspace=0)
         cax = axs.flat[-1]

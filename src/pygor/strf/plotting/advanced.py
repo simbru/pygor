@@ -143,14 +143,15 @@ def chroma_overview(
     # Ensure ax is always 2D for consistent indexing
     if ax.ndim == 1:
         ax = ax.reshape(1, -1)
-    
+
+    # Precompute all collapsed times at once (avoids per-ROI recomputation)
+    all_collapsed_chroma = data_strf_object.collapse_times_chroma()
+
     for n, roi in enumerate(rois_specified):
         start_index = roi * data_strf_object.numcolour
         end_index = start_index + data_strf_object.numcolour
         fetch_indices = range(start_index, end_index)
-        strfs_chroma = np.squeeze(pygor.utilities.multicolour_reshape(
-            data_strf_object.collapse_times(fetch_indices), data_strf_object.numcolour
-        ))
+        strfs_chroma = np.squeeze(all_collapsed_chroma[:, roi])
         if remove_border is True:
             border_tup = pygor.utilities.check_border(strfs_chroma)
             strfs_chroma = np.copy(

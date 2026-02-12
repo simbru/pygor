@@ -219,15 +219,24 @@ def add_scalebar(
     ax.add_line(line)
     
     # Calculate aesthetically pleasing, scale-robust text spacing using font metrics
-    # Create a temporary text object to measure actual rendered size
-    temp_text = ax.text(0, 0, string or 'Ag', fontsize=text_size, transform=ax.transData)
-    temp_text.set_visible(False)
-    
-    # Get the actual rendered text height in data coordinates
-    fig.canvas.draw()  # Ensure text is rendered for measurement
-    text_bbox = temp_text.get_window_extent(fig.canvas.get_renderer())
-    text_height_points = text_bbox.height
-    temp_text.remove()  # Clean up temporary text
+    # Cache text height to avoid forcing a full draw on every call # Copilot optimisation
+    cache = getattr(fig, "_pygor_scalebar_cache", None)
+    if cache is None:
+        cache = {}
+        fig._pygor_scalebar_cache = cache
+    cache_key = (text_size, string or "Ag", fig.dpi)
+    text_height_points = cache.get(cache_key)
+    if text_height_points is None:
+        renderer = fig.canvas.get_renderer()
+        if renderer is None:
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+        temp_text = ax.text(0, 0, string or "Ag", fontsize=text_size, transform=ax.transData)
+        temp_text.set_visible(False)
+        text_bbox = temp_text.get_window_extent(renderer)
+        text_height_points = text_bbox.height
+        temp_text.remove()  # Clean up temporary text
+        cache[cache_key] = text_height_points
     
     # Calculate spacing based on rendered text height for true scale robustness
     # Be VERY generous with spacing - user needs substantial breathing room

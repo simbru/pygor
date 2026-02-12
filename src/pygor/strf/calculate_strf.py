@@ -495,7 +495,7 @@ def calculate_calcium_correlated_average(strf_obj, noise_array, sta_past_window=
     # STEP 2: Process ROIs (optionally in parallel with joblib)
     if n_jobs == 1:
         # Sequential processing
-        roi_iter = tqdm(roi_list, desc="Computing STRFs", disable=not verbose, leave=False, position=1)
+        roi_iter = tqdm(roi_list, desc="Computing STRFs", leave=False)
         for rr in roi_iter:
             result = _process_single_roi(
                 rr, roi_list, input_traces, trigger_start, n_f_relevant,
@@ -524,7 +524,7 @@ def calculate_calcium_correlated_average(strf_obj, noise_array, sta_past_window=
         )
 
         # Unpack results as they complete, with tqdm tracking progress
-        for result in tqdm(results_gen, total=len(roi_list), desc="Computing STRFs (parallel)", disable=not verbose, leave=False, position=1):
+        for result in tqdm(results_gen, total=len(roi_list), desc="Computing STRFs (parallel)", leave=False):
             event_counter[result['roi_idx']] = result['event_count']
             filter_sds[:, :, result['roi_idx']] = result['filter_sds']
             filter_pols[:, :, result['roi_idx']] = result['filter_pols']
