@@ -147,11 +147,11 @@ class ResponseMapping(Core):
         num_rois = self.num_rois
         roi_sizes = []
         fov_sizes = {
-            'ntc3': {'0.15':539,
+            'nTC3': {'0.15':539,
                     '0.21':439,
                     '0.32':308,
                     '0.43':206}, 
-            'ntc1': {'0.15': 700,
+            'nTC1': {'0.15': 700,
                     '0.21': 500,
                     '0.32': 400,
                     '0.43': 300}
@@ -161,18 +161,17 @@ class ResponseMapping(Core):
             roi_sizes.append(roi_size)
 
         if pd.isna(self.optical_config):
-            optical_config = 'ntc3'
+            optical_config = 'nTC3'  # Default to nTC3 if optical config is not specified
             print(f"Optical config not found in metadata, assuming {optical_config}.")
         else:
-            optical_config = self.optical_config
+            optical_config = self.optical_config.decode() if isinstance(self.optical_config, bytes) else self.optical_config
 
         img_size = self.average_stack.shape[1]  # Assuming square images
         zoom_rounded = round(self.zoom, 2)
-
         fov_size_um = fov_sizes.get(optical_config, {}).get(f"{zoom_rounded:.2f}", None)
         
         if fov_size_um is None:
-            raise ValueError(f"FoV size not found for optical config {optical_config} and zoom {self.zoom}")
+            raise ValueError(f"FoV size not found for optical config {optical_config} and zoom {zoom_rounded:.2f}")
         pixel_size_um = fov_size_um / img_size
         roi_sizes_microns = np.array(roi_sizes) * pixel_size_um * pixel_size_um  # Area in square microns
         return roi_sizes_microns
