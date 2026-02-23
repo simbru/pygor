@@ -1,4 +1,5 @@
 # Dependencies
+from typing import Any
 from dataclasses import dataclass, field
 
 import pygor.strf.unit_conversion
@@ -38,9 +39,9 @@ import pygor.strf.calculate_strf
 # import pygor.strf.calculate_multicolour_optimized
 import pygor.utils.helpinfo
 import pygor.utils.unit_conversion as unit_conversion
-from pygor.classes.core_data import Core
+from .core_data import Core
 # import scipy
-from pygor.classes.core_data import try_fetch_table_params
+from .core_data import try_fetch_table_params
 
 @dataclass(repr = False)
 class STRF(Core):
@@ -87,6 +88,12 @@ class STRF(Core):
                     self.multicolour = False
                     self.numcolour = 1
                 self.strfs = pygor.data_helpers.load_strf(HDF5_file)
+            if self.strfs is None:
+                raise ValueError(
+                    f"No STRF arrays found in '{self.filename.name}'. "
+                    "H5 file has no keys matching 'STRF0_*'. "
+                    "Was this file exported before STRF calculation in IGOR?"
+                )
             self.num_strfs = len(self.strfs)
             if self.num_rois == 0:
                 print("Number of ROIs not set, likely ROIs array is missing. Setting to number of STRFs divided by number of colours.")
@@ -128,12 +135,12 @@ class STRF(Core):
         
         # Check 1: num_rois vs STRF count consistency
         if self.num_rois != expected_rois:
-            import warnings
-            warnings.warn(
+            raise ValueError(
                 f"Data inconsistency in {self.name}: "
                 f"num_rois ({self.num_rois}) != expected from STRFs ({expected_rois}). "
-                f"STRFs: {self.num_strfs}, Colors: {self.numcolour}",
-                UserWarning
+                f"STRFs: {self.num_strfs}, Colors: {self.numcolour}. "
+                f"This usually means ROIs were re-segmented without recomputing "
+                f"STRFs. Recompute STRFs or restore the original ROI segmentation."
             )
         
         # Check 2: ipl_depths length vs num_rois consistency  
@@ -252,7 +259,7 @@ class STRF(Core):
             return pygor.utilities.multicolour_reshape(self.strfs, self.numcolour)
     
     ## Bootstrapping
-    def __calc_pval_time(self, parallel = None, **kwargs) -> np.ndarray:
+    def __calc_pval_time(self, parallel = None, **kwargs: Any) -> np.ndarray:
         """
         Calculate the p-value for each time point in the data.
 
@@ -267,7 +274,7 @@ class STRF(Core):
         self._pval_time = np.array([pygor.strf.bootstrap.bootstrap_time(x, bootstrap_n=self.bs_settings["time_bs_n"], parallel = parallel) for x in bar])
         return self._pval_time
 
-    def __calc_pval_space(self, parallel = None, **kwargs) -> np.ndarray:
+    def __calc_pval_space(self, parallel = None, **kwargs: Any) -> np.ndarray:
         """
         Calculate the p-value space for the spatial components.
 
@@ -516,6 +523,26 @@ class STRF(Core):
             self._strfs_no_border_cache = pygor.utilities.auto_remove_border(self.strfs)
         return self._strfs_no_border_cache
 
+    def _invalidate_strf_caches(self):
+        """Clear all caches that depend on self.strfs.
+
+        Must be called whenever self.strfs is reassigned (e.g. in calculate_strf).
+        """
+        self._strfs_no_border_cache = None
+        for attr in (
+            '_collapse_times_cache',
+            '_spatial_overlap_cache',
+            '_pca_rf_shape_cache',
+            '_centre_surround_metrics_cache',
+            '_latency_vectors_cache',
+            '_temporal_span_cache',
+            '_latency_plane_fit_cache',
+            '_cs_seg_results_maps',
+            '_cs_seg_results_times',
+        ):
+            if hasattr(self, attr):
+                delattr(self, attr)
+
     def fit_contours(self, roi = None, force = True) -> np.ndarray[list[list[list[float, float]]]]:
         """
         Returns the contours of the collapse times.
@@ -717,7 +744,7 @@ class STRF(Core):
             indices = np.arange(start_index, end_index)
             return np.squeeze(pygor.utilities.multicolour_reshape(self.strfs[indices], self.numcolour))
 
-    def get_timecourses_dominant(self, **kwargs):
+    def get_timecourses_dominant(self, **kwargs: Any):
         dominant_times = []
         for arr in self.get_timecourses(**kwargs):
             if np.max(np.abs(arr[0])) > np.max(np.abs(arr[1])):
@@ -727,7 +754,7 @@ class STRF(Core):
         dominant_times = np.array(dominant_times)
         return dominant_times
 
-    def get_timecourses_secondary(self, **kwargs):
+    def get_timecourses_secondary(self, **kwargs: Any):
         secondary_times = []
         for arr in self.get_timecourses(**kwargs):
             if np.max(np.abs(arr[0])) > np.max(np.abs(arr[1])):
@@ -887,7 +914,7 @@ class STRF(Core):
         strf_shifted = np.ma.array([np.roll(arr, shift_by[i], axis = (1,2)) for i, arr in enumerate(self.strfs)])
         return strf_shifted
 
-    def collapse_times(self, roi = None, zscore : bool = True, spatial_centre : bool = False, border : bool = False, force_recompute : bool = False, **kwargs) -> np.ma.masked_array:
+    def collapse_times(self, roi = None, zscore : bool = True, spatial_centre : bool = False, border : bool = False, force_recompute : bool = False, **kwargs: Any) -> np.ma.masked_array:
         # Create cache key from parameters
         roi_key = tuple(roi) if roi is not None and hasattr(roi, '__iter__') and not isinstance(roi, (str, int)) else roi
         cache_key = (roi_key, zscore, spatial_centre, border, tuple(sorted(kwargs.items())))
@@ -908,11 +935,13 @@ class STRF(Core):
             else:
                 raise ValueError("ROI must be None, int, or an iterable of ints")
         else:
-            iterate_through = range(len(self.strfs))
+            iterate_through = None  # resolved after strfs_arr is set
         if border == True:
             strfs_arr = self.strfs
         if border == False:
             strfs_arr = self.strfs_no_border
+        if iterate_through is None:
+            iterate_through = range(len(strfs_arr))
         if isinstance(iterate_through, Iterable):
             target_shape = (len(iterate_through),
                             strfs_arr.shape[2], 
@@ -949,7 +978,7 @@ class STRF(Core):
         return collapsed_strf_arr # do not squeeze for more predictable output
         # spatial.collapse_3d(recording.strfs[strf_num])
 
-    def collapse_times_chroma(self, roi = None, zscore : bool = True, spatial_centre : bool = False, border : bool = False, **kwargs) -> np.ma.masked_array:
+    def collapse_times_chroma(self, roi = None, zscore : bool = True, spatial_centre : bool = False, border : bool = False, **kwargs: Any) -> np.ma.masked_array:
         all_collapsed = self.collapse_times(None, zscore = zscore, spatial_centre = spatial_centre, border = border, **kwargs)
         if roi is None:
             return pygor.utilities.multicolour_reshape(all_collapsed, self.numcolour)
@@ -2277,44 +2306,44 @@ class STRF(Core):
                 'angles': angles_deg
             }
 
-    def get_colour_channel_offsets_true_centers(self, roi=None,**kwargs):
+    def get_colour_channel_offsets_true_centers(self, roi=None,**kwargs: Any):
         results = self.calc_colour_channel_offsets(roi=roi, **kwargs)
         return results['true_centers']
     
-    def get_colour_channel_offsets_magnitudes(self, roi=None,**kwargs):
+    def get_colour_channel_offsets_magnitudes(self, roi=None,**kwargs: Any):
         results = self.calc_colour_channel_offsets(roi=roi, **kwargs)
         return results['magnitudes']
     
-    def get_colour_channel_offsets_angles(self, roi=None,**kwargs):
+    def get_colour_channel_offsets_angles(self, roi=None,**kwargs: Any):
         results = self.calc_colour_channel_offsets(roi=None, **kwargs)
         return results['angles']
     
-    def get_pca_major_axis_lengths(self, roi=None, **kwargs):
+    def get_pca_major_axis_lengths(self, roi=None, **kwargs: Any):
         """Get major axis lengths from PCA analysis"""
         results = self.calc_pca_rf_shape_analysis(roi=roi, **kwargs)
         return results['major_axis_length']
     
-    def get_pca_minor_axis_lengths(self, roi=None, **kwargs):
+    def get_pca_minor_axis_lengths(self, roi=None, **kwargs: Any):
         """Get minor axis lengths from PCA analysis"""
         results = self.calc_pca_rf_shape_analysis(roi=roi, **kwargs)
         return results['minor_axis_length']
     
-    def get_pca_eccentricities(self, roi=None, **kwargs):
+    def get_pca_eccentricities(self, roi=None, **kwargs: Any):
         """Get eccentricity values from PCA analysis"""
         results = self.calc_pca_rf_shape_analysis(roi=roi, **kwargs)
         return results['eccentricity']
     
-    def get_pca_orientations(self, roi=None, **kwargs):
+    def get_pca_orientations(self, roi=None, **kwargs: Any):
         """Get orientation angles from PCA analysis"""
         results = self.calc_pca_rf_shape_analysis(roi=roi, **kwargs)
         return results['angle_degrees']
     
-    def get_pca_centroidsX(self, roi=None, **kwargs):
+    def get_pca_centroidsX(self, roi=None, **kwargs: Any):
         """Get centroid coordinates from PCA analysis"""
         results = self.calc_pca_rf_shape_analysis(roi=roi, **kwargs)
         return results['centroid_x']
     
-    def get_pca_centroidsY(self, roi=None, **kwargs):
+    def get_pca_centroidsY(self, roi=None, **kwargs: Any):
         """Get centroid coordinates from PCA analysis"""
         results = self.calc_pca_rf_shape_analysis(roi=roi, **kwargs)
         return results['centroid_y']
@@ -2338,10 +2367,10 @@ class STRF(Core):
         pols_out[pols == np.nan] = "NaN"
         return pols_out
 
-    def get_polarity_category_cell(self, mask_by_channel=False, threshold=2, dimstr="spatiotemporal") -> str:
+    def get_polarity_category_cell(self, mask_by_channel=False, threshold=2, dimstr="spatiotemporal", channels=None) -> str:
         """
         Get polarity category for each cell across colour channels.
-        
+
         Parameters
         ----------
         mask_by_channel : bool, optional
@@ -2350,7 +2379,10 @@ class STRF(Core):
             Threshold for bool_by_channel masking (default: 2)
         dimstr : str, optional
             Dimension for bool_by_channel ('time' or 'space', default: 'time')
-            
+        channels : list of int, optional
+            Channel indices to consider (e.g. [0,1,2,3] for only single-colour
+            channels). If None, all channels are used.
+
         Returns
         -------
         list of str
@@ -2359,14 +2391,17 @@ class STRF(Core):
         result = []
         polarities = self.get_polarities()
         arr = pygor.utilities.multicolour_reshape(polarities, self.numcolour).T
-        
+
         if mask_by_channel:
             # Get boolean mask for significant channels
             bool_mask = self.bool_by_channel(threshold=threshold, dimstr=dimstr)
             # Apply mask to polarities - set insignificant channels to NaN
             for i, (pol_row, mask_row) in enumerate(zip(arr, bool_mask)):
                 arr[i] = np.where(mask_row, pol_row, np.nan)
-        
+
+        if channels is not None:
+            arr = arr[:, channels]
+
         for i in arr:
             inner_no_nan = np.unique(i)[~np.isnan(np.unique(i))]
             inner_no_nan = inner_no_nan[inner_no_nan != 0]
@@ -2384,7 +2419,7 @@ class STRF(Core):
                 result.append("other")
         return result
 
-    def get_polarity_category_cell_simple(self, mask_by_channel=False, threshold=2, dimstr="spatiotemporal") -> str:
+    def get_polarity_category_cell_simple(self, mask_by_channel=False, threshold=2, dimstr="spatiotemporal", channels=None) -> str:
         """
         Get simplified polarity category for each cell across colour channels.
         Uses same logic as get_polarity_category_cell but only returns 'on', 'off', 'opp', or 'nan'.
@@ -2397,6 +2432,9 @@ class STRF(Core):
             Threshold for bool_by_channel masking (default: 2)
         dimstr : str, optional
             Dimension for bool_by_channel ('time' or 'space', default: 'spatiotemporal')
+        channels : list of int, optional
+            Channel indices to consider (e.g. [0,1,2,3] for only single-colour
+            channels). If None, all channels are used.
 
         Returns
         -------
@@ -2421,6 +2459,9 @@ class STRF(Core):
             for i, (pol_row, mask_row) in enumerate(zip(arr, bool_mask)):
                 arr[i] = np.where(mask_row, pol_row, np.nan)
 
+        if channels is not None:
+            arr = arr[:, channels]
+
         for i in arr:
             inner_no_nan = np.unique(i)[~np.isnan(np.unique(i))]
             if not any(inner_no_nan):
@@ -2436,7 +2477,7 @@ class STRF(Core):
                 result.append("nan")
         return result
 
-    def get_time_amps(self, **kwargs) -> np.ndarray:
+    def get_time_amps(self, **kwargs: Any) -> np.ndarray:
         maxes = np.max(self.get_timecourses_dominant(**kwargs).data, axis = (1))
         mins = np.min(self.get_timecourses_dominant(**kwargs).data, axis = (1))
         largest_mag = np.where(maxes > np.abs(mins), maxes, mins) # search and insert values to retain sign
@@ -2448,7 +2489,7 @@ class STRF(Core):
         largest_mag = np.where(maxes > np.abs(mins), maxes, mins) # search and insert values to retain sign
         return largest_mag
 
-    def get_opponency_index_time(self, **kwargs) -> np.ndarray:
+    def get_opponency_index_time(self, **kwargs: Any) -> np.ndarray:
         # Get dominant and secondary timecourse amplitudes
         dominant_amps = self.get_time_amps(**kwargs)
         secondary_amps = self.get_time_amps_surr()
@@ -2464,7 +2505,7 @@ class STRF(Core):
         )
         return antagonism_index
 
-    def get_time_amps_by_ch(self, ch_idx, **kwargs) -> np.ndarray:
+    def get_time_amps_by_ch(self, ch_idx, **kwargs: Any) -> np.ndarray:
         amps_raw = self.get_time_amps()
         amps_raw_ch_reshape = pygor.utilities.multicolour_reshape(amps_raw, self.numcolour)
         return amps_raw_ch_reshape[ch_idx]
@@ -2518,7 +2559,7 @@ class STRF(Core):
     # def get_time_to_peak(self):
 
 
-    def calc_tunings_amplitude(self,dimstr = "time", treshhold = 2, **kwargs) -> np.ndarray:
+    def calc_tunings_amplitude(self,dimstr = "time", treshhold = 2, **kwargs: Any) -> np.ndarray:
         if self.multicolour == True:
             if dimstr == "time":
                 largest_by_colour = pygor.utilities.multicolour_reshape(self.get_time_amps(**kwargs), self.numcolour)
@@ -2599,7 +2640,7 @@ class STRF(Core):
             raise ValueError("dimstr must be 'time' or 'space'")
         return pygor.utilities.multicolour_reshape(np.abs(amps), self.numcolour).T > threshold
 
-    def calc_mean_absolute_deviation(self, dimstr = "space", **kwargs):
+    def calc_mean_absolute_deviation(self, dimstr = "space", **kwargs: Any):
         tunings = self.calc_tunings_amplitude(dimstr = dimstr, **kwargs)
         mad = np.mean(np.abs(tunings - np.mean(tunings, axis = 1, keepdims=True)), axis = 1)
         mad = np.where(mad == 0, np.inf, mad)
@@ -2832,7 +2873,12 @@ class STRF(Core):
         peak_times = self.get_strf_peak_times()  # (n_rois, height, width)
 
         if channel is not None:
-            peak_times = pygor.utilities.multicolour_reshape(peak_times, channel)[channel - 1]
+            if not isinstance(channel, (int, np.integer)) or channel < 0 or channel >= self.numcolour:
+                raise ValueError(
+                    f"channel={channel} out of range. Use 0-{self.numcolour - 1} "
+                    f"(0-indexed) or None for all channels."
+                )
+            peak_times = pygor.utilities.multicolour_reshape(peak_times, self.numcolour)[channel]
 
         # Resolve ROI indices
         if roi is None:
@@ -2862,7 +2908,7 @@ class STRF(Core):
         # Get amplitude weights (matching ROI/channel selection)
         weights = self.get_amplitude_weights()
         if channel is not None:
-            weights = pygor.utilities.multicolour_reshape(weights, channel)[channel - 1]
+            weights = pygor.utilities.multicolour_reshape(weights, self.numcolour)[channel]
         weights = weights[roi_indices]
 
         # Center each ROI by its amplitude-weighted median
@@ -3051,6 +3097,211 @@ class STRF(Core):
         """
         results = self.compute_latency_vectors(use_segmentation=use_segmentation)
         return results['coherence']
+
+    def demo_rf_coherence(self, roi, use_segmentation=True, amplitude_weighted=False):
+        """Visualize how the coherence metric is computed for a single ROI.
+
+        Produces a two-row figure showing the full pipeline:
+
+        Top row (zoomed to RF bounding box):
+        1. Latency values annotated on each pixel.
+        2. Finite difference arrows showing how np.gradient computes
+           dx/dy from neighbouring pixel values.
+        3. The same arrows normalised to unit length.
+
+        Bottom row:
+        4. Raw gradient vectors overlaid on the full latency map.
+        5. Unit vectors overlaid on the full latency map.
+        6. Unit circle coherence diagram.
+
+        Parameters
+        ----------
+        roi : int
+            ROI index.
+        use_segmentation : bool
+            Whether to use segmented latency maps.
+        amplitude_weighted : bool
+            If True, size per-pixel dots by amplitude weight.
+        """
+        latency_maps = self.get_strf_delta_times(use_segmentation=use_segmentation)
+        lmap = latency_maps[roi]
+
+        grad_y, grad_x = np.gradient(lmap)
+
+        if hasattr(lmap, 'mask') and lmap.mask.any():
+            mask = ~lmap.mask
+        else:
+            mask = np.ones(lmap.shape, dtype=bool)
+
+        # Build weights (same logic as compute_latency_vectors)
+        if amplitude_weighted:
+            weights_all = self.get_amplitude_weights()
+            amp = weights_all[roi]
+            amp_valid = np.where(mask, amp, 0.0)
+            amp_sum = amp_valid[mask].sum()
+            if amp_sum == 0:
+                warnings.warn(f"ROI {roi}: amplitude sum is zero, falling back to uniform weights.")
+                n_valid = mask.sum()
+                w = np.where(mask, 1.0 / max(n_valid, 1), 0.0)
+            else:
+                w = amp_valid / amp_sum
+        else:
+            n_valid = mask.sum()
+            w = np.where(mask, 1.0 / max(n_valid, 1), 0.0)
+
+        grad_mag = np.sqrt(grad_x**2 + grad_y**2)
+        grad_mag_safe = np.where(grad_mag == 0, 1, grad_mag)
+        ux = grad_x / grad_mag_safe
+        uy = grad_y / grad_mag_safe
+
+        mean_ux = (ux * w).sum()
+        mean_uy = (uy * w).sum()
+        coherence = np.sqrt(mean_ux**2 + mean_uy**2)
+        direction = np.degrees(np.arctan2(mean_uy, mean_ux)) % 360
+
+        # --- Compute bounding box around valid pixels (with 1px padding) ---
+        rows, cols = np.where(mask)
+        if rows.size == 0:
+            warnings.warn(f"ROI {roi}: no valid pixels, nothing to plot.")
+            return None
+        r0 = max(rows.min() - 1, 0)
+        r1 = min(rows.max() + 2, lmap.shape[0])
+        c0 = max(cols.min() - 1, 0)
+        c1 = min(cols.max() + 2, lmap.shape[1])
+        crop = np.asarray(lmap[r0:r1, c0:c1])
+        crop_mask = mask[r0:r1, c0:c1]
+        crop_gx = grad_x[r0:r1, c0:c1]
+        crop_gy = grad_y[r0:r1, c0:c1]
+        crop_ux = ux[r0:r1, c0:c1]
+        crop_uy = uy[r0:r1, c0:c1]
+        cY, cX = np.mgrid[0:crop.shape[0], 0:crop.shape[1]]
+
+        # Colour limits: use the top-weighted pixels so the colourmap
+        # resolves subtle gradients inside the RF rather than being
+        # dominated by the full dynamic range.
+        # Use the full weight array (not just crop) for robust thresholding
+        w_valid = w[mask]
+        v_valid = np.asarray(lmap)[mask]
+        if w_valid.size > 0 and w_valid.max() > 0:
+            # Top 25% of weights — focuses on the RF core
+            w_thresh = np.percentile(w_valid[w_valid > 0], 75)
+            hi_weight = v_valid[w_valid >= w_thresh]
+            if hi_weight.size > 1:
+                vmin, vmax = float(np.nanmin(hi_weight)), float(np.nanmax(hi_weight))
+            else:
+                vmin, vmax = float(np.nanmin(v_valid)), float(np.nanmax(v_valid))
+        else:
+            vmin, vmax = float(np.nanmin(np.asarray(lmap))), float(np.nanmax(np.asarray(lmap)))
+        # Ensure some range
+        if vmin == vmax:
+            vmin -= 0.001
+            vmax += 0.001
+
+        # --- Build weight-based alpha maps for imshow overlays ---
+        # Normalised weight for alpha: full image and crop
+        w_norm = w / w.max() if w.max() > 0 else w
+        w_crop = w_norm[r0:r1, c0:c1]
+
+        def _rgba_imshow(ax, data, alpha_map, vmin, vmax):
+            """Render data as RGBA with per-pixel alpha from weights."""
+            cmap = plt.get_cmap('RdBu_r')
+            norm = plt.Normalize(vmin=vmin, vmax=vmax)
+            rgba = cmap(norm(np.asarray(data)))
+            rgba[..., 3] = np.clip(alpha_map, 0.05, 1.0)
+            ax.imshow(rgba, origin='lower')
+
+        # --- Figure ---
+        fig, axes = plt.subplots(2, 3, figsize=(16, 9))
+
+        # ---- Top row: zoomed to RF bounding box ----
+
+        # Panel 1: pixel values annotated (skip text if crop is too large)
+        _rgba_imshow(axes[0, 0], crop, w_crop, vmin, vmax)
+        max_dim = max(crop.shape)
+        if max_dim <= 15:
+            if max_dim <= 6:
+                txt_fs = 8
+            elif max_dim <= 10:
+                txt_fs = 6
+            else:
+                txt_fs = 5
+            val_range = vmax - vmin
+            if val_range == 0:
+                txt_dec = 1
+            else:
+                txt_dec = max(1, int(np.ceil(-np.log10(val_range))) + 1)
+            for r in range(crop.shape[0]):
+                for c in range(crop.shape[1]):
+                    if crop_mask[r, c]:
+                        axes[0, 0].text(c, r, f'{crop[r, c]:.{txt_dec}f}',
+                                         ha='center', va='center',
+                                         fontsize=txt_fs, fontweight='bold')
+        axes[0, 0].set_title("1. Pixel latency values")
+
+        # Panel 2: raw gradient arrows on zoomed crop
+        _rgba_imshow(axes[0, 1], crop, w_crop * 0.3, vmin, vmax)
+        axes[0, 1].quiver(cX[crop_mask], cY[crop_mask],
+                           crop_gx[crop_mask], crop_gy[crop_mask],
+                           angles='xy', color='k', width=0.006)
+        axes[0, 1].set_title("2. np.gradient (raw dx, dy)")
+
+        # Panel 3: unit vectors on zoomed crop
+        _rgba_imshow(axes[0, 2], crop, w_crop * 0.3, vmin, vmax)
+        axes[0, 2].quiver(cX[crop_mask], cY[crop_mask],
+                           crop_ux[crop_mask], crop_uy[crop_mask],
+                           angles='xy', scale=15, color='k', width=0.006)
+        axes[0, 2].set_title("3. Normalised to unit length")
+
+        # ---- Bottom row: full view + coherence ----
+        Y, X = np.mgrid[0:lmap.shape[0], 0:lmap.shape[1]]
+        # Full-view uses same colour limits as crop for consistency
+        full_vmin, full_vmax = vmin, vmax
+
+        # Per-pixel alpha for quiver arrows
+        w_mask = w[mask]
+        w_max = w_mask.max() if w_mask.max() > 0 else 1.0
+        alpha_arr = np.clip(w_mask / w_max, 0.05, 1.0)
+        colors_raw = np.zeros((mask.sum(), 4))
+        colors_raw[:, 3] = alpha_arr
+
+        # Panel 4: raw gradients on full map
+        _rgba_imshow(axes[1, 0], lmap, w_norm * 0.3, full_vmin, full_vmax)
+        axes[1, 0].quiver(X[mask], Y[mask], grad_x[mask], grad_y[mask],
+                           angles='xy', color=colors_raw, width=0.004)
+        axes[1, 0].set_title("4. Raw gradients (weight-faded)")
+
+        # Panel 5: unit vectors on full map
+        _rgba_imshow(axes[1, 1], lmap, w_norm * 0.3, full_vmin, full_vmax)
+        axes[1, 1].quiver(X[mask], Y[mask], ux[mask], uy[mask],
+                           angles='xy', scale=20, color=colors_raw, width=0.004)
+        axes[1, 1].set_title("5. Unit vectors (weight-faded)")
+
+        # Panel 6: unit circle coherence diagram
+        axes[1, 2].set_aspect('equal')
+        if amplitude_weighted:
+            sizes = w[mask] / w[mask].max() * 50
+        else:
+            sizes = 15
+        axes[1, 2].scatter(ux[mask].ravel(), uy[mask].ravel(),
+                            alpha=0.4, s=sizes, zorder=2,
+                            label=f'Per-pixel directions (n={mask.sum()})')
+        circle = plt.Circle((0, 0), 1, fill=False, color='gray', ls='--')
+        axes[1, 2].add_patch(circle)
+        axes[1, 2].annotate('', xy=(mean_ux, mean_uy), xytext=(0, 0),
+                              arrowprops=dict(arrowstyle='->', color='red', lw=2.5))
+        axes[1, 2].plot(mean_ux, mean_uy, 'o', color='red', ms=6, zorder=3,
+                          label=f'Mean (len={coherence:.2f})')
+        axes[1, 2].set_xlim(-1.4, 1.4)
+        axes[1, 2].set_ylim(-1.4, 1.4)
+        axes[1, 2].axhline(0, color='gray', lw=0.5)
+        axes[1, 2].axvline(0, color='gray', lw=0.5)
+        axes[1, 2].legend(fontsize=7, loc='lower left')
+        axes[1, 2].set_title(f"6. Coherence = {coherence:.2f}, Dir = {direction:.0f}\u00b0")
+        axes[1, 2].set_xlabel("Mean resultant length = coherence")
+
+        fig.suptitle(f"ROI {roi} - RF coherence demo", fontsize=13)
+        plt.tight_layout()
+        return fig
 
     def get_latency_magnitudes(self, use_segmentation=True):
         """Get latency gradient magnitudes for all ROIs.
@@ -3527,8 +3778,12 @@ class STRF(Core):
         spectrum_pos = np.array([pygor.strf.temporal.only_spectrum(i) for i in self.get_timecourses()[:, 1]])
         return spectrum_neg, spectrum_pos
 
-    def unravel_chroma_roi(strf_obj, roi, chroma_index, multichroma_dim = 0, roi_dim = 1):
-        return np.ravel_multi_index([roi, chroma_index], np.array(strf_obj.strfs_chroma.shape)[[roi_dim, multichroma_dim]])
+    def unravel_chroma_roi(self, roi, chroma_index, multichroma_dim=0, roi_dim=1):
+        """Deprecated: use ``unravel_strf_indices`` instead."""
+        raise DeprecationWarning(
+            "unravel_chroma_roi is deprecated and broken. "
+            "Use unravel_strf_indices(roi_index=..., colour_index=...) instead."
+        )
 
     def demo_contouring(self, roi, chromatic_reshape = False):
         plt.close()
@@ -3556,7 +3811,7 @@ class STRF(Core):
     def plot_timecourse(self, roi):
         plt.plot(self.get_timecourses()[roi].T)
 
-    def plot_space(self, roi = None, ax = None, cmap = "Greys_r", **kwargs):
+    def plot_space(self, roi = None, ax = None, cmap = "Greys_r", **kwargs: Any):
         space = self.collapse_times(roi)
         maxabs = np.max(np.abs(space))
         if "clim" not in kwargs:
@@ -3568,10 +3823,10 @@ class STRF(Core):
             ax.imshow(np.squeeze(space), origin = "lower", cmap = cmap, **kwargs)
             plt.colorbar(ax.images[0], ax=ax, orientation="vertical")
 
-    def plot_strfs_space(self, roi = None, **kwargs):
+    def plot_strfs_space(self, roi = None, **kwargs: Any):
         return pygor.strf.plotting.simple.plot_collapsed_strfs(self, **kwargs)
 
-    def plot_peaktime_strfs(self, roi=None, **kwargs):
+    def plot_peaktime_strfs(self, roi=None, **kwargs: Any):
         """Plot raw peak timing values for each ROI.
 
         Shows when each pixel's response peaked (absolute time, no centering).
@@ -3579,7 +3834,7 @@ class STRF(Core):
         """
         return pygor.strf.plotting.simple.plot_peaktime_strfs(self, roi=roi, **kwargs)
 
-    def plot_deltatime_strfs(self, roi=None, **kwargs):
+    def plot_deltatime_strfs(self, roi=None, **kwargs: Any):
         """Plot relative timing differences for each ROI.
 
         Shows timing differences relative to each ROI's weighted median,
@@ -3588,7 +3843,7 @@ class STRF(Core):
         """
         return pygor.strf.plotting.simple.plot_deltatime_strfs(self, roi=roi, **kwargs)
 
-    def plot_chromatic_overview(self, roi = None, contours = False, with_times = False, colour_idx=None, **kwargs):
+    def plot_chromatic_overview(self, roi = None, contours = False, with_times = False, colour_idx=None, **kwargs: Any):
         """
         Plot comprehensive chromatic overview of STRFs showing spatial and temporal components.
         
@@ -3627,7 +3882,7 @@ class STRF(Core):
             warnings.simplefilter("always")
             return pygor.strf.plotting.advanced.chroma_overview(self, roi, contours=contours, with_times=with_times, colour_idx=colour_idx, **kwargs)
 
-    def play_strf(self, roi, dur_s = None, **kwargs):
+    def play_strf(self, roi, dur_s = None, **kwargs: Any):
         if dur_s is None:
             dur_s = self.strf_dur_ms/1000
         if isinstance(roi, tuple):
@@ -3639,7 +3894,7 @@ class STRF(Core):
             anim = pygor.plotting.play_movie(np.squeeze(self.strfs[roi]), dur_s = dur_s, **kwargs)
         return anim
 
-    def play_multichrom_strf(self, roi = None, dur_s = None, **kwargs):
+    def play_multichrom_strf(self, roi = None, dur_s = None, **kwargs: Any):
         # anim = pygor.strf.plot.multi_chroma_movie(self, roi, **kwargs)
         if dur_s is None:
             dur_s = self.strf_dur_ms/1000
@@ -3671,7 +3926,7 @@ class STRF(Core):
             joblib.dump(self, outp, compress='zlib')
 
     def to_rgb(self, roi = None, rgb_channels = [0, 1, 3], bgr = True, plot = False, gamma = None, method = "abs",
-            remove_borders = None, **kwargs):
+            remove_borders = None, **kwargs: Any):
         # input_arr = np.squeeze(pygor.utilities.multicolour_reshape(self.collapse_times(), self.numcolour))[:, roi]
         def _fetch_data(roi):
             # start_index = roi + (roi * self.numcolour)
@@ -3704,8 +3959,8 @@ class STRF(Core):
             axs.flat[1].plot(rgu_arr.reshape(-1, 1, order = "f"), alpha = 1, label = "RGU")
             axs.flat[1].plot(rgb_arr.reshape(-1, 1, order = "f"), alpha = 0.5, label = "RGB")
             axs.flat[1].legend()
-            axs.flat[2].imshow(rgb_arr)
-            axs.flat[3].imshow(rgu_arr)
+            axs.flat[2].imshow(rgb_arr, origin="lower")
+            axs.flat[3].imshow(rgu_arr, origin="lower")
             plt.show()
             return None
         if roi is None:
@@ -3716,7 +3971,7 @@ class STRF(Core):
             else:
                 return np.array([_run(self, i) for i in roi])
     
-    def play_strf_rgb(self, roi, channel = "All", method = "grey_centered", plot = True,**kwargs):
+    def play_strf_rgb(self, roi, channel = "All", method = "grey_centered", plot = True,**kwargs: Any):
         ## Generate RGB movie
         if channel == "All":
             num_channels = self.numcolour
@@ -3810,7 +4065,7 @@ class STRF(Core):
         index = [selectivity_sparseness(i) for i in tunings]
         return index
 
-    def cs_seg(self, roi = None, plot = False, force_recompute = False, **kwargs):
+    def cs_seg(self, roi = None, plot = False, force_recompute = False, **kwargs: Any):
         if plot is False:
             if force_recompute is True:
                 maps, times =  pygor.strf.centsurr.run_object(self, **kwargs)
@@ -3917,7 +4172,7 @@ class STRF(Core):
         sums = np.where(sums == 0, np.nan, sums)
         return sums
 
-    def get_seg_centres(self, roi = None, label = 0, weighted = True, weighting_exp = 3, channel_reshape = False,**kwargs):
+    def get_seg_centres(self, roi = None, label = 0, weighted = True, weighting_exp = 3, channel_reshape = False,**kwargs: Any):
         cmaps, _ = self.cs_seg(**kwargs)
         centres_list = []
         for n, segmap in enumerate(cmaps):
@@ -4319,17 +4574,17 @@ class STRF(Core):
         return vectors['magnitude']
 
     
-    def get_centre_surr_x(self, **kwargs):
+    def get_centre_surr_x(self, **kwargs: Any):
         return self.calc_centre_surr_vectors(**kwargs)['dx']
     
-    def get_centre_surr_y(self, **kwargs):
+    def get_centre_surr_y(self, **kwargs: Any):
         return self.calc_centre_surr_vectors(**kwargs)['dy']
 
     def demo_cs_seg(self, roi):
         _ = self.cs_seg(roi, plot = True, segmentation_params = {"plot_demo": True})
         plt.show()
 
-    def convolve_with_img(self, roi, img = "example", plot = False, xrange = None, auto_crop = True, auto_crop_thresh = 3, yrange = None, **kwargs):
+    def convolve_with_img(self, roi, img = "example", plot = False, xrange = None, auto_crop = True, auto_crop_thresh = 3, yrange = None, **kwargs: Any):
         from pygor.strf import convolve
         if roi is None:
             raise ValueError("ROI must be supplied")
@@ -4530,12 +4785,12 @@ class STRF(Core):
             collapse_method=collapse_method, figsize=figsize
         )
 
-    def calculate_strf(self, noise_array, sta_past_window=2.0, sta_future_window=2.0,
-                    n_colours=1, n_triggers_per_colour=None, edge_crop=2,
-                    max_frames_per_trigger=8, event_sd_threshold=2.0,
-                    use_znorm=True, adjust_by_polarity=True,
-                    skip_first_triggers=0, skip_last_triggers=0,
-                    pre_smooth=0, roi=None, n_jobs=1, normalize_strfs=True, verbose=False, **kwargs):
+    def calculate_strf(self, noise_array: np.ndarray, sta_past_window: float = 2.0, sta_future_window: float = 2.0,
+                    n_colours: int = 1, n_triggers_per_colour: int | None = None, edge_crop: int = 2,
+                    max_frames_per_trigger: int = 8, event_sd_threshold: float = 2.0,
+                    use_znorm: bool = True, adjust_by_polarity: bool = True,
+                    skip_first_triggers: int = 0, skip_last_triggers: int = 0,
+                    pre_smooth: int = 0, roi: int | None = None, n_jobs: int = 1, normalize_strfs: bool = True, verbose: bool = False, **kwargs: Any):
         """
         Calculate spike-triggered averages (STRFs) for all ROIs and colour channels.
         
@@ -4685,6 +4940,9 @@ class STRF(Core):
         strfs_reordered = np.transpose(strfs_calc, (1, 0, 2, 3, 4))  # (n_rois, n_colours, time, x, y)
         self.strfs = strfs_reordered.reshape(n_rois_calc * n_colours_calc, n_time, n_x, n_y)
 
+        # Invalidate all caches that depend on self.strfs
+        self._invalidate_strf_caches()
+
         # Update other internal attributes
         self.num_strfs = len(self.strfs)
         self.numcolour = n_colours_calc
@@ -4830,7 +5088,7 @@ class STRF(Core):
         
         return selected_timecourses#, top_indices, selected_amplitudes
 
-    def napari_strfs(self, **kwargs):
+    def napari_strfs(self, **kwargs: Any):
         import pygor.strf.gui.methods as gui
         napari_session = gui.NapariSession(self)
         return napari_session.run()
@@ -4898,7 +5156,7 @@ def calculate_spatiotemporal_correlation(strf_obj, roi=None, method='pearson'):
 
 def _create_by_channel_method(method_name):
     """Create a _by_channel wrapper that applies multicolour reshaping."""
-    def by_channel_wrapper(self, ch_idx=None, **kwargs):
+    def by_channel_wrapper(self, ch_idx=None, **kwargs: Any):
         result = getattr(self, method_name)(**kwargs)
         reshaped = pygor.utilities.multicolour_reshape(result, self.numcolour)
         
