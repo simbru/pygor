@@ -1,22 +1,25 @@
-from typing import Any
 import pathlib
 import warnings
+from typing import Any
 
 try:
     from collections.abc import Iterable
 except ImportError:
     from collections import Iterable
-from IPython.core import display
+import contextlib
+import shutil
+
 import joblib
+from IPython.core import display
+from ipywidgets import Output
 
 # from tqdm.autonotebook import tqdm
 from tqdm.auto import tqdm
-from ipywidgets import Output
-import shutil
-import contextlib
 
 
-def find_files_in(filetype_ext_str, dir_path, recursive=False, **kwargs: Any) -> list:
+def find_files_in(
+    filetype_ext_str, dir_path, recursive=False, **kwargs: Any
+) -> list[str]:
     """
     Searches the specified directory for files with the specified file extension.
 
