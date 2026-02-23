@@ -1,3 +1,4 @@
+from typing import Any
 from pygor.classes.core_data import Core
 from dataclasses import dataclass, field
 import numpy as np
@@ -1475,7 +1476,7 @@ class OSDS(Core):
                                        metric=None, trace_scale=0.25, minimal=True, 
                                        polar_color=None, trace_alpha=0.7, use_phases=None, 
                                        phase_colors=None, orbit_distance=0.5, trace_aspect_x=1.0, 
-                                       trace_aspect_y=1.0, separate_phase_axes=False, **kwargs):
+                                       trace_aspect_y=1.0, separate_phase_axes=False, **kwargs: Any):
         """
         Plot tuning function with floating trace snippets in external axes.
         

@@ -7,6 +7,7 @@ Claude Code + Github Copilot assisted development
 All outputs verified against IGOR-outputs within 0.095-1.03 similarity ratios
 """
 
+from typing import Any
 import numpy as np
 import warnings
 from scipy.signal import correlate
@@ -219,7 +220,7 @@ def calculate_calcium_correlated_average(strf_obj, noise_array, sta_past_window=
                                                 max_frames_per_trigger=8, event_sd_threshold=2.0,
                                                 use_znorm=True, adjust_by_polarity=True,
                                                 skip_first_triggers=0, skip_last_triggers=0,
-                                                pre_smooth=0, roi=None, n_jobs=1, verbose=True, **kwargs):
+                                                pre_smooth=0, roi=None, n_jobs=1, verbose=True, **kwargs: Any):
     """
     Calculate spike-triggered averages (STRFs) - IGOR-equivalent calculations with substantial performance improvements.
     

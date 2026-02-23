@@ -1,3 +1,4 @@
+from typing import Any
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -21,7 +22,7 @@ from . import custom
 from scipy import stats
 
 
-def _legacy_play_movie(d3_arr, **kwargs):
+def _legacy_play_movie(d3_arr, **kwargs: Any):
     if d3_arr.ndim != 3:
         raise AttributeError(
             "Array passed to function is not three dimensional (3D). Shape should be: (time,x,y)"
@@ -59,7 +60,7 @@ def _legacy_play_movie(d3_arr, **kwargs):
     interact(update_plots, frame=play)
 
 
-def contouring_demo(arr_3d, level=None, display_time=True, returns=False, **kwargs):
+def contouring_demo(arr_3d, level=None, display_time=True, returns=False, **kwargs: Any):
     # Collapse time to give us 2d representation
     arr_3d_collapsed = pygor.strf.spatial.collapse_3d(arr_3d, zscore=False)
     # Extract content from masks

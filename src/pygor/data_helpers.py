@@ -1,3 +1,4 @@
+from typing import Any
 from math import nan
 import numpy as np
 import datetime
@@ -235,9 +236,9 @@ def post_process_strf_all(arr_4d, correct_rotation=True, zscore=True):
 
 
 def label_from_str(
-    input_str, search_terms, label=None, split_by="_", kick_suffix=True, **kwargs
+    input_str, search_terms, label=None, split_by="_", kick_suffix=True, **kwargs: Any
 ):
-    def _decide_output_if_nomatch(**kwargs):
+    def _decide_output_if_nomatch(**kwargs: Any):
         # In some cases we might want to return a specific thing if no matches are found
         if "else_return" in kwargs:
             return kwargs["else_return"]
@@ -245,7 +246,7 @@ def label_from_str(
         else:
             return np.nan
 
-    def _final_check(input_str, search_terms, **kwargs):
+    def _final_check(input_str, search_terms, **kwargs: Any):
         if hasattr(search_terms, "__iter__") is True:
             terms_found = []
             for term in search_terms:

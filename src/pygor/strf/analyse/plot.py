@@ -2,6 +2,7 @@ try:
     from collections import Iterable
 except:
     from collections.abc import Iterable
+from typing import Any
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -679,7 +680,7 @@ def plot_roi_hist(
     ax=None,
     legend=True,
     main_ax="x",
-    **kwargs,
+    **kwargs: Any,
 ):
     """This function `plot_roi_hist` creates histograms of a specified statistic within regions of interest
     (ROIs) based on different categories such as color or polarity.
@@ -934,7 +935,7 @@ def ipl_summary_polarity_chroma(
 
 
 def _multi_vs_single_vert(
-    df, metric, subset_list, colour=None, labels=None, **kwargs
+    df, metric, subset_list, colour=None, labels=None, **kwargs: Any
 ) -> (plt.figure, plt.axis):
     # Generate filtered dataframe by metric
     metric_df = df.filter(like=metric)
@@ -1046,7 +1047,7 @@ def _multi_vs_single_vert(
 
 
 def _multi_vs_single_horz(
-    df, metric, subset_list, colour=None, labels=None, **kwargs
+    df, metric, subset_list, colour=None, labels=None, **kwargs: Any
 ) -> (plt.figure, plt.axis):
     # Generate filtered dataframe by metric
     metric_df = df.filter(like=metric)
@@ -1159,7 +1160,7 @@ def _multi_vs_single_horz(
 
 
 def plot_multi_vs_single(
-    df, metric, subset_list, orientation="v", labels=None, **kwargs
+    df, metric, subset_list, orientation="v", labels=None, **kwargs: Any
 ):
     if orientation == "v" or orientation == "vertical":
         _multi_vs_single_vert(df, metric, subset_list, **kwargs)

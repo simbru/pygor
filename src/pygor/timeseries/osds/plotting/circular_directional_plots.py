@@ -1,3 +1,4 @@
+from typing import Any
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -363,7 +364,7 @@ def plot_tuning_function_with_traces(osds_obj, roi_index, ax=None, show_trials=T
                                     metric='peak', trace_scale=0.2, minimal=True, 
                                     polar_color="#3D3AC4", trace_alpha=1, use_phases=None, 
                                     phase_colors=None, orbit_distance=0.5, trace_aspect_x=1.0, 
-                                    trace_aspect_y=1.0, separate_phase_axes=False, **kwargs):
+                                    trace_aspect_y=1.0, separate_phase_axes=False, **kwargs: Any):
     """
     Plot tuning function with floating trace snippets in external axes.
     Designed for poster presentations with clean, minimal styling.

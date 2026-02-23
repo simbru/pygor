@@ -3,6 +3,7 @@ Clean clustering module for RF analysis
 Integrates with the melting framework for flexible column selection
 """
 
+from typing import Any
 from matplotlib import rcParams
 import pandas as pd
 import numpy as np
@@ -432,7 +433,7 @@ def _relabel_clusters_by_ipl_depth(clustered_data, verbose=False):
     return result
 
 def apply_clustering(data, method='kmeans', n_clusters=5, random_state=42, 
-                    use_pca=False, n_components=None, **kwargs):
+                    use_pca=False, n_components=None, **kwargs: Any):
     """
     Apply clustering algorithm to prepared data.
     
@@ -1342,7 +1343,7 @@ def verify_rf_averaging(df_with_clusters, experiment_obj, cluster_averages, clus
             if i == 0:
                 # Show average using your RGB composite function for direct comparison
                 rgb_data = create_rgb_composite(averaged_rf, [0, 1, 2])  # RGB composite [0,1,2]
-                axes[0, i].imshow(rgb_data)  # No clim - auto equalize like in your overview
+                axes[0, i].imshow(rgb_data, origin='lower')  # No clim - auto equalize like in your overview
                 axes[0, i].set_title(f'AVERAGE\n(n={n_rois})')
                 axes[0, i].axis('off')
                 
@@ -3401,7 +3402,7 @@ def generate_clustering_quality_table(clustered_data, feature_patterns=None, clu
 # Convenience function that combines everything
 def cluster_rf_data(df, feature_patterns, method='kmeans', n_clusters=5, random_state=42,
                    id_vars=None, scale=True, scaling_method='standard', show_elbow=True, 
-                   show_embedding=None, show_silhouette=False, **kwargs):
+                   show_embedding=None, show_silhouette=False, **kwargs: Any):
     """
     Complete clustering workflow for RF data.
     

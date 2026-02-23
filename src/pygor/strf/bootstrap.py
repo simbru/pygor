@@ -1,3 +1,4 @@
+from typing import Any
 import numpy as np  #
 import matplotlib.pyplot as plt
 import warnings
@@ -96,7 +97,7 @@ def bootstrap_time(
     plot=False,
     parallel=True,
     seed=111,
-    **kwargs,
+    **kwargs: Any,
 ):
     if np.ma.is_masked(arr_3d):
         with warnings.catch_warnings():
@@ -218,7 +219,7 @@ def bootstrap_space(
     plot=False,
     parallel=True,
     seed=111,
-    **kwargs,
+    **kwargs: Any,
 ):  # these metrics work so leave them
     """
     Perform a spatial permutation test to compute p-value for a given metric on the spatial data.
@@ -240,7 +241,7 @@ def bootstrap_space(
     plot : bool, optional
         If True, plot a histogram of permuted test statistics (default is False).
 
-    **kwargs
+    **kwargs: Any
         Additional arguments to customize the plot, such as 'binsize' to specify the number of bins in the histogram.
 
     Returns

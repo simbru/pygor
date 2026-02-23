@@ -1,3 +1,4 @@
+from typing import Any
 import pathlib
 import warnings
 
@@ -15,7 +16,7 @@ import shutil
 import contextlib
 
 
-def find_files_in(filetype_ext_str, dir_path, recursive=False, **kwargs) -> list:
+def find_files_in(filetype_ext_str, dir_path, recursive=False, **kwargs: Any) -> list:
     """
     Searches the specified directory for files with the specified file extension.
 
@@ -88,7 +89,7 @@ def find_files_in(filetype_ext_str, dir_path, recursive=False, **kwargs) -> list
     return paths
 
 
-def _load_parser(file_path, as_class=None, **kwargs):
+def _load_parser(file_path, as_class=None, **kwargs: Any):
     """
     Parse and load data from a file based on its file type.
 
@@ -130,7 +131,7 @@ def _load_parser(file_path, as_class=None, **kwargs):
     return loaded
 
 
-def load(file_path, as_class=None, **kwargs):
+def load(file_path, as_class=None, **kwargs: Any):
     """
     Loads data from a file specified by `file_path` using a given class or default parser.
 
@@ -159,7 +160,7 @@ def tqdm_joblib(tqdm_object):
     """
 
     class TqdmBatchCompletionCallback(joblib.parallel.BatchCompletionCallBack):
-        def __call__(self, *args, **kwargs):
+        def __call__(self, *args, **kwargs: Any):
             tqdm_object.update(n=self.batch_size)
             return super().__call__(*args, **kwargs)
 
@@ -173,7 +174,7 @@ def tqdm_joblib(tqdm_object):
 
 
 def load_list(
-    paths_list, as_class=None, parallel=True, **kwargs
+    paths_list, as_class=None, parallel=True, **kwargs: Any
 ) -> list[pathlib.WindowsPath]:
     """
     Converts a list of paths to a list of objects, optionally using a specified class for instantiation
@@ -235,7 +236,7 @@ def load_list(
     return objects_list
 
 
-def _load_and_save(file_path, output_folder, as_class, **kwargs):
+def _load_and_save(file_path, output_folder, as_class, **kwargs: Any):
     """
     Load data from the specified file and save it to the given output folder using the provided class.
 
@@ -306,7 +307,7 @@ def load_pkl(full_path):
         return object
 
 
-def picklestore_objects(file_paths, output_folder, **kwargs):
+def picklestore_objects(file_paths, output_folder, **kwargs: Any):
     """
     Pickle store objects from given file paths to the specified output folder.
 
@@ -342,7 +343,7 @@ def picklestore_objects(file_paths, output_folder, **kwargs):
                 out.clear_output()
 
 
-def pickleload_objects(file_paths, **kwargs):
+def pickleload_objects(file_paths, **kwargs: Any):
     """
     Load pickle objects from given file paths to the specified output folder.
 

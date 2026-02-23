@@ -1,3 +1,4 @@
+from typing import Any
 import warnings
 import matplotlib.pyplot as plt
 import numpy as np
@@ -612,7 +613,7 @@ def tiling(
     chromatic=False,
     x_lim=None,
     y_lim=None,
-    **kwargs,
+    **kwargs: Any,
 ):
     """
     Visualizes the tiling of spectro-temporal receptive fields (STRFs).
@@ -806,7 +807,7 @@ def tiling(
     # plt.savefig(r"C:\Users\SimenLab\OneDrive\Universitet\PhD\Conferences\Life Sciences PhD Careers Symposium 2023\RF_tiling.svg")
 
 
-def multi_chroma_movie(strf_object, roi, show_cbar=False, **kwargs):
+def multi_chroma_movie(strf_object, roi, show_cbar=False, **kwargs: Any):
     # This is way more efficient than the legacy version and does not rely on ipywidgets
     # https://stackoverflow.com/questions/39472017/how-to-animate-the-colorbar-in-matplotlib
 
@@ -844,7 +845,7 @@ def spatial_colors(d3_srf_arr):
 
 
 def spacetime_plot(
-    strf_arr, slice_along="y", avg_sides=3, ax=None, cmap=None, clim=None, **kwargs
+    strf_arr, slice_along="y", avg_sides=3, ax=None, cmap=None, clim=None, **kwargs: Any
 ):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

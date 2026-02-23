@@ -1,3 +1,4 @@
+from typing import Any
 from math import e
 import numpy as np
 from scipy import signal
@@ -351,7 +352,7 @@ def decay_time(csn_times):
     decay_time_s = calculate_decay_time(csn_times[1])
     return decay_time_c, decay_time_s
 
-def gen_stats(strfs_obj, colour_list = ["R", "G", "B", "UV"], **kwargs):
+def gen_stats(strfs_obj, colour_list = ["R", "G", "B", "UV"], **kwargs: Any):
     """
     Generate statistics on a list of STRF arrays.
 

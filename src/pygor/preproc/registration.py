@@ -23,7 +23,7 @@ Note this module is largely written by Claude Code but heavily vetted by me(:
 
 import numpy as np
 import warnings
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Any
 from concurrent.futures import ThreadPoolExecutor
 import os
 
@@ -584,7 +584,7 @@ def transfer_rois(
     return shifted_mask, transform
 
 
-def transfer_rois_between(source, target, *, plot: bool = False, **kwargs) -> dict:
+def transfer_rois_between(source, target, *, plot: bool = False, **kwargs: Any) -> dict:
     """
     Transfer ROIs from source data object to target data object.
 

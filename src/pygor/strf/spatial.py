@@ -2,6 +2,7 @@
 Tools for determining spatial properties of STRFs
 """
 
+from typing import Any
 import numpy as np
 import numpy.ma as ma
 #import math
@@ -328,7 +329,7 @@ def corr_spacetime(arr_3d, convolve = True, kernel_width = 3, kernel_depth = 5,
         corr_arr = prod_funct(arr_3d, axis = 0)
     return corr_arr
 
-def collapse_3d(arr_3d, zscore=True, **kwargs):
+def collapse_3d(arr_3d, zscore=True, **kwargs: Any):
     """Collapses a 3D array by applying spatial-temporal correlation and polarity.
 
     This function takes in a 3D array and collapses it by multiplying the result
@@ -410,7 +411,7 @@ def polarity_2d(arr_2d):
         pol = 1
     return pol
 
-def rf_mask2d(arr_3d, axis = 0, level = None, mode = collapse_3d, **kwargs):
+def rf_mask2d(arr_3d, axis = 0, level = None, mode = collapse_3d, **kwargs: Any):
     """
     Generate a masked array for a 2D array representing a receptive field (RF).
     
@@ -493,7 +494,7 @@ def rf_mask2d(arr_3d, axis = 0, level = None, mode = collapse_3d, **kwargs):
 #     arr = np.ma.array((neg_masked, pos_masked))
 #     return arr
 
-def rf_mask3d(arr_3d, axis = 0, level = None, mode = collapse_3d, **kwargs):
+def rf_mask3d(arr_3d, axis = 0, level = None, mode = collapse_3d, **kwargs: Any):
     """
     Generate a mask for a 3D array representing a spatio-temporal receptive field (STRFs).
     

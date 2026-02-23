@@ -1,4 +1,5 @@
 # Dependencies
+from typing import Any
 from dataclasses import dataclass
 from dataclasses import field
 
@@ -113,7 +114,7 @@ class Experiment:
                 def _tqdm_joblib(tqdm_bar):
                     """Context manager to patch joblib for tqdm progress."""
                     class _TqdmCallback(joblib.parallel.BatchCompletionCallBack):
-                        def __call__(self, *args, **kwargs):
+                        def __call__(self, *args, **kwargs: Any):
                             tqdm_bar.update(n=self.batch_size)
                             return super().__call__(*args, **kwargs)
                     old_callback = joblib.parallel.BatchCompletionCallBack
@@ -291,7 +292,7 @@ class Experiment:
         
         self.__exp_forgetter__(indices)
 
-    def fetch_all(self, key: str, **kwargs):
+    def fetch_all(self, key: str, **kwargs: Any):
         all_collated = []
         for i in self.recording:
             requested_attr = getattr(i, key)
@@ -649,7 +650,7 @@ class Experiment:
         prefix = f"{base_key}_"
         return any(key.startswith(prefix) for key in results.keys())
 
-    def fetch_raw(self, method, **kwargs):
+    def fetch_raw(self, method, **kwargs: Any):
         """
         Fetch raw results from all recordings without any transformations.
 
@@ -705,7 +706,7 @@ class Experiment:
                 results.append(None)
         return results
 
-    def fetch_concat(self, method, type_filter=None, axis=0, **kwargs):
+    def fetch_concat(self, method, type_filter=None, axis=0, **kwargs: Any):
         """
         Fetch and concatenate results from recordings into a single array.
 
@@ -825,7 +826,7 @@ class Experiment:
             
         return(np.vstack(rows))
 
-    def run(self, method, **kwargs):
+    def run(self, method, **kwargs: Any):
         """
         Run a method on each recording in the experiment.
 

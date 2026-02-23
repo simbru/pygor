@@ -1,4 +1,5 @@
 
+from typing import Any
 import numpy as np
 import skimage.filters
 import matplotlib.pyplot as plt
@@ -10,7 +11,7 @@ min_targets =     5
 min_hole_size =   3
 min_object_size = min_targets
 
-def _detect_targets(spatial_filter, thresh_value = global_thresh_val, min_targets = min_targets, result_plot = False, **kwargs):
+def _detect_targets(spatial_filter, thresh_value = global_thresh_val, min_targets = min_targets, result_plot = False, **kwargs: Any):
     """
     Detect targets based on the spatial filter values and return the indices of the detected targets.
     In short, the algorithm detects targets over the given threshold value on the first pass. On the 
@@ -56,7 +57,7 @@ def _detect_targets(spatial_filter, thresh_value = global_thresh_val, min_target
         detected_targets = []
     return detected_targets
 
-def _gen_filter_mask(spatial_filter, thresh_value = global_thresh_val, min_hole_size = min_hole_size, min_object_size = min_object_size, result_plot = False, **kwargs):
+def _gen_filter_mask(spatial_filter, thresh_value = global_thresh_val, min_hole_size = min_hole_size, min_object_size = min_object_size, result_plot = False, **kwargs: Any):
     """
     Generate a binary mask based on spatial filtering of detected targets. This is the third pass 
     of the target detection algorithm. In short, the algorithm removes small holes and objects
@@ -121,7 +122,7 @@ def _gen_filter_mask(spatial_filter, thresh_value = global_thresh_val, min_hole_
         # ax[2].imshow(mask)
     return mask
 
-def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1, result_plot = False, **kwargs):
+def _fit_filter_contour(spatial_filter_mask, gauss_sigma = 1, result_plot = False, **kwargs: Any):
     """
     This function applies a Gaussian filter to the input binary mask to smooth 
     it. Then, it finds the contours of the smoothed mask. Optionally, it can 
@@ -243,7 +244,7 @@ def bipolar_mask(spatial_filter, abs_thresh_val = global_thresh_val, result_plot
         ax[1].imshow(pos_mask, origin = "lower")
     return neg_mask, pos_mask
 
-def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, result_plot = False, ax = None, **kwargs):
+def bipolar_contour(spatial_filter, abs_thresh_val = global_thresh_val, result_plot = False, ax = None, **kwargs: Any):
     """
     Processes a spatial filter mask to segment and contour areas based on polarity.
 

@@ -1,3 +1,4 @@
+from typing import Any
 import matplotlib.pyplot as plt
 import matplotlib as mlp
 import seaborn as sns
@@ -297,7 +298,7 @@ def stats_summary(
     scatter=True,
     figsize=None,
     figsize_scaler=2,
-    **kwargs,
+    **kwargs: Any,
 ):
     # # Vizualize n clusters
     clust_labels = natsort.natsorted(
@@ -357,7 +358,7 @@ def _imshow_spatial_reconstruct(
     parallel=None,
     x_crop=(None, None),
     y_crop=(None, None),
-    **kwargs,
+    **kwargs: Any,
 ):
     # Figure out how many columns we need
     chromatic_cols = df.filter(regex=r"_\d").columns
@@ -392,7 +393,7 @@ def _imshow_spatial_reconstruct(
 
 
 def _plot_temporal_reconstruct(
-    df, cluster_id_str, axs=None, parallel=None, scalebar=False, **kwargs
+    df, cluster_id_str, axs=None, parallel=None, scalebar=False, **kwargs: Any
 ):
     # Figure out how many columns we need
     chromatic_cols = df.filter(regex=r"_\d").columns
@@ -428,7 +429,7 @@ def _plot_temporal_reconstruct_stack(
     parallel=True,
     drop_surround=True,
     scalebar=False,
-    **kwargs,
+    **kwargs: Any,
 ):
     # Figure out how many columns we need
     chromatic_cols = df.filter(regex=r"_\d").columns
@@ -453,7 +454,7 @@ def _plot_temporal_reconstruct_stack(
         pygor.plotting.add_scalebar(2.5, ax=axs, flip_text=True, x=1, line_width=5)
 
 
-def _imshow_temporal_reconstruct(df, cluster_id_str, axs=None, parallel=None, **kwargs):
+def _imshow_temporal_reconstruct(df, cluster_id_str, axs=None, parallel=None, **kwargs: Any):
     # Figure out how many columns we need
     chromatic_cols = df.filter(regex=r"_\d").columns
     unique_wavelengths = list(np.unique([i.split("_")[-1] for i in chromatic_cols]))
@@ -489,7 +490,7 @@ def plot_spatial_reconstruct(
     parallel=True,
     x_crop=(None, None),
     y_crop=(None, None),
-    **kwargs,
+    **kwargs: Any,
 ):
     if cluster_id_strings is None:
         cluster_id_strings = natsort.natsorted(
@@ -887,7 +888,7 @@ def cluster_bubbles(
     ax=None,
     simple_titles=True,
     legend=True,
-    **kwargs,
+    **kwargs: Any,
 ):
     # Generate plot
     # if col_wrap is not None:
