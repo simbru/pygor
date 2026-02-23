@@ -1,3 +1,4 @@
+from typing import Any
 from re import S
 import numpy as np
 from numpy import ma
@@ -69,7 +70,7 @@ def segmentation_algorithm(
     crop_time=None,
     on_pcs=True,
     kick_surr_pix = None,
-    **kwargs,
+    **kwargs: Any,
 ):
     
     """
@@ -188,18 +189,18 @@ def segmentation_algorithm(
         colormap = plt.cm.tab10  # Use the entire Set1 colormap
         cmap = plt.cm.colors.ListedColormap([colormap(i) for i in range(num_clusts)])
         space_repr = pygor.strf.spatial.collapse_3d(original_input)
-        ax[0].imshow(space_repr, cmap = "RdBu", clim = (-np.max(np.abs(space_repr)), np.max(np.abs(space_repr))))
+        ax[0].imshow(space_repr, cmap = "RdBu", clim = (-np.max(np.abs(space_repr)), np.max(np.abs(space_repr))), origin="lower")
         if amplitude_boost is True:
             std_repr = space_repr * fit_on_std.reshape(space_repr.shape)
-            ax[1].imshow(std_repr, cmap="RdBu", clim = (-np.max(np.abs(std_repr)), np.max(np.abs(std_repr))))
+            ax[1].imshow(std_repr, cmap="RdBu", clim = (-np.max(np.abs(std_repr)), np.max(np.abs(std_repr))), origin="lower")
         ax[2].plot(original_input.reshape(original_shape[0], -1), alpha=0.05, c="black")
         ax[3].plot(inputdata_reshaped, alpha=0.05, c="black")
         ax[4].plot(fit_on.T, alpha=0.05, c="black")
         # top_3 = np.argsort(np.std(prediction_times, axis=1))[-2:]
         # ax[4].plot(prediction_times[top_3].T)
         ax[5].plot(prediction_times.T)
-        ax[6].imshow(pygor.strf.spatial.collapse_3d(inputdata_3d), cmap="Greys_r")
-        ax[6].imshow(prediction_map, cmap=cmap, alpha=0.25)
+        ax[6].imshow(pygor.strf.spatial.collapse_3d(inputdata_3d), cmap="Greys_r", origin="lower")
+        ax[6].imshow(prediction_map, cmap=cmap, alpha=0.25, origin="lower")
         titles = [
             "Space_collapse",
             "Space_collapse * amp boost",
@@ -872,7 +873,7 @@ def insert_border_zone(segmented_map, border_width=1, centre_label=0, surround_l
     return new_map
 
 
-def cs_segment_demo(inputdata_3d, **kwargs):
+def cs_segment_demo(inputdata_3d, **kwargs: Any):
     segmentation_algorithm(inputdata_3d, plot_demo=True, **kwargs)
 
 def run(d3_arr, plot=False, 
@@ -1230,7 +1231,7 @@ def gen_cmap(colormap = plt.cm.tab10, num = 3):
 #         times.append(ctimes)
 #     return [maps, times]
 
-def run_object(self, roi = None, plot_params = None, **kwargs):
+def run_object(self, roi = None, plot_params = None, **kwargs: Any):
     if roi is None:
         roi = np.arange(self.strfs_no_border.shape[0])
     if isinstance(roi, Iterable) is False:

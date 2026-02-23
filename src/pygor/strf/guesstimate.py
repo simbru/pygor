@@ -95,7 +95,7 @@ def estimate_rf_mask_metrics(strf_object, sanity_plot=False):
         smart_radius = np.sqrt(smart_sizes / np.pi)
 
     if sanity_plot == True:
-        plt.imshow(combine_masks[0])
+        plt.imshow(combine_masks[0], origin="lower")
         plt.colorbar()
         plt.scatter(coms[:, 1], coms[:, 0], c="blue")
         plt.scatter(nanmean[1], nanmean[0], c="red")

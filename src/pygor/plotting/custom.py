@@ -1,4 +1,6 @@
+from typing import Any
 import matplotlib
+from matplotlib.pyplot import gray
 
 uv_cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
     "custom_uv", [(0.0, "white"), (1, "violet")]
@@ -68,11 +70,13 @@ violet_map = matplotlib.colors.LinearSegmentedColormap.from_list(
 #     "", ["black", "#ff00ff"]
 # )
 
-maps_concat = [red_map, green_map, blue_map, violet_map]
+gray_map = matplotlib.colors.LinearSegmentedColormap.from_list("", ["black", "silver", "white"])
+
+maps_concat = [red_map, green_map, blue_map, violet_map, gray_map, gray_map]
 
 
 def label_ax_colour(
-    ax, x=0.1, y=0.9, marker="o", colour=fish_palette[0], relative_axis=True, **kwargs
+    ax, x=0.1, y=0.9, marker="o", colour=fish_palette[0], relative_axis=True, **kwargs: Any
 ):
     """The function `label_ax_colour` labels a point on an axis with a marker of a specified color and
     size, allowing for customization of the position and appearance.

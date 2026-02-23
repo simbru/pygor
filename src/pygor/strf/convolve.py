@@ -71,25 +71,25 @@ def convolve_image(strf_obj, roi_index, img = "example", img_zoom = 1/2, arr_zoo
             fig, ax = plt.subplots(4, 4, figsize = (15, 10))
             maxval = np.max(np.abs(arr_list))
             for n, i in enumerate(arr_list):
-                ax[0, n].imshow(i, cmap = ["Reds", "Greens", "Blues", "Purples"][n], clim = (-maxval, maxval))#pygor.plotting.custom.maps_concat[n]
-                ax[2, n].imshow(img[:, :, n], cmap = "Greys_r")#pygor.plotting.custom.maps_concat[n]
-                ax[3, n].imshow(rf_img_conv_output[:, :, n], cmap = "Greys_r")#pygor.plotting.custom.maps_concat[n]
+                ax[0, n].imshow(i, cmap = ["Reds", "Greens", "Blues", "Purples"][n], clim = (-maxval, maxval), origin="lower")#pygor.plotting.custom.maps_concat[n]
+                ax[2, n].imshow(img[:, :, n], cmap = "Greys_r", origin="lower")#pygor.plotting.custom.maps_concat[n]
+                ax[3, n].imshow(rf_img_conv_output[:, :, n], cmap = "Greys_r", origin="lower")#pygor.plotting.custom.maps_concat[n]
             norm_img = np.clip(MinMaxScaler().fit_transform(img.reshape(-1, 1)).reshape(img.shape), 0, 1)
-            ax[1, 0].imshow(norm_img[:, :, :3])
-            ax[1, 1].imshow(norm_img[:, :, :3], zorder = 0)
+            ax[1, 0].imshow(norm_img[:, :, :3], origin="lower")
+            ax[1, 1].imshow(norm_img[:, :, :3], zorder = 0, origin="lower")
             percent_width = arr.shape[1] / img.shape[1] * 100
             percent_heigth = arr.shape[0] / img.shape[0] * 100
             axins = inset_axes(ax[1, 1], width=f"{percent_width}%", height=f"{percent_heigth}%", loc='upper right')
             # Display the inset image
-            axins.imshow(arr_list[0], cmap = "Greys_r", alpha = .7)
+            axins.imshow(arr_list[0], cmap = "Greys_r", alpha = .7, origin="lower")
             axins.set_facecolor('none')
             axins.axis(False)
             if norm_output is True:
                 plot_img = rf_img_conv_output
             else:
                 plot_img = np.clip(MinMaxScaler().fit_transform(rf_img_conv_output.reshape(-1, 1)).reshape(img.shape), 0, 1)
-            ax[1, 2].imshow(plot_img[:, :, :3])
-            ax[1, 3].imshow(plot_img[:, :, [0, 1, -1]])
+            ax[1, 2].imshow(plot_img[:, :, :3], origin="lower")
+            ax[1, 3].imshow(plot_img[:, :, [0, 1, -1]], origin="lower")
             titles = ["R", "G", "B", "UV", "Image", "Image and R", "Convolution RGB", "Convolution RGU", "R ch input", "G ch input", "B ch input", "UV ch input", "R ch output", "G ch output", "B ch output", "UV ch output"]
             for n, cax in enumerate(ax.flat):
                 cax.axis(False)
@@ -97,17 +97,17 @@ def convolve_image(strf_obj, roi_index, img = "example", img_zoom = 1/2, arr_zoo
         if strf_obj.multicolour is False:
             fig, ax = plt.subplots(1, 4, figsize = (10, 5))
             maxval = np.max(np.abs(arr_list[0]))
-            ax[0].imshow(arr_list[0], cmap = "Greys_r", clim = (-maxval, maxval))
-            ax[1].imshow(img[:, :, 0], cmap = "Greys_r")
-            ax[2].imshow(img[:, :, 0], cmap = "Greys_r")
+            ax[0].imshow(arr_list[0], cmap = "Greys_r", clim = (-maxval, maxval), origin="lower")
+            ax[1].imshow(img[:, :, 0], cmap = "Greys_r", origin="lower")
+            ax[2].imshow(img[:, :, 0], cmap = "Greys_r", origin="lower")
             percent_width = arr.shape[1] / img.shape[1] * 100
             percent_heigth = arr.shape[0] / img.shape[0] * 100
             axins = inset_axes(ax[2], width=f"{percent_width}%", height=f"{percent_heigth}%", loc='upper right')
             # Display the inset image
-            axins.imshow(arr_list[0], cmap = "Greys_r", alpha = .7, clim = (-maxval, maxval))
+            axins.imshow(arr_list[0], cmap = "Greys_r", alpha = .7, clim = (-maxval, maxval), origin="lower")
             axins.set_facecolor('none')
             axins.axis(False)
-            ax[3].imshow(rf_img_conv_output[:, :, 0], cmap = "Greys_r")
+            ax[3].imshow(rf_img_conv_output[:, :, 0], cmap = "Greys_r", origin="lower")
             norm_img = np.clip(MinMaxScaler().fit_transform(img.reshape(-1, 1)).reshape(img.shape), 0, 1)
             for cax in ax:
                 cax.axis(False)

@@ -484,7 +484,7 @@ def plot_spatial_alignment(alignment_results, figsize=(15, 10)):
     # Plot individual spatial maps
     for i, (spatial_map, centroid) in enumerate(zip(spatial_maps, centroid_positions)):
         # Individual map
-        im = axes[0, i].imshow(spatial_map, cmap=cmaps[i], aspect='equal')
+        im = axes[0, i].imshow(spatial_map, cmap=cmaps[i], aspect='equal', origin='lower')
         axes[0, i].set_title(f'Color Channel {i}')
         
         # Mark centroid if valid

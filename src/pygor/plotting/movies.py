@@ -1,3 +1,4 @@
+from typing import Any
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.animation
@@ -13,7 +14,7 @@ except ImportError:
 # Local imports
 
 
-def play_movie(d3_arr, dur_s=1.3, figaxim_return=False, clim = None, rgb_repr=False, interval = None, dpi = 100, frameon = False, **kwargs):
+def play_movie(d3_arr, dur_s=1.3, figaxim_return=False, clim = None, rgb_repr=False, interval = None, dpi = 100, frameon = False, **kwargs: Any):
     # This is way more efficient than the legacy version and does not rely on ipywidgets
     # https://stackoverflow.com/questions/39472017/how-to-animate-the-colorbar-in-matplotlib
 
@@ -94,7 +95,7 @@ def play_movie(d3_arr, dur_s=1.3, figaxim_return=False, clim = None, rgb_repr=Fa
 
 
 def play_movie_4d_simple(
-    d4_arr, dur_s=1.3, figaxim_return=False, show_cbar=True, **kwargs
+    d4_arr, dur_s=1.3, figaxim_return=False, show_cbar=True, **kwargs: Any
 ):
     # This is way more efficient than the legacy version and does not rely on ipywidgets
     # https://stackoverflow.com/questions/39472017/how-to-animate-the-colorbar-in-matplotlib
@@ -199,7 +200,7 @@ def play_movie_4d(
     axis=None,
     frameon=False,
     norm_by="input",
-    **kwargs,
+    **kwargs: Any,
 ):
     # This is way more efficient than the legacy version and does not rely on ipywidgets
     # https://stackoverflow.com/questions/39472017/how-to-animate-the-colorbar-in-matplotlib
@@ -232,10 +233,14 @@ def play_movie_4d(
     if norm_by == "input":
         max_abs_val = np.max(np.abs(input_arr))
     # Check attributes and kwargs
+    n_panels = rows * columns
     if "cmap_list" not in kwargs:
-        cmap_list = ["Greys_r"] * rows * columns
+        cmap_list = ["Greys_r"] * n_panels
     else:
-        cmap_list = np.tile(kwargs["cmap_list"], int(input_arr.shape[0] / columns))
+        # Cycle cmap_list to cover all panels regardless of how many channels
+        base = list(kwargs["cmap_list"])
+        reps = (n_panels + len(base) - 1) // len(base)  # ceil division
+        cmap_list = (base * reps)[:n_panels]
     # Use RC context manager to temporarily use the modified rc dict
     with matplotlib.rc_context(rc=plot_settings):
         # Initiate the figure, change themeing to Seaborn, create axes to tie colorbar too (for scaling)
@@ -255,7 +260,7 @@ def play_movie_4d(
             ax.axis("off")
             ax.set_aspect("equal")
             # Plotting
-            im = ax.imshow(input_arr[n, 0], cmap=cmap_list[n])
+            im = ax.imshow(input_arr[n, 0], cmap=cmap_list[n], origin="lower")
             # Equalise the colormap
             im.set_clim(-max_abs_val, max_abs_val)
             # Optional colorbars
@@ -266,7 +271,7 @@ def play_movie_4d(
         if kwargs.get("row_labels") != None:
             # fig.subplots_adjust(right=.8, top=.95, wspace=0, hspace=0)
             fig.set_frameon(True)
-            for label, ax in zip(kwargs.get("row_labels"), axs.flat[::4]):
+            for label, ax in zip(kwargs.get("row_labels"), axs.flat[::columns]):
                 ax.axis("on")
                 ax.spines["top"].set_visible(False)
                 ax.spines["right"].set_visible(False)
