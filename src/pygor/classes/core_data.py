@@ -1,3 +1,5 @@
+from typing import Any, Callable
+from matplotlib.axes import Axes
 from dataclasses import dataclass, field
 
 try:
@@ -71,7 +73,7 @@ def try_fetch_table_params(file, params_key, file_key="OS_Parameters"):
     
 @dataclass
 class Core:
-    filename: str or pathlib.Path
+    filename: str | pathlib.Path
     config: str | pathlib.Path = None  # Optional path to TOML config file
     do_preprocess: bool | dict = False  # Preprocessing options (for ScanM files)
     metadata: dict = field(init=False)
@@ -132,7 +134,15 @@ class Core:
             # check if 0 in rois, if so, set to 1
             if self.rois is not None and np.any(self.rois == 0):
                 self.rois[self.rois == 0] = 1
-            self.num_rois = len(np.unique(self.rois)) - 1
+            if self.rois is not None:
+                self.num_rois = len(np.unique(self.rois)) - 1
+            else:
+                self.num_rois = 0
+                warnings.warn(
+                    f"{self.filename.name}: No 'ROIs' dataset found in H5 file. "
+                    "Was this file exported without ROI segmentation?",
+                    stacklevel=3,
+                )
             self.roi_sizes = try_fetch(HDF5_file, "RoiSizes")
             if self.roi_sizes is not None:
                 self.roi_sizes = self.roi_sizes[:self.num_rois]
@@ -715,7 +725,7 @@ class Core:
         reference_mode: str = None,
         edge_crop: int = None,
         ref_plane: np.ndarray = None,
-        verbose = False,
+        verbose: bool = False,
     ) -> dict:
         """
         Apply motion correction (registration) to images in-place.
@@ -1016,7 +1026,7 @@ class Core:
         self,
         output_path=None,
         overwrite: bool = False,
-    ):
+    ) -> pathlib.Path:
         """
         Export Core data to H5 file.
         
@@ -1047,19 +1057,21 @@ class Core:
             )
         
         with h5py.File(output_path, "w") as f:
-            #  Image data 
+            #  Image data
             # H5 expects (width, height, frames) - transposed from our (frames, height, width)
-            images_t = self.images.transpose(2, 1, 0)
-            # IGOR stores as uint16 (unsigned), matching raw ADC values
-            f.create_dataset("wDataCh0_detrended", data=images_t, dtype=np.uint16)
-            
+            if self.images is not None:
+                images_t = self.images.transpose(2, 1, 0)
+                # IGOR stores as uint16 (unsigned), matching raw ADC values
+                f.create_dataset("wDataCh0_detrended", data=images_t, dtype=np.uint16)
+
             # Trigger channel (if available)
             if hasattr(self, 'trigger_images') and self.trigger_images is not None:
                 trigger_t = self.trigger_images.transpose(2, 1, 0)
                 f.create_dataset("wDataCh2", data=trigger_t, dtype=np.int16)
-            
+
             # Average stack
-            f.create_dataset("Stack_Ave", data=self.average_stack.T, dtype=np.float32)
+            if self.average_stack is not None:
+                f.create_dataset("Stack_Ave", data=self.average_stack.T, dtype=np.float32)
             
             #  ROIs 
             if self.rois is not None:
@@ -1075,65 +1087,73 @@ class Core:
             if self.traces_znorm is not None:
                 f.create_dataset("Traces0_znorm", data=self.traces_znorm.T, dtype=np.float32)
             
-            #  Trigger times 
-            max_triggers = max(len(self.triggertimes_frame) if self.triggertimes_frame is not None else 0, 1000)
-            triggertimes = np.full(max_triggers, np.nan)
-            if self.triggertimes is not None and len(self.triggertimes) > 0:
-                triggertimes[:len(self.triggertimes)] = self.triggertimes
-            f.create_dataset("Triggertimes", data=triggertimes, dtype=np.float64)
+            #  Trigger times
+            if self.triggertimes is not None or self.triggertimes_frame is not None:
+                max_triggers = max(
+                    len(self.triggertimes_frame) if self.triggertimes_frame is not None else 0,
+                    len(self.triggertimes) if self.triggertimes is not None else 0,
+                    1000,
+                )
+                triggertimes = np.full(max_triggers, np.nan)
+                if self.triggertimes is not None and len(self.triggertimes) > 0:
+                    triggertimes[:len(self.triggertimes)] = self.triggertimes
+                f.create_dataset("Triggertimes", data=triggertimes, dtype=np.float64)
+
+                triggertimes_frame = np.full(max_triggers, np.nan)
+                if self.triggertimes_frame is not None and len(self.triggertimes_frame) > 0:
+                    triggertimes_frame[:len(self.triggertimes_frame)] = self.triggertimes_frame
+                f.create_dataset("Triggertimes_Frame", data=triggertimes_frame, dtype=np.float64)
             
-            triggertimes_frame = np.full(max_triggers, np.nan)
-            if self.triggertimes_frame is not None and len(self.triggertimes_frame) > 0:
-                triggertimes_frame[:len(self.triggertimes_frame)] = self.triggertimes_frame
-            f.create_dataset("Triggertimes_Frame", data=triggertimes_frame, dtype=np.float64)
-            
-            #  wParamsStr (date/time metadata) 
-            exp_date = self.metadata["exp_date"]
-            exp_time = self.metadata["exp_time"]
-            date_str = f"{exp_date.year}-{exp_date.month:02d}-{exp_date.day:02d}"
-            time_str = f"{exp_time.hour:02d}-{exp_time.minute:02d}-{exp_time.second:02d}-00"
-            
-            params_str = [""] * 10
-            params_str[4] = date_str
-            params_str[5] = time_str
-            params_str[0] = str(self.filename.stem)
-            
-            dt = h5py.special_dtype(vlen=str)
-            params_str_ds = f.create_dataset("wParamsStr", (len(params_str),), dtype=dt)
-            for i, s in enumerate(params_str):
-                params_str_ds[i] = s.encode("utf-8")
-            
-            #  wParamsNum (XYZ position) 
-            params_num = np.zeros(50, dtype=np.float64)
-            xyz = self.metadata.get("objectiveXYZ", (0, 0, 0))
-            params_num[26] = xyz[0]
-            params_num[27] = xyz[2]
-            params_num[28] = xyz[1]
-            f.create_dataset("wParamsNum", data=params_num, dtype=np.float64)
-            
-            #  OS_Parameters 
-            os_params_keys = [
-                "placeholder",
-                "LineDuration",
-                "nPlanes", 
-                "Trigger_Mode",
-                "Skip_First_Triggers",
-                "Skip_Last_Triggers",
-            ]
-            os_params_values = np.array([
-                0,
-                self.linedur_s,
-                self.n_planes,
-                self.trigger_mode,
-                0,
-                0,
-            ], dtype=np.float64)
-            
-            os_params_ds = f.create_dataset("OS_Parameters", data=os_params_values)
-            os_params_ds.attrs["OS_Parameters"] = np.array(
-                [b"Keys"] + [k.encode() for k in os_params_keys], 
-                dtype=object
-            )
+            #  wParamsStr (date/time metadata)
+            if hasattr(self, 'metadata') and self.metadata is not None:
+                exp_date = self.metadata["exp_date"]
+                exp_time = self.metadata["exp_time"]
+                date_str = f"{exp_date.year}-{exp_date.month:02d}-{exp_date.day:02d}"
+                time_str = f"{exp_time.hour:02d}-{exp_time.minute:02d}-{exp_time.second:02d}-00"
+
+                params_str = [""] * 10
+                params_str[4] = date_str
+                params_str[5] = time_str
+                params_str[0] = str(self.filename.stem)
+
+                dt = h5py.special_dtype(vlen=str)
+                params_str_ds = f.create_dataset("wParamsStr", (len(params_str),), dtype=dt)
+                for i, s in enumerate(params_str):
+                    params_str_ds[i] = s.encode("utf-8")
+
+            #  wParamsNum (XYZ position)
+            if hasattr(self, 'metadata') and self.metadata is not None:
+                params_num = np.zeros(50, dtype=np.float64)
+                xyz = self.metadata.get("objectiveXYZ", (0, 0, 0))
+                params_num[26] = xyz[0]
+                params_num[27] = xyz[2]
+                params_num[28] = xyz[1]
+                f.create_dataset("wParamsNum", data=params_num, dtype=np.float64)
+
+            #  OS_Parameters
+            if hasattr(self, 'linedur_s') and self.linedur_s is not None:
+                os_params_keys = [
+                    "placeholder",
+                    "LineDuration",
+                    "nPlanes",
+                    "Trigger_Mode",
+                    "Skip_First_Triggers",
+                    "Skip_Last_Triggers",
+                ]
+                os_params_values = np.array([
+                    0,
+                    self.linedur_s,
+                    self.n_planes,
+                    self.trigger_mode,
+                    0,
+                    0,
+                ], dtype=np.float64)
+
+                os_params_ds = f.create_dataset("OS_Parameters", data=os_params_values)
+                os_params_ds.attrs["OS_Parameters"] = np.array(
+                    [b"Keys"] + [k.encode() for k in os_params_keys],
+                    dtype=object
+                )
             
             #  Optional data - check for both None and nan
             def _is_valid(attr):
@@ -1214,18 +1234,18 @@ class Core:
 
     def view_stack_projection(
         self,
-        func=np.mean,
-        axis=0,
-        cbar=False,
-        ax=None,
-        figsize=(None, None),
-        figsize_scale=None,
+        func: Callable[..., Any] = np.mean,
+        axis: int = 0,
+        cbar: bool = False,
+        ax: Axes | None = None,
+        figsize: tuple[float | None, float | None] = (None, None),
+        figsize_scale: float | None = None,
         zcrop: tuple = None,
         xcrop: tuple = None,
         ycrop: tuple = None,
-        alpha=0.5,
-        show_axes=False,
-        **kwargs,
+        alpha: float = 0.5,
+        show_axes: bool = False,
+        **kwargs: Any,
     ):
         """
         Display a projection of the image stack using the specified function.
@@ -1312,7 +1332,7 @@ class Core:
         outline_smooth=True,
         outline_width=2,
         roi_indices=None,
-        **kwargs,
+        **kwargs: Any,
     ):
         """
         Display a projection of the image stack using the specified function.
@@ -1552,7 +1572,7 @@ class Core:
         d3[:, :, 0] = base
         d3[:, :, 1] = base1
         d3[:, :, 2] = base2
-        ax.imshow(pygor.utilities.min_max_norm(d3, 0, 1))
+        ax.imshow(pygor.utilities.min_max_norm(d3, 0, 1), origin="lower")
 
     def get_depth(self):
         """
@@ -1586,16 +1606,14 @@ class Core:
         """
         return pygor.core.methods.update_h5_key(self, key, value, overwrite)
     
-    def update_ipl_depths(self, depths=None, overwrite=False):
+    def update_ipl_depths(self, depths=None):
         """
-        Update IPL depths in the H5 file, optionally using interactive depth selection.
+        Update IPL depths on the in-memory object, optionally using interactive depth selection.
 
         Parameters
         ----------
         depths : array-like, optional
             Pre-calculated depths. If None, launches interactive depth selection.
-        overwrite : bool, optional
-            Whether to overwrite existing ipl_depths (default: False)
 
         Returns
         -------
@@ -1608,15 +1626,13 @@ class Core:
                 print("Depth calculation was cancelled or failed.")
                 return False
 
-        success = self.update_h5_key('Positions', depths, overwrite)
-        if success:
-            self.ipl_depths = depths  # Update the object attribute
-            print(f"Successfully updated ipl_depths for {len(depths)} ROIs")
-        return success
+        self.ipl_depths = depths
+        print(f"Successfully updated ipl_depths for {len(depths)} ROIs")
+        return True
 
     def estimate_ipl_depths(self, n_bins=8, upper_percentile=0.0,
                             lower_percentile=100.0, orientation=None,
-                            overwrite=False, save=False, plot=False):
+                            plot=False):
         """Automatically estimate IPL depths from ROI positions without GUI.
 
         Uses percentile-based boundary estimation along the scan axis to
@@ -1633,11 +1649,6 @@ class Core:
             Percentile for the outer (0 %) boundary (default: 95.0).
         orientation : str or None, optional
             ``"horizontal"`` or ``"vertical"``. Auto-detected if None.
-        overwrite : bool, optional
-            Whether to overwrite existing ipl_depths in H5 (default: False).
-        save : bool, optional
-            Whether to save depths to the H5 file (default: False).
-            Call with ``save=True`` explicitly when ready to persist.
         plot : bool, optional
             Whether to show a diagnostic plot with image, boundaries,
             centroids, and depth KDE (default: True).
@@ -1661,8 +1672,6 @@ class Core:
             self.roi_centroids, upper, lower, orientation=orientation,
         )
         self.ipl_depths = depths
-        if save:
-            self.update_h5_key('Positions', depths, overwrite)
         if plot:
             mean_image = np.average(self.images, axis=0)
             plot_ipl_estimation(
@@ -1670,36 +1679,20 @@ class Core:
             )
         return depths
 
-    def update_rois(self, roi_mask, overwrite=True):
+    def update_rois(self, roi_mask):
         """
-        Update ROIs in the H5 file with a pre-defined ROI mask. If overwrite=False,
-        existing ROIs will not be modified. If the object is associated with an H5 file,
-        the 'ROIs' key will be updated accordingly.
+        Update ROIs on the in-memory object.
 
-        For interactive ROI drawing, use draw_rois(overwrite=True) instead.
+        To persist changes to an H5 file, use export_to_h5().
 
         Parameters
         ----------
         roi_mask : array-like
             ROI mask to save (background=1, ROIs=-1,-2,...,-n)
-        overwrite : bool, optional
-            Whether to overwrite existing ROIs (default: False)
-
-        Returns
-        -------
-        bool
-            True if update was successful, False otherwise
         """
-        self.rois = roi_mask  # Update the object attribute
-        self.num_rois = len(np.unique(roi_mask))-1
+        self.rois = roi_mask
+        self.num_rois = len(np.unique(roi_mask)) - 1
         print(f"Successfully updated object.rois: {self.num_rois} ROIs saved")
-
-        # check if object is associated with an H5 file
-        if self.filename.suffix == '.h5' and overwrite:
-            print("Associated H5 file detected, updating 'ROIs' key...")
-            bool = self.update_h5_key('ROIs', roi_mask.T, overwrite=overwrite) #transpose for H5 format
-            if not bool:
-                print("H5 file key 'ROIs'not updated, due to overwrite=False.")
         
     def transfer_rois_from(
         self,
@@ -1806,11 +1799,11 @@ class Core:
         )
 
         # Update self with transferred ROIs
-        self.update_rois(shifted_mask, overwrite=overwrite)
+        self.update_rois(shifted_mask)
 
         # Optionally extract traces
         if extract_traces and self.images is not None:
-            self.extract_traces_from_rois(overwrite=overwrite)
+            self.extract_traces_from_rois()
 
         # Build result dict
         result = {
@@ -1948,7 +1941,7 @@ class Core:
 
         ax.imshow(colored, origin='lower')
 
-    def segment_rois(self, mode="blob", overwrite=True, **kwargs):
+    def segment_rois(self, mode="blob", overwrite=False, **kwargs: Any) -> np.ndarray:
         """
         Segment ROIs using automated methods.
 
@@ -2127,14 +2120,14 @@ class Core:
         """
         from pygor.segmentation import segment_rois as _segment_rois
         roi_mask = _segment_rois(self, mode=mode, overwrite=overwrite, **kwargs)
-        self.update_rois(roi_mask, overwrite=overwrite)
+        self.update_rois(roi_mask)
 
         # Record segmentation in params
         self.params.mark_segmentation({"mode": mode, **kwargs})
 
         return roi_mask
 
-    def view_images_interactive(self, **kwargs):
+    def view_images_interactive(self, **kwargs: Any) -> None:
         """
         View the image stack interactively using Napari.
 
@@ -2146,7 +2139,7 @@ class Core:
         session = pygor.core.gui.methods.NapariViewStack(self, **kwargs)
         session.run()
 
-    def draw_rois(self, attribute = "calculate_image_average", style = "stacked", load_existing_rois=True, overwrite=True, show_correlation=False, **kwargs):
+    def draw_rois(self, attribute = "calculate_image_average", style = "stacked", load_existing_rois=True, overwrite=True, show_correlation=False, **kwargs: Any) -> None:
         """
         Draw ROIs on the image stack.
 
@@ -2165,7 +2158,7 @@ class Core:
         **kwargs : dict
             Additional keyword arguments passed to NapariRoiPrompt
         """
-        def call_method(obj, method_str, *args, **kwargs):
+        def call_method(obj, method_str, *args, **kwargs: Any):
             # Extract method name by stripping trailing parentheses (if present)
             method_name = method_str.split('(')[0].strip()  # Handles "method" or "method()"
             method = getattr(obj, method_name)  # Get the method from the object
@@ -2222,16 +2215,16 @@ class Core:
                 # if success:
                 self.rois = igor_style_mask
                 self.num_rois = len(np.unique(igor_style_mask)[np.unique(igor_style_mask) < 0])
-                print(f"Successfully saved {self.num_rois} ROIs to H5 file")
+                print(f"Successfully updated {self.num_rois} ROIs in memory")
 
                 # Recompute dependent data since ROIs changed
                 print("\nRecomputing traces, snippets, and averages for new ROIs...")
 
                 # Compute both raw and z-normalized traces
-                self.extract_traces_from_rois(overwrite=True)
+                self.extract_traces_from_rois()
 
                 # Compute snippets and averages
-                self.compute_snippets_and_averages(overwrite=True)
+                self.compute_snippets_and_averages()
 
                 # Verify shapes match
                 print("\nVerifying data integrity:")
@@ -2368,7 +2361,7 @@ class Core:
                 trace_roi_count = self.traces_znorm.shape[0]  # First dimension is n_rois
                 if trace_roi_count != current_roi_count:
                     print(f"WARNING: Trace count ({trace_roi_count}) doesn't match ROI count ({current_roi_count}).")
-                    print("Traces may be stale from H5 file. Restart kernel or call extract_traces_from_rois(overwrite=True).")
+                    print("Traces may be stale from H5 file. Restart kernel or call extract_traces_from_rois().")
 
             traces_plot = self.traces_znorm  # Already (n_rois, n_frames) from IGOR convention
             avg_img = np.mean(self.images, axis=0)
@@ -2413,7 +2406,7 @@ class Core:
         binpix: int = 1,
         overwrite: bool = False,
         force: bool = False,
-    ):
+    ) -> np.ndarray:
         """
         Compute pixel-wise temporal correlation with neighboring pixels.
 
@@ -2482,14 +2475,6 @@ class Core:
             "timecompress": timecompress,
             "binpix": binpix,
         })
-
-        # Optionally save to H5 file if overwrite is True
-        if overwrite:
-            success = self.update_h5_key('correlation_projection', correlation_projection, overwrite=True)
-            if success:
-                print("Successfully saved correlation projection to H5 file")
-            else:
-                print("Failed to save correlation projection to H5 file")
 
         return correlation_projection
 
@@ -2594,7 +2579,7 @@ class Core:
         """
         return getattr(self, '_baseline_used', None)
 
-    def extract_traces_from_rois(self, overwrite=False):
+    def extract_traces_from_rois(self) -> tuple[np.ndarray, np.ndarray]:
         """
         Compute ROI traces from images and ROI mask.
 
@@ -2602,11 +2587,6 @@ class Core:
         Always computes BOTH raw and z-normalized traces to ensure consistency.
         Mimics IGOR's OS_TracesAndTriggers functionality for trace extraction.
         Uses vectorized NumPy operations for speed.
-
-        Parameters:
-        -----------
-        overwrite : bool, optional
-            If True, saves traces to H5 file (default: False)
 
         Returns:
         --------
@@ -2665,15 +2645,6 @@ class Core:
 
         print(f"Extracted {n_rois} traces ({n_frames} frames each)")
 
-        # Save to H5 if requested
-        if overwrite and self.filename.suffix == '.h5':
-            success_raw = self.update_h5_key('Traces0_raw', self.traces_raw, overwrite=True)
-            success_znorm = self.update_h5_key('Traces0_znorm', self.traces_znorm, overwrite=True)
-            if success_raw and success_znorm:
-                print(f"Successfully saved {n_rois} raw and z-normalized traces to H5 file")
-            else:
-                print("Warning: Some traces failed to save to H5 file")
-
         return self.traces_raw, self.traces_znorm
 
     def compute_traces_from_rois(self):
@@ -2686,18 +2657,13 @@ class Core:
         )
         return self.extract_traces_from_rois()
 
-    def compute_snippets_and_averages(self, overwrite=False):
+    def compute_snippets_and_averages(self) -> tuple[np.ndarray, np.ndarray]:
         """
         Compute snippets and averages from ROI traces.
 
         Mimics IGOR's OS_BasicAveraging functionality. Snippets are individual
         stimulus repetitions, and averages are the mean across all repetitions.
         Always uses raw traces (not z-normalized) as IGOR does.
-
-        Parameters:
-        -----------
-        overwrite : bool, optional
-            If True, saves snippets and averages to H5 file (default: False)
 
         Returns:
         --------
@@ -2709,7 +2675,7 @@ class Core:
         # Check prerequisites
         if self.traces_raw is None:
             print("Traces not available, computing them now...")
-            self.extract_traces_from_rois(overwrite=overwrite)
+            self.extract_traces_from_rois()
 
         if self.triggertimes is None:
             raise ValueError("Triggertimes not available. Cannot compute snippets.")
@@ -2798,10 +2764,6 @@ class Core:
                                        snippets_frames[frame_indices + 1, loop_idx, :] * weights_next[:, np.newaxis])
             snippets_upsampled[:, loop_idx, :] = snippets_upsampled_flat
 
-        # For H5 storage, keep as (snippet_length, n_loops, n_rois) and (snippet_length, n_rois)
-        snippets_for_h5 = snippets_upsampled
-        averages_for_h5 = averages
-
         # For in-memory use, transpose to match try_fetch behavior
         # Averages: (n_rois, snippet_length)
         averages = averages.T
@@ -2838,17 +2800,6 @@ class Core:
             "trigger_mode": int(trigger_mode),
         })
 
-        # Save to H5 file if requested
-        if overwrite:
-            success_snip = self.update_h5_key('Snippets0', snippets_for_h5, overwrite=True)
-            success_avg = self.update_h5_key('Averages0', averages_for_h5, overwrite=True)
-            success_qc = self.update_h5_key('QualityCriterion', quality_criterion, overwrite=True)
-
-            if success_snip and success_avg and success_qc:
-                print("Successfully saved snippets, averages, and quality criterion to H5 file")
-            else:
-                print("Warning: Some data failed to save to H5 file")
-
         return snippets, averages
 
     def plot_averages(
@@ -2859,7 +2810,7 @@ class Core:
         independent_scale = False, 
         n_rois_raster = 50,
         sort_order = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         """
         A function to plot the averages of specified regions of interest (rois) on separate subplots within a figure.
@@ -2930,14 +2881,14 @@ class Core:
         if self.correlation_projection is not None:
             temp_mask = np.isin(self.rois_alt, roi_indices)
             rois_map = np.where(temp_mask, self.rois_alt, np.nan)
-            ax_map.imshow(self.correlation_projection, cmap='gray')
-            im = ax_map.imshow(rois_map, cmap='jet', alpha=0.5)
+            ax_map.imshow(self.correlation_projection, cmap='gray', origin='lower')
+            im = ax_map.imshow(rois_map, cmap='jet', alpha=0.5, origin='lower')
             plt.colorbar(im, ax=ax_map, label='ROI ID')
         else:
             # Fallback to just ROI mask if no correlation projection
             temp_mask = np.isin(self.rois_alt, roi_indices)
             rois_map = np.where(temp_mask, self.rois_alt, np.nan)
-            im = ax_map.imshow(rois_map, cmap='jet')
+            im = ax_map.imshow(rois_map, cmap='jet', origin='lower')
             plt.colorbar(im, ax=ax_map, label='ROI ID')
             
         title = f"{len(roi_indices)} ROIs"
@@ -2960,7 +2911,7 @@ class Core:
         plt.tight_layout()
         return fig, (ax_map, ax_avg)
 
-    def plot_traces(self, rois=None, n_rois_imshow=50, figsize=None, cmap="inferno", unit="seconds", **kwargs):
+    def plot_traces(self, rois: list[int] | None = None, n_rois_imshow: int = 50, figsize: tuple[float, float] | None = None, cmap: str = "inferno", unit: str = "seconds", **kwargs: Any):
         """
         Plot traces_znorm as stacked line traces or as an imshow heatmap.
 
@@ -3035,7 +2986,7 @@ class Core:
         axs[-1].set_xlabel(xlabel)
         return fig, axs
 
-    def calculate_image_average(self, ignore_skip=False):
+    def calculate_image_average(self, ignore_skip=False) -> np.ndarray:
         """
         Calculate the average image from a series of trigger frames.
 
