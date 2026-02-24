@@ -710,23 +710,23 @@ class Core:
 
     def register(
         self,
-        n_reference_frames: int = None,
-        batch_size: int = None,
-        artifact_width: int = None,
-        upsample_factor: int = None,
-        normalization: str = None,
-        order: int = None,
-        mode: str = None,
+        n_reference_frames: int | None = None,
+        batch_size: int | None = None,
+        artifact_width: int | None = None,
+        upsample_factor: int | None = None,
+        normalization: str | None = None,
+        order: int | None = None,
+        mode: str | None = None,
         force: bool = False,
         plot: bool = False,
         parallel: bool = True,
         n_jobs: int = -1,
-        batch_mode: str = None,
-        reference_mode: str = None,
-        edge_crop: int = None,
-        ref_plane: np.ndarray = None,
+        batch_mode: str | None = None,
+        reference_mode: str | None = None,
+        edge_crop: int | None = None,
+        ref_plane: np.ndarray | None = None,
         verbose: bool = False,
-    ) -> dict:
+    ) -> dict[str, object]:
         """
         Apply motion correction (registration) to images in-place.
 
@@ -1644,9 +1644,9 @@ class Core:
         n_bins : int, optional
             Number of bins along the scan axis (default: 15).
         upper_percentile : float, optional
-            Percentile for the inner (100 %) boundary (default: 5.0).
+            Percentile for the outer (0 %) boundary (default: 5.0).
         lower_percentile : float, optional
-            Percentile for the outer (0 %) boundary (default: 95.0).
+            Percentile for the inner (100 %) boundary (default: 95.0).
         orientation : str or None, optional
             ``"horizontal"`` or ``"vertical"``. Auto-detected if None.
         plot : bool, optional

@@ -215,12 +215,12 @@ def _process_single_roi(rr, roi_list, input_traces, trigger_start, n_f_relevant,
         'event_count': event_count
     }
 
-def calculate_calcium_correlated_average(strf_obj, noise_array, sta_past_window=2.0, sta_future_window=2.0,
-                                                n_colours=1, n_triggers_per_colour=None, edge_crop=2,
-                                                max_frames_per_trigger=8, event_sd_threshold=2.0,
-                                                use_znorm=True, adjust_by_polarity=True,
-                                                skip_first_triggers=0, skip_last_triggers=0,
-                                                pre_smooth=0, roi=None, n_jobs=1, verbose=True, **kwargs: Any):
+def calculate_calcium_correlated_average(strf_obj, noise_array: np.ndarray, sta_past_window: float = 2.0, sta_future_window: float = 2.0,
+                                                n_colours: int = 1, n_triggers_per_colour: int | None = None, edge_crop: int = 2,
+                                                max_frames_per_trigger: int = 8, event_sd_threshold: float = 2.0,
+                                                use_znorm: bool = True, adjust_by_polarity: bool = True,
+                                                skip_first_triggers: int = 0, skip_last_triggers: int = 0,
+                                                pre_smooth: int = 0, roi: int | list[int] | np.ndarray | None = None, n_jobs: int = 1, verbose: bool = True, **kwargs: Any) -> dict[str, object]:
     """
     Calculate spike-triggered averages (STRFs) - IGOR-equivalent calculations with substantial performance improvements.
     
