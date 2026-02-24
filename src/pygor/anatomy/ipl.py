@@ -131,17 +131,17 @@ def calculate_ipl_depths(roi_centroids, upper_boundary, lower_boundary,
 
     For each ROI centroid, finds the closest point on each boundary (matching
     by X coordinate for horizontal scans, Y for vertical) and linearly
-    interpolates the depth position as a percentage (0 % = lower/outer
-    boundary, 100 % = upper/inner boundary).
+    interpolates the depth position as a percentage (0 % = upper/outer
+    boundary, 100 % = lower/inner boundary).
 
     Parameters
     ----------
     roi_centroids : array-like, shape (n_rois, 2)
         ROI centroid positions in (y, x) format.
     upper_boundary : array-like, shape (M, 2)
-        The 100 % (inner) boundary in (y, x) format.
-    lower_boundary : array-like, shape (M, 2)
         The 0 % (outer) boundary in (y, x) format.
+    lower_boundary : array-like, shape (M, 2)
+        The 100 % (inner) boundary in (y, x) format.
     orientation : str or None, optional
         ``"horizontal"`` or ``"vertical"``. If None, auto-detected from
         the lower boundary curve via :func:`determine_orientation`.
@@ -179,7 +179,7 @@ def _depths_horizontal(lower, upper, roi_centroids):
     y_upper = upper[closest_upper, 0]
     y_lower = lower[closest_lower, 0]
 
-    return (roi_y - y_lower) / (y_upper - y_lower) * 100
+    return (roi_y - y_upper) / (y_lower - y_upper) * 100
 
 
 def _depths_vertical(lower, upper, roi_centroids):
@@ -196,11 +196,11 @@ def _depths_vertical(lower, upper, roi_centroids):
     x_upper = upper[closest_upper, 1]
     x_lower = lower[closest_lower, 1]
 
-    # Handle reversed boundaries (0 % on the right / higher-X side)
+    # Handle reversed boundaries
     if np.mean(x_lower) > np.mean(x_upper):
-        return (x_lower - roi_x) / (x_lower - x_upper) * 100
+        return (roi_x - x_upper) / (x_lower - x_upper) * 100
     else:
-        return (roi_x - x_lower) / (x_upper - x_lower) * 100
+        return (x_upper - roi_x) / (x_upper - x_lower) * 100
 
 
 def estimate_ipl_boundaries(roi_centroids, n_bins=1, upper_percentile=0,
@@ -221,10 +221,10 @@ def estimate_ipl_boundaries(roi_centroids, n_bins=1, upper_percentile=0,
     n_bins : int, optional
         Number of bins along the scan axis (default: 15).
     upper_percentile : float, optional
-        Percentile for the inner (100 %) boundary within each bin
+        Percentile for the outer (0 %) boundary within each bin
         (default: 5.0).
     lower_percentile : float, optional
-        Percentile for the outer (0 %) boundary within each bin
+        Percentile for the inner (100 %) boundary within each bin
         (default: 95.0).
     orientation : str or None, optional
         ``"horizontal"`` or ``"vertical"``. If None, auto-detected from
@@ -238,9 +238,9 @@ def estimate_ipl_boundaries(roi_centroids, n_bins=1, upper_percentile=0,
     Returns
     -------
     upper_boundary : np.ndarray, shape (n_points, 2)
-        The estimated 100 % (inner) boundary in (y, x) format.
-    lower_boundary : np.ndarray, shape (n_points, 2)
         The estimated 0 % (outer) boundary in (y, x) format.
+    lower_boundary : np.ndarray, shape (n_points, 2)
+        The estimated 100 % (inner) boundary in (y, x) format.
 
     Raises
     ------
@@ -391,9 +391,9 @@ def plot_ipl_estimation(image, roi_centroids, upper_boundary, lower_boundary,
     roi_centroids : array-like, shape (n_rois, 2)
         ROI centroid positions in (y, x) format.
     upper_boundary : np.ndarray, shape (M, 2)
-        The 100 % (inner) boundary in (y, x) format.
-    lower_boundary : np.ndarray, shape (M, 2)
         The 0 % (outer) boundary in (y, x) format.
+    lower_boundary : np.ndarray, shape (M, 2)
+        The 100 % (inner) boundary in (y, x) format.
     depths : np.ndarray, shape (n_rois,)
         Estimated IPL depth percentages.
     ax : None
@@ -433,11 +433,11 @@ def plot_ipl_estimation(image, roi_centroids, upper_boundary, lower_boundary,
     )
     ax_img.plot(
         upper_boundary[:, 1], upper_boundary[:, 0],
-        color="red", linewidth=1.5, label="100% (inner)",
+        color="blue", linewidth=1.5, label="0% (outer)",
     )
     ax_img.plot(
         lower_boundary[:, 1], lower_boundary[:, 0],
-        color="blue", linewidth=1.5, label="0% (outer)",
+        color="red", linewidth=1.5, label="100% (inner)",
     )
     ax_img.legend(loc="upper right", fontsize=7, framealpha=0.7)
     ax_img.set_title("IPL boundary estimation")

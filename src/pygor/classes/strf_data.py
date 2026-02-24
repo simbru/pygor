@@ -4790,7 +4790,7 @@ class STRF(Core):
                     max_frames_per_trigger: int = 8, event_sd_threshold: float = 2.0,
                     use_znorm: bool = True, adjust_by_polarity: bool = True,
                     skip_first_triggers: int = 0, skip_last_triggers: int = 0,
-                    pre_smooth: int = 0, roi: int | None = None, n_jobs: int = 1, normalize_strfs: bool = True, verbose: bool = False, **kwargs: Any):
+                    pre_smooth: int = 0, roi: int | None = None, n_jobs: int = 1, normalize_strfs: bool = True, verbose: bool = False, **kwargs: Any) -> dict[str, object]:
         """
         Calculate spike-triggered averages (STRFs) for all ROIs and colour channels.
         
