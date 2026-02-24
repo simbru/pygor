@@ -66,7 +66,7 @@ class AnalysisParams:
 
     # Processing step parameters (None = not yet applied)
     preprocessing: Optional[dict] = None
-    registration: Optional[dict] = None
+    registration: Optional[dict[str, object]] = None
     segmentation: Optional[dict] = None
     triggers: Optional[dict] = None
 
@@ -230,7 +230,7 @@ class AnalysisParams:
         self.preprocessed = True
         self.artifact_width = params.get("artifact_width", self.artifact_width)
 
-    def mark_registration(self, params: dict, stats: dict = None) -> None:
+    def mark_registration(self, params: dict[str, object], stats: dict[str, object] | None = None) -> None:
         """
         Record that registration was applied with the given parameters.
 

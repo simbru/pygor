@@ -18,8 +18,11 @@ from tqdm.auto import tqdm
 
 
 def find_files_in(
-    filetype_ext_str, dir_path, recursive=False, **kwargs: Any
-) -> list[str]:
+    filetype_ext_str: str,
+    dir_path: str | pathlib.PurePath,
+    recursive: bool = False,
+    **kwargs: Any,
+) -> list[pathlib.Path]:
     """
     Searches the specified directory for files with the specified file extension.
 
