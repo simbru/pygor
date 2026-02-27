@@ -70,3 +70,6 @@ constraint-dependencies = ["pyqt5-qt5 <=5.15.2"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pyright]
+typeCheckingMode = "basic"
