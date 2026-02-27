@@ -89,18 +89,17 @@ def read_smh_header(path: str | Path) -> dict:
 
     header = {}
 
-    # Try reading as UTF-16-LE first (common for ScanM files on Windows)
-    # Fall back to latin-1 if that fails
-    try:
-        with open(path, "r", encoding="utf-16-le") as f:
-            content = f.read()
-    except UnicodeDecodeError:
-        # Fall back to latin-1 and skip every other character
-        # (handles mixed binary/text format from older ScanM versions)
-        with open(path, "r", encoding="latin-1") as f:
-            raw_content = f.read()
-        # Skip null bytes that appear in UTF-16-like encoding
-        content = raw_content[1:-1:2] if raw_content else ""
+    # SMH files have a 64-byte binary preamble followed by UTF-16-LE text.
+    # Read as binary and skip the preamble to avoid decode errors from
+    # binary bytes that happen to form invalid UTF-16 surrogates.
+    with open(path, "rb") as f:
+        raw = f.read()
+
+    # Find the start of the text section (first CRLF in UTF-16-LE)
+    text_start = raw.find(b"\r\x00\n\x00")
+    if text_start == -1:
+        text_start = 0
+    content = raw[text_start:].decode("utf-16-le", errors="replace")
 
     # Parse entries: "type,key=value;"
     # Example: "UINT32,uFrameWidth=512;"
