@@ -1,45 +1,49 @@
-from typing import Any, Callable
-from matplotlib.axes import Axes
 from dataclasses import dataclass, field
+from typing import Any, Callable
+
+from matplotlib.axes import Axes
 
 try:
     from collections import Iterable
 except ImportError:
     from collections.abc import Iterable
 # Local imports
-import pygor.core.methods
-import pygor.core.calculations
-import pygor.core.plot
-import pygor.data_helpers
-import pygor.utils.helpinfo
-import pygor.strf.spatial
-import pygor.strf.contouring
-import pygor.strf.temporal
-import pygor.plotting.basic
-import pygor.utils
-import pygor.core
-import pygor.core.gui
-from pygor.params import AnalysisParams
+import math
 
 # Dependencies
 import operator
+import pathlib
+import warnings
+
+import h5py
+import matplotlib
+import matplotlib.patheffects as path_effects
 import matplotlib.pyplot as plt
 import numpy as np
-import pathlib
-import h5py
-import matplotlib.patheffects as path_effects
-import matplotlib
-import warnings
 import scipy.ndimage
-import math
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import skimage
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+import pygor.core
+import pygor.core.calculations
+import pygor.core.gui
+import pygor.core.methods
+import pygor.core.plot
+import pygor.data_helpers
+import pygor.plotting.basic
+import pygor.strf.contouring
+import pygor.strf.spatial
+import pygor.strf.temporal
+import pygor.utils
+import pygor.utils.helpinfo
+from pygor.params import AnalysisParams
+
 
 def try_fetch(file, key):
     try:
         result = file[key]
         result_shape = result.shape
-        if result_shape != (): # if not a scalar
+        if result_shape != ():  # if not a scalar
             # reshape to match expected orientation for Python
             result = np.array(result).T
     except KeyError as error:
@@ -50,12 +54,13 @@ def try_fetch(file, key):
         # )
         error
     return result
-    
+
+
 def try_fetch_table_params(file, params_key, file_key="OS_Parameters"):
     try:
         """
         Will always default to fetching given key from a IGOR table holding parameters. will default to 'OS_Parameters'
-        but can be changed to other tables if needed for specific experiments. 
+        but can be changed to other tables if needed for specific experiments.
         """
         attr_items = list(file[file_key].attrs.items())
         if not attr_items:
@@ -66,11 +71,13 @@ def try_fetch_table_params(file, params_key, file_key="OS_Parameters"):
     except KeyError as error:
         # # raise KeyError(f"'{key}' not found in {file.filename}, setting to np.nan") from error
         warnings.warn(
-            f"'{params_key}' not found in {file.filename}, setting to np.nan", stacklevel=2
+            f"'{params_key}' not found in {file.filename}, setting to np.nan",
+            stacklevel=2,
         )
-        error   
+        error
         return np.nan
-    
+
+
 @dataclass
 class Core:
     filename: str | pathlib.Path
@@ -83,7 +90,7 @@ class Core:
     averages: np.array = np.nan
     snippets: np.array = np.nan
     ms_dur: int = np.nan
-    trigger_mode : int = 1 #defualt value
+    trigger_mode: int = 1  # defualt value
     num_rois: int = field(init=False)
     params: AnalysisParams = field(init=False)  # Analysis parameters
 
@@ -96,13 +103,16 @@ class Core:
         ext = self.filename.suffix.lower()
 
         # Auto-detect format based on extension
-        if ext in ['.smp', '.smh']:
+        if ext in [".smp", ".smh"]:
             # ScanM file - delegate to internal loader
             self._load_from_scanm_internal()
-        elif ext in ['.h5', '.hdf5']:
+        elif ext in [".h5", ".hdf5"]:
             # H5 file - use original loading logic
             if self.do_preprocess:
-                warnings.warn("do_preprocess parameter is ignored for H5 files (typically already preprocessed). Call manually if needed.", stacklevel=2)
+                warnings.warn(
+                    "do_preprocess parameter is ignored for H5 files (typically already preprocessed). Call manually if needed.",
+                    stacklevel=2,
+                )
             self._load_from_h5()
         else:
             raise ValueError(
@@ -145,15 +155,19 @@ class Core:
                 )
             self.roi_sizes = try_fetch(HDF5_file, "RoiSizes")
             if self.roi_sizes is not None:
-                self.roi_sizes = self.roi_sizes[:self.num_rois]
+                self.roi_sizes = self.roi_sizes[: self.num_rois]
             # Timing parameters
             self.triggertimes = try_fetch(HDF5_file, "Triggertimes")
             self.triggertimes = self.triggertimes[~np.isnan(self.triggertimes)].astype(
                 float
             )
             self.triggertimes_frame = try_fetch(HDF5_file, "Triggertimes_Frame")
-            self.__skip_first_frames = int(try_fetch_table_params(HDF5_file, "Skip_First_Triggers")) # Note name mangling to prevent accidents if 
-            self.__skip_last_frames = -int(try_fetch_table_params(HDF5_file, "Skip_Last_Triggers")) # private class attrs share names 
+            self.__skip_first_frames = int(
+                try_fetch_table_params(HDF5_file, "Skip_First_Triggers")
+            )  # Note name mangling to prevent accidents if
+            self.__skip_last_frames = -int(
+                try_fetch_table_params(HDF5_file, "Skip_Last_Triggers")
+            )  # private class attrs share names
             self.ipl_depths = try_fetch(HDF5_file, "Positions")
             self.averages = try_fetch(HDF5_file, "Averages0")
             self.snippets = try_fetch(HDF5_file, "Snippets0")
@@ -165,14 +179,26 @@ class Core:
             self.average_stack = try_fetch(HDF5_file, "Stack_Ave")
             exp_params = try_fetch(HDF5_file, "wExpParams")
             if exp_params is not None:
-                self.stage = try_fetch_table_params(HDF5_file, "stage", 'wExpParams').decode('utf-8')
-                self.orientation = try_fetch_table_params(HDF5_file, "orientation", 'wExpParams').decode('utf-8')
-                self.depth = try_fetch_table_params(HDF5_file, "depth", 'wExpParams').decode('utf-8')
-                self.stimulus = try_fetch_table_params(HDF5_file, "stimulus", 'wExpParams').decode('utf-8')
+                self.stage = try_fetch_table_params(
+                    HDF5_file, "stage", "wExpParams"
+                ).decode("utf-8")
+                self.orientation = try_fetch_table_params(
+                    HDF5_file, "orientation", "wExpParams"
+                ).decode("utf-8")
+                self.depth = try_fetch_table_params(
+                    HDF5_file, "depth", "wExpParams"
+                ).decode("utf-8")
+                self.stimulus = try_fetch_table_params(
+                    HDF5_file, "stimulus", "wExpParams"
+                ).decode("utf-8")
             if self.images is not None:
-                self.frame_hz = float(1/(self.images.shape[1]/self.n_planes*self.linedur_s))
+                self.frame_hz = float(
+                    1 / (self.images.shape[1] / self.n_planes * self.linedur_s)
+                )
             else:
-                self.frame_hz = float(1/(self.average_stack.shape[0]/self.n_planes*self.linedur_s))
+                self.frame_hz = float(
+                    1 / (self.average_stack.shape[0] / self.n_planes * self.linedur_s)
+                )
         # Check that trigger mode matches phase number
         # if self.trigger_mode != self.phase_num:
         #     warnings.warn(
@@ -219,7 +245,9 @@ class Core:
 
         # Load ScanM data
         channels_to_load = list(set([imaging_channel, trigger_channel]))
-        header, channel_data = scanm_module.load_scanm(self.filename, channels=channels_to_load)
+        header, channel_data = scanm_module.load_scanm(
+            self.filename, channels=channels_to_load
+        )
 
         # Get actual number of frames recorded
         n_frames_total = header.get("NumberOfFrames", 0)
@@ -277,7 +305,9 @@ class Core:
         self.triggertimes_frame = trigger_frames
         self.triggertimes = trigger_times
         self._Core__skip_first_frames = skip_first_triggers
-        self._Core__skip_last_frames = -skip_last_triggers if skip_last_triggers > 0 else 0
+        self._Core__skip_last_frames = (
+            -skip_last_triggers if skip_last_triggers > 0 else 0
+        )
 
         # Metadata
         self.metadata = {
@@ -397,7 +427,7 @@ class Core:
             If False (default), load raw data without preprocessing.
             If True, apply preprocessing with defaults from config.
             If dict, apply preprocessing with custom parameters.
-            
+
             Preprocessing parameters:
             - artifact_width (int): Light artifact pixels (default: 2)
             - flip_x (bool): X-flip image (default: True)
@@ -432,44 +462,44 @@ class Core:
         >>> # Load raw, then preprocess later
         >>> data = Core.from_scanm("recording.smp")
         >>> data.preprocess(artifact_width=3, detrend=True)
-        
+
         Notes
         -----
         To save the data for later use, call `data.export_to_h5("output.h5")`.
         """
         import pygor.preproc.scanm as scanm_module
-        
+
         path = pathlib.Path(path)
-        
+
         # Load ScanM data
         channels_to_load = list(set([imaging_channel, trigger_channel]))
         header, channel_data = scanm_module.load_scanm(path, channels=channels_to_load)
-        
+
         # Get actual number of frames recorded
         n_frames_total = header.get("NumberOfFrames", 0)
         frame_counter = header.get("FrameCounter", 0)
         stim_buf_per_fr = header.get("StimBufPerFr", 1)
         actual_frames = (n_frames_total - frame_counter) * stim_buf_per_fr
-        
+
         # Get imaging data
         if imaging_channel not in channel_data:
             raise ValueError(f"Imaging channel {imaging_channel} not found in data")
         images = channel_data[imaging_channel][:actual_frames]
-        
+
         # Compute timing parameters
         timing = scanm_module._compute_timing_params(header, images)
-        
+
         # Parse datetime
         exp_date, exp_time = scanm_module._parse_scanm_datetime(header)
-        
+
         # Detect triggers
         if trigger_channel in channel_data:
             trigger_stack = channel_data[trigger_channel][:actual_frames]
             trigger_frames, trigger_times = scanm_module.detect_triggers(
-                trigger_stack, 
+                trigger_stack,
                 line_duration=timing["line_duration_s"],
             )
-            
+
             # Apply skip settings
             if skip_last_triggers > 0:
                 trigger_frames = trigger_frames[skip_first_triggers:-skip_last_triggers]
@@ -481,34 +511,38 @@ class Core:
             trigger_stack = None
             trigger_frames = np.array([], dtype=int)
             trigger_times = np.array([], dtype=float)
-        
+
         # Create instance without calling __post_init__
         # We use object.__new__ to bypass dataclass __init__, hacky but works
         instance = object.__new__(cls)
-        
+
         # Set all required attributes manually
         instance.filename = path
         instance.type = cls.__name__
         instance.name = path.stem
-        
+
         # Image data
         instance.images = images
-        instance.trigger_images = trigger_stack  # Store trigger channel for visualization
+        instance.trigger_images = (
+            trigger_stack  # Store trigger channel for visualization
+        )
         instance.average_stack = images.mean(axis=0)
         instance.correlation_projection = None
-        
+
         # Timing
         instance.frame_hz = timing["frame_hz"]
         instance.linedur_s = timing["line_duration_s"]
         instance.n_planes = timing["n_planes"]
-        
+
         # Triggers - now with accurate line-precision times
         instance.triggertimes_frame = trigger_frames
         instance.triggertimes = trigger_times
         instance.trigger_mode = trigger_mode
         instance._Core__skip_first_frames = skip_first_triggers
-        instance._Core__skip_last_frames = -skip_last_triggers if skip_last_triggers > 0 else 0
-        
+        instance._Core__skip_last_frames = (
+            -skip_last_triggers if skip_last_triggers > 0 else 0
+        )
+
         # Metadata - preserve all relevant header info
         instance.metadata = {
             "filename": str(path),
@@ -534,21 +568,21 @@ class Core:
             "User": header.get("User"),
             "Comment": header.get("Comment"),
         }
-        
+
         # ROI-related (initially empty)
         instance.rois = None
         instance.num_rois = 0
         instance.roi_sizes = None
         instance.traces_raw = None
         instance.traces_znorm = None
-        
+
         # Other attributes
         instance.averages = None
         instance.snippets = None
         instance.ms_dur = None
         instance.quality_indices = None
         instance.ipl_depths = None
-        
+
         # Private attributes that Core uses
         instance._Core__keyword_lables = {"ipl_depths": None}
         instance._Core__compare_ops_map = {
@@ -558,7 +592,7 @@ class Core:
             ">=": operator.ge,
             "<=": operator.le,
         }
-        
+
         # Store header for export
         instance._scanm_header = header
 
@@ -574,9 +608,9 @@ class Core:
                 instance.preprocess(**preprocess)
             else:
                 instance.preprocess()
-        
+
         return instance
-    
+
     def preprocess(
         self,
         artifact_width: int = None,
@@ -642,7 +676,7 @@ class Core:
             warnings.warn(
                 "Data has already been preprocessed. Use force=True to re-apply. "
                 "Note: re-preprocessing already-preprocessed data may produce artifacts.",
-                RuntimeWarning
+                RuntimeWarning,
             )
             return
 
@@ -664,14 +698,16 @@ class Core:
 
         # Collect user-provided params (filter out None values)
         user_params = {
-            k: v for k, v in {
-                'artifact_width': artifact_width,
-                'flip_x': flip_x,
-                'detrend': detrend,
-                'smooth_window_s': smooth_window_s,
-                'time_bin': time_bin,
-                'fix_first_frame': fix_first_frame,
-            }.items() if v is not None
+            k: v
+            for k, v in {
+                "artifact_width": artifact_width,
+                "flip_x": flip_x,
+                "detrend": detrend,
+                "smooth_window_s": smooth_window_s,
+                "time_bin": time_bin,
+                "fix_first_frame": fix_first_frame,
+            }.items()
+            if v is not None
         }
 
         # Merge defaults with user overrides
@@ -688,8 +724,13 @@ class Core:
         self.average_stack = self.images.mean(axis=0)
 
         # Check and correct TTL baseline if needed
-        if check_trigger_start and hasattr(self, 'trigger_images') and self.trigger_images is not None:
+        if (
+            check_trigger_start
+            and hasattr(self, "trigger_images")
+            and self.trigger_images is not None
+        ):
             from pygor.preproc.triggers import correct_ttl_baseline
+
             self.trigger_images, n_corrected = correct_ttl_baseline(self.trigger_images)
             if n_corrected > 0:
                 # Re-detect triggers with corrected signal
@@ -697,11 +738,25 @@ class Core:
                     self.trigger_images,
                     line_duration=self.linedur_s,
                 )
+                # The baseline correction may have clipped a trigger at the
+                # boundary, shifting the first detected trigger late. Fix by
+                # adjusting its time to match the regular interval pattern.
+                # We do NOT prepend triggers — the pre-correction window is
+                # genuine pre-stimulus baseline.
+                if len(trigger_times) >= 3:
+                    intervals = np.diff(trigger_times)
+                    median_interval = np.median(intervals[1:]) if len(intervals) > 1 else intervals[0]
+                    tolerance = 0.02 * median_interval
+                    if abs(intervals[0] - median_interval) > tolerance:
+                        trigger_times[0] = trigger_times[1] - median_interval
+                        trigger_frames[0] = int(round(trigger_times[0] * self.frame_hz))
+                        print(f"TTL baseline correction: adjusted boundary trigger "
+                              f"by {(intervals[0] - median_interval)*1000:.0f}ms")
                 self.triggertimes_frame = trigger_frames
                 self.triggertimes = trigger_times
 
         # Reduce trigger channel to 2 columns to save memory (matches IGOR)
-        if hasattr(self, 'trigger_images') and self.trigger_images is not None:
+        if hasattr(self, "trigger_images") and self.trigger_images is not None:
             if self.trigger_images.ndim == 3 and self.trigger_images.shape[-1] > 2:
                 self.trigger_images = self.trigger_images[:, :, :2].copy()
 
@@ -834,7 +889,7 @@ class Core:
             warnings.warn(
                 "Data has already been registered. Use force=True to re-apply. "
                 "Note: re-registering already-registered data may produce artifacts.",
-                RuntimeWarning
+                RuntimeWarning,
             )
             return self.params.registration or {}
 
@@ -859,19 +914,21 @@ class Core:
 
         # Collect user-provided params (filter out None values)
         user_params = {
-            k: v for k, v in {
-                'n_reference_frames': n_reference_frames,
-                'batch_size': batch_size,
-                'upsample_factor': upsample_factor,
-                'normalization': normalization,
-                'order': order,
-                'mode': mode,
-                'parallel': parallel,
-                'n_jobs': n_jobs,
-                'batch_mode': batch_mode,
-                'reference_mode': reference_mode,
-                'edge_crop': edge_crop,
-            }.items() if v is not None
+            k: v
+            for k, v in {
+                "n_reference_frames": n_reference_frames,
+                "batch_size": batch_size,
+                "upsample_factor": upsample_factor,
+                "normalization": normalization,
+                "order": order,
+                "mode": mode,
+                "parallel": parallel,
+                "n_jobs": n_jobs,
+                "batch_mode": batch_mode,
+                "reference_mode": reference_mode,
+                "edge_crop": edge_crop,
+            }.items()
+            if v is not None
         }
 
         # Merge defaults with user overrides
@@ -891,7 +948,7 @@ class Core:
         )
 
         # Include artifact_width in params so it gets stored
-        params['artifact_width'] = artifact_width
+        params["artifact_width"] = artifact_width
 
         # Update images
         self.images = registered
@@ -901,12 +958,12 @@ class Core:
 
         # Compute statistics
         stats = {
-            'mean_shift': tuple(shifts.mean(axis=0)),
-            'std_shift': tuple(shifts.std(axis=0)),
-            'max_shift': tuple(shifts.max(axis=0)),
-            'mean_error': float(errors.mean()),
-            'shifts': shifts,
-            'errors': errors,
+            "mean_shift": tuple(shifts.mean(axis=0)),
+            "std_shift": tuple(shifts.std(axis=0)),
+            "max_shift": tuple(shifts.max(axis=0)),
+            "mean_error": float(errors.mean()),
+            "shifts": shifts,
+            "errors": errors,
         }
 
         # Record registration in params (sets registered=True)
@@ -915,17 +972,19 @@ class Core:
         # Plot if requested
         if plot:
             self._plot_registration_results(
-                shifts, errors, original_stack, params.get('reference_mode', 'std')
+                shifts, errors, original_stack, params.get("reference_mode", "std")
             )
             plt.show()
         # if stats["mean_error"] < 0.05:
         if verbose:
-            print(f"Registration complete.\n"
+            print(
+                f"Registration complete.\n"
                 f"  Mean error: {stats['mean_error']:.4f}\n"
                 f"  Max shift: (y={stats['max_shift'][0]:.2f}, x={stats['max_shift'][1]:.2f})\n"
                 f"  Mean shift: (y={stats['mean_shift'][0]:.2f}, x={stats['mean_shift'][1]:.2f})\n"
                 f"  Shift SD: (y={stats['std_shift'][0]:.2f}, x={stats['std_shift'][1]:.2f})\n"
-                f"  Registration error: {stats['mean_error']:.4f}")
+                f"  Registration error: {stats['mean_error']:.4f}"
+            )
         return stats
 
     def reset_images(self) -> None:
@@ -968,6 +1027,7 @@ class Core:
     ):
         """Plot registration results with images and shift traces."""
         import matplotlib.pyplot as plt
+
         from pygor.preproc.registration import _compute_projection
 
         batch_idx = np.arange(len(shifts))
@@ -993,31 +1053,41 @@ class Core:
         vmax = max(proj_original.max(), proj_registered.max())
 
         # Reference image: recompute from the original stack to show what was actually used
-        n_ref = self.params.registration.get('n_reference_frames', 100) if self.params.registration else 100
+        n_ref = (
+            self.params.registration.get("n_reference_frames", 100)
+            if self.params.registration
+            else 100
+        )
         ref_image = _compute_projection(original_stack[:n_ref], reference_mode)
-        ax_ref.imshow(ref_image, cmap='gray', origin = "lower")
-        ax_ref.set_title(f'Reference ({reference_mode}, n={n_ref})')
-        ax_ref.axis('off')
+        ax_ref.imshow(ref_image, cmap="gray", origin="lower")
+        ax_ref.set_title(f"Reference ({reference_mode}, n={n_ref})")
+        ax_ref.axis("off")
 
         # Original projection
-        ax_orig.imshow(proj_original, cmap='gray', vmin=vmin, vmax=vmax, origin = "lower")
-        ax_orig.set_title(f'Before ({reference_mode})')
-        ax_orig.axis('off')
+        ax_orig.imshow(proj_original, cmap="gray", vmin=vmin, vmax=vmax, origin="lower")
+        ax_orig.set_title(f"Before ({reference_mode})")
+        ax_orig.axis("off")
 
         # Registered projection
-        ax_reg.imshow(proj_registered, cmap='gray', vmin=vmin, vmax=vmax, origin = "lower")
-        ax_reg.set_title(f'After ({reference_mode})')
-        ax_reg.axis('off')
+        ax_reg.imshow(
+            proj_registered, cmap="gray", vmin=vmin, vmax=vmax, origin="lower"
+        )
+        ax_reg.set_title(f"After ({reference_mode})")
+        ax_reg.axis("off")
 
         # Shift traces
-        ax_shifts.plot(batch_idx, shifts[:, 0], 'b-', label='Y shift', linewidth=1, alpha=0.8)
-        ax_shifts.plot(batch_idx, shifts[:, 1], 'r-', label='X shift', linewidth=1, alpha=0.8)
-        ax_shifts.axhline(0, color='k', linestyle='--', alpha=0.3)
-        ax_shifts.set_xlabel('Batch index')
-        ax_shifts.set_ylabel('Shift (pixels)')
-        ax_shifts.legend(loc='upper right')
+        ax_shifts.plot(
+            batch_idx, shifts[:, 0], "b-", label="Y shift", linewidth=1, alpha=0.8
+        )
+        ax_shifts.plot(
+            batch_idx, shifts[:, 1], "r-", label="X shift", linewidth=1, alpha=0.8
+        )
+        ax_shifts.axhline(0, color="k", linestyle="--", alpha=0.3)
+        ax_shifts.set_xlabel("Batch index")
+        ax_shifts.set_ylabel("Shift (pixels)")
+        ax_shifts.legend(loc="upper right")
         ax_shifts.grid(True, alpha=0.3)
-        ax_shifts.set_title('Registration Shifts Over Time')
+        ax_shifts.set_title("Registration Shifts Over Time")
 
         plt.tight_layout()
         plt.show()
@@ -1029,33 +1099,33 @@ class Core:
     ) -> pathlib.Path:
         """
         Export Core data to H5 file.
-        
+
         Useful for saving preprocessed data or data loaded from ScanM files.
-        
+
         Parameters
         ----------
         output_path : str or Path, optional
             Output H5 file path. If None, uses same name as source with .h5 extension.
         overwrite : bool, optional
             If True, overwrite existing file. Default False.
-            
+
         Returns
         -------
         Path
             Path to the created H5 file.
         """
         import h5py
-        
+
         if output_path is None:
             output_path = self.filename.with_suffix(".h5")
         else:
             output_path = pathlib.Path(output_path)
-        
+
         if output_path.exists() and not overwrite:
             raise FileExistsError(
                 f"File already exists: {output_path}. Use overwrite=True to replace."
             )
-        
+
         with h5py.File(output_path, "w") as f:
             #  Image data
             # H5 expects (width, height, frames) - transposed from our (frames, height, width)
@@ -1065,47 +1135,62 @@ class Core:
                 f.create_dataset("wDataCh0_detrended", data=images_t, dtype=np.uint16)
 
             # Trigger channel (if available)
-            if hasattr(self, 'trigger_images') and self.trigger_images is not None:
+            if hasattr(self, "trigger_images") and self.trigger_images is not None:
                 trigger_t = self.trigger_images.transpose(2, 1, 0)
                 f.create_dataset("wDataCh2", data=trigger_t, dtype=np.int16)
 
             # Average stack
             if self.average_stack is not None:
-                f.create_dataset("Stack_Ave", data=self.average_stack.T, dtype=np.float32)
-            
-            #  ROIs 
+                f.create_dataset(
+                    "Stack_Ave", data=self.average_stack.T, dtype=np.float32
+                )
+
+            #  ROIs
             if self.rois is not None:
                 f.create_dataset("ROIs", data=self.rois.T, dtype=np.int16)
-                
+
             if self.roi_sizes is not None:
                 f.create_dataset("RoiSizes", data=self.roi_sizes, dtype=np.int32)
-            
-            #  Traces 
+
+            #  Traces
             if self.traces_raw is not None:
-                f.create_dataset("Traces0_raw", data=self.traces_raw.T, dtype=np.float32)
-                
+                f.create_dataset(
+                    "Traces0_raw", data=self.traces_raw.T, dtype=np.float32
+                )
+
             if self.traces_znorm is not None:
-                f.create_dataset("Traces0_znorm", data=self.traces_znorm.T, dtype=np.float32)
-            
+                f.create_dataset(
+                    "Traces0_znorm", data=self.traces_znorm.T, dtype=np.float32
+                )
+
             #  Trigger times
             if self.triggertimes is not None or self.triggertimes_frame is not None:
                 max_triggers = max(
-                    len(self.triggertimes_frame) if self.triggertimes_frame is not None else 0,
+                    len(self.triggertimes_frame)
+                    if self.triggertimes_frame is not None
+                    else 0,
                     len(self.triggertimes) if self.triggertimes is not None else 0,
                     1000,
                 )
                 triggertimes = np.full(max_triggers, np.nan)
                 if self.triggertimes is not None and len(self.triggertimes) > 0:
-                    triggertimes[:len(self.triggertimes)] = self.triggertimes
+                    triggertimes[: len(self.triggertimes)] = self.triggertimes
                 f.create_dataset("Triggertimes", data=triggertimes, dtype=np.float64)
 
                 triggertimes_frame = np.full(max_triggers, np.nan)
-                if self.triggertimes_frame is not None and len(self.triggertimes_frame) > 0:
-                    triggertimes_frame[:len(self.triggertimes_frame)] = self.triggertimes_frame
-                f.create_dataset("Triggertimes_Frame", data=triggertimes_frame, dtype=np.float64)
-            
+                if (
+                    self.triggertimes_frame is not None
+                    and len(self.triggertimes_frame) > 0
+                ):
+                    triggertimes_frame[: len(self.triggertimes_frame)] = (
+                        self.triggertimes_frame
+                    )
+                f.create_dataset(
+                    "Triggertimes_Frame", data=triggertimes_frame, dtype=np.float64
+                )
+
             #  wParamsStr (date/time metadata)
-            if hasattr(self, 'metadata') and self.metadata is not None:
+            if hasattr(self, "metadata") and self.metadata is not None:
                 exp_date = self.metadata["exp_date"]
                 exp_time = self.metadata["exp_time"]
                 date_str = f"{exp_date.year}-{exp_date.month:02d}-{exp_date.day:02d}"
@@ -1117,12 +1202,14 @@ class Core:
                 params_str[0] = str(self.filename.stem)
 
                 dt = h5py.special_dtype(vlen=str)
-                params_str_ds = f.create_dataset("wParamsStr", (len(params_str),), dtype=dt)
+                params_str_ds = f.create_dataset(
+                    "wParamsStr", (len(params_str),), dtype=dt
+                )
                 for i, s in enumerate(params_str):
                     params_str_ds[i] = s.encode("utf-8")
 
             #  wParamsNum (XYZ position)
-            if hasattr(self, 'metadata') and self.metadata is not None:
+            if hasattr(self, "metadata") and self.metadata is not None:
                 params_num = np.zeros(50, dtype=np.float64)
                 xyz = self.metadata.get("objectiveXYZ", (0, 0, 0))
                 params_num[26] = xyz[0]
@@ -1131,7 +1218,7 @@ class Core:
                 f.create_dataset("wParamsNum", data=params_num, dtype=np.float64)
 
             #  OS_Parameters
-            if hasattr(self, 'linedur_s') and self.linedur_s is not None:
+            if hasattr(self, "linedur_s") and self.linedur_s is not None:
                 os_params_keys = [
                     "placeholder",
                     "LineDuration",
@@ -1140,21 +1227,23 @@ class Core:
                     "Skip_First_Triggers",
                     "Skip_Last_Triggers",
                 ]
-                os_params_values = np.array([
-                    0,
-                    self.linedur_s,
-                    self.n_planes,
-                    self.trigger_mode,
-                    0,
-                    0,
-                ], dtype=np.float64)
+                os_params_values = np.array(
+                    [
+                        0,
+                        self.linedur_s,
+                        self.n_planes,
+                        self.trigger_mode,
+                        0,
+                        0,
+                    ],
+                    dtype=np.float64,
+                )
 
                 os_params_ds = f.create_dataset("OS_Parameters", data=os_params_values)
                 os_params_ds.attrs["OS_Parameters"] = np.array(
-                    [b"Keys"] + [k.encode() for k in os_params_keys],
-                    dtype=object
+                    [b"Keys"] + [k.encode() for k in os_params_keys], dtype=object
                 )
-            
+
             #  Optional data - check for both None and nan
             def _is_valid(attr):
                 """Check if attribute is valid (not None and not nan)."""
@@ -1177,11 +1266,17 @@ class Core:
                 f.create_dataset("Positions", data=self.ipl_depths, dtype=np.float64)
 
             if _is_valid(self.correlation_projection):
-                f.create_dataset("correlation_projection", data=self.correlation_projection.T, dtype=np.float32)
+                f.create_dataset(
+                    "correlation_projection",
+                    data=self.correlation_projection.T,
+                    dtype=np.float32,
+                )
 
             if _is_valid(self.quality_indices):
-                f.create_dataset("QualityCriterion", data=self.quality_indices, dtype=np.float64)
-        
+                f.create_dataset(
+                    "QualityCriterion", data=self.quality_indices, dtype=np.float64
+                )
+
         print(f"Exported to: {output_path}")
         return output_path
 
@@ -1193,7 +1288,7 @@ class Core:
     def __str__(self):
         # For pretty printing
         return f"{self.__class__}"
-    
+
     @property
     def is_registered(self):
         """Whether registration has been applied to the images."""
@@ -1203,7 +1298,7 @@ class Core:
     def frametime_ms(self):
         time_arr = np.arange(self.traces_raw.shape[1]) / self.frame_hz
         return time_arr
-    
+
     def get_help(self, hints=False, types=False) -> None:
         """
         Get help information for the object, including methods and attributes.
@@ -1220,8 +1315,10 @@ class Core:
         None
         """
         # Check if this class has patterns to exclude from help
-        exclude_patterns = getattr(self, '_help_exclude_patterns', None)
-        method_list = pygor.utils.helpinfo.get_methods_list(self, with_returns=types, exclude_patterns=exclude_patterns)
+        exclude_patterns = getattr(self, "_help_exclude_patterns", None)
+        method_list = pygor.utils.helpinfo.get_methods_list(
+            self, with_returns=types, exclude_patterns=exclude_patterns
+        )
         attribute_list = pygor.utils.helpinfo.get_attribute_list(self, with_types=types)
         welcome = pygor.utils.helpinfo.welcome_help(
             self.type, self.metadata, hints=hints
@@ -1252,7 +1349,7 @@ class Core:
 
         Parameters:
         - func: Callable or str, optional, default: np.mean
-            The function used to compute the projection along the specified axis. 
+            The function used to compute the projection along the specified axis.
             If "average_stack", uses self.average_stack directly.
             If pygor.core.methods.correlation_map, applies correlation mapping.
         - axis: int, optional, default: 0
@@ -1301,12 +1398,23 @@ class Core:
             ystart = ycrop[0]
             ystop = ycrop[1]
         if func == "average_stack":
-            scanv = ax.imshow(self.average_stack, cmap = "Greys_r", origin = "lower", **kwargs)
+            scanv = ax.imshow(
+                self.average_stack, cmap="Greys_r", origin="lower", **kwargs
+            )
         elif func == pygor.core.methods.correlation_map:
-            correlation_result = func(self.images[zstart:zstop, ystart:ystop, xstart:xstop])
-            scanv = ax.imshow(correlation_result, cmap ="Greys_r", origin = "lower", **kwargs)
+            correlation_result = func(
+                self.images[zstart:zstop, ystart:ystop, xstart:xstop]
+            )
+            scanv = ax.imshow(
+                correlation_result, cmap="Greys_r", origin="lower", **kwargs
+            )
         else:
-            scanv = ax.imshow(func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis = axis), cmap ="Greys_r", origin = "lower", **kwargs)
+            scanv = ax.imshow(
+                func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis=axis),
+                cmap="Greys_r",
+                origin="lower",
+                **kwargs,
+            )
         if cbar == True:
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
@@ -1397,86 +1505,113 @@ class Core:
 
         # Use rois_alt for 0-based indexing
         rois_to_use = self.rois_alt
-        
+
         # num_rois = int(np.nanmax(rois_to_use)) + 1  # +1 because 0-based indexing
         color = matplotlib.colormaps["jet_r"]
-        
+
         if func == "average_stack":
-            scanv = ax.imshow(self.average_stack, cmap = "Greys_r", origin = "lower", **kwargs)
+            scanv = ax.imshow(
+                self.average_stack, cmap="Greys_r", origin="lower", **kwargs
+            )
         elif func == pygor.core.methods.correlation_map:
-            correlation_result = func(self.images[zstart:zstop, ystart:ystop, xstart:xstop])
-            scanv = ax.imshow(correlation_result, cmap ="Greys_r", origin = "lower", **kwargs)
+            correlation_result = func(
+                self.images[zstart:zstop, ystart:ystop, xstart:xstop]
+            )
+            scanv = ax.imshow(
+                correlation_result, cmap="Greys_r", origin="lower", **kwargs
+            )
         else:
-            scanv = ax.imshow(func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis = axis), cmap ="Greys_r", origin = "lower", **kwargs)
+            scanv = ax.imshow(
+                func(self.images[zstart:zstop, ystart:ystop, xstart:xstop:], axis=axis),
+                cmap="Greys_r",
+                origin="lower",
+                **kwargs,
+            )
         if outline:
             # Extract ROI outlines instead of filled regions
             from skimage import measure
-            
+
             # Get unique ROI values from rois_alt (0-based indexing, background is NaN)
             roi_values = np.unique(rois_to_use)
-            roi_values = roi_values[~np.isnan(roi_values)].astype(int)  # Remove NaN (background)
-            
+            roi_values = roi_values[~np.isnan(roi_values)].astype(
+                int
+            )  # Remove NaN (background)
+
             # Filter by specific ROI indices if provided
             if roi_indices is not None:
                 roi_indices = np.array(roi_indices)
                 roi_values = roi_values[np.isin(roi_values, roi_indices)]
-            
+
             # Check if any ROIs remain after filtering
             if len(roi_values) == 0:
                 print(f"Warning: No ROIs found with indices {roi_indices}")
                 # Create empty ScalarMappable for consistency
                 import matplotlib.cm as cm
+
                 norm = matplotlib.colors.Normalize(vmin=0, vmax=1)
                 rois = cm.ScalarMappable(norm=norm, cmap=color)
             else:
                 # Apply cropping to ROIs
                 rois_cropped = rois_to_use[ystart:ystop, xstart:xstop]
-                
+
                 # Plot each ROI outline individually
                 for i, roi_val in enumerate(roi_values):
                     # Create binary mask for current ROI
                     roi_mask = (rois_cropped == roi_val).astype(int)
-                    
+
                     if np.sum(roi_mask) == 0:  # Skip if ROI not in cropped region
                         continue
-                    
+
                     # Find contours
                     contours = measure.find_contours(roi_mask, 0.5)
-                    
+
                     # Get color for this ROI
                     roi_color = color(i / len(roi_values))
-                    
+
                     # Plot each contour
                     for contour in contours:
                         if outline_smooth:
                             # Apply Gaussian smoothing to contour coordinates
                             from scipy.ndimage import gaussian_filter1d
+
                             contour[:, 0] = gaussian_filter1d(contour[:, 0], sigma=1.5)
                             contour[:, 1] = gaussian_filter1d(contour[:, 1], sigma=1.5)
-                            
+
                             # Close the contour by adding the first point to the end
                             contour = np.vstack([contour, contour[0]])
 
-                        ax.plot(contour[:, 1], contour[:, 0], 
-                            color=roi_color, linewidth=outline_width, alpha=alpha)
-                
+                        ax.plot(
+                            contour[:, 1],
+                            contour[:, 0],
+                            color=roi_color,
+                            linewidth=outline_width,
+                            alpha=alpha,
+                        )
+
                 # Create dummy mappable for colorbar compatibility
                 import matplotlib.cm as cm
-                norm = matplotlib.colors.Normalize(vmin=np.min(roi_values), vmax=np.max(roi_values))
+
+                norm = matplotlib.colors.Normalize(
+                    vmin=np.min(roi_values), vmax=np.max(roi_values)
+                )
                 rois = cm.ScalarMappable(norm=norm, cmap=color)
         else:
             # Original filled region display using rois_alt
             rois_display = rois_to_use.copy()
-            
+
             # Filter by specific ROI indices if provided
             if roi_indices is not None:
                 roi_indices = np.array(roi_indices)
                 # Create mask for ROIs not in roi_indices (set them to NaN)
                 mask = ~np.isin(rois_display, roi_indices) & ~np.isnan(rois_display)
                 rois_display[mask] = np.nan
-            
-            rois_masked = np.ma.masked_where(np.isnan(rois_display), rois_display)[ystart:ystop, xstart:xstop]
-            rois = ax.imshow(rois_masked, cmap = color, alpha = alpha, origin = "lower", **kwargs)
+
+            rois_masked = np.ma.masked_where(np.isnan(rois_display), rois_display)[
+                ystart:ystop, xstart:xstop
+            ]
+            rois = ax.imshow(
+                rois_masked, cmap=color, alpha=alpha, origin="lower", **kwargs
+            )
         ax.grid(False)
         ax.axis("off")
         if cbar == True:
@@ -1486,9 +1621,11 @@ class Core:
         if labels == True:
             # Get ROI values from rois_alt (0-based indexing)
             label_map = np.unique(rois_to_use)
-            label_map = label_map[~np.isnan(label_map)].astype(int)  # Remove NaN (background)
+            label_map = label_map[~np.isnan(label_map)].astype(
+                int
+            )  # Remove NaN (background)
             label_map = np.sort(label_map)  # Sort in ascending order
-            
+
             # Filter label_map by roi_indices if provided
             if roi_indices is not None:
                 roi_indices = np.array(roi_indices)
@@ -1522,7 +1659,7 @@ class Core:
                         path_effects.Normal(),
                     ],
                 )
-        
+
         return fig, ax
 
     def view_drift(
@@ -1585,11 +1722,11 @@ class Core:
         """
         session = pygor.core.gui.methods.NapariDepthPrompt(self)
         return session.run()
-    
+
     def update_h5_key(self, key, value, overwrite=False):
         """
         Update a specific key in the H5 file with new data.
-        
+
         Parameters
         ----------
         key : str
@@ -1598,14 +1735,14 @@ class Core:
             The new value to store
         overwrite : bool, optional
             Whether to overwrite existing data (default: False)
-            
+
         Returns
         -------
         bool
             True if update was successful, False otherwise
         """
         return pygor.core.methods.update_h5_key(self, key, value, overwrite)
-    
+
     def update_ipl_depths(self, depths=None):
         """
         Update IPL depths on the in-memory object, optionally using interactive depth selection.
@@ -1630,9 +1767,14 @@ class Core:
         print(f"Successfully updated ipl_depths for {len(depths)} ROIs")
         return True
 
-    def estimate_ipl_depths(self, n_bins=8, upper_percentile=0.0,
-                            lower_percentile=100.0, orientation=None,
-                            plot=False):
+    def estimate_ipl_depths(
+        self,
+        n_bins=8,
+        upper_percentile=0.0,
+        lower_percentile=100.0,
+        orientation=None,
+        plot=False,
+    ):
         """Automatically estimate IPL depths from ROI positions without GUI.
 
         Uses percentile-based boundary estimation along the scan axis to
@@ -1659,8 +1801,11 @@ class Core:
             Estimated IPL depth percentages.
         """
         from pygor.anatomy.ipl import (
-            estimate_ipl_boundaries, calculate_ipl_depths, plot_ipl_estimation,
+            calculate_ipl_depths,
+            estimate_ipl_boundaries,
+            plot_ipl_estimation,
         )
+
         upper, lower = estimate_ipl_boundaries(
             self.roi_centroids,
             n_bins=n_bins,
@@ -1669,13 +1814,20 @@ class Core:
             orientation=orientation,
         )
         depths = calculate_ipl_depths(
-            self.roi_centroids, upper, lower, orientation=orientation,
+            self.roi_centroids,
+            upper,
+            lower,
+            orientation=orientation,
         )
         self.ipl_depths = depths
         if plot:
             mean_image = np.average(self.images, axis=0)
             plot_ipl_estimation(
-                mean_image, self.roi_centroids, upper, lower, depths,
+                mean_image,
+                self.roi_centroids,
+                upper,
+                lower,
+                depths,
             )
         return depths
 
@@ -1693,7 +1845,7 @@ class Core:
         self.rois = roi_mask
         self.num_rois = len(np.unique(roi_mask)) - 1
         print(f"Successfully updated object.rois: {self.num_rois} ROIs saved")
-        
+
     def transfer_rois_from(
         self,
         source: "Core",
@@ -1807,10 +1959,10 @@ class Core:
 
         # Build result dict
         result = {
-            'shift': transform['shift'],
-            'error': transform['error'],
-            'num_rois': self.num_rois,
-            'source_name': source.name,
+            "shift": transform["shift"],
+            "error": transform["error"],
+            "num_rois": self.num_rois,
+            "source_name": source.name,
         }
 
         # Plot if requested
@@ -1818,11 +1970,13 @@ class Core:
             self._plot_roi_transfer(source, shifted_mask, transform, projection_mode)
 
         # Print summary
-        print(f"ROI Transfer complete.\n"
-              f"  Source: {source.name}\n"
-              f"  Shift: (y={result['shift'][0]:.2f}, x={result['shift'][1]:.2f}) pixels\n"
-              f"  Registration error: {result['error']:.4f}\n"
-              f"  ROIs transferred: {result['num_rois']}")
+        print(
+            f"ROI Transfer complete.\n"
+            f"  Source: {source.name}\n"
+            f"  Shift: (y={result['shift'][0]:.2f}, x={result['shift'][1]:.2f}) pixels\n"
+            f"  Registration error: {result['error']:.4f}\n"
+            f"  ROIs transferred: {result['num_rois']}"
+        )
 
         return result
 
@@ -1846,7 +2000,10 @@ class Core:
                     f"'{data_obj.name}' has no image stack. Cannot compute std projection."
                 )
         elif mode == "correlation":
-            if hasattr(data_obj, 'correlation_projection') and data_obj.correlation_projection is not None:
+            if (
+                hasattr(data_obj, "correlation_projection")
+                and data_obj.correlation_projection is not None
+            ):
                 return data_obj.correlation_projection
             else:
                 raise RuntimeError(
@@ -1873,10 +2030,7 @@ class Core:
         target_proj = self._get_projection_for_alignment(self, projection_mode)
 
         # Compute pearsons correlation for two projections
-        corr = np.corrcoef(
-            source_proj.flatten(),
-            target_proj.flatten()
-        )[0, 1]
+        corr = np.corrcoef(source_proj.flatten(), target_proj.flatten())[0, 1]
 
         # Shared colormap limits
         vmin = min(source_proj.min(), target_proj.min())
@@ -1884,16 +2038,16 @@ class Core:
 
         # Top-left: Source with original ROIs
         ax = axes[0, 0]
-        ax.imshow(source_proj, cmap='gray', vmin=vmin, vmax=vmax, origin='lower')
+        ax.imshow(source_proj, cmap="gray", vmin=vmin, vmax=vmax, origin="lower")
         self._overlay_rois_on_axis(ax, source.rois, alpha=0.3)
-        ax.set_title(f'Source: {source.name}\n(original ROIs)')
-        ax.axis('off')
+        ax.set_title(f"Source: {source.name}\n(original ROIs)")
+        ax.axis("off")
 
         # Top-right: Target projection (for reference)
         ax = axes[0, 1]
-        ax.imshow(target_proj, cmap='gray', vmin=vmin, vmax=vmax, origin='lower')
-        ax.set_title(f'Target: {self.name}\n({projection_mode} projection)')
-        ax.axis('off')
+        ax.imshow(target_proj, cmap="gray", vmin=vmin, vmax=vmax, origin="lower")
+        ax.set_title(f"Target: {self.name}\n({projection_mode} projection)")
+        ax.axis("off")
 
         # Bottom-left: Overlay showing alignment (red-cyan composite)
         ax = axes[1, 0]
@@ -1904,19 +2058,23 @@ class Core:
         rgb[:, :, 0] = source_norm  # Red channel = source
         rgb[:, :, 1] = target_norm  # Green channel = target
         rgb[:, :, 2] = target_norm  # Blue channel = target (makes cyan)
-        ax.imshow(np.clip(rgb, 0, 1), origin='lower')
-        shift = transform['shift']
-        ax.set_title(f'Alignment overlay (R=source, C=target)\n'
-                     f'Shift to apply: dy={shift[0]:.2f}, dx={shift[1]:.2f} px')
-        ax.axis('off')
+        ax.imshow(np.clip(rgb, 0, 1), origin="lower")
+        shift = transform["shift"]
+        ax.set_title(
+            f"Alignment overlay (R=source, C=target)\n"
+            f"Shift to apply: dy={shift[0]:.2f}, dx={shift[1]:.2f} px"
+        )
+        ax.axis("off")
 
         # Bottom-right: Target with transferred ROIs
         ax = axes[1, 1]
-        ax.imshow(target_proj, cmap='gray', vmin=vmin, vmax=vmax, origin='lower')
+        ax.imshow(target_proj, cmap="gray", vmin=vmin, vmax=vmax, origin="lower")
         self._overlay_rois_on_axis(ax, shifted_mask, alpha=0.3)
-        ax.set_title(f'Target with transferred ROIs\n'
-                     f'({self.num_rois} ROIs, error={transform["error"]:.4f}, corr={corr:.4f})')
-        ax.axis('off')
+        ax.set_title(
+            f"Target with transferred ROIs\n"
+            f"({self.num_rois} ROIs, error={transform['error']:.4f}, corr={corr:.4f})"
+        )
+        ax.axis("off")
 
         plt.tight_layout()
         plt.show()
@@ -1932,14 +2090,14 @@ class Core:
 
         # Create colored overlay
         colored = np.zeros((*roi_mask.shape, 4))  # RGBA
-        cmap = matplotlib.colormaps['jet']
+        cmap = matplotlib.colormaps["jet"]
 
         for i, roi_id in enumerate(unique_rois):
             color = cmap(i / max(len(unique_rois), 1))
             mask = roi_mask == roi_id
             colored[mask] = (*color[:3], alpha)
 
-        ax.imshow(colored, origin='lower')
+        ax.imshow(colored, origin="lower")
 
     def segment_rois(self, mode="blob", overwrite=False, **kwargs: Any) -> np.ndarray:
         """
@@ -2119,6 +2277,7 @@ class Core:
         >>> data.segment_rois(mode="blob", input_mode="std")  # standard deviation
         """
         from pygor.segmentation import segment_rois as _segment_rois
+
         roi_mask = _segment_rois(self, mode=mode, overwrite=overwrite, **kwargs)
         self.update_rois(roi_mask)
 
@@ -2139,7 +2298,15 @@ class Core:
         session = pygor.core.gui.methods.NapariViewStack(self, **kwargs)
         session.run()
 
-    def draw_rois(self, attribute = "calculate_image_average", style = "stacked", load_existing_rois=True, overwrite=True, show_correlation=False, **kwargs: Any) -> None:
+    def draw_rois(
+        self,
+        attribute="calculate_image_average",
+        style="stacked",
+        load_existing_rois=True,
+        overwrite=True,
+        show_correlation=False,
+        **kwargs: Any,
+    ) -> None:
         """
         Draw ROIs on the image stack.
 
@@ -2158,9 +2325,12 @@ class Core:
         **kwargs : dict
             Additional keyword arguments passed to NapariRoiPrompt
         """
+
         def call_method(obj, method_str, *args, **kwargs: Any):
             # Extract method name by stripping trailing parentheses (if present)
-            method_name = method_str.split('(')[0].strip()  # Handles "method" or "method()"
+            method_name = method_str.split("(")[
+                0
+            ].strip()  # Handles "method" or "method()"
             method = getattr(obj, method_name)  # Get the method from the object
             print(method)
             if attribute in obj.__dict__:
@@ -2172,12 +2342,14 @@ class Core:
 
         # If target is None (e.g., no repetitions), fall back to raw images
         if target is None:
-            print("No averaged data available (likely no repetitions). Using raw images instead.")
+            print(
+                "No averaged data available (likely no repetitions). Using raw images instead."
+            )
             target = self.images
 
         # Check if existing ROIs should be loaded
         existing_roi_mask = None
-        if load_existing_rois and hasattr(self, 'rois') and self.rois is not None:
+        if load_existing_rois and hasattr(self, "rois") and self.rois is not None:
             existing_roi_mask = self.rois
             print("Loading existing ROIs from self.rois")
 
@@ -2195,26 +2367,33 @@ class Core:
             traces_plot_style=style,
             existing_roi_mask=existing_roi_mask,
             correlation_projection=correlation_projection,
-            **kwargs
+            **kwargs,
         )
         traces = session.run()
 
         # Save ROI mask if overwrite is True
         if overwrite:
             # Check if user actually modified ROIs in Napari
-            if hasattr(session, 'rois_were_modified') and not session.rois_were_modified:
+            if (
+                hasattr(session, "rois_were_modified")
+                and not session.rois_were_modified
+            ):
                 # ROIs were not modified - use original mask to prevent growth
                 print("No changes detected - ROIs not overwritten")
             else:
                 # ROIs were modified - convert and save
                 napari_mask = session.mask
-                igor_style_mask = session.convert_napari_mask_to_igor_format(napari_mask)
+                igor_style_mask = session.convert_napari_mask_to_igor_format(
+                    napari_mask
+                )
                 # Postpone saving to H5 until user executes save operation, but update object attributes
 
                 # success = self.update_h5_key('ROIs', h5_mask, overwrite=True)
                 # if success:
                 self.rois = igor_style_mask
-                self.num_rois = len(np.unique(igor_style_mask)[np.unique(igor_style_mask) < 0])
+                self.num_rois = len(
+                    np.unique(igor_style_mask)[np.unique(igor_style_mask) < 0]
+                )
                 print(f"Successfully updated {self.num_rois} ROIs in memory")
 
                 # Recompute dependent data since ROIs changed
@@ -2229,26 +2408,36 @@ class Core:
                 # Verify shapes match
                 print("\nVerifying data integrity:")
                 print(f"  num_rois: {self.num_rois}")
-                print(f"  traces_raw shape: {self.traces_raw.shape if self.traces_raw is not None else 'None'}")
-                print(f"  averages shape: {self.averages.shape if self.averages is not None else 'None'}")
-                print(f"  snippets shape: {self.snippets.shape if self.snippets is not None else 'None'}")
+                print(
+                    f"  traces_raw shape: {self.traces_raw.shape if self.traces_raw is not None else 'None'}"
+                )
+                print(
+                    f"  averages shape: {self.averages.shape if self.averages is not None else 'None'}"
+                )
+                print(
+                    f"  snippets shape: {self.snippets.shape if self.snippets is not None else 'None'}"
+                )
 
                 print("All dependent data recomputed and saved successfully")
             # else:
             #     print("Failed to save ROIs to H5 file")
 
         # Plot traces if requested
-        if kwargs.get('plot', False):
+        if kwargs.get("plot", False):
             print("\nGenerating traces plot...")
 
             if overwrite and self.traces_znorm is not None:
                 # Saved mode: plot from computed traces
                 self._plot_traces(style=style, session=session)
-            elif hasattr(session, 'mask') and session.mask is not None:
+            elif hasattr(session, "mask") and session.mask is not None:
                 # Preview mode: plot from temporary mask
                 target_images = self.images if target is self.images else target
-                self._plot_traces(style=style, session=session,
-                                roi_mask=session.mask, images=target_images)
+                self._plot_traces(
+                    style=style,
+                    session=session,
+                    roi_mask=session.mask,
+                    images=target_images,
+                )
             else:
                 print("No ROI data available for plotting")
 
@@ -2274,6 +2463,7 @@ class Core:
             Image stack for preview mode (if provided with roi_mask, computes traces on-the-fly)
         """
         import matplotlib.pyplot as plt
+
         import pygor.core.gui.methods
 
         # Determine mode and prepare data
@@ -2297,6 +2487,7 @@ class Core:
 
             # Extract traces using vectorized method
             from pygor.core.trace_extraction import extract_traces
+
             traces_raw = extract_traces(images, roi_mask)
             # Returns (n_rois, n_frames)
 
@@ -2307,13 +2498,15 @@ class Core:
 
             # Get baseline parameters
             try:
-                ignore_first_seconds = self.os_parameters['Ignore1stXseconds']
-                baseline_seconds = self.os_parameters['Baseline_nSeconds']
-                line_duration = self.os_parameters['LineDuration']
+                ignore_first_seconds = self.os_parameters["Ignore1stXseconds"]
+                baseline_seconds = self.os_parameters["Baseline_nSeconds"]
+                line_duration = self.os_parameters["LineDuration"]
                 n_lines = images.shape[1]  # nY from image dimensions
             except (AttributeError, KeyError, TypeError):
                 # Fallback if OS_Parameters not available
-                print("Warning: OS_Parameters not available, using default baseline settings")
+                print(
+                    "Warning: OS_Parameters not available, using default baseline settings"
+                )
                 ignore_first_seconds = 0
                 baseline_seconds = 2
                 line_duration = 0.002  # 2ms default
@@ -2352,18 +2545,28 @@ class Core:
         else:
             # SAVED MODE: Use existing computed traces
             if self.traces_znorm is None:
-                print("No traces available - call extract_traces_from_rois first or provide roi_mask and images for preview")
+                print(
+                    "No traces available - call extract_traces_from_rois first or provide roi_mask and images for preview"
+                )
                 return
 
             # Check if traces shape matches current ROI count (staleness check)
             if self.rois is not None:
                 current_roi_count = len(np.unique(self.rois)[np.unique(self.rois) < 0])
-                trace_roi_count = self.traces_znorm.shape[0]  # First dimension is n_rois
+                trace_roi_count = self.traces_znorm.shape[
+                    0
+                ]  # First dimension is n_rois
                 if trace_roi_count != current_roi_count:
-                    print(f"WARNING: Trace count ({trace_roi_count}) doesn't match ROI count ({current_roi_count}).")
-                    print("Traces may be stale from H5 file. Restart kernel or call extract_traces_from_rois().")
+                    print(
+                        f"WARNING: Trace count ({trace_roi_count}) doesn't match ROI count ({current_roi_count})."
+                    )
+                    print(
+                        "Traces may be stale from H5 file. Restart kernel or call extract_traces_from_rois()."
+                    )
 
-            traces_plot = self.traces_znorm  # Already (n_rois, n_frames) from IGOR convention
+            traces_plot = (
+                self.traces_znorm
+            )  # Already (n_rois, n_frames) from IGOR convention
             avg_img = np.mean(self.images, axis=0)
 
         # Create plot
@@ -2371,29 +2574,34 @@ class Core:
         colormap = plt.cm.rainbow(np.linspace(0, 1, len(traces_plot)))
 
         # Top panel: Show average image with ROI overlay
-        ax[0].imshow(avg_img, cmap="Greys_r", origin='lower')
-        if session is not None and hasattr(session, 'mask'):
-            ax[0].imshow(session.mask, cmap="rainbow", alpha=0.25, origin='lower')
+        ax[0].imshow(avg_img, cmap="Greys_r", origin="lower")
+        if session is not None and hasattr(session, "mask"):
+            ax[0].imshow(session.mask, cmap="rainbow", alpha=0.25, origin="lower")
         elif roi_mask is not None:
-            ax[0].imshow(roi_mask, cmap="rainbow", alpha=0.25, origin='lower')
-        ax[0].set_title('ROIs')
-        ax[0].axis('off')
+            ax[0].imshow(roi_mask, cmap="rainbow", alpha=0.25, origin="lower")
+        ax[0].set_title("ROIs")
+        ax[0].axis("off")
 
         # Bottom panel: Plot z-normalized traces
         if style == "stacked":
             for n, trace in enumerate(traces_plot):
                 ax[1].plot(trace, color=colormap[-n], alpha=0.7, linewidth=0.5)
-            ax[1].set_ylabel('Z-score', fontsize=10)
-            ax[1].set_xlabel('Frame', fontsize=10)
-            ax[1].set_title('Z-normalized traces (baseline corrected)')
+            ax[1].set_ylabel("Z-score", fontsize=10)
+            ax[1].set_xlabel("Frame", fontsize=10)
+            ax[1].set_title("Z-normalized traces (baseline corrected)")
 
         elif style == "raster":
-            im = ax[1].imshow(traces_plot, aspect="auto", cmap="RdBu_r",
-                            interpolation="none", origin='lower')
-            ax[1].set_ylabel('ROI #', fontsize=10)
-            ax[1].set_xlabel('Frame', fontsize=10)
-            ax[1].set_title('Z-normalized traces (baseline corrected)')
-            plt.colorbar(im, ax=ax[1], label='Z-score')
+            im = ax[1].imshow(
+                traces_plot,
+                aspect="auto",
+                cmap="RdBu_r",
+                interpolation="none",
+                origin="lower",
+            )
+            ax[1].set_ylabel("ROI #", fontsize=10)
+            ax[1].set_xlabel("Frame", fontsize=10)
+            ax[1].set_title("Z-normalized traces (baseline corrected)")
+            plt.colorbar(im, ax=ax[1], label="Z-score")
 
         plt.tight_layout()
         plt.show()
@@ -2451,11 +2659,15 @@ class Core:
         """
         # Check if already computed and not forcing recompute
         if not force and not overwrite and self.correlation_projection is not None:
-            print("Correlation projection already exists. Use force=True or overwrite=True to recompute.")
+            print(
+                "Correlation projection already exists. Use force=True or overwrite=True to recompute."
+            )
             return self.correlation_projection
 
         if self.images is None:
-            raise ValueError("No image data available. Cannot compute correlation projection.")
+            raise ValueError(
+                "No image data available. Cannot compute correlation projection."
+            )
 
         # Call standalone function
         correlation_projection = pygor.core.calculations.compute_correlation_projection(
@@ -2470,15 +2682,20 @@ class Core:
         self.correlation_projection = correlation_projection
 
         # Record step in params
-        self.params.mark_step("correlation_projection", {
-            "include_diagonals": include_diagonals,
-            "timecompress": timecompress,
-            "binpix": binpix,
-        })
+        self.params.mark_step(
+            "correlation_projection",
+            {
+                "include_diagonals": include_diagonals,
+                "timecompress": timecompress,
+                "binpix": binpix,
+            },
+        )
 
         return correlation_projection
 
-    def _compute_baseline_window(self, baseline_duration_s=2.0):
+    def _compute_baseline_window(
+        self, baseline_duration_s: float | None = None, buffer_s: float = 1.0
+    ):
         """
         Compute baseline window from pre-stimulus period.
 
@@ -2487,8 +2704,12 @@ class Core:
 
         Parameters
         ----------
-        baseline_duration_s : float, optional
-            Duration of baseline window in seconds (default: 2.0)
+        baseline_duration_s : float or None, optional
+            Duration of baseline window in seconds. If None (default), uses the
+            entire pre-stimulus period minus a buffer at the start.
+        buffer_s : float, optional
+            Buffer in seconds to skip at recording start to avoid artifacts (default: 1.0).
+            Only used when baseline_duration_s is None.
 
         Returns
         -------
@@ -2496,7 +2717,7 @@ class Core:
             (baseline_start_frame, baseline_end_frame) where end is exclusive
         """
         # Check for manual override first
-        if hasattr(self, '_baseline_window') and self._baseline_window is not None:
+        if hasattr(self, "_baseline_window") and self._baseline_window is not None:
             return self._baseline_window
 
         # Fallback if no triggers available
@@ -2506,18 +2727,23 @@ class Core:
             return 0, max(3, n_frames)
 
         first_trigger_frame = int(self.triggertimes_frame[0])
-        baseline_frames = int(baseline_duration_s * self.frame_hz)
-
-        # Work backwards from first trigger
         baseline_end = first_trigger_frame  # exclusive
-        baseline_start = max(0, baseline_end - baseline_frames)
+
+        if baseline_duration_s is None:
+            # Use entire pre-stimulus period minus buffer at start
+            buffer_frames = int(buffer_s * self.frame_hz)
+            baseline_start = buffer_frames
+        else:
+            # Work backwards from first trigger for specified duration
+            baseline_frames = int(baseline_duration_s * self.frame_hz)
+            baseline_start = max(0, baseline_end - baseline_frames)
 
         # Validate minimum window size (need at least 3 frames for std)
         actual_frames = baseline_end - baseline_start
         if actual_frames < 3:
             warnings.warn(
                 f"First trigger at frame {first_trigger_frame} too early for "
-                f"{baseline_duration_s}s baseline. Using frames 0-{first_trigger_frame} "
+                f"requested baseline. Using frames 0-{first_trigger_frame} "
                 f"({actual_frames} frames)"
             )
             baseline_start = 0
@@ -2564,8 +2790,10 @@ class Core:
             )
 
         duration = (self._baseline_window[1] - self._baseline_window[0]) / self.frame_hz
-        print(f"Baseline window set: frames {self._baseline_window[0]}-{self._baseline_window[1]} "
-              f"({duration:.2f}s)")
+        print(
+            f"Baseline window set: frames {self._baseline_window[0]}-{self._baseline_window[1]} "
+            f"({duration:.2f}s)"
+        )
 
     @property
     def baseline_info(self):
@@ -2577,11 +2805,13 @@ class Core:
         dict or None
             Dictionary with baseline window info, or None if not yet computed.
         """
-        return getattr(self, '_baseline_used', None)
+        return getattr(self, "_baseline_used", None)
 
-    def extract_traces_from_rois(self) -> tuple[np.ndarray, np.ndarray]:
+    def extract_traces_from_rois(self, baseline_dur: int | float | None = 10) -> tuple[np.ndarray, np.ndarray]:
         """
         Compute ROI traces from images and ROI mask.
+
+        baseline_dur: Optional duration in seconds for baseline window. If None, uses automatic pre-stimulus detection.
 
         Extracts the average fluorescence signal for each ROI across all frames.
         Always computes BOTH raw and z-normalized traces to ensure consistency.
@@ -2608,26 +2838,34 @@ class Core:
 
         n_rois, n_frames = traces_raw.shape
 
-        # Compute baseline window from pre-stimulus period (before first trigger)
-        baseline_start, baseline_end = self._compute_baseline_window()
+        # Compute baseline window from backwards pre-stimulus period (before first trigger)
+        baseline_start, baseline_end = self._compute_baseline_window(baseline_duration_s=baseline_dur)
 
         baseline_frames = baseline_end - baseline_start
         baseline_duration = baseline_frames / self.frame_hz
-        method = 'manual' if hasattr(self, '_baseline_window') and self._baseline_window else 'pre-stimulus'
+        method = (
+            "manual"
+            if hasattr(self, "_baseline_window") and self._baseline_window
+            else "pre-stimulus"
+        )
 
-        print(f"Using {method} baseline: frames {baseline_start}-{baseline_end} "
-              f"({baseline_frames} frames, {baseline_duration:.2f}s)")
+        print(
+            f"Using {method} baseline: frames {baseline_start}-{baseline_end} "
+            f"({baseline_frames} frames, {baseline_duration:.2f}s)"
+        )
 
         # Compute z-normalized traces using vectorized function
         traces_znorm = znorm_traces(traces_raw, baseline_start, baseline_end)
 
         # Store baseline info for transparency
         self._baseline_used = {
-            'start_frame': baseline_start,
-            'end_frame': baseline_end,
-            'n_frames': baseline_frames,
-            'duration_s': baseline_duration,
-            'method': method,
+            "start_frame": baseline_start,
+            "end_frame": baseline_end,
+            "start_ms": baseline_start / self.frame_hz * 1000,
+            "end_ms": baseline_end / self.frame_hz * 1000,
+            "n_frames": baseline_frames,
+            "duration_s": baseline_duration,
+            "method": method,
         }
 
         # Set both attributes
@@ -2635,13 +2873,16 @@ class Core:
         self.traces_znorm = traces_znorm
 
         # Record step in params
-        self.params.mark_step("trace_extraction", {
-            "n_rois": n_rois,
-            "n_frames": n_frames,
-            "baseline_start": baseline_start,
-            "baseline_end": baseline_end,
-            "baseline_method": method,
-        })
+        self.params.mark_step(
+            "trace_extraction",
+            {
+                "n_rois": n_rois,
+                "n_frames": n_frames,
+                "baseline_start": baseline_start,
+                "baseline_end": baseline_end,
+                "baseline_method": method,
+            },
+        )
 
         print(f"Extracted {n_rois} traces ({n_frames} frames each)")
 
@@ -2702,14 +2943,19 @@ class Core:
 
         # Calculate valid triggers and snippet parameters (in frame units first)
         n_triggers = len(triggertimes)
-        snippet_duration_s = triggertimes[trigger_mode + ignore_first_triggers] - triggertimes[ignore_first_triggers]
+        snippet_duration_s = (
+            triggertimes[trigger_mode + ignore_first_triggers]
+            - triggertimes[ignore_first_triggers]
+        )
         snippet_duration_frames = int(snippet_duration_s / frame_duration)
 
         # Calculate number of complete loops
         valid_triggers = n_triggers - ignore_first_triggers + ignore_last_triggers
         n_loops = valid_triggers // trigger_mode
 
-        print(f"Extracting snippets: {n_triggers} triggers, {n_loops} complete loops, snippet duration: {snippet_duration_frames} frames")
+        print(
+            f"Extracting snippets: {n_triggers} triggers, {n_loops} complete loops, snippet duration: {snippet_duration_frames} frames"
+        )
 
         # Initialize output arrays (using frame-level dimensions)
         snippets_frames = np.zeros((snippet_duration_frames, n_loops, n_rois))
@@ -2724,7 +2970,9 @@ class Core:
 
             # Ensure we don't exceed array bounds
             if end_frame > n_frames:
-                print(f"Warning: Loop {loop_idx} exceeds frame array, truncating at {n_loops}")
+                print(
+                    f"Warning: Loop {loop_idx} exceeds frame array, truncating at {n_loops}"
+                )
                 n_loops = loop_idx
                 break
 
@@ -2736,32 +2984,48 @@ class Core:
             snippets_frames = snippets_frames[:, :n_loops, :]
 
         # Compute averages across loops (still at frame level)
-        averages_frames = np.mean(snippets_frames, axis=1)  # Shape: (snippet_duration_frames, n_rois)
+        averages_frames = np.mean(
+            snippets_frames, axis=1
+        )  # Shape: (snippet_duration_frames, n_rois)
 
-        print(f"Upsampling averages from {snippet_duration_frames} frames to line-precision")
+        print(
+            f"Upsampling averages from {snippet_duration_frames} frames to line-precision"
+        )
 
         # NOW upsample only the averages (much more efficient!)
         # Vectorized upsampling using linear interpolation
-        weights_next = np.tile(np.arange(lines_per_frame) / lines_per_frame, snippet_duration_frames - 1)
+        weights_next = np.tile(
+            np.arange(lines_per_frame) / lines_per_frame, snippet_duration_frames - 1
+        )
         weights_curr = 1 - weights_next
-        frame_indices = np.repeat(np.arange(snippet_duration_frames - 1), lines_per_frame)
+        frame_indices = np.repeat(
+            np.arange(snippet_duration_frames - 1), lines_per_frame
+        )
 
         # Upsample averages
-        averages_upsampled_flat = (averages_frames[frame_indices, :] * weights_curr[:, np.newaxis] +
-                                   averages_frames[frame_indices + 1, :] * weights_next[:, np.newaxis])
+        averages_upsampled_flat = (
+            averages_frames[frame_indices, :] * weights_curr[:, np.newaxis]
+            + averages_frames[frame_indices + 1, :] * weights_next[:, np.newaxis]
+        )
 
         # Use the actual length from interpolation (not the calculated target)
         snippet_duration_upsampled = len(averages_upsampled_flat)
         averages = averages_upsampled_flat  # Shape: (snippet_upsampled, n_rois)
 
         # Upsample snippets using the same interpolation approach
-        print(f"Upsampling snippets from {snippet_duration_frames} frames to line-precision ({snippet_duration_upsampled} samples)")
+        print(
+            f"Upsampling snippets from {snippet_duration_frames} frames to line-precision ({snippet_duration_upsampled} samples)"
+        )
         snippets_upsampled = np.zeros((snippet_duration_upsampled, n_loops, n_rois))
 
         for loop_idx in range(n_loops):
             # Upsample each loop separately
-            snippets_upsampled_flat = (snippets_frames[frame_indices, loop_idx, :] * weights_curr[:, np.newaxis] +
-                                       snippets_frames[frame_indices + 1, loop_idx, :] * weights_next[:, np.newaxis])
+            snippets_upsampled_flat = (
+                snippets_frames[frame_indices, loop_idx, :]
+                * weights_curr[:, np.newaxis]
+                + snippets_frames[frame_indices + 1, loop_idx, :]
+                * weights_next[:, np.newaxis]
+            )
             snippets_upsampled[:, loop_idx, :] = snippets_upsampled_flat
 
         # For in-memory use, transpose to match try_fetch behavior
@@ -2793,23 +3057,27 @@ class Core:
         self.quality_indices = quality_criterion
 
         # Record step in params
-        self.params.mark_step("snippets_and_averages", {
-            "n_loops": int(n_loops),
-            "n_triggers": int(n_triggers),
-            "snippet_duration_frames": int(snippet_duration_frames),
-            "trigger_mode": int(trigger_mode),
-        })
+        self.params.mark_step(
+            "snippets_and_averages",
+            {
+                "n_loops": int(n_loops),
+                "n_triggers": int(n_triggers),
+                "snippet_duration_frames": int(snippet_duration_frames),
+                "trigger_mode": int(trigger_mode),
+            },
+        )
 
         return snippets, averages
 
     def plot_averages(
-        self, rois=None, 
-        figsize=(None, None), 
-        figsize_scale=None, 
-        axs=None, 
-        independent_scale = False, 
-        n_rois_raster = 50,
-        sort_order = None,
+        self,
+        rois=None,
+        figsize=(None, None),
+        figsize_scale=None,
+        axs=None,
+        independent_scale=False,
+        n_rois_raster=50,
+        sort_order=None,
         **kwargs: Any,
     ):
         """
@@ -2844,14 +3112,24 @@ class Core:
         if self.averages is None:
             warnings.warn("Averages do not exist.")
             return
-        return pygor.core.plot.plot_averages(self, rois, figsize, figsize_scale, axs, independent_scale, n_rois_raster, sort_order, **kwargs)
+        return pygor.core.plot.plot_averages(
+            self,
+            rois,
+            figsize,
+            figsize_scale,
+            axs,
+            independent_scale,
+            n_rois_raster,
+            sort_order,
+            **kwargs,
+        )
 
     def plot_filter_preview(self, roi_indices, figsize=(16, 6), title_prefix=""):
         """
         Quick side-by-side visualization: ROI map + filtered averages raster.
-        
+
         Useful for previewing ROI filtering before committing changes with keep_rois().
-        
+
         Parameters
         ----------
         roi_indices : array-like
@@ -2860,12 +3138,12 @@ class Core:
             Figure size (width, height). Default (16, 6).
         title_prefix : str, optional
             Optional prefix for the title (e.g., filter criteria description)
-            
+
         Returns
         -------
         fig, (ax_map, ax_avg)
             Figure and axes tuple
-            
+
         Examples
         --------
         >>> spatial_pass = obj.rois_in_range(x_range=(40, 80))
@@ -2874,44 +3152,64 @@ class Core:
         >>> obj.plot_filter_preview(preview_rois, title_prefix="QC>0.25, x:40-80")
         """
         roi_indices = np.asarray(roi_indices).ravel()
-        
+
         fig, (ax_map, ax_avg) = plt.subplots(1, 2, figsize=figsize)
-        
+
         # Left: ROI overlay on correlation projection
         if self.correlation_projection is not None:
             temp_mask = np.isin(self.rois_alt, roi_indices)
             rois_map = np.where(temp_mask, self.rois_alt, np.nan)
-            ax_map.imshow(self.correlation_projection, cmap='gray', origin='lower')
-            im = ax_map.imshow(rois_map, cmap='jet', alpha=0.5, origin='lower')
-            plt.colorbar(im, ax=ax_map, label='ROI ID')
+            ax_map.imshow(self.correlation_projection, cmap="gray", origin="lower")
+            im = ax_map.imshow(rois_map, cmap="jet", alpha=0.5, origin="lower")
+            plt.colorbar(im, ax=ax_map, label="ROI ID")
         else:
             # Fallback to just ROI mask if no correlation projection
             temp_mask = np.isin(self.rois_alt, roi_indices)
             rois_map = np.where(temp_mask, self.rois_alt, np.nan)
-            im = ax_map.imshow(rois_map, cmap='jet', origin='lower')
-            plt.colorbar(im, ax=ax_map, label='ROI ID')
-            
+            im = ax_map.imshow(rois_map, cmap="jet", origin="lower")
+            plt.colorbar(im, ax=ax_map, label="ROI ID")
+
         title = f"{len(roi_indices)} ROIs"
         if title_prefix:
             title = f"{title_prefix}: {title}"
         ax_map.set_title(title)
-        ax_map.axis('off')
-        
+        ax_map.axis("off")
+
         # Right: averages raster (always use imshow for preview speed)
         if self.averages is not None and len(roi_indices) > 0:
-            ax_avg.imshow(self.averages[roi_indices], aspect='auto', cmap='Greys_r', interpolation='none')
+            ax_avg.imshow(
+                self.averages[roi_indices],
+                aspect="auto",
+                cmap="Greys_r",
+                interpolation="none",
+            )
             ax_avg.set_title("Averages (raster)")
             ax_avg.set_xlabel("Time (samples)")
             ax_avg.set_ylabel("ROI")
         else:
-            ax_avg.text(0.5, 0.5, "No averages available", 
-                       ha='center', va='center', transform=ax_avg.transAxes)
-            ax_avg.axis('off')
-        
+            ax_avg.text(
+                0.5,
+                0.5,
+                "No averages available",
+                ha="center",
+                va="center",
+                transform=ax_avg.transAxes,
+            )
+            ax_avg.axis("off")
+
         plt.tight_layout()
         return fig, (ax_map, ax_avg)
 
-    def plot_traces(self, rois: list[int] | None = None, n_rois_imshow: int = 50, figsize: tuple[float, float] | None = None, cmap: str = "inferno", unit: str = "seconds", **kwargs: Any):
+    def plot_traces(
+        self,
+        rois: list[int] | None = None,
+        n_rois_imshow: int = 50,
+        figsize: tuple[float, float] | None = None,
+        cmap: str = "inferno",
+        unit: str = "seconds",
+        show_baseline: bool = True,
+        **kwargs: Any,
+    ):
         """
         Plot traces_znorm as stacked line traces or as an imshow heatmap.
 
@@ -2935,6 +3233,10 @@ class Core:
             X-axis unit: "seconds" (or "s") to convert frames via
             self.frame_hz, or "frames" (or "f") to keep raw frame indices.
             Default "seconds".
+        show_baseline : bool
+            If True, overlay a shaded region indicating the baseline window
+            used for z-normalization. Requires baseline_info to be available
+            (i.e. traces must have been extracted). Default False.
         **kwargs
             Passed to plt.plot (line mode) or ax.imshow (imshow mode).
         """
@@ -2953,6 +3255,23 @@ class Core:
         else:
             x = np.arange(n_frames)
             xlabel = "Time (frames)"
+        # Resolve baseline span in x-axis units (if requested)
+        baseline_span = None
+        if show_baseline:
+            info = self.baseline_info
+            if info is not None:
+                if unit in ("seconds", "s"):
+                    baseline_span = (
+                        info["start_frame"] / self.frame_hz,
+                        info["end_frame"] / self.frame_hz,
+                    )
+                else:
+                    baseline_span = (info["start_frame"], info["end_frame"])
+            else:
+                warnings.warn(
+                    "show_baseline=True but no baseline info available "
+                    "(traces not yet extracted?)."
+                )
         if n_rois > n_rois_imshow:
             # --- imshow mode ---
             if figsize is None:
@@ -2960,6 +3279,8 @@ class Core:
             fig, ax = plt.subplots(figsize=figsize)
             extent = [x[0], x[-1], n_rois - 0.5, -0.5]
             ax.imshow(traces, cmap=cmap, interpolation="none", extent=extent, **kwargs)
+            if baseline_span is not None:
+                ax.axvspan(*baseline_span, facecolor="silver", alpha=0.25, label="Baseline", edgecolor='red', linestyle='--')
             ax.set_xlabel(xlabel)
             ax.set_ylabel("ROI")
             return fig, ax
@@ -2967,7 +3288,10 @@ class Core:
         if figsize is None:
             figsize = (8, max(3, n_rois * 0.4))
         fig, axs = plt.subplots(
-            n_rois, 1, figsize=figsize, sharex=True,
+            n_rois,
+            1,
+            figsize=figsize,
+            sharex=True,
             gridspec_kw={"hspace": 0},
         )
         if n_rois == 1:
@@ -2976,6 +3300,8 @@ class Core:
         for i, ax in enumerate(axs):
             ax.plot(x, traces[i], color=colors[i], linewidth=0.7, **kwargs)
             ax.set_xlim(x[0], x[-1])
+            if baseline_span is not None:
+                ax.axvspan(*baseline_span, color="silver", alpha=1, zorder=-1, edgecolor=None)
             ax.axis("off")
         # Re-enable x-axis on bottom subplot only
         axs[-1].axis("on")
@@ -3079,7 +3405,7 @@ class Core:
 
     def get_average_markers(self):
         return pygor.core.methods.determine_epoch_markers_ms(self)
-    
+
     def get_epoch_dur(self, rtol=1e-3, atol=1e-3):
         # Differentiate the average markers to get the epoch durations
         diff = np.diff(self.get_average_markers())
@@ -3102,13 +3428,15 @@ class Core:
         Uses cached value if available, unless recompute=True.
         """
         if self.correlation_projection is None or recompute:
-            self.correlation_projection = pygor.core.methods.correlation_map(self.images)
+            self.correlation_projection = pygor.core.methods.correlation_map(
+                self.images
+            )
         return self.correlation_projection
 
-    def calc_mean_triggertimes(self, unit = "index"):
+    def calc_mean_triggertimes(self, unit="index"):
         """
         Calculate the mean trigger times in seconds.
-        
+
         Returns
         -------
         numpy.ndarray
@@ -3120,23 +3448,25 @@ class Core:
             markers_arr -= markers_arr[0]
         else:
             if self.triggertimes.shape[0] % self.trigger_mode != 0:
-                print(
-                    "WARNING: Trigger times are not evenly divisible by trigger mode"
-                )
+                print("WARNING: Trigger times are not evenly divisible by trigger mode")
                 # Determine amount of triggers to crop out to achieve loop alignment
                 num_triggers_to_crop = self.triggertimes.shape[0] % self.trigger_mode
                 triggertimes = self.triggertimes[:-num_triggers_to_crop]
-                print(f"WARNING: Cropped {num_triggers_to_crop} triggers to achieve loop alignment")
+                print(
+                    f"WARNING: Cropped {num_triggers_to_crop} triggers to achieve loop alignment"
+                )
             else:
                 triggertimes = self.triggertimes
             # Calculate average trigger times in seconds
-            avg_epoch_dur = np.average(np.diff(triggertimes.reshape(-1, self.trigger_mode)[:, 0]))
+            avg_epoch_dur = np.average(
+                np.diff(triggertimes.reshape(-1, self.trigger_mode)[:, 0])
+            )
             epoch_reshape = triggertimes.reshape(-1, self.trigger_mode)
             temp_arr = np.empty(epoch_reshape.shape)
             for n, i in enumerate(epoch_reshape):
                 temp_arr[n] = i - (avg_epoch_dur * n)
             avg_epoch_triggertimes = np.average(temp_arr, axis=0)
-            markers_arr_s = avg_epoch_triggertimes# / self.linedur_s
+            markers_arr_s = avg_epoch_triggertimes  # / self.linedur_s
             markers_arr_s -= markers_arr_s[0]
             if unit == "index" or unit == "indices":
                 markers_arr = markers_arr_s * (1 / self.linedur_s)
@@ -3148,7 +3478,7 @@ class Core:
                 markers_arr = np.round(markers_arr, 0).astype(int)
             if unit == "ms":
                 markers_arr = markers_arr_s * 1000
-        return markers_arr#.astype(int)
+        return markers_arr  # .astype(int)
 
     @property
     def rois_alt(self):
@@ -3157,51 +3487,51 @@ class Core:
         temp_rois *= -1
         temp_rois = temp_rois - 1
         return temp_rois
-    
+
     @property
     def traces_znorm_ms(self):
         """
         Get interpolated and upscaled traces_znorm in millisecond precision.
-        
+
         Converts traces from frame precision to line precision (~500 Hz sampling)
         using linear interpolation, matching IGOR Pro's OS_BasicAveraging behavior.
-        
+
         Returns
         -------
         numpy.ndarray
-            Interpolated traces with shape (n_rois, n_timepoints_ms) where 
+            Interpolated traces with shape (n_rois, n_timepoints_ms) where
             n_timepoints_ms corresponds to line precision sampling rate.
         """
         if self.traces_znorm is None:
             return None
-            
+
         # Get dimensions
         n_rois, n_frames = self.traces_znorm.shape
-        
+
         # Calculate frame duration and line duration
         frame_duration_s = 1.0 / self.frame_hz  # Frame duration in seconds
         line_duration_s = self.linedur_s  # Line duration in seconds (typically ~0.002s)
-        
+
         # Calculate number of lines per frame (nY equivalent)
         lines_per_frame = int(frame_duration_s / line_duration_s)
-        
+
         # Total interpolated time points (line precision)
         n_points_ms = n_frames * lines_per_frame
-        
+
         # Use scipy.ndimage.zoom for fast interpolation
         from scipy.ndimage import zoom
-        
+
         # Calculate zoom factor for time axis
         zoom_factor = lines_per_frame
-        
+
         # Interpolate all ROI traces at once using zoom
         # zoom applies along the last axis (time axis)
-        traces_ms = zoom(self.traces_znorm, (1, zoom_factor), order=1, mode='nearest')
-        
+        traces_ms = zoom(self.traces_znorm, (1, zoom_factor), order=1, mode="nearest")
+
         return traces_ms
-    
+
     @property
-    def roi_centroids(self, force = True):
+    def roi_centroids(self, force=True):
         """
         Get the centre of mass for each ROI in the image if not already done.
         """
@@ -3247,7 +3577,7 @@ class Core:
             keep &= (centroids[:, 0] >= ymin) & (centroids[:, 0] <= ymax)
 
         return roi_indices[keep]
-    
+
     def keep_rois(self, roi_indices, update_dependent=True):
         """
         Keep only the specified ROIs and set the rest to background.
@@ -3285,7 +3615,9 @@ class Core:
                     self.snippets = self.snippets[:0]
                 if isinstance(self.quality_indices, np.ndarray):
                     self.quality_indices = self.quality_indices[:0]
-                if hasattr(self, "roi_sizes") and isinstance(self.roi_sizes, np.ndarray):
+                if hasattr(self, "roi_sizes") and isinstance(
+                    self.roi_sizes, np.ndarray
+                ):
                     self.roi_sizes = self.roi_sizes[:0]
             return self.rois
 
@@ -3298,6 +3630,7 @@ class Core:
         self.rois = np.where(np.isin(self.rois, roi_values), self.rois, 1)
 
         if update_dependent:
+
             def _subset_first_dim(array_value):
                 if not isinstance(array_value, np.ndarray):
                     return array_value
@@ -3323,5 +3656,7 @@ class Core:
                 remapped[self.rois == old_id] = -(new_idx + 1)
             self.rois = remapped
 
-        self.num_rois = np.unique(self.rois).size - 1  # Update num_rois based on unique values (excluding background)
+        self.num_rois = (
+            np.unique(self.rois).size - 1
+        )  # Update num_rois based on unique values (excluding background)
         return self.rois

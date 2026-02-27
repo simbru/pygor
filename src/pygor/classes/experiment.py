@@ -1,7 +1,11 @@
 # Dependencies
-from typing import Any
+from __future__ import annotations
+from typing import TYPE_CHECKING, Any
 from dataclasses import dataclass
 from dataclasses import field
+
+if TYPE_CHECKING:
+    from pygor.classes.core_data import Core
 
 try:
     from collections import Iterable
@@ -20,8 +24,8 @@ import pygor.load
 @dataclass
 class Experiment:
     # Initialise object properties
-    recording: list = field(default_factory=list)
-    id_dict: dict = field(default_factory=lambda: defaultdict(list))
+    recording: list[Core] = field(default_factory=list)
+    id_dict: dict[str, list[Any]] = field(default_factory=lambda: defaultdict(list))
     # if isinstance(recording, dataclasses.Field) is False:
     #     raise AttributeError("Class input or 'self.recording' must be iterable")
 
@@ -38,7 +42,7 @@ class Experiment:
         self.__update_data__()
 
     @classmethod
-    def from_files(cls, file_paths, pygor_class_name, n_jobs=-1, **class_kwargs):
+    def from_files(cls, file_paths: list[str] | str, pygor_class_name: str, n_jobs: int = -1, on_error: str = "raise", **class_kwargs: Any) -> Experiment:
         """
         Initialize an Experiment from a list of file paths.
 
@@ -50,6 +54,11 @@ class Experiment:
             Name of the pygor class to use for loading (e.g., 'STRF', 'MovingBars', 'FullField')
         n_jobs : int, optional
             Number of parallel jobs for loading files. -1 uses all cores, 1 disables parallelization (default: -1)
+        on_error : str, optional
+            How to handle files that fail to load (default: "raise"):
+            - "raise": raise an exception if any file fails to load
+            - "skip": skip failed files and continue (warning: this shifts recording
+              indices, which can silently misalign merges between Experiments)
         **class_kwargs : dict, optional
             Additional keyword arguments to pass to the pygor class constructor
             (e.g., dir_num=8 for OSDS data)
@@ -69,7 +78,12 @@ class Experiment:
 
         >>> # Load with 4 parallel workers and additional parameters
         >>> exp = Experiment.from_files(file_list, 'OSDS', n_jobs=4, dir_num=8, dir_phase_num=2)
+
+        >>> # Skip failed files (use with caution — recording indices will shift)
+        >>> exp = Experiment.from_files(file_list, 'STRF', on_error="skip")
         """
+        if on_error not in ("raise", "skip"):
+            raise ValueError(f"on_error must be 'raise' or 'skip', got '{on_error}'")
         # Handle single file input
         if isinstance(file_paths, (str, pathlib.Path)):
             file_paths = [file_paths]
@@ -146,15 +160,24 @@ class Experiment:
                 print(f"Failed to load {pathlib.Path(file_path).name}: {result}")
         
         if failed_files:
-            print(f"\nWarning: {len(failed_files)} files failed to load:")
-            for file_path, error in failed_files:
-                print(f"  {pathlib.Path(file_path).name}: {error}")
-        
+            failed_summary = "\n".join(
+                f"  {pathlib.Path(fp).name}: {err}" for fp, err in failed_files
+            )
+            if on_error == "raise":
+                raise RuntimeError(
+                    f"{len(failed_files)} file(s) failed to load:\n{failed_summary}\n"
+                    f"Fix the failing files or use on_error='skip' to skip them "
+                    f"(warning: this shifts recording indices)."
+                )
+            else:
+                print(f"\nWarning: {len(failed_files)} files failed to load:")
+                print(failed_summary)
+
         if not recordings:
             raise ValueError("No files could be loaded successfully")
-        
+
         print(f"\nSuccessfully loaded {len(recordings)} recordings")
-        
+
         # Create experiment with loaded recordings
         return cls(recording=recordings)
 
@@ -169,8 +192,13 @@ class Experiment:
 
     def __exp_dict_setter__(self, object):
         self.id_dict["id"].append(len(self.id_dict["name"]))
-        self.id_dict["date"].append(object.metadata["exp_date"].strftime("%d-%m-%Y"))
-        self.id_dict["name"].append(pathlib.Path(object.metadata["filename"]).stem)
+        date_str = object.metadata["exp_date"].strftime("%d-%m-%Y")
+        name = pathlib.Path(object.metadata["filename"]).stem
+        prefix = "_".join(name.split("_")[:2])
+        self.id_dict["date"].append(date_str)
+        self.id_dict["name"].append(name)
+        self.id_dict["prefix"].append(prefix)
+        self.id_dict["recording_uid"].append(f"{prefix}_{date_str}")
         self.id_dict["num_rois"].append(object.num_rois)
         self.id_dict["type"].append(object.type)
         self.id_dict["path"].append(object.metadata["filename"])
@@ -311,7 +339,7 @@ class Experiment:
         self,
         methods,
         as_dataframe=False,
-        level="recording",
+        level="roi",
         include_metadata=True,
         unpack_ndarrays=False,
         unpack_axis=0,
@@ -456,17 +484,20 @@ class Experiment:
         return method_specs, result_keys, return_single
 
     def _init_metadata_results(self, results):
-        metadata_keys = ["recording_id", "name", "date", "type", "num_rois"]
+        metadata_keys = ["recording_id", "recording_uid", "prefix", "name", "date", "type", "num_rois", "source_path"]
         for key in metadata_keys:
             if key not in results:
                 results[key] = []
 
     def _append_recording_metadata(self, results, rec_idx):
         results["recording_id"].append(rec_idx)
+        results["recording_uid"].append(self.id_dict["recording_uid"][rec_idx])
+        results["prefix"].append(self.id_dict["prefix"][rec_idx])
         results["name"].append(self.id_dict["name"][rec_idx])
         results["date"].append(self.id_dict["date"][rec_idx])
         results["type"].append(self.id_dict["type"][rec_idx])
         results["num_rois"].append(self.id_dict["num_rois"][rec_idx])
+        results["source_path"].append(self.id_dict["path"][rec_idx])
 
     def _call_recording_method(
         self,
@@ -522,10 +553,13 @@ class Experiment:
 
     def _append_roi_metadata(self, roi_row, rec_idx, roi_idx):
         roi_row["recording_id"] = rec_idx
+        roi_row["recording_uid"] = self.id_dict["recording_uid"][rec_idx]
+        roi_row["prefix"] = self.id_dict["prefix"][rec_idx]
         roi_row["roi_id"] = roi_idx
         roi_row["name"] = self.id_dict["name"][rec_idx]
         roi_row["date"] = self.id_dict["date"][rec_idx]
         roi_row["type"] = self.id_dict["type"][rec_idx]
+        roi_row["source_path"] = self.id_dict["path"][rec_idx]
 
     def _add_roi_result(self, roi_row, result_name, result_data, num_rois, roi_idx):
         if result_data is None:
