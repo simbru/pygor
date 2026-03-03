@@ -217,6 +217,16 @@ def plot_averages(
         # arr = scaler.fit_transform(arr)
         maxabs = np.max(np.abs(arr))
         if rois is not None:
+            n_avail = arr.shape[0]
+            bad_rois = [r for r in rois if r >= n_avail]
+            if bad_rois:
+                raise IndexError(
+                    f"ROI indices {bad_rois} are out of bounds for averages "
+                    f"with {n_avail} ROIs. This usually means ROIs were "
+                    f"re-segmented without recomputing traces. Run "
+                    f"compute_snippets_and_averages() (or extract_traces() "
+                    f"then compute_snippets_and_averages()) to update."
+                )
             arr = arr[rois]
         if "clim" in kwargs:
             img = ax.imshow(arr, aspect="auto", cmap = "Greys_r", clim = kwargs["clim"], interpolation="None")
