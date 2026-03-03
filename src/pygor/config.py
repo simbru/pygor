@@ -45,7 +45,11 @@ def _get_defaults_path() -> Path:
 # -----------------------------------------------------------------------------
 
 def _load_toml_file(path: Path) -> dict:
-    """Load a TOML file, returning empty dict if not found or toml not available."""
+    """Load a TOML file, returning empty dict if not found or toml not available.
+
+    Raises on parse errors so invalid TOML is caught immediately,
+    with the file path included in the error message.
+    """
     if not HAS_TOML:
         return {}
 
@@ -57,8 +61,10 @@ def _load_toml_file(path: Path) -> dict:
             config = tomllib.load(f)
             return config if config else {}
     except Exception as e:
-        warnings.warn(f"Failed to load config from {path}: {e}")
-        return {}
+        raise type(e)(
+            f"{e}\n  File: {path}\n"
+            f"  Hint: TOML requires 0.5 not .5, and has no null (use \"none\" string)"
+        ) from None
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

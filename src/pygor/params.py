@@ -137,6 +137,7 @@ class AnalysisParams:
             "segmentation": get_defaults("segmentation", config_path),
             "triggers": get_defaults("triggers", config_path),
             "instrument": get_defaults("instrument", config_path),
+            "deconvolution": get_defaults("deconvolution", config_path),
         }
 
         # Load analysis-type-specific defaults using lowercase TOML section name

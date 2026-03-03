@@ -49,7 +49,7 @@ print(obj.params.summary())
 | `registration` | n_reference_frames, batch_size, upsample_factor, etc. |
 | `triggers` | threshold, min_gap_seconds |
 | `segmentation.cellpose` | diameter, flow_threshold, cellprob_threshold |
-| `segmentation.postprocess` | split_large, size_multiplier, etc. |
+| `segmentation.cellpose_postprocess` | split_large, size_multiplier, etc. (cellpose+ only) |
 | `strf.general` | num_colours |
 | `strf.contouring` | global_thresh_val, min_targets, etc. |
 | `strf.spatial` | snr_threshold, kernel_width, etc. |
