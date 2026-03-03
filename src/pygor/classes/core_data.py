@@ -745,13 +745,17 @@ class Core:
                 # genuine pre-stimulus baseline.
                 if len(trigger_times) >= 3:
                     intervals = np.diff(trigger_times)
-                    median_interval = np.median(intervals[1:]) if len(intervals) > 1 else intervals[0]
+                    median_interval = (
+                        np.median(intervals[1:]) if len(intervals) > 1 else intervals[0]
+                    )
                     tolerance = 0.02 * median_interval
                     if abs(intervals[0] - median_interval) > tolerance:
                         trigger_times[0] = trigger_times[1] - median_interval
                         trigger_frames[0] = int(round(trigger_times[0] * self.frame_hz))
-                        print(f"TTL baseline correction: adjusted boundary trigger "
-                              f"by {(intervals[0] - median_interval)*1000:.0f}ms")
+                        print(
+                            f"TTL baseline correction: adjusted boundary trigger "
+                            f"by {(intervals[0] - median_interval) * 1000:.0f}ms"
+                        )
                 self.triggertimes_frame = trigger_frames
                 self.triggertimes = trigger_times
 
@@ -2099,15 +2103,22 @@ class Core:
 
         ax.imshow(colored, origin="lower")
 
-    def segment_rois(self, mode="blob", overwrite=False, **kwargs: Any) -> np.ndarray:
+    def segment_rois(self, mode=None, overwrite=False, **kwargs: Any) -> np.ndarray:
         """
         Segment ROIs using automated methods.
 
+        Default parameters for each mode are loaded from the config system
+        (``[segmentation.blob]``, ``[segmentation.watershed]``, etc. in
+        defaults.toml or user config). Pass kwargs to override any parameter.
+        To change defaults permanently, edit your config TOML file.
+
         Parameters
         ----------
-        mode : str
-            Segmentation mode. Available options:
-            - "cellpose+": Cellpose with post-processing heuristics (default, requires model)
+        mode : str or None
+            Segmentation mode. If None, uses default from config
+            (``[segmentation.general] mode``, defaults to "blob").
+            Available options:
+            - "cellpose+": Cellpose with post-processing heuristics (requires model)
             - "cellpose": Raw Cellpose output only (requires model)
             - "blob": Difference of Gaussian blob detection (no ML required)
             - "watershed": Watershed segmentation (no ML required)
@@ -2277,6 +2288,21 @@ class Core:
         >>> data.segment_rois(mode="blob", input_mode="std")  # standard deviation
         """
         from pygor.segmentation import segment_rois as _segment_rois
+
+        # Load default mode and roi_order from config if not specified
+        if mode is None or "roi_order" not in kwargs:
+            try:
+                from pygor.config import get_defaults
+
+                general = get_defaults("segmentation.general")
+            except (KeyError, AttributeError, ImportError):
+                general = {}
+            if mode is None:
+                mode = general.get("mode", "blob")
+            if "roi_order" not in kwargs:
+                roi_order = general.get("roi_order")
+                if roi_order is not None:
+                    kwargs["roi_order"] = roi_order
 
         roi_mask = _segment_rois(self, mode=mode, overwrite=overwrite, **kwargs)
         self.update_rois(roi_mask)
@@ -2807,7 +2833,9 @@ class Core:
         """
         return getattr(self, "_baseline_used", None)
 
-    def extract_traces_from_rois(self, baseline_dur: int | float | None = 10) -> tuple[np.ndarray, np.ndarray]:
+    def extract_traces_from_rois(
+        self, baseline_dur: int | float | None = 10
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Compute ROI traces from images and ROI mask.
 
@@ -2839,7 +2867,9 @@ class Core:
         n_rois, n_frames = traces_raw.shape
 
         # Compute baseline window from backwards pre-stimulus period (before first trigger)
-        baseline_start, baseline_end = self._compute_baseline_window(baseline_duration_s=baseline_dur)
+        baseline_start, baseline_end = self._compute_baseline_window(
+            baseline_duration_s=baseline_dur
+        )
 
         baseline_frames = baseline_end - baseline_start
         baseline_duration = baseline_frames / self.frame_hz
@@ -2887,6 +2917,109 @@ class Core:
         print(f"Extracted {n_rois} traces ({n_frames} frames each)")
 
         return self.traces_raw, self.traces_znorm
+
+    def deconvolve_traces(
+        self,
+        rise_tau_ms: float | None = None,
+        decay_tau_ms: float | None = None,
+        lambd: float | None = None,
+        kernel_window_ms: float | None = None,
+        use_znorm: bool = True,
+        verbose: bool = False,
+    ) -> np.ndarray:
+        """Remove calcium indicator blur from traces via Wiener deconvolution.
+
+        Builds a causal calcium kernel (center-point sampled at the frame rate)
+        and applies regularized Wiener deconvolution to all ROIs in a single
+        vectorized FFT pass. The result is stored as ``self.traces_deconvolved``.
+
+        Parameters fall back to ``[deconvolution]`` in defaults.toml when not
+        provided. The shipped defaults target jGCaMP8f (Zhang et al. 2023).
+
+        Parameters
+        ----------
+        rise_tau_ms : float or None
+            Indicator rise time constant in ms. Default from config: 2.5.
+        decay_tau_ms : float or None
+            Indicator decay time constant in ms. Default from config: 75.0.
+        lambd : float or None
+            Wiener regularization. Larger = more smoothing. Default from
+            config: 3e-3.
+        kernel_window_ms : float or None
+            Kernel support duration in ms. Default from config: 800.0.
+        use_znorm : bool, default True
+            If True, deconvolve ``self.traces_znorm``. If False, use
+            ``self.traces_raw``.
+        verbose : bool, default False
+            Print kernel and timing info.
+
+        Returns
+        -------
+        np.ndarray, shape (n_rois, n_frames)
+            Deconvolved traces. Also stored as ``self.traces_deconvolved``.
+
+        Examples
+        --------
+        >>> obj.deconvolve_traces()
+        >>> # For STRF objects, pass directly:
+        >>> rf.deconvolve_traces()
+        >>> rf.calculate_strf(noise_array, traces=rf.traces_deconvolved)
+        """
+        from pygor.strf.deconvolution import calcium_kernel, wiener_deconvolve
+
+        # Fall back to defaults.toml [deconvolution] section
+        defaults = self.params.get_defaults("deconvolution")
+        if rise_tau_ms is None:
+            rise_tau_ms = defaults.get("rise_tau_ms", 2.5)
+        if decay_tau_ms is None:
+            decay_tau_ms = defaults.get("decay_tau_ms", 75.0)
+        if lambd is None:
+            lambd = defaults.get("lambd", 3e-3)
+        if kernel_window_ms is None:
+            kernel_window_ms = defaults.get("kernel_window_ms", 800.0)
+
+        frame_dt_ms = 1000.0 * self.linedur_s * self.images.shape[1]
+        t_kernel, kernel = calcium_kernel(
+            frame_dt_ms,
+            rise_tau_ms=rise_tau_ms,
+            decay_tau_ms=decay_tau_ms,
+            kernel_window_ms=kernel_window_ms,
+        )
+
+        if use_znorm:
+            traces = self.traces_znorm
+        else:
+            traces = self.traces_raw
+
+        if traces is None:
+            raise ValueError(
+                "No traces available. Run extract_traces_from_rois() first."
+            )
+
+        if verbose:
+            print(f"Frame duration: {frame_dt_ms:.2f} ms")
+            print(
+                f"Kernel: rise={rise_tau_ms} ms, decay={decay_tau_ms} ms, "
+                f"{len(kernel)} bins, λ={lambd:g}"
+            )
+            print(f"Deconvolving {traces.shape[0]} ROIs × {traces.shape[1]} frames")
+
+        self.traces_deconvolved = wiener_deconvolve(traces, kernel, lambd=lambd)
+
+        self.params.mark_step(
+            "deconvolution",
+            {
+                "rise_tau_ms": rise_tau_ms,
+                "decay_tau_ms": decay_tau_ms,
+                "lambd": lambd,
+                "kernel_window_ms": kernel_window_ms,
+                "frame_dt_ms": frame_dt_ms,
+                "kernel_bins": len(kernel),
+                "use_znorm": use_znorm,
+            },
+        )
+
+        return self.traces_deconvolved
 
     def compute_traces_from_rois(self):
         """
@@ -3280,7 +3413,14 @@ class Core:
             extent = [x[0], x[-1], n_rois - 0.5, -0.5]
             ax.imshow(traces, cmap=cmap, interpolation="none", extent=extent, **kwargs)
             if baseline_span is not None:
-                ax.axvspan(*baseline_span, facecolor="silver", alpha=0.25, label="Baseline", edgecolor='red', linestyle='--')
+                ax.axvspan(
+                    *baseline_span,
+                    facecolor="silver",
+                    alpha=0.25,
+                    label="Baseline",
+                    edgecolor="red",
+                    linestyle="--",
+                )
             ax.set_xlabel(xlabel)
             ax.set_ylabel("ROI")
             return fig, ax
@@ -3301,7 +3441,9 @@ class Core:
             ax.plot(x, traces[i], color=colors[i], linewidth=0.7, **kwargs)
             ax.set_xlim(x[0], x[-1])
             if baseline_span is not None:
-                ax.axvspan(*baseline_span, color="silver", alpha=1, zorder=-1, edgecolor=None)
+                ax.axvspan(
+                    *baseline_span, color="silver", alpha=1, zorder=-1, edgecolor=None
+                )
             ax.axis("off")
         # Re-enable x-axis on bottom subplot only
         axs[-1].axis("on")

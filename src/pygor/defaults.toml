@@ -34,19 +34,61 @@ edge_crop = 1
 threshold = 20000
 min_gap_seconds = 0.05
 
+[segmentation.general]
+mode = "blob"
+roi_order = "LR"
+
 [segmentation.cellpose]
 diameter = 0
 flow_threshold = 0.9
 cellprob_threshold = 0.5
 min_size = 2
 
-[segmentation.postprocess]
+[segmentation.cellpose_postprocess]
 split_large = true
 size_multiplier = 1.25
 min_peak_distance = 2
 min_size_after_split = 4
 shrink_iterations = 1
 shrink_size_threshold = 30
+
+[segmentation.blob]
+input_mode = "average"
+unsharp_radius = 1.0
+unsharp_amount = 2.5
+min_sigma = 0.8
+max_sigma = 2
+threshold = 0.01
+eliminate_overlap = 1
+merge_overlap = 0.33
+anatomy_threshold = "none"
+anatomy_thresh_mult = 0
+erode_iterations = 0
+radius_multiplier = 1.5
+min_radius = 1
+
+[segmentation.watershed]
+input_mode = "combined"
+threshold = 0.05
+min_distance = 1
+gap_pixels = 2
+min_size_to_shrink = 10
+min_roi_size = 3
+
+[segmentation.flood_fill]
+input_mode = "average"
+threshold = 0.075
+min_distance = 1
+max_size = 20
+drop_fraction = 0.1
+min_gap = 1
+min_roi_size = 5
+
+[deconvolution]
+rise_tau_ms = 2.5       # Indicator rise tau (ms). Default: jGCaMP8f
+decay_tau_ms = 75.0     # Indicator decay tau (ms). Default: jGCaMP8f
+lambd = 0.003           # Wiener regularization (larger = smoother)
+kernel_window_ms = 800.0      # Kernel support duration (ms)
 
 [strf.general]
 num_colours = 1
