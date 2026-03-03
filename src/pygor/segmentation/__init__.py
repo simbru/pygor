@@ -47,6 +47,49 @@ def list_methods():
     return list(_METHODS.keys())
 
 
+def _load_mode_defaults(config_key, data=None):
+    """Load mode-specific segmentation defaults from config.
+
+    Tries the data object's params first (respects user config), then
+    falls back to package defaults via pygor.config.
+
+    Parameters
+    ----------
+    config_key : str
+        Segmentation mode key (e.g. "blob", "watershed", "flood_fill")
+    data : Core/STRF, optional
+        Data object whose params may contain user config overrides
+
+    Returns
+    -------
+    dict
+        Mode-specific default parameters
+    """
+    mode_defaults = {}
+
+    # Read fresh from disk so live edits to defaults.toml take effect immediately
+    try:
+        from pygor.config import get_defaults
+        mode_defaults = get_defaults(f"segmentation.{config_key}")
+    except (KeyError, AttributeError, ImportError):
+        pass
+
+    # Fallback to data object's cached params (e.g. when user passed config= at construction)
+    if not mode_defaults and data is not None and hasattr(data, "params"):
+        try:
+            seg_defaults = data.params.get_defaults("segmentation")
+            mode_defaults = seg_defaults.get(config_key, {})
+        except (ValueError, AttributeError):
+            pass
+
+    # Convert "none" sentinel to actual None (TOML has no null type)
+    for key, value in mode_defaults.items():
+        if isinstance(value, str) and value.lower() == "none":
+            mode_defaults[key] = None
+
+    return mode_defaults
+
+
 def segment_rois(
     data,
     mode="cellpose+",
@@ -57,6 +100,11 @@ def segment_rois(
     **kwargs,
 ):
     """Segment ROIs using automated methods.
+
+    Default parameters for each mode are loaded from the config system
+    (defaults.toml sections ``[segmentation.blob]``, ``[segmentation.watershed]``,
+    etc.) and can be overridden per-call via kwargs. User config files
+    override package defaults; kwargs override both.
 
     Parameters
     ----------
@@ -151,24 +199,20 @@ def segment_rois(
         warnings.warn("ROIs already exist. Use overwrite=True to replace.")
         return None
 
+    # Load mode-specific defaults from config, then let kwargs override
+    config_key = mode.replace("+", "_plus")  # "cellpose+" -> "cellpose_plus"
+    mode_defaults = _load_mode_defaults(config_key, data)
+    kwargs = {**mode_defaults, **kwargs}
+
     # Extract common parameters before passing kwargs to segment functions
     roi_order = kwargs.pop("roi_order", "LR")
     plot = kwargs.pop("plot", False)  # Handle plotting here, after relabeling
     input_mode = kwargs.get("input_mode", "average")  # Keep in kwargs but save for plotting
 
-    # Save enhancement parameters for plotting (they stay in kwargs for segment())
-    # These need to be applied to plot image so user sees what was actually segmented
-    # Apply mode-specific defaults (blob has enhancement/masking enabled by default)
-    if mode == "blob":
-        # Blob defaults: enhancement and anatomy masking ON
-        unsharp_radius = kwargs.get("unsharp_radius", 1.0)
-        unsharp_amount = kwargs.get("unsharp_amount", 2.5)
-        anatomy_threshold = kwargs.get("anatomy_threshold", "otsu")
-    else:
-        # Watershed/flood_fill defaults: enhancement and anatomy masking OFF unless specified
-        unsharp_radius = kwargs.get("unsharp_radius")
-        unsharp_amount = kwargs.get("unsharp_amount")
-        anatomy_threshold = kwargs.get("anatomy_threshold")
+    # Read enhancement/masking params for plotting (they stay in kwargs for segment())
+    unsharp_radius = kwargs.get("unsharp_radius")
+    unsharp_amount = kwargs.get("unsharp_amount")
+    anatomy_threshold = kwargs.get("anatomy_threshold")
     anatomy_thresh_mult = kwargs.get("anatomy_thresh_mult", 0.2)
     erode_iterations = kwargs.get("erode_iterations", 1)
 

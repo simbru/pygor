@@ -234,15 +234,17 @@ def segment(
         print(f"Enhancing image (unsharp: r={unsharp_radius}, a={unsharp_amount})...")
     img = enhance_unsharp(img, radius=unsharp_radius, amount=unsharp_amount)
 
-    # Create anatomy mask to exclude border regions
-    if verbose:
-        print(f"Creating anatomy mask (threshold={anatomy_threshold}, mult={anatomy_thresh_mult})...")
-    anatomy_mask = create_anatomy_mask(
-        img,
-        method=anatomy_threshold,
-        thresh_mult=anatomy_thresh_mult,
-        erode_iterations=erode_iterations
-    )
+    # Create anatomy mask to exclude border regions (if enabled)
+    anatomy_mask = None
+    if anatomy_threshold is not None:
+        if verbose:
+            print(f"Creating anatomy mask (threshold={anatomy_threshold}, mult={anatomy_thresh_mult})...")
+        anatomy_mask = create_anatomy_mask(
+            img,
+            method=anatomy_threshold,
+            thresh_mult=anatomy_thresh_mult,
+            erode_iterations=erode_iterations
+        )
 
     # Detect blobs
     if verbose:
@@ -256,8 +258,11 @@ def segment(
         artifact_width=artifact_fill_width
     )
 
-    # Filter by anatomy mask
-    blobs = filter_points_by_mask(blobs_raw, anatomy_mask)
+    # Filter by anatomy mask (if enabled)
+    if anatomy_mask is not None:
+        blobs = filter_points_by_mask(blobs_raw, anatomy_mask)
+    else:
+        blobs = blobs_raw
 
     if verbose:
         n_filtered = len(blobs_raw) - len(blobs)

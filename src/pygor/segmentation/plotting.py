@@ -38,28 +38,25 @@ def plot_segmentation(
 
     n_rois = masks.max() if masks.max() > 0 else len(np.unique(masks)) - 1
 
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    fig, axes = plt.subplots(2, 1, figsize=(15, 5))
 
     # Build input title
-    input_title = f'Input: {input_mode}'
+    input_title = f"Input: {input_mode}"
     if enhanced:
-        input_title += ' (enhanced)'
+        input_title += " (enhanced)"
 
     # Input image
-    axes[0].imshow(img, cmap='gray', origin="lower")
+    axes[0].imshow(img, cmap="gray", origin="lower")
     axes[0].set_title(input_title)
-    axes[0].axis('off')
-
-    # ROI masks only
-    axes[1].imshow(masks, cmap='gray', interpolation='nearest', origin="lower")
-    axes[1].set_title(f'ROI Masks ({n_rois} ROIs)')
-    axes[1].axis('off')
+    axes[0].axis("off")
 
     # Overlay
-    axes[2].imshow(img, cmap='gray', origin="lower")
+    axes[1].imshow(img, cmap="gray", origin="lower")
     if n_rois > 0:
         masked = np.ma.masked_where(masks == 0, masks)
-        axes[2].imshow(masked, cmap='prism', alpha=0.23, interpolation='nearest', origin="lower")
+        axes[1].imshow(
+            masked, cmap="prism", alpha=0.23, interpolation="nearest", origin="lower"
+        )
 
     # Draw anatomy mask boundary if provided
     if anatomy_mask is not None:
@@ -67,15 +64,17 @@ def plot_segmentation(
             # Find contours of the anatomy mask
             contours = measure.find_contours(anatomy_mask.astype(float), 0.5)
             for contour in contours:
-                axes[0].plot(contour[:, 1], contour[:, 0], 'c-', linewidth=1.5, alpha=0.7)
+                axes[0].plot(
+                    contour[:, 1], contour[:, 0], "c-", linewidth=1.5, alpha=0.7
+                )
             # Add to legend
-            axes[0].plot([], [], 'c-', linewidth=1.5, label='Anatomy mask')
-            axes[0].legend(loc='upper right', fontsize=8)
+            axes[0].plot([], [], "c-", linewidth=1.5, label="Anatomy mask")
+            axes[0].legend(loc="upper right", fontsize=8)
         except Exception:
             pass  # Skip contour drawing if it fails
 
-    axes[2].set_title(f'{method}: {input_mode} + ROIs')
-    axes[2].axis('off')
+    axes[1].set_title(f"{method}: {input_mode} + ROIs ({n_rois})")
+    axes[1].axis("off")
 
     plt.tight_layout()
     plt.show()
