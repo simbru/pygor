@@ -241,6 +241,34 @@ class FullField(Core):
             results.append(t)
         return np.array(results)
 
+    def get_transience_dominant(self, **kwargs):
+        """
+        Return transience from whichever phase (ON/OFF) has the stronger
+        response, chosen per ROI and color.
+
+        Uses get_amplitudes to determine which phase dominates, then selects
+        the corresponding transience score from get_transience.
+
+        Parameters
+        ----------
+        **kwargs
+            Passed to get_transience (mode, on_window, off_window, etc.).
+
+        Returns
+        -------
+        transience : ndarray, shape (mode, n_rois)
+            Transience score from the dominant phase per ROI.
+        """
+        on_window = kwargs.get('on_window', (500, 1950))
+        off_window = kwargs.get('off_window', (2500, 3950))
+        transience = self.get_transience(**kwargs)  # (2, mode, n_rois)
+        amps = self.get_amplitudes(
+            mode=kwargs.get('mode', None), return_diff=False,
+            epochs_ms=[on_window, off_window]
+        )  # (mode, 2, n_rois)
+        pick_off = np.abs(amps[:, 1, :]) > np.abs(amps[:, 0, :])  # (mode, n_rois)
+        return np.where(pick_off, transience[1], transience[0])
+
     def get_transcience_0(self, **kwargs):
         """
         Convenience method to get ON transience only (for compatibility with

@@ -4790,7 +4790,9 @@ class STRF(Core):
                     max_frames_per_trigger: int = 8, event_sd_threshold: float = 2.0,
                     use_znorm: bool = True, adjust_by_polarity: bool = True,
                     skip_first_triggers: int = 0, skip_last_triggers: int = 0,
-                    pre_smooth: int = 0, roi: int | None = None, n_jobs: int = 1, normalize_strfs: bool = True, verbose: bool = False, **kwargs: Any) -> dict[str, object]:
+                    pre_smooth: int = 0, roi: int | None = None, n_jobs: int = 1, normalize_strfs: bool = True,
+                    traces: np.ndarray | None = None,
+                    verbose: bool = False, **kwargs: Any) -> dict[str, object]:
         """
         Calculate spike-triggered averages (STRFs) for all ROIs and colour channels.
         
@@ -4840,6 +4842,12 @@ class STRF(Core):
             Whether to apply the same normalization used during H5 loading
             (z-score based on first 1/5 of temporal frames). Set to False
             to get raw calculated STRFs for comparison.
+        traces : np.ndarray or None, default None
+            Optional pre-processed traces array, shape (n_rois, n_frames).
+            If None, defaults to ``self.traces_znorm`` (or ``self.traces_raw``
+            if ``use_znorm=False``). Pass any custom traces, e.g.
+            ``self.traces_deconvolved``, ``self.traces_znorm``, or an
+            externally filtered array.
         verbose : bool, default True
             Whether to print progress information
         **kwargs
@@ -4900,6 +4908,7 @@ class STRF(Core):
             pre_smooth=pre_smooth,
             roi=roi,
             n_jobs=n_jobs,
+            traces=traces,
             verbose=verbose,
             **kwargs
         )
