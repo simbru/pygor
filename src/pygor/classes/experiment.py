@@ -107,7 +107,7 @@ class Experiment:
                 recording = pygor_class(file_path, **class_kwargs)
                 return ('success', file_path, recording)
             except Exception as e:
-                return ('failed', file_path, str(e))
+                return ('failed', file_path, e)
         
         # Load files in parallel or sequential
         if n_jobs == 1 or len(file_paths) == 1:
@@ -150,28 +150,63 @@ class Experiment:
         # Process results
         recordings = []
         failed_files = []
-        
+
         for status, file_path, result in results:
             if status == 'success':
                 recordings.append(result)
                 print(f"Loaded: {pathlib.Path(file_path).name}")
             else:
                 failed_files.append((file_path, result))
-                print(f"Failed to load {pathlib.Path(file_path).name}: {result}")
-        
+                print(f"Failed to load {pathlib.Path(file_path).name}: {type(result).__name__}: {result}")
+
         if failed_files:
-            failed_summary = "\n".join(
-                f"  {pathlib.Path(fp).name}: {err}" for fp, err in failed_files
-            )
+            # Categorize errors to help users diagnose the root cause
+            config_errors = []
+            file_errors = []
+            other_errors = []
+            for fp, err in failed_files:
+                err_type = type(err).__name__
+                # TOML/config errors affect all files — flag them prominently
+                if "toml" in err_type.lower() or "toml" in str(err).lower():
+                    config_errors.append((fp, err))
+                elif isinstance(err, (FileNotFoundError, PermissionError, OSError)):
+                    file_errors.append((fp, err))
+                else:
+                    other_errors.append((fp, err))
+
+            # Build detailed error message
+            lines = [f"{len(failed_files)} file(s) failed to load:\n"]
+
+            if config_errors:
+                lines.append("  CONFIG / TOML ERRORS (likely affects ALL files — fix config first):")
+                # Show the config error once (it's the same for all files)
+                _, first_err = config_errors[0]
+                lines.append(f"    {type(first_err).__name__}: {first_err}")
+                lines.append(f"    Check your TOML config files (defaults.toml, ~/.pygor/config.toml, ./pygor.toml)")
+                lines.append(f"    Common cause: bare decimals like .5 (use 0.5) or syntax errors\n")
+
+            if file_errors:
+                lines.append("  FILE ERRORS:")
+                for fp, err in file_errors:
+                    lines.append(f"    {pathlib.Path(fp).name}: {type(err).__name__}: {err}")
+                lines.append("")
+
+            if other_errors:
+                lines.append("  OTHER ERRORS:")
+                for fp, err in other_errors:
+                    lines.append(f"    {pathlib.Path(fp).name}: {type(err).__name__}: {err}")
+                lines.append("")
+
+            error_msg = "\n".join(lines)
+
             if on_error == "raise":
                 raise RuntimeError(
-                    f"{len(failed_files)} file(s) failed to load:\n{failed_summary}\n"
-                    f"Fix the failing files or use on_error='skip' to skip them "
+                    f"{error_msg}"
+                    f"Fix the underlying error(s) or use on_error='skip' to skip failed files "
                     f"(warning: this shifts recording indices)."
                 )
             else:
-                print(f"\nWarning: {len(failed_files)} files failed to load:")
-                print(failed_summary)
+                print(f"\nWarning: {error_msg}")
 
         if not recordings:
             raise ValueError("No files could be loaded successfully")
