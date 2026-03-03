@@ -1,20 +1,22 @@
 """
 Based on OS_STRFs.ipf by Tom Baden
 1:1 translation was slow due to Python's inefficient looping
-This module provides a speed-optimised STRF calculation 
+This module provides a speed-optimised STRF calculation
 Substantial speedup (100x+ in testing)
 Claude Code + Github Copilot assisted development
 All outputs verified against IGOR-outputs within 0.095-1.03 similarity ratios
 """
 
-from typing import Any
-import numpy as np
 import warnings
-from scipy.signal import correlate
+from typing import Any
+
+import numpy as np
 from joblib import Parallel, delayed
-from tqdm.auto import tqdm
 from scipy import ndimage
 from scipy.fft import fft, ifft, next_fast_len
+from scipy.signal import correlate
+from tqdm.auto import tqdm
+
 
 def means_subtracted_correlation(f_signal, noise_signal_2d):
     """
@@ -34,22 +36,25 @@ def means_subtracted_correlation(f_signal, noise_signal_2d):
     """
     # Remove mean from source (equivalent to correlate /NODC from IGOR)
     f_signal_means_subtracted = f_signal - np.mean(f_signal)
-    
+
     # Remove DC from all destinations simultaneously
     noise_means = np.mean(noise_signal_2d, axis=1, keepdims=True)
     noise_signal_2d_means_subtracted = noise_signal_2d - noise_means
-    
+
     # Scipy turned out faster than np.correlate ()
     # NOTE: Argument order reversed to match IGOR's lag convention
-    # IGOR: result[k] = sum(src[n] × dest[n-k])  
-    # scipy: result[k] = sum(a[n] × b[n+k])     
+    # IGOR: result[k] = sum(src[n] × dest[n-k])
+    # scipy: result[k] = sum(a[n] × b[n+k])
     # By swapping arguments, we get equivalent temporal ordering
     correlations = []
     for i in range(noise_signal_2d_means_subtracted.shape[0]):
-        corr = correlate(noise_signal_2d_means_subtracted[i], f_signal_means_subtracted, mode='full')
+        corr = correlate(
+            noise_signal_2d_means_subtracted[i], f_signal_means_subtracted, mode="full"
+        )
         correlations.append(corr)
-    
+
     return np.array(correlations)
+
 
 # nice to have, but provided no meaningful speedup in testing and uses more memory
 # def means_subtracted_correlation_fft(f_signal, noise_signal_2d):
@@ -87,10 +92,25 @@ def means_subtracted_correlation(f_signal, noise_signal_2d):
 #     # Trim to 'full' mode length
 #     return correlations[:, :n_full]
 
-def _process_single_roi(rr, roi_list, input_traces, trigger_start, n_f_relevant,
-                        colour_lookup, noise_stimulus, mean_stim, n_colours,
-                        n_x_noise, n_y_noise, n_f_filter, n_f_filter_past,
-                        edge_crop, event_sd_threshold, pre_smooth):
+
+def _process_single_roi(
+    rr,
+    roi_list,
+    input_traces,
+    trigger_start,
+    n_f_relevant,
+    colour_lookup,
+    noise_stimulus,
+    mean_stim,
+    n_colours,
+    n_x_noise,
+    n_y_noise,
+    n_f_filter,
+    n_f_filter_past,
+    edge_crop,
+    event_sd_threshold,
+    pre_smooth,
+):
     """
     Process a single ROI for STRF calculation (for joblib parallelization).
 
@@ -133,7 +153,9 @@ def _process_single_roi(rr, roi_list, input_traces, trigger_start, n_f_relevant,
     roi_idx = roi_list.index(rr)
 
     # Event counting
-    current_trace_raw = input_traces[trigger_start:trigger_start+n_f_relevant, rr].copy()
+    current_trace_raw = input_traces[
+        trigger_start : trigger_start + n_f_relevant, rr
+    ].copy()
     current_trace_dif = np.diff(current_trace_raw, prepend=current_trace_raw[0])
     baseline_points = min(100, n_f_relevant)
     current_trace_dif_base = current_trace_dif[:baseline_points]
@@ -145,8 +167,8 @@ def _process_single_roi(rr, roi_list, input_traces, trigger_start, n_f_relevant,
         event_count = np.sum(current_trace_dif > event_sd_threshold)
 
     # Get base trace and current lookup
-    base_trace = input_traces[trigger_start:trigger_start+n_f_relevant, rr].copy()
-    current_lookup = colour_lookup[trigger_start:trigger_start+n_f_relevant].copy()
+    base_trace = input_traces[trigger_start : trigger_start + n_f_relevant, rr].copy()
+    current_lookup = colour_lookup[trigger_start : trigger_start + n_f_relevant].copy()
 
     # Initialize outputs for this ROI
     strf_data = np.zeros((n_colours, n_f_filter, n_x_noise, n_y_noise))
@@ -162,7 +184,11 @@ def _process_single_roi(rr, roi_list, input_traces, trigger_start, n_f_relevant,
         current_filter = np.zeros((n_x_noise, n_y_noise, n_f_filter))
 
         # Compute filter using optimized correlation
-        noise_2d = noise_stimulus.reshape((n_x_noise-edge_crop*2) * (n_y_noise-edge_crop*2), n_f_relevant, order='C')
+        noise_2d = noise_stimulus.reshape(
+            (n_x_noise - edge_crop * 2) * (n_y_noise - edge_crop * 2),
+            n_f_relevant,
+            order="C",
+        )
         correlations_2d = means_subtracted_correlation(current_trace, noise_2d)
         # Optional FFT-based correlation for further speedup but less memory efficient with joblib
         # correlations_2d = means_subtracted_correlation_fft(current_trace, noise_2d)
@@ -170,9 +196,16 @@ def _process_single_roi(rr, roi_list, input_traces, trigger_start, n_f_relevant,
         # Extract STA window
         start_idx = n_f_relevant - n_f_filter_past
         if start_idx >= 0 and start_idx + n_f_filter <= correlations_2d.shape[1]:
-            sta_windows = correlations_2d[:, start_idx:start_idx + n_f_filter]
-            strf_spatial = sta_windows.reshape(n_x_noise-edge_crop*2, n_y_noise-edge_crop*2, n_f_filter, order='C')
-            current_filter[edge_crop:n_x_noise-edge_crop, edge_crop:n_y_noise-edge_crop, :] = strf_spatial
+            sta_windows = correlations_2d[:, start_idx : start_idx + n_f_filter]
+            strf_spatial = sta_windows.reshape(
+                n_x_noise - edge_crop * 2,
+                n_y_noise - edge_crop * 2,
+                n_f_filter,
+                order="C",
+            )
+            current_filter[
+                edge_crop : n_x_noise - edge_crop, edge_crop : n_y_noise - edge_crop, :
+            ] = strf_spatial
 
         # Normalize by mean stimulus (vectorized)
         mean_stim_slice = mean_stim[:, :, colour]
@@ -186,7 +219,9 @@ def _process_single_roi(rr, roi_list, input_traces, trigger_start, n_f_relevant,
         # Calculate SD projections with z-normalization on copy
         current_filter_smth = current_filter.copy()
         if pre_smooth > 0:
-            current_filter_smth = ndimage.gaussian_filter(current_filter_smth, sigma=pre_smooth)
+            current_filter_smth = ndimage.gaussian_filter(
+                current_filter_smth, sigma=pre_smooth
+            )
 
         temp_wave = current_filter_smth[:, :, 0]
         temp_mean = np.mean(temp_wave)
@@ -204,46 +239,62 @@ def _process_single_roi(rr, roi_list, input_traces, trigger_start, n_f_relevant,
             pols = np.where(max_locs < min_locs, -1, 1)
 
             # Store in output arrays (flattening spatial dims into colour-concatenated format)
-            filter_pols_roi[:, colour * n_y_noise:(colour + 1) * n_y_noise] = pols
-            filter_sds_roi[:, colour * n_y_noise:(colour + 1) * n_y_noise] = sds
+            filter_pols_roi[:, colour * n_y_noise : (colour + 1) * n_y_noise] = pols
+            filter_sds_roi[:, colour * n_y_noise : (colour + 1) * n_y_noise] = sds
 
     return {
-        'roi_idx': roi_idx,
-        'strf_data': strf_data,
-        'filter_sds': filter_sds_roi,
-        'filter_pols': filter_pols_roi,
-        'event_count': event_count
+        "roi_idx": roi_idx,
+        "strf_data": strf_data,
+        "filter_sds": filter_sds_roi,
+        "filter_pols": filter_pols_roi,
+        "event_count": event_count,
     }
 
-def calculate_calcium_correlated_average(strf_obj, noise_array: np.ndarray, sta_past_window: float = 2.0, sta_future_window: float = 2.0,
-                                                n_colours: int = 1, n_triggers_per_colour: int | None = None, edge_crop: int = 2,
-                                                max_frames_per_trigger: int = 8, event_sd_threshold: float = 2.0,
-                                                use_znorm: bool = True, adjust_by_polarity: bool = True,
-                                                skip_first_triggers: int = 0, skip_last_triggers: int = 0,
-                                                pre_smooth: int = 0, roi: int | list[int] | np.ndarray | None = None, n_jobs: int = 1, verbose: bool = True, **kwargs: Any) -> dict[str, object]:
+
+def calculate_calcium_correlated_average(
+    strf_obj,
+    noise_array: np.ndarray,
+    sta_past_window: float = 2.0,
+    sta_future_window: float = 2.0,
+    n_colours: int = 1,
+    n_triggers_per_colour: int | None = None,
+    edge_crop: int = 2,
+    max_frames_per_trigger: int = 8,
+    event_sd_threshold: float = 2.0,
+    use_znorm: bool = True,
+    adjust_by_polarity: bool = True,
+    skip_first_triggers: int = 0,
+    skip_last_triggers: int = 0,
+    pre_smooth: int = 0,
+    roi: int | list[int] | np.ndarray | None = None,
+    n_jobs: int = 1,
+    traces: np.ndarray | None = None,
+    verbose: bool = True,
+    **kwargs: Any,
+) -> dict[str, object]:
     """
     Calculate spike-triggered averages (STRFs) - IGOR-equivalent calculations with substantial performance improvements.
-    
+
     This function maintains exact scientific equivalence to IGOR Pro's OS_STRFs_beta_experimental
-    while achieving significant performance improvements through vectorization and 
+    while achieving significant performance improvements through vectorization and
     optimized memory management.
-    
+
     PERFORMANCE IMPROVEMENTS:
     -------------------------
-    10-20x faster than loop based implementation: 45s → 2-4s per ROI  
+    10-20x faster than loop based implementation: 45s → 2-4s per ROI
     Reliable scipy.signal.correlate: No FFT complications
     Memory efficiency: Optimized array layouts and batch processing
     Cache optimization: C-order arrays for better memory access
-    
+
     VERIFIED IGOR EQUIVALENCES MAINTAINED:
     -------------------------------------
     Correlate /NODC: Cross-correlation with DC (means) removal from both signals
-    Frame-precise noise mapping: Aligns noise patterns to calcium imaging frames  
+    Frame-precise noise mapping: Aligns noise patterns to calcium imaging frames
     IGOR windowing: Uses start_idx = nF_relevant - nF_Filter_past extraction
     Mean stimulus calculation: Computes reference for normalization
     Z-normalization: Based on first temporal frame as in IGOR
     Output format: [colour, roi, time, y, x] matching IGOR structure
-    
+
     Parameters
     ----------
     strf_obj : STRF object
@@ -252,7 +303,7 @@ def calculate_calcium_correlated_average(strf_obj, noise_array: np.ndarray, sta_
         3D noise array with shape (y, x, time_patterns)
     sta_past_window : float, default 2.0
         How far into the past to calculate STA (seconds)
-    sta_future_window : float, default 2.0  
+    sta_future_window : float, default 2.0
         How far into the future to calculate STA (seconds)
     n_colours : int, default 1
         Number of color channels
@@ -287,19 +338,23 @@ def calculate_calcium_correlated_average(strf_obj, noise_array: np.ndarray, sta_
         Dictionary with results in the format [colour, roi, time, y, x]
         Keys: 'strfs', 'filter_sds', 'filter_corrs', 'event_counter'
     """
-    
+
     if verbose:
         print("Starting STRF calculation...")
-    
+
     # Validate STA window parameters (direct translation from IGOR)
     if sta_past_window <= 0 or sta_future_window < 0:
-        raise ValueError("ERROR: STA window parameters must be positive (past > 0, future >= 0)")
-    
+        raise ValueError(
+            "ERROR: STA window parameters must be positive (past > 0, future >= 0)"
+        )
+
     if sta_past_window + sta_future_window > 10:
-        warnings.warn(f"WARNING: Very large STA window ({sta_past_window + sta_future_window}s) may cause memory issues")
-    
+        warnings.warn(
+            f"WARNING: Very large STA window ({sta_past_window + sta_future_window}s) may cause memory issues"
+        )
+
     # n_triggers_per_colour=None means single-colour mode (skip colour lookup logic)
-    single_colour_mode = (n_colours == 1 and n_triggers_per_colour is None)
+    single_colour_mode = n_colours == 1 and n_triggers_per_colour is None
 
     # Validate multi-colour parameters
     if n_colours > 1 and n_triggers_per_colour is None:
@@ -317,43 +372,47 @@ def calculate_calcium_correlated_average(strf_obj, noise_array: np.ndarray, sta_
             print(f"nTriggers_per_Colour: {n_triggers_per_colour}")
         print(f"CropNoiseEdges: {edge_crop}")
         print(f"nF_Max_per_Noiseframe: {max_frames_per_trigger}")
-    
+
     # Get data from STRF object (equivalent to IGOR wave access)
-    if use_znorm:
-        if hasattr(strf_obj, 'traces_znorm'):
+    # If explicit traces are provided, use them directly; otherwise fall back
+    # to traces_znorm or traces_raw based on use_znorm toggle.
+    if traces is not None:
+        input_traces = np.asarray(traces, dtype=float).T.copy()  # (n_rois, n_frames) → (n_frames, n_rois)
+    elif use_znorm:
+        if hasattr(strf_obj, "traces_znorm") and strf_obj.traces_znorm is not None:
             input_traces = strf_obj.traces_znorm.T.copy()  # Transpose to (frames, rois)
         else:
             raise AttributeError("Z-normalized traces not found")
     else:
-        if hasattr(strf_obj, 'traces_raw'):
+        if hasattr(strf_obj, "traces_raw") and strf_obj.traces_raw is not None:
             input_traces = strf_obj.traces_raw.T.copy()  # Transpose to (frames, rois)
         else:
             raise AttributeError("Raw traces not found")
-    
+
     # Get trigger times by frame (not by time!)
     triggertimes_frame = strf_obj.triggertimes_frame.copy()
-    
+
     # Count triggers (vectorized - finds first NaN or length if no NaN)
     nan_mask = np.isnan(triggertimes_frame)
     if np.any(nan_mask):
         n_triggers = np.argmax(nan_mask)  # Index of first NaN
     else:
         n_triggers = len(triggertimes_frame)
-    
+
     if verbose:
         print(f"{n_triggers} Triggers found")
-    
+
     # Validate trigger skipping parameters
     if skip_first_triggers < 0 or skip_last_triggers < 0:
         raise ValueError("ERROR: Skip trigger parameters cannot be negative")
-    
+
     if skip_first_triggers + skip_last_triggers >= n_triggers:
         raise ValueError("ERROR: Skip parameters would eliminate all triggers")
-    
+
     # Calculate frame parameters (direct translation)
     n_f = input_traces.shape[0]  # Number of frames
     n_rois = input_traces.shape[1]  # Number of ROIs
-    
+
     # Handle ROI selection
     if roi is None:
         roi_list = list(range(n_rois))
@@ -363,37 +422,50 @@ def calculate_calcium_correlated_average(strf_obj, noise_array: np.ndarray, sta_
         roi_list = list(roi)
     else:
         raise ValueError("ROI must be None, int, list, or numpy array")
-    
+
     # Calculate temporal parameters
-    frame_duration = strf_obj.linedur_s * strf_obj.images.shape[1]  # Frameduration = nY * LineDuration
-    n_f_filter_past = max(1, int(np.floor(sta_past_window / frame_duration)))  # frames for past window (minimum 1)
-    n_f_filter_future = max(0, int(np.floor(sta_future_window / frame_duration)))  # frames for future window
+    frame_duration = (
+        strf_obj.linedur_s * strf_obj.images.shape[1]
+    )  # Frameduration = nY * LineDuration
+    n_f_filter_past = max(
+        1, int(np.floor(sta_past_window / frame_duration))
+    )  # frames for past window (minimum 1)
+    n_f_filter_future = max(
+        0, int(np.floor(sta_future_window / frame_duration))
+    )  # frames for future window
     n_f_filter = n_f_filter_past + n_f_filter_future  # total STA window in frames
     sta_total_window = sta_past_window + sta_future_window  # total window in seconds
-    
+
     if verbose:
         print(f"Frame duration: {frame_duration:.4f}s")
-        print(f"STA window: {n_f_filter_past} frames past + {n_f_filter_future} frames future = {n_f_filter} total frames")
+        print(
+            f"STA window: {n_f_filter_past} frames past + {n_f_filter_future} frames future = {n_f_filter} total frames"
+        )
         print(f"STA total window: {sta_total_window}s")
-    
+
     # Validate temporal window parameters
     if n_f_filter_past >= n_f or n_f_filter >= n_f:
         raise ValueError("ERROR: STA window is larger than available data")
-    
+
     # Get noise array dimensions (note: IGOR has X and Y flipped relative to mouse)
     n_x_noise = noise_array.shape[1]  # X and Y flipped relative to mouse
     n_y_noise = noise_array.shape[0]
     n_z_noise = noise_array.shape[2]
-    
+
     if verbose:
-        print(f"Noise array shape: {noise_array.shape} -> nY_Noise={n_y_noise}, nX_Noise={n_x_noise}, nZ_Noise={n_z_noise}")
-    
+        print(
+            f"Noise array shape: {noise_array.shape} -> nY_Noise={n_y_noise}, nX_Noise={n_x_noise}, nZ_Noise={n_z_noise}"
+        )
+
     # Validate noise array dimensions
-    if n_x_noise <= edge_crop*2 or n_y_noise <= edge_crop*2:
+    if n_x_noise <= edge_crop * 2 or n_y_noise <= edge_crop * 2:
         raise ValueError("ERROR: CropNoiseEdges too large for noise array dimensions")
-    
+
     # Calculate frame parameters needed for processing
-    n_f_relevant = int(triggertimes_frame[n_triggers-skip_last_triggers-1] - triggertimes_frame[skip_first_triggers])
+    n_f_relevant = int(
+        triggertimes_frame[n_triggers - skip_last_triggers - 1]
+        - triggertimes_frame[skip_first_triggers]
+    )
 
     # Build ColourLookup array - maps each frame to its colour channel
     # In single-colour mode, all frames map to colour 0 (no complex lookup needed)
@@ -409,43 +481,59 @@ def calculate_calcium_correlated_average(strf_obj, noise_array: np.ndarray, sta_
 
         for ll in range(n_colour_loops):
             for colour in range(n_colours):
-                start_trigger_idx = ll * (n_colours * n_triggers_per_colour) + colour * n_triggers_per_colour
-                end_trigger_idx = ll * (n_colours * n_triggers_per_colour) + (colour + 1) * n_triggers_per_colour - 1
+                start_trigger_idx = (
+                    ll * (n_colours * n_triggers_per_colour)
+                    + colour * n_triggers_per_colour
+                )
+                end_trigger_idx = (
+                    ll * (n_colours * n_triggers_per_colour)
+                    + (colour + 1) * n_triggers_per_colour
+                    - 1
+                )
 
                 # Bounds checking
                 if start_trigger_idx < n_triggers and end_trigger_idx < n_triggers:
                     current_start_frame = int(triggertimes_frame[start_trigger_idx])
                     current_end_frame = int(triggertimes_frame[end_trigger_idx])
-                    colour_lookup[current_start_frame:current_end_frame+1] = colour
+                    colour_lookup[current_start_frame : current_end_frame + 1] = colour
 
         if verbose:
-            print(f"ColourLookup built: {n_colour_loops} loops x {n_colours} colours x {n_triggers_per_colour} triggers")
+            print(
+                f"ColourLookup built: {n_colour_loops} loops x {n_colours} colours x {n_triggers_per_colour} triggers"
+            )
 
     # Pre-allocate output arrays (direct translation from IGOR)
-    filter_sds = np.zeros((n_x_noise, n_y_noise*n_colours, len(roi_list)))
-    filter_pols = np.ones((n_x_noise, n_y_noise*n_colours, len(roi_list)))  # force to 1 (On)
-    filter_corrs = np.zeros((n_x_noise, n_y_noise*n_colours, len(roi_list)))
+    filter_sds = np.zeros((n_x_noise, n_y_noise * n_colours, len(roi_list)))
+    filter_pols = np.ones(
+        (n_x_noise, n_y_noise * n_colours, len(roi_list))
+    )  # force to 1 (On)
+    filter_corrs = np.zeros((n_x_noise, n_y_noise * n_colours, len(roi_list)))
 
     # Pre-allocate STRF output array [colour, roi, time, x, y]
-    strfs_output = np.zeros((n_colours, len(roi_list), n_f_filter, n_x_noise, n_y_noise))
+    strfs_output = np.zeros(
+        (n_colours, len(roi_list), n_f_filter, n_x_noise, n_y_noise)
+    )
 
     event_counter = np.zeros(len(roi_list))
     mean_stim = np.full((n_x_noise, n_y_noise, n_colours), np.nan)
-    
+
     if verbose:
         print(f"Calculating kernels for {len(roi_list)} ROIs...")
 
     # Pre-compute noise stimulus mapping BEFORE ROI loop (needed for mean_stim calculation)
     # Phase 2 fix: Initialize to 0.5 instead of 0 to match IGOR
     trigger_start = int(triggertimes_frame[skip_first_triggers])
-    noise_stimulus = np.full((n_x_noise-edge_crop*2, n_y_noise-edge_crop*2, n_f_relevant),
-                            0.5, dtype=np.float32)
+    noise_stimulus = np.full(
+        (n_x_noise - edge_crop * 2, n_y_noise - edge_crop * 2, n_f_relevant),
+        0.5,
+        dtype=np.float32,
+    )
 
     # Vectorized trigger-to-noise mapping following IGOR's exact logic
     trigger_counter = 0
-    for tt in range(skip_first_triggers, n_triggers-skip_last_triggers-1):
+    for tt in range(skip_first_triggers, n_triggers - skip_last_triggers - 1):
         current_start_frame = int(triggertimes_frame[tt]) - trigger_start
-        current_end_frame = int(triggertimes_frame[tt+1]) - trigger_start
+        current_end_frame = int(triggertimes_frame[tt + 1]) - trigger_start
 
         # Bounds checking
         if current_start_frame < 0 or current_end_frame >= n_f_relevant:
@@ -459,7 +547,11 @@ def calculate_calcium_correlated_average(strf_obj, noise_array: np.ndarray, sta_
 
         # Optimized noise pattern mapping
         if trigger_counter < noise_array.shape[2]:
-            noise_pattern = noise_array[edge_crop:n_y_noise-edge_crop, edge_crop:n_x_noise-edge_crop, trigger_counter]
+            noise_pattern = noise_array[
+                edge_crop : n_y_noise - edge_crop,
+                edge_crop : n_x_noise - edge_crop,
+                trigger_counter,
+            ]
             frame_range = np.arange(current_start_frame, current_end_frame + 1)
             frame_range = frame_range[frame_range < n_f_relevant]
 
@@ -477,7 +569,7 @@ def calculate_calcium_correlated_average(strf_obj, noise_array: np.ndarray, sta_
         print("Computing mean stimulus for normalization: Colours...", end="")
 
     base_trace_ref = np.ones(n_f_relevant)  # Reference uses constant trace
-    current_lookup = colour_lookup[trigger_start:trigger_start+n_f_relevant].copy()
+    current_lookup = colour_lookup[trigger_start : trigger_start + n_f_relevant].copy()
 
     for colour in range(n_colours):
         current_trace = np.where(current_lookup == colour, base_trace_ref, 0.0)
@@ -487,8 +579,9 @@ def calculate_calcium_correlated_average(strf_obj, noise_array: np.ndarray, sta_
         # noise_stimulus shape: (n_x_cropped, n_y_cropped, n_f_relevant)
         # current_trace shape: (n_f_relevant,)
         # Result: mean over time of (noise * trace) for each pixel
-        mean_stim[edge_crop:n_x_noise-edge_crop, edge_crop:n_y_noise-edge_crop, colour] = \
-            np.mean(noise_stimulus * current_trace, axis=2)
+        mean_stim[
+            edge_crop : n_x_noise - edge_crop, edge_crop : n_y_noise - edge_crop, colour
+        ] = np.mean(noise_stimulus * current_trace, axis=2)
 
     if verbose:
         print(".")
@@ -499,40 +592,74 @@ def calculate_calcium_correlated_average(strf_obj, noise_array: np.ndarray, sta_
         roi_iter = tqdm(roi_list, desc="Computing STRFs", leave=False)
         for rr in roi_iter:
             result = _process_single_roi(
-                rr, roi_list, input_traces, trigger_start, n_f_relevant,
-                colour_lookup, noise_stimulus, mean_stim, n_colours,
-                n_x_noise, n_y_noise, n_f_filter, n_f_filter_past,
-                edge_crop, event_sd_threshold, pre_smooth
+                rr,
+                roi_list,
+                input_traces,
+                trigger_start,
+                n_f_relevant,
+                colour_lookup,
+                noise_stimulus,
+                mean_stim,
+                n_colours,
+                n_x_noise,
+                n_y_noise,
+                n_f_filter,
+                n_f_filter_past,
+                edge_crop,
+                event_sd_threshold,
+                pre_smooth,
             )
 
             # Unpack results
-            event_counter[result['roi_idx']] = result['event_count']
-            filter_sds[:, :, result['roi_idx']] = result['filter_sds']
-            filter_pols[:, :, result['roi_idx']] = result['filter_pols']
+            event_counter[result["roi_idx"]] = result["event_count"]
+            filter_sds[:, :, result["roi_idx"]] = result["filter_sds"]
+            filter_pols[:, :, result["roi_idx"]] = result["filter_pols"]
 
             # Store STRF data
             for colour in range(n_colours):
-                strfs_output[colour, result['roi_idx'], :, :, :] = result['strf_data'][colour]
+                strfs_output[colour, result["roi_idx"], :, :, :] = result["strf_data"][
+                    colour
+                ]
     else:
         # Parallel processing with joblib + tqdm progress bar
         results_gen = Parallel(n_jobs=n_jobs, return_as="generator")(
             delayed(_process_single_roi)(
-                rr, roi_list, input_traces, trigger_start, n_f_relevant,
-                colour_lookup, noise_stimulus, mean_stim, n_colours,
-                n_x_noise, n_y_noise, n_f_filter, n_f_filter_past,
-                edge_crop, event_sd_threshold, pre_smooth
-            ) for rr in roi_list
+                rr,
+                roi_list,
+                input_traces,
+                trigger_start,
+                n_f_relevant,
+                colour_lookup,
+                noise_stimulus,
+                mean_stim,
+                n_colours,
+                n_x_noise,
+                n_y_noise,
+                n_f_filter,
+                n_f_filter_past,
+                edge_crop,
+                event_sd_threshold,
+                pre_smooth,
+            )
+            for rr in roi_list
         )
 
         # Unpack results as they complete, with tqdm tracking progress
-        for result in tqdm(results_gen, total=len(roi_list), desc="Computing STRFs (parallel)", leave=False):
-            event_counter[result['roi_idx']] = result['event_count']
-            filter_sds[:, :, result['roi_idx']] = result['filter_sds']
-            filter_pols[:, :, result['roi_idx']] = result['filter_pols']
+        for result in tqdm(
+            results_gen,
+            total=len(roi_list),
+            desc="Computing STRFs (parallel)",
+            leave=False,
+        ):
+            event_counter[result["roi_idx"]] = result["event_count"]
+            filter_sds[:, :, result["roi_idx"]] = result["filter_sds"]
+            filter_pols[:, :, result["roi_idx"]] = result["filter_pols"]
 
             for colour in range(n_colours):
-                strfs_output[colour, result['roi_idx'], :, :, :] = result['strf_data'][colour]
-    
+                strfs_output[colour, result["roi_idx"], :, :, :] = result["strf_data"][
+                    colour
+                ]
+
     # Apply polarity adjustment if requested (direct translation)
     if adjust_by_polarity:
         filter_corrs *= filter_pols
@@ -540,18 +667,18 @@ def calculate_calcium_correlated_average(strf_obj, noise_array: np.ndarray, sta_
 
     # Prepare results dictionary
     results = {
-        'strfs': strfs_output,
-        'filter_sds': filter_sds,
-        'filter_corrs': filter_corrs,
-        'event_counter': event_counter,
-        'roi_list': roi_list,
-        'n_triggers': n_triggers,
-        'frame_duration': frame_duration,
-        'sta_window_frames': n_f_filter
+        "strfs": strfs_output,
+        "filter_sds": filter_sds,
+        "filter_corrs": filter_corrs,
+        "event_counter": event_counter,
+        "roi_list": roi_list,
+        "n_triggers": n_triggers,
+        "frame_duration": frame_duration,
+        "sta_window_frames": n_f_filter,
     }
-    
+
     if verbose:
         print("STRF calculation completed successfully.")
         print(f"Output shape [colour, roi, time, x, y]: {strfs_output.shape}")
-    
+
     return results
