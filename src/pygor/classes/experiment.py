@@ -113,7 +113,7 @@ class Experiment:
         if n_jobs == 1 or len(file_paths) == 1:
             # Sequential loading with tqdm progress bar
             try:
-                from tqdm.auto import tqdm
+                from tqdm import tqdm
                 results = [load_single_file(fp) for fp in tqdm(file_paths, desc="Loading files")]
             except ImportError:
                 results = [load_single_file(fp) for fp in file_paths]
@@ -121,7 +121,7 @@ class Experiment:
             # Parallel loading with tqdm progress bar via joblib callback
             from joblib import Parallel, delayed
             try:
-                from tqdm.auto import tqdm
+                from tqdm import tqdm
                 import contextlib
 
                 @contextlib.contextmanager
@@ -923,7 +923,7 @@ class Experiment:
         """
         success_count = 0
         try:
-            from tqdm.auto import tqdm
+            from tqdm import tqdm
             iterator = tqdm(enumerate(self.recording), total=len(self.recording), desc=method)
         except ImportError:
             iterator = enumerate(self.recording)

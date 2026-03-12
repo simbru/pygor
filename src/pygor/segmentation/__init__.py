@@ -297,6 +297,13 @@ def segment_rois(
                 plot_img = None
 
         if plot_img is not None:
+            # Get pure average stack for left column of 2x2 plot
+            avg_img = None
+            if data.average_stack is not None:
+                avg_img = data.average_stack
+            elif data.images is not None:
+                avg_img = data.images.mean(axis=0)
+
             # Apply same enhancement as segmentation so user sees what was actually used
             if unsharp_radius is not None and unsharp_amount is not None:
                 plot_img = enhance_unsharp(plot_img, radius=unsharp_radius, amount=unsharp_amount)
@@ -321,6 +328,7 @@ def segment_rois(
                 method=mode,
                 anatomy_mask=anatomy_mask_overlay,
                 enhanced=was_enhanced,
+                average_img=avg_img,
             )
 
     return pygor_mask

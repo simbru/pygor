@@ -54,11 +54,11 @@ shrink_size_threshold = 30
 
 [segmentation.blob]
 input_mode = "average"
-unsharp_radius = 1.0
-unsharp_amount = 2.5
+unsharp_radius = 0.5
+unsharp_amount = 5
 min_sigma = 0.8
 max_sigma = 2
-threshold = 0.01
+threshold = 0.02
 eliminate_overlap = 1
 merge_overlap = 0.33
 anatomy_threshold = "none"

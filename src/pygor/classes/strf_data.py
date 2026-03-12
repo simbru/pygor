@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 # import sklearn.preprocessing
 import re
-from tqdm.auto import tqdm
+from tqdm import tqdm
 # Local imports
 import pygor.data_helpers
 import pygor.strf.bootstrap

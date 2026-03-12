@@ -15,7 +15,7 @@ from joblib import Parallel, delayed
 from scipy import ndimage
 from scipy.fft import fft, ifft, next_fast_len
 from scipy.signal import correlate
-from tqdm.auto import tqdm
+from tqdm import tqdm
 
 
 def means_subtracted_correlation(f_signal, noise_signal_2d):
