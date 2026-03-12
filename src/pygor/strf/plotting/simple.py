@@ -1,18 +1,21 @@
-import pygor
+from collections.abc import Iterable
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib import ticker as mticker
 from matplotlib.colors import Normalize
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from collections.abc import Iterable
+
+import pygor
 
 
 def _validate_channel(channel, numcolour):
     """Validate 0-indexed channel parameter."""
     if channel is not None:
         if not isinstance(channel, (int, np.integer)):
-            raise TypeError(f"channel must be an int or None, got {type(channel).__name__}")
+            raise TypeError(
+                f"channel must be an int or None, got {type(channel).__name__}"
+            )
         if channel < 0 or channel >= numcolour:
             raise ValueError(
                 f"channel={channel} out of range. Use 0-{numcolour - 1} "
@@ -43,9 +46,7 @@ def _build_grid_image(array, max_x):
     empty_slices = num_rows * max_x - num_slices
     if np.ma.isMaskedArray(array):
         pad_array = np.ma.masked_all((empty_slices, array.shape[1], array.shape[2]))
-        array_padded = (
-            np.ma.vstack([array, pad_array]) if empty_slices > 0 else array
-        )
+        array_padded = np.ma.vstack([array, pad_array]) if empty_slices > 0 else array
     else:
         pad_array = np.zeros((empty_slices, array.shape[1], array.shape[2]))
         array_padded = np.vstack([array, pad_array]) if empty_slices > 0 else array
@@ -288,7 +289,10 @@ def _annotate_grid(ax, roi_indices, num_rows, max_x, h, w):
 # Colour-mosaic helpers (fast single-imshow rendering for multicolour data)
 # ---------------------------------------------------------------------------
 
-def _compute_mosaic_row_limits(data_4d, scale, mad_scale=2, alpha_weights_4d=None, clim=None):
+
+def _compute_mosaic_row_limits(
+    data_4d, scale, mad_scale=2, alpha_weights_4d=None, clim=None
+):
     """Compute per-ROI (vmin, vmax) colour limits for a 4D colour mosaic.
 
     Parameters
@@ -415,15 +419,108 @@ def _build_colour_mosaic(
             rgba = colormap(norm(data_4d[c, roi]))  # (ny, nx, 4)
             if alpha_weights_4d is not None:
                 rgba[..., 3] = alpha_weights_4d[c, roi]
-            mosaic[y0:y0 + ny, x0:x0 + nx] = rgba
+            mosaic[y0 : y0 + ny, x0 : x0 + nx] = rgba
         # Per-row colourbar strip: vertical gradient from vmax (top) to vmin (bottom)
         cbar_vals = np.linspace(1, 0, ny)[:, None] * np.ones((1, cbar_width_px))
         cbar_x0 = n_colours * nx + (n_colours - 1) * gap_px + gap_px
-        mosaic[y0:y0 + ny, cbar_x0:cbar_x0 + cbar_width_px] = colormap(cbar_vals)
+        mosaic[y0 : y0 + ny, cbar_x0 : cbar_x0 + cbar_width_px] = colormap(cbar_vals)
 
     layout_info = dict(
-        n_colours=n_colours, n_rois=n_rois, ny=ny, nx=nx,
-        gap_px=gap_px, cbar_width_px=cbar_width_px, row_width=row_width,
+        n_colours=n_colours,
+        n_rois=n_rois,
+        ny=ny,
+        nx=nx,
+        gap_px=gap_px,
+        cbar_width_px=cbar_width_px,
+        row_width=row_width,
+    )
+    return mosaic, layout_info
+
+
+def _build_multi_cmap_mosaic(
+    data_4d,
+    row_limits,
+    cmaps,
+    extra_rgba_columns=None,
+    crosshairs=False,
+    gap_px=1,
+    bg_color=(1, 1, 1, 1),
+):
+    """Build an RGBA mosaic with per-column colormaps and optional extra RGBA columns.
+
+    Parameters
+    ----------
+    data_4d : ndarray, shape (n_colours, n_rois, h, w)
+        Colormapped spatial data.
+    row_limits : list of (vmin, vmax), length n_rois
+        Symmetric colour limits per ROI row.
+    cmaps : list of colormap
+        One colormap per colour column (length n_colours).
+    extra_rgba_columns : list of ndarray or None
+        Each array has shape (n_rois, h, w, 3) or (n_rois, h, w, 4).
+        These are placed directly into the mosaic without colormap application.
+    crosshairs : bool
+        Draw crosshair lines on spatial tiles.
+    gap_px : int
+        Pixel gap between tiles.
+    bg_color : tuple of 4 floats
+        RGBA background colour.
+
+    Returns
+    -------
+    mosaic : ndarray, shape (total_h, total_w, 4)
+    layout_info : dict
+    """
+    n_colours, n_rois, ny, nx = data_4d.shape
+    colormaps = [plt.get_cmap(c).copy() if isinstance(c, str) else c for c in cmaps]
+    for cm in colormaps:
+        cm.set_bad("black")
+    bg_rgba = np.array(bg_color, dtype=np.float32)
+
+    n_extra = len(extra_rgba_columns) if extra_rgba_columns is not None else 0
+    total_cols = n_colours + n_extra
+    row_width = total_cols * nx + (total_cols - 1) * gap_px
+    total_h = n_rois * ny + (n_rois - 1) * gap_px
+    mosaic = np.broadcast_to(bg_rgba, (total_h, row_width, 4)).copy()
+
+    crosshair_color = np.array([0.1, 0.1, 0.1, 0.1], dtype=np.float32)
+
+    for roi in range(n_rois):
+        vmin, vmax = row_limits[roi]
+        norm = Normalize(vmin=vmin, vmax=vmax)
+        y0 = roi * (ny + gap_px)
+        # Colormapped columns
+        for c in range(n_colours):
+            x0 = c * (nx + gap_px)
+            rgba = colormaps[c](norm(data_4d[c, roi]))  # (ny, nx, 4)
+            mosaic[y0 : y0 + ny, x0 : x0 + nx] = rgba
+            if crosshairs:
+                cy = y0 + ny // 2
+                cx = x0 + nx // 2
+                mosaic[cy, x0 : x0 + nx] = crosshair_color
+                mosaic[y0 : y0 + ny, cx] = crosshair_color
+        # Extra RGBA columns (RGB/RGU composites)
+        if extra_rgba_columns is not None:
+            for e, extra in enumerate(extra_rgba_columns):
+                x0 = (n_colours + e) * (nx + gap_px)
+                tile = extra[roi]  # (h, w, 3) or (h, w, 4)
+                if tile.ndim == 3 and tile.shape[2] == 3:
+                    # Pad RGB to RGBA
+                    rgba_tile = np.ones((*tile.shape[:2], 4), dtype=np.float32)
+                    rgba_tile[..., :3] = tile
+                else:
+                    rgba_tile = tile
+                mosaic[y0 : y0 + ny, x0 : x0 + nx] = rgba_tile
+
+    layout_info = dict(
+        n_colours=n_colours,
+        n_extra=n_extra,
+        total_cols=total_cols,
+        n_rois=n_rois,
+        ny=ny,
+        nx=nx,
+        gap_px=gap_px,
+        row_width=row_width,
     )
     return mosaic, layout_info
 
@@ -462,8 +559,15 @@ def _annotate_colour_mosaic(
     # Column titles
     for c in range(nc):
         x_center = c * (nx + gap) + nx / 2
-        ax.text(x_center, -2, colour_labels[c],
-                ha="center", va="bottom", fontsize=9, fontweight="bold")
+        ax.text(
+            x_center,
+            -2,
+            colour_labels[c],
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            fontweight="bold",
+        )
 
     if not show_labels and not show_cbar_labels:
         return
@@ -475,8 +579,7 @@ def _annotate_colour_mosaic(
         vmin, vmax = row_limits[i]
 
         if show_labels:
-            ax.text(-2, y_center, str(roi_idx),
-                    ha="right", va="center", fontsize=6)
+            ax.text(-2, y_center, str(roi_idx), ha="right", va="center", fontsize=6)
 
         if show_cbar_labels:
             if cbar_label_format == "time":
@@ -490,10 +593,15 @@ def _annotate_colour_mosaic(
             else:
                 fmt_top = f"{vmax:.2g}"
                 fmt_bot = f"{vmin:.2g}"
-            ax.text(cbar_x_right + 1, y0 + 1, fmt_top,
-                    ha="left", va="top", fontsize=4)
-            ax.text(cbar_x_right + 1, y0 + ny - 1, fmt_bot,
-                    ha="left", va="bottom", fontsize=4)
+            ax.text(cbar_x_right + 1, y0 + 1, fmt_top, ha="left", va="top", fontsize=4)
+            ax.text(
+                cbar_x_right + 1,
+                y0 + ny - 1,
+                fmt_bot,
+                ha="left",
+                va="bottom",
+                fontsize=4,
+            )
 
 
 def _compute_alpha_weights_4d(self, roi_indices):
@@ -523,9 +631,17 @@ def _compute_alpha_weights_4d(self, roi_indices):
     return alpha
 
 
-def _mosaic_figure(mosaic, layout_info, roi_indices, row_limits,
-                   colour_labels, show_labels, show_cbar, px_scale,
-                   cbar_label_format="time"):
+def _mosaic_figure(
+    mosaic,
+    layout_info,
+    roi_indices,
+    row_limits,
+    colour_labels,
+    show_labels,
+    show_cbar,
+    px_scale,
+    cbar_label_format="time",
+):
     """Create a figure from a colour mosaic and annotate it.
 
     Returns
@@ -537,7 +653,10 @@ def _mosaic_figure(mosaic, layout_info, roi_indices, row_limits,
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     ax.imshow(mosaic, aspect="equal", interpolation="nearest", origin="lower")
     _annotate_colour_mosaic(
-        ax, layout_info, roi_indices, row_limits,
+        ax,
+        layout_info,
+        roi_indices,
+        row_limits,
         colour_labels=colour_labels,
         show_labels=show_labels,
         show_cbar_labels=show_cbar,
@@ -606,10 +725,7 @@ def plot_collapsed_strfs(
     fig, ax : matplotlib Figure and Axes
     """
     # --- Mosaic mode: multicolour data with no specific channel ---
-    use_mosaic = (
-        hasattr(self, "multicolour") and self.multicolour
-        and channel is None
-    )
+    use_mosaic = hasattr(self, "multicolour") and self.multicolour and channel is None
     if use_mosaic:
         data_4d = self.collapse_times_by_channel(
             force_recompute=True,
@@ -632,12 +748,23 @@ def plot_collapsed_strfs(
                 row_limits.append((-cv, cv))
 
         mosaic, layout_info = _build_colour_mosaic(
-            data_4d, row_limits, cmap, None, "white",
-            gap_px, cbar_width_px if show_cbar else 0,
+            data_4d,
+            row_limits,
+            cmap,
+            None,
+            "white",
+            gap_px,
+            cbar_width_px if show_cbar else 0,
         )
         return _mosaic_figure(
-            mosaic, layout_info, roi_indices, row_limits,
-            colour_labels, show_labels, show_cbar, px_scale,
+            mosaic,
+            layout_info,
+            roi_indices,
+            row_limits,
+            colour_labels,
+            show_labels,
+            show_cbar,
+            px_scale,
             cbar_label_format="generic",
         )
 
@@ -659,7 +786,9 @@ def plot_collapsed_strfs(
 
     # Display
     fig, ax = plt.subplots(figsize=(max_x, max(2, num_rows)))
-    im = ax.imshow(image, cmap=cmap, interpolation="none", clim=(-cval, cval), origin=origin)
+    im = ax.imshow(
+        image, cmap=cmap, interpolation="none", clim=(-cval, cval), origin=origin
+    )
     ax.axis("off")
     if show_cbar:
         cbar_kwargs = {} if cbar_kwargs is None else cbar_kwargs
@@ -743,10 +872,7 @@ def plot_peaktime_strfs(
     fig, ax : matplotlib Figure and Axes
     """
     # --- Mosaic mode: multicolour data with no specific channel ---
-    use_mosaic = (
-        hasattr(self, "multicolour") and self.multicolour
-        and channel is None
-    )
+    use_mosaic = hasattr(self, "multicolour") and self.multicolour and channel is None
     if use_mosaic:
         data_4d = self.get_strf_peak_times_by_channel()  # (n_colours, n_rois, h, w)
         n_rois_per_colour = data_4d.shape[1]
@@ -768,7 +894,7 @@ def plot_peaktime_strfs(
             for r in range(n_rois):
                 roi_data = data_4d[:, r]
                 finite = roi_data[np.isfinite(roi_data)]
-                if hasattr(roi_data, 'compressed'):
+                if hasattr(roi_data, "compressed"):
                     finite = roi_data.compressed()
                 if finite.size > 0:
                     row_limits.append((float(np.min(finite)), float(np.max(finite))))
@@ -776,12 +902,23 @@ def plot_peaktime_strfs(
                     row_limits.append((0.0, 1.0))
 
         mosaic, layout_info = _build_colour_mosaic(
-            data_4d, row_limits, cmap, alpha_4d, bad_color,
-            gap_px, cbar_width_px if show_cbar else 0,
+            data_4d,
+            row_limits,
+            cmap,
+            alpha_4d,
+            bad_color,
+            gap_px,
+            cbar_width_px if show_cbar else 0,
         )
         return _mosaic_figure(
-            mosaic, layout_info, roi_indices, row_limits,
-            colour_labels, show_labels, show_cbar, px_scale,
+            mosaic,
+            layout_info,
+            roi_indices,
+            row_limits,
+            colour_labels,
+            show_labels,
+            show_cbar,
+            px_scale,
         )
 
     # --- Single-channel / single-colour grid mode (existing path) ---
@@ -810,9 +947,9 @@ def plot_peaktime_strfs(
     if alpha_mode == "strf_abs":
         alpha_array_raw = self.get_amplitude_weights()
         if channel is not None:
-            alpha_array_raw = pygor.utilities.multicolour_reshape(alpha_array_raw, self.numcolour)[
-                channel
-            ]
+            alpha_array_raw = pygor.utilities.multicolour_reshape(
+                alpha_array_raw, self.numcolour
+            )[channel]
         alpha_array_raw = alpha_array_raw[roi_indices]
         if alpha_array_raw.shape == array.shape:
             finite_alpha = alpha_array_raw[np.isfinite(alpha_array_raw)]
@@ -822,7 +959,9 @@ def plot_peaktime_strfs(
                     alpha_array = np.clip(alpha_array_raw, alpha_lo, alpha_hi)
                     alpha_array = (alpha_array - alpha_lo) / (alpha_hi - alpha_lo)
                     alpha_array = np.clip(alpha_array, 0.0, 1.0)
-                    alpha_array = np.nan_to_num(alpha_array, nan=0.0, posinf=1.0, neginf=0.0)
+                    alpha_array = np.nan_to_num(
+                        alpha_array, nan=0.0, posinf=1.0, neginf=0.0
+                    )
                     alpha_array = np.clip(alpha_array, 0.0, 1.0)
                     alpha, _, _ = _build_grid_image(alpha_array, max_x)
 
@@ -959,13 +1098,11 @@ def plot_deltatime_strfs(
         raise ValueError("scale must be 'global', 'global_centered', or 'per_roi'")
 
     # --- Mosaic mode: multicolour data with no specific channel ---
-    use_mosaic = (
-        hasattr(self, "multicolour") and self.multicolour
-        and channel is None
-    )
+    use_mosaic = hasattr(self, "multicolour") and self.multicolour and channel is None
     if use_mosaic:
         data_4d = self.get_strf_delta_times_by_channel(
-            use_segmentation=use_segmentation, seg_kwargs=seg_kwargs,
+            use_segmentation=use_segmentation,
+            seg_kwargs=seg_kwargs,
         )  # (n_colours, n_rois, h, w)
         # Resolve ROI indices from the per-colour ROI count
         n_rois_per_colour = data_4d.shape[1]
@@ -979,15 +1116,30 @@ def plot_deltatime_strfs(
             alpha_4d = _compute_alpha_weights_4d(self, roi_indices)
 
         row_limits = _compute_mosaic_row_limits(
-            data_4d, scale, mad_scale, alpha_4d, clim,
+            data_4d,
+            scale,
+            mad_scale,
+            alpha_4d,
+            clim,
         )
         mosaic, layout_info = _build_colour_mosaic(
-            data_4d, row_limits, cmap, alpha_4d, bad_color,
-            gap_px, cbar_width_px if show_cbar else 0,
+            data_4d,
+            row_limits,
+            cmap,
+            alpha_4d,
+            bad_color,
+            gap_px,
+            cbar_width_px if show_cbar else 0,
         )
         return _mosaic_figure(
-            mosaic, layout_info, roi_indices, row_limits,
-            colour_labels, show_labels, show_cbar, px_scale,
+            mosaic,
+            layout_info,
+            roi_indices,
+            row_limits,
+            colour_labels,
+            show_labels,
+            show_cbar,
+            px_scale,
         )
 
     # --- Single-channel / single-colour grid mode (existing path) ---
@@ -995,8 +1147,10 @@ def plot_deltatime_strfs(
 
     # Get centered delta times from the data method
     array = self.get_strf_delta_times(
-        roi=roi, channel=channel,
-        use_segmentation=use_segmentation, seg_kwargs=seg_kwargs,
+        roi=roi,
+        channel=channel,
+        use_segmentation=use_segmentation,
+        seg_kwargs=seg_kwargs,
     )
     # Ensure 3D even for single ROI
     if array.ndim == 2:
@@ -1005,7 +1159,9 @@ def plot_deltatime_strfs(
     # Resolve roi_indices for alpha weights (must match array shape)
     all_weights = self.get_amplitude_weights()
     if channel is not None:
-        all_weights = pygor.utilities.multicolour_reshape(all_weights, self.numcolour)[channel]
+        all_weights = pygor.utilities.multicolour_reshape(all_weights, self.numcolour)[
+            channel
+        ]
     roi_indices = _normalize_roi_indices(roi, all_weights.shape[0])
     if not roi_indices:
         raise ValueError("roi selection is empty")
@@ -1025,7 +1181,9 @@ def plot_deltatime_strfs(
                 alpha_array = np.clip(alpha_array_raw, alpha_lo, alpha_hi)
                 alpha_array = (alpha_array - alpha_lo) / (alpha_hi - alpha_lo)
                 alpha_array = np.clip(alpha_array, 0.0, 1.0)
-                alpha_array = np.nan_to_num(alpha_array, nan=0.0, posinf=1.0, neginf=0.0)
+                alpha_array = np.nan_to_num(
+                    alpha_array, nan=0.0, posinf=1.0, neginf=0.0
+                )
                 alpha_array = np.clip(alpha_array, 0.0, 1.0)
                 alpha, _, _ = _build_grid_image(alpha_array, max_x)
 
@@ -1060,7 +1218,11 @@ def plot_deltatime_strfs(
     elif scale == "global_centered" and per_roi_mads is not None:
         # Use median of per-ROI MADs as the scale
         # This represents "typical" within-ROI variance
-        mad = np.median(per_roi_mads[per_roi_mads > 0]) if np.any(per_roi_mads > 0) else 0.0
+        mad = (
+            np.median(per_roi_mads[per_roi_mads > 0])
+            if np.any(per_roi_mads > 0)
+            else 0.0
+        )
         if mad == 0 or not np.isfinite(mad):
             vmin, vmax = _masked_minmax(image)
             max_abs = max(abs(vmin), abs(vmax))
@@ -1123,9 +1285,7 @@ def plot_deltatime_strfs(
                 time_scale = 1.0
                 unit = "s"
             cbar.set_label(f"\u0394t ({unit})")
-            cbar.formatter = mticker.FuncFormatter(
-                lambda x, pos: f"{x * time_scale:g}"
-            )
+            cbar.formatter = mticker.FuncFormatter(lambda x, pos: f"{x * time_scale:g}")
             cbar.update_ticks()
 
     if show_labels:
@@ -1133,5 +1293,3 @@ def plot_deltatime_strfs(
         _annotate_grid(ax, roi_indices, num_rows, max_x, h, w)
 
     return fig, ax
-
-

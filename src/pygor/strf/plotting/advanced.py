@@ -1,5 +1,6 @@
-from typing import Any
 import warnings
+from typing import Any
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -9,15 +10,18 @@ except ImportError:
     from collections.abc import Iterable
 # Local imports
 import pygor.plotting
-import pygor.utilities
-import pygor.strf.spatial
-import pygor.strf.temporal
 import pygor.strf.contouring
 import pygor.strf.pixconverter
+import pygor.strf.spatial
+import pygor.strf.temporal
+import pygor.utilities
+from pygor.plotting.custom import blue_map, fish_palette, green_map, red_map, violet_map
+from pygor.strf.plotting.simple import _build_multi_cmap_mosaic
 
-from pygor.plotting.custom import red_map, green_map, blue_map, violet_map, fish_palette
 pygor.plotting.fish_palette.append("dimgrey")
 pygor.plotting.fish_palette.append("grey")
+
+
 def chroma_overview(
     data_strf_object,
     specify_rois=None,
@@ -26,9 +30,9 @@ def chroma_overview(
     x_crop=(0, 0),
     column_titles=None,
     colour_maps=[red_map, green_map, blue_map, violet_map, "Greys_r", "Greys_r"],
-    centre_dots = True,
+    centre_dots=True,
     contours=False,
-    crosshairs=True,
+    crosshairs=False,
     ax=None,
     high_contrast=True,
     remove_border=False,
@@ -39,12 +43,13 @@ def chroma_overview(
     time_setting="1d",
     time_dur_ms=None,
     scalebar=True,
-    figsize = None,
+    figsize=None,
     colour_idx=None,
 ):
+    # Optimised by Claude Opus 4.6, incredibly fast now.
     # Create iterators depneding on desired output
     if isinstance(specify_rois, np.int64) or isinstance(specify_rois, np.int32):
-        specify_rois = int(specify_rois) # handle silly numpy int types issue
+        specify_rois = int(specify_rois)  # handle silly numpy int types issue
     if isinstance(
         specify_rois, int
     ):  # user specifies number of rois from "start", although negative is also allowed
@@ -75,7 +80,7 @@ def chroma_overview(
         # remove_border = False
     # else:
     numcolour = data_strf_object.numcolour
-    
+
     # Handle colour index filtering
     if colour_idx is None:
         colour_idx = list(range(numcolour))
@@ -83,26 +88,26 @@ def chroma_overview(
         colour_idx = [colour_idx]
     else:
         colour_idx = list(colour_idx)
-    
+
     # Filter colour maps to match selected indices
     if isinstance(colour_maps, list) and len(colour_maps) >= numcolour:
         colour_maps = [colour_maps[i] for i in colour_idx]
     elif not isinstance(colour_maps, list):
         colour_maps = [colour_maps] * len(colour_idx)
-    
+
     # Filter column titles if provided
     if column_titles is not None:
         if len(column_titles) >= numcolour:
             column_titles = [column_titles[i] for i in colour_idx]
         else:
             column_titles = None  # Fallback if titles don't match
-    
+
     num_cols = len(colour_idx)
-    
+
     # Handle time duration - use object's duration if not specified
     if time_dur_ms is None:
         time_dur_ms = data_strf_object.strf_dur_ms
-    
+
     # Handle colour limits
     if isinstance(clim, str) and clim == "all":
         # Use the abs max of the entre input
@@ -111,74 +116,439 @@ def chroma_overview(
     else:
         # Otherwise use user input (two floats or ints)
         clim_vals = clim
-    if ax is None:
-        external_axis = False
-        if with_times == True:
-            num_cols += 1
-        if with_rgb == True:
-            num_cols += 2
-        if isinstance(specify_rois, int):
-            num_rows = 1
-        else:
-            num_rows = len(specify_rois)
-        figsize_scaler = 1
-        if figsize is None:
-            # Improved sizing for better Jupyter notebook display
-            if num_rows == 1:
-                # Single ROI: use more reasonable aspect ratio
-                figsize = (num_cols * 2.5, 3)  # Fixed height, reasonable width
-            else:
-                # Multiple ROIs: use original scaling but with better proportions
-                figsize = (num_cols * 2 * figsize_scaler, num_rows * figsize_scaler)
-        # Use different layout for single vs multiple ROIs
-        if num_rows == 1:
-            fig, ax = plt.subplots(num_rows, num_cols, figsize=figsize, 
-                                 layout="constrained", squeeze=False)
-        else:
-            fig, ax = plt.subplots(num_rows, num_cols, figsize=figsize, 
-                                 layout="constrained")
+    if ax is not None:
+        # Legacy path: external axes provided, use old per-axis approach
+        return _chroma_overview_legacy(
+            data_strf_object,
+            rois_specified,
+            colour_idx,
+            colour_maps,
+            column_titles,
+            numcolour,
+            clim,
+            clim_vals,
+            remove_border,
+            y_crop,
+            x_crop,
+            contours,
+            crosshairs,
+            high_contrast,
+            labels,
+            with_times,
+            with_rgb,
+            time_setting,
+            time_dur_ms,
+            scalebar,
+            figsize,
+            ax,
+        )
+
+    # ---- Optimised mosaic path ----
+    num_rois = len(rois_specified) if not isinstance(rois_specified, int) else 1
+    rois_list = (
+        list(rois_specified)
+        if not isinstance(rois_specified, int)
+        else [rois_specified]
+    )
+
+    # Phase A: Vectorised data preparation
+    all_collapsed_chroma = data_strf_object.collapse_times_chroma()
+    # data_4d shape: (len(colour_idx), num_rois, h, w)
+    data_4d = all_collapsed_chroma[np.ix_(colour_idx, rois_list)]
+    if remove_border is True:
+        data_4d = np.copy(pygor.utilities.auto_remove_border(data_4d))
+    ycropper = y_crop if y_crop != (0, 0) else (None, None)
+    xcropper = x_crop if x_crop != (0, 0) else (None, None)
+    data_4d = data_4d[:, :, ycropper[0] : ycropper[1], xcropper[0] : xcropper[1]]
+
+    # Compute per-ROI symmetric colour limits
+    if isinstance(clim, str) and clim == "all":
+        abs_max = np.max(np.abs(data_4d))
+        row_limits = [(-abs_max, abs_max)] * num_rois
+    elif clim == "roi" or clim is None:
+        row_limits = []
+        for n in range(num_rois):
+            cv = np.max(np.abs(data_4d[:, n]))
+            row_limits.append((-cv, cv))
     else:
-        fig = plt.gcf()
-        external_axis = True
-    
+        row_limits = [clim_vals] * num_rois
+
+    # Phase B: Build RGB/RGU composites
+    extra_rgba_columns = None
+    if with_rgb and data_4d.shape[0] >= 4:
+        rgb_composites = []
+        rgu_composites = []
+        for n in range(num_rois):
+            rgb_data = np.abs(data_4d[[0, 1, 2], n])  # (3, h, w)
+            rgu_data = np.abs(data_4d[[0, 1, 3], n])
+            rgb_max = rgb_data.max()
+            rgu_max = rgu_data.max()
+            if rgb_max > 0:
+                rgb_data = rgb_data / rgb_max
+            if rgu_max > 0:
+                rgu_data = rgu_data / rgu_max
+            rgb_composites.append(np.transpose(rgb_data, (1, 2, 0)))  # (h, w, 3)
+            rgu_composites.append(np.transpose(rgu_data, (1, 2, 0)))
+        extra_rgba_columns = [
+            np.array(rgb_composites, dtype=np.float32),
+            np.array(rgu_composites, dtype=np.float32),
+        ]
+
+    # Phase C: Build mosaic
+    mosaic, layout_info = _build_multi_cmap_mosaic(
+        data_4d,
+        row_limits,
+        colour_maps,
+        extra_rgba_columns=extra_rgba_columns,
+        crosshairs=crosshairs,
+        gap_px=1,
+    )
+    ny = layout_info["ny"]
+    nx = layout_info["nx"]
+    gap_px = layout_info["gap_px"]
+
+    # Phase D: Create figure using manual axes positioning to avoid
+    # tight_layout / aspect="equal" conflicts that cause whitespace.
+    px_scale = 0.03
+    mosaic_fig_w = mosaic.shape[1] * px_scale
+    mosaic_fig_h = mosaic.shape[0] * px_scale
+    if with_times:
+        time_frac = 0.1  # fraction of total width for temporal panel
+        gap_frac = 0.02  # gap between imshow and plot
+        margin = 0.04  # margin for scalebar text
+        line_pix = 1  # thickness of lines (optional)
+        trace_scalar = 0.9
+        mosaic_frac = 1.0 - time_frac - gap_frac
+        total_w = mosaic_fig_w / (mosaic_frac - margin)
+        fig_h = mosaic_fig_h  # small extra for scalebar text below
+        if figsize is None:
+            figsize = (total_w, fig_h)
+        fig = plt.figure(figsize=figsize)
+        ax_mosaic = fig.add_axes([margin, margin, mosaic_frac - margin, 1 - 2 * margin])
+        ax_time = fig.add_axes(
+            [mosaic_frac + gap_frac, margin, time_frac - margin, 1 - 2 * margin],
+            sharey=ax_mosaic,
+        )
+    else:
+        if figsize is None:
+            figsize = (max(mosaic_fig_w, 2), mosaic_fig_h + 0.5)
+        fig, ax_mosaic = plt.subplots(1, 1, figsize=figsize)
+        ax_time = None
+
+    ax_mosaic.imshow(mosaic, aspect="auto", interpolation="nearest", origin="lower")
+    ax_mosaic.autoscale(
+        enable=False
+    )  # lock limits — prevents scalebar plot() from expanding via sharey
+    ax_mosaic.axis("off")
+
+    # Phase E: Annotations on mosaic
+    if column_titles is not None:
+        for plot_idx in range(len(colour_idx)):
+            x_center = plot_idx * (nx + gap_px) + nx / 2
+            ax_mosaic.text(
+                x_center,
+                -2,
+                column_titles[plot_idx],
+                ha="center",
+                va="top",
+                fontsize=9,
+                fontweight="bold",
+                color="white",
+            )
+    if labels is not None:
+        if labels == "auto":
+            labels = [f"ROI {roi}" for roi in rois_list]
+        for n, label in enumerate(labels):
+            y_center = n * (ny + gap_px) + ny / 2
+            ax_mosaic.text(
+                -2, y_center, label, ha="right", va="center", fontsize=6, color="white"
+            )
+
+    # Contours on mosaic
+    if contours:
+        for n, roi in enumerate(rois_list):
+            y_offset = n * (ny + gap_px)
+            for plot_idx, ci in enumerate(colour_idx):
+                x_offset = plot_idx * (nx + gap_px)
+                _contours_plotter_mosaic(
+                    data_strf_object,
+                    roi=roi,
+                    index=ci,
+                    ax=ax_mosaic,
+                    x_offset=x_offset,
+                    y_offset=y_offset,
+                    high_contrast=high_contrast,
+                )
+
+    # Phase F: Temporal traces — y-offsets use mosaic pixel coordinates so
+    # each trace aligns with its corresponding mosaic row (origin="lower").
+    mosaic_h = mosaic.shape[0]
+    if with_times and ax_time is not None:
+        all_max_val = 0
+        # First pass: find global max amplitude
+        for n, roi in enumerate(rois_list):
+            start_index = roi * numcolour
+            end_index = start_index + numcolour
+            fetch_indices = range(start_index, end_index)
+            times = np.squeeze(
+                pygor.utilities.multicolour_reshape(
+                    data_strf_object.get_timecourses(
+                        fetch_indices, method="segmentation", mask_empty=True
+                    ),
+                    numcolour,
+                )
+            )
+            times = times[colour_idx]
+            curr_max = np.max(np.abs(times))
+            if curr_max > all_max_val:
+                all_max_val = curr_max
+        # Scale traces to fit within each mosaic row height
+        trace_scale = (ny * trace_scalar) / all_max_val if all_max_val > 0 else 1.0
+        # Second pass: plot traces at mosaic row centers
+        for n, roi in enumerate(rois_list):
+            start_index = roi * numcolour
+            end_index = start_index + numcolour
+            fetch_indices = range(start_index, end_index)
+            times = np.squeeze(
+                pygor.utilities.multicolour_reshape(
+                    data_strf_object.get_timecourses(
+                        fetch_indices, method="segmentation", mask_empty=True
+                    ),
+                    numcolour,
+                )
+            )
+            times = times[colour_idx]
+            deviation = np.std(times, axis=-1)
+            close_to_zero = np.isclose(deviation, 0, rtol=0.1, atol=0.4)
+            time_frames = times.shape[-1]
+            time_axis_ms = np.linspace(0, time_dur_ms, time_frames)
+            # y_offset = center of this ROI's row in mosaic pixel coords
+            y_offset = n * (ny + gap_px) + ny / 2
+            for enum, plotme in enumerate(times):
+                original_color_idx = colour_idx[enum]
+                close_val = close_to_zero[enum]
+                if hasattr(close_val, "any"):
+                    is_close_to_zero = close_val.any()
+                else:
+                    is_close_to_zero = bool(close_val)
+                alpha = 0.5 if is_close_to_zero else 1.0
+                ax_time.plot(
+                    time_axis_ms,
+                    plotme.T * trace_scale + y_offset,
+                    color=pygor.plotting.fish_palette[original_color_idx],
+                    alpha=alpha,
+                    lw=line_pix,
+                )
+        ax_time.set_xlim(0, time_dur_ms)
+        # y-limits are shared with ax_mosaic via sharey — guaranteed 1:1 alignment
+        ax_time.axis("off")
+        # Scalebars drawn directly in data coords
+        if scalebar:
+            # SD bar — only show if there's actual amplitude to measure
+            if all_max_val > 0:
+                value = 5 if all_max_val > 5 else np.round(all_max_val, 2)
+                scaled_value = value * trace_scale
+                sb_x = time_dur_ms * 1.02
+                t_ymid = (mosaic_h - 1) / 2  # vertical midpoint of mosaic
+                ax_time.plot(
+                    [sb_x, sb_x],
+                    [t_ymid - scaled_value / 2, t_ymid + scaled_value / 2],
+                    "k-",
+                    lw=3,
+                    clip_on=False,
+                    solid_capstyle="butt",
+                )
+                ax_time.text(
+                    sb_x + time_dur_ms * 0.03,
+                    t_ymid,
+                    f"{value} SD",
+                    ha="left",
+                    va="center",
+                    fontsize=8,
+                    rotation=-90,
+                )
+            # 300ms bar — below the mosaic bottom edge (matching spatial scalebar)
+            scalebar_target_ms = 300
+            sb_y = -0.5 - ny * 0.15
+            ax_time.plot(
+                [0, scalebar_target_ms],
+                [sb_y, sb_y],
+                "k-",
+                lw=3,
+                clip_on=False,
+                solid_capstyle="butt",
+            )
+            ax_time.text(
+                scalebar_target_ms / 2,
+                sb_y - ny * 0.08,
+                f"{scalebar_target_ms} ms",
+                ha="center",
+                va="top",
+                fontsize=8,
+            )
+
+    # Spatial scalebar — bottom-left of mosaic, drawn in data coords
+    degrees = 15
+    visang_to_space = pygor.strf.pixconverter.visang_to_pix(
+        degrees,
+        pixwidth=40,
+    )
+    if scalebar:
+        # imshow sets xlim/ylim to image extent (-0.5 to dim-0.5)
+        sb_y = -0.5 - ny * 0.15  # just below the mosaic bottom edge
+        ax_mosaic.plot(
+            [0, visang_to_space],
+            [sb_y, sb_y],
+            "k-",
+            lw=3,
+            clip_on=False,
+            solid_capstyle="butt",
+        )
+        ax_mosaic.text(
+            visang_to_space / 2,
+            sb_y - ny * 0.08,
+            f"{degrees}\u00b0",
+            ha="center",
+            va="top",
+            fontsize=8,
+        )
+
+    return fig, ax_mosaic
+
+
+def _contours_plotter_mosaic(
+    data_strf_object,
+    roi,
+    index=None,
+    x_offset=0,
+    y_offset=0,
+    high_contrast=True,
+    ax=None,
+):
+    """Draw contours on a mosaic axis with pixel-coordinate offsets."""
+    if ax is None:
+        return
+    contours = pygor.utilities.multicolour_reshape(
+        data_strf_object.fit_contours(), data_strf_object.numcolour
+    )[:, roi]
+    neg_contours = contours[:, 0]
+    pos_contours = contours[:, 1]
+    if index is None:
+        index = range(len(contours))
+    if isinstance(index, Iterable) is False:
+        index = [index]
+    for colour in index:
+        for contour_n in neg_contours[colour]:
+            if high_contrast:
+                ax.plot(
+                    contour_n[:, 1] + x_offset,
+                    contour_n[:, 0] + y_offset,
+                    lw=1.5,
+                    ls="-",
+                    c="white",
+                    alpha=1,
+                )
+                ax.plot(
+                    contour_n[:, 1] + x_offset,
+                    contour_n[:, 0] + y_offset,
+                    lw=1.5,
+                    ls="dashed",
+                    c=fish_palette[colour],
+                    alpha=1,
+                )
+            else:
+                ax.plot(
+                    contour_n[:, 1] + x_offset,
+                    contour_n[:, 0] + y_offset,
+                    lw=1,
+                    ls="-",
+                    c=fish_palette[colour],
+                    alpha=1,
+                )
+        for contour_p in pos_contours[colour]:
+            if high_contrast:
+                ax.plot(
+                    contour_p[:, 1] + x_offset,
+                    contour_p[:, 0] + y_offset,
+                    lw=1.5,
+                    ls="-",
+                    c="white",
+                    alpha=1,
+                )
+                ax.plot(
+                    contour_p[:, 1] + x_offset,
+                    contour_p[:, 0] + y_offset,
+                    lw=1.5,
+                    ls="dashed",
+                    c=fish_palette[colour],
+                    alpha=1,
+                )
+            else:
+                ax.plot(
+                    contour_p[:, 1] + x_offset,
+                    contour_p[:, 0] + y_offset,
+                    lw=1,
+                    ls="-",
+                    c=fish_palette[colour],
+                    alpha=1,
+                )
+
+
+def _chroma_overview_legacy(
+    data_strf_object,
+    rois_specified,
+    colour_idx,
+    colour_maps,
+    column_titles,
+    numcolour,
+    clim,
+    clim_vals,
+    remove_border,
+    y_crop,
+    x_crop,
+    contours,
+    crosshairs,
+    high_contrast,
+    labels,
+    with_times,
+    with_rgb,
+    time_setting,
+    time_dur_ms,
+    scalebar,
+    figsize,
+    ax,
+):
+    """Legacy per-axis chroma_overview for when external axes are provided."""
+    fig = plt.gcf()
     # Ensure ax is always 2D for consistent indexing
     if ax.ndim == 1:
         ax = ax.reshape(1, -1)
-
-    # Precompute all collapsed times at once (avoids per-ROI recomputation)
     all_collapsed_chroma = data_strf_object.collapse_times_chroma()
-
     for n, roi in enumerate(rois_specified):
-        start_index = roi * data_strf_object.numcolour
-        end_index = start_index + data_strf_object.numcolour
+        start_index = roi * numcolour
+        end_index = start_index + numcolour
         fetch_indices = range(start_index, end_index)
         strfs_chroma = np.squeeze(all_collapsed_chroma[:, roi])
         if remove_border is True:
             border_tup = pygor.utilities.check_border(strfs_chroma)
-            strfs_chroma = np.copy(
-                pygor.utilities.auto_remove_border(strfs_chroma)
-            )
+            strfs_chroma = np.copy(pygor.utilities.auto_remove_border(strfs_chroma))
         else:
             border_tup = (0, 0, 0, 0)
-        if clim == "roi" or clim == None:
+        if clim == "roi" or clim is None:
             clim_vals = (-np.max(np.abs(strfs_chroma)), np.max(np.abs(strfs_chroma)))
-        if y_crop != (0, 0):
-            ycropper = y_crop
-        else:
-            ycropper = (None, None)
-        if x_crop != (0, 0):
-            xcropper = x_crop
-        else:
-            xcropper = (None, None)
-        strfs_chroma = strfs_chroma[:, ycropper[0] : ycropper[1], xcropper[0] : xcropper[1]]
-        # ax is already properly shaped from subplot creation with squeeze=False
+        ycropper = y_crop if y_crop != (0, 0) else (None, None)
+        xcropper = x_crop if x_crop != (0, 0) else (None, None)
+        strfs_chroma = strfs_chroma[
+            :, ycropper[0] : ycropper[1], xcropper[0] : xcropper[1]
+        ]
         for plot_idx, color_idx in enumerate(colour_idx):
-            strf = ax[n, plot_idx].imshow(strfs_chroma[color_idx], cmap=colour_maps[plot_idx], origin="lower")
+            strf = ax[n, plot_idx].imshow(
+                strfs_chroma[color_idx], cmap=colour_maps[plot_idx], origin="lower"
+            )
             strf.set_clim(clim_vals)
             if n == 0 and column_titles is not None:
                 ax[n, plot_idx].set_title(column_titles[plot_idx])
-            # Handle contours optionally
-            if contours == True:
+            if contours:
                 _contours_plotter(
                     data_strf_object,
                     roi=roi,
@@ -187,98 +557,74 @@ def chroma_overview(
                     xy_offset=(-border_tup[0], -border_tup[2]),
                     high_contrast=high_contrast,
                 )
-                np.abs(
-                    np.diff(ax[n, 0].get_ylim())[0] / np.diff(ax[0, 0].get_xlim())[0]
-                )
-            # if centre_dots == True:
-            #     centres = data_strf_object.get_seg_centres(fetch_indices)
-            #     for colour_num, colour_centre in enumerate(centres):
-            #         ax[n, colour_num].plot(
-            #             colour_centre[:, 1],
-            #             colour_centre[:, 0],
-            #             "o",
-            #             color=pygor.plotting.fish_palette[colour_num],
-            #         )
-        if with_times == True:
-            # Calculate the correct time axis column (next available after filtered colors)
+        if with_times:
             time_ax_col = len(colour_idx)
-            times = np.squeeze(pygor.utilities.multicolour_reshape(
-                data_strf_object.get_timecourses(fetch_indices, method="segmentation", mask_empty = True), numcolour
-            ))
-            # Filter times to match selected color indices
+            times = np.squeeze(
+                pygor.utilities.multicolour_reshape(
+                    data_strf_object.get_timecourses(
+                        fetch_indices, method="segmentation", mask_empty=True
+                    ),
+                    numcolour,
+                )
+            )
             times = times[colour_idx]
-            # Check which data is close to zero for alpha adjustment (after filtering)
-            deviation = np.std(times, axis = -1)
-            close_to_zero = np.isclose(deviation, 0, rtol=.1, atol=.4)
-            
-            # Create proper time axis in milliseconds
+            deviation = np.std(times, axis=-1)
+            close_to_zero = np.isclose(deviation, 0, rtol=0.1, atol=0.4)
             time_frames = times.shape[-1]
             time_axis_ms = np.linspace(0, time_dur_ms, time_frames)
-            
             for enum, plotme in enumerate(times):
                 original_color_idx = colour_idx[enum]
-                # Set alpha based on whether this specific color's data is close to zero
-                # Handle the case where close_to_zero[enum] might still be an array
                 close_val = close_to_zero[enum]
-                if hasattr(close_val, 'any'):  # It's an array
-                    is_close_to_zero = close_val.any()  # Use any() for array
+                if hasattr(close_val, "any"):
+                    is_close_to_zero = close_val.any()
                 else:
-                    is_close_to_zero = bool(close_val)  # It's already a scalar
+                    is_close_to_zero = bool(close_val)
                 alpha = 0.5 if is_close_to_zero else 1.0
-                
-                ax[n, time_ax_col].plot(time_axis_ms, plotme.T, 
-                                    color=pygor.plotting.fish_palette[original_color_idx], 
-                                    alpha=alpha)
-        if with_rgb == True:
-            # Calculate the correct RGB axis columns
+                ax[n, time_ax_col].plot(
+                    time_axis_ms,
+                    plotme.T,
+                    color=pygor.plotting.fish_palette[original_color_idx],
+                    alpha=alpha,
+                )
+        if with_rgb:
             rgb_start_col = len(colour_idx) + (1 if with_times else 0)
-            
-            # Use the same cropped data as main plots for consistency
-            # Create RGB representations from the already-cropped strfs_chroma
-            rgb_data = strfs_chroma[[0, 1, 2]]  # R, G, B channels
-            rgu_data = strfs_chroma[[0, 1, 3]]  # R, G, UV channels
-            
-            # Normalize to [0, 1] for RGB display with proportional scaling
+            rgb_data = strfs_chroma[[0, 1, 2]]
+            rgu_data = strfs_chroma[[0, 1, 3]]
             rgb_normalized = np.abs(rgb_data)
             rgu_normalized = np.abs(rgu_data)
-            
-            # Proportional scaling - find global max across all channels to preserve relative magnitudes
             rgb_global_max = np.max([rgb_normalized[i].max() for i in range(3)])
             rgu_global_max = np.max([rgu_normalized[i].max() for i in range(3)])
-            
             if rgb_global_max > 0:
                 for i in range(3):
                     rgb_normalized[i] = rgb_normalized[i] / rgb_global_max
             if rgu_global_max > 0:
                 for i in range(3):
                     rgu_normalized[i] = rgu_normalized[i] / rgu_global_max
-            
-            # Convert to (H, W, C) format for imshow
             processed_rgb = np.transpose(rgb_normalized, (1, 2, 0))
             processed_rgu = np.transpose(rgu_normalized, (1, 2, 0))
-            
-            # Display RGB plots with same cropping as main plots
-            ax[n, rgb_start_col].imshow(processed_rgb, origin="lower", interpolation="none")
-            ax[n, rgb_start_col + 1].imshow(processed_rgu, origin="lower", interpolation="none")
+            ax[n, rgb_start_col].imshow(
+                processed_rgb, origin="lower", interpolation="none"
+            )
+            ax[n, rgb_start_col + 1].imshow(
+                processed_rgu, origin="lower", interpolation="none"
+            )
             ax[n, rgb_start_col].axis(False)
             ax[n, rgb_start_col + 1].axis(False)
     for n, axis in enumerate(ax.flat):
         axis.axis(False)
-        if crosshairs == True:
-            if len(axis.images) > 0: 
+        if crosshairs:
+            if len(axis.images) > 0:
                 xlim = axis.get_xlim()
                 ylim = axis.get_ylim()
                 axis.axhline(
-                    y=ylim[0] + (ylim[1] - ylim[0]) / 2,
-                    color="w", alpha=0.7,
+                    y=ylim[0] + (ylim[1] - ylim[0]) / 2, color="k", alpha=0.3, lw=1
                 )
                 axis.axvline(
-                    x=xlim[0] + (xlim[1] - xlim[0]) / 2,
-                    color="w", alpha=0.7,
+                    x=xlim[0] + (xlim[1] - xlim[0]) / 2, color="k", alpha=0.3, lw=1
                 )
-    if labels != None:
+    if labels is not None:
         if labels == "auto":
-            labels = [f"ROI {roi}" for roi in specify_rois]
+            labels = [f"ROI {roi}" for roi in rois_specified]
         for axis, label in zip(ax[:, 0].flat, labels):
             axis.axis(True)
             axis.spines["top"].set_visible(False)
@@ -288,38 +634,23 @@ def chroma_overview(
             axis.set_xticklabels([])
             axis.set_yticklabels([])
             axis.set_ylabel(label, rotation="horizontal", labelpad=15)
-    if with_times == True:
-        # Calculate correction for axis stuff first
+    if with_times:
         ref_ax = ax[0, 0]
-        # Work out how many axes we already plotted over
-        time_ax = len(colour_idx)  # Use the correct time axis column
+        time_ax = len(colour_idx)
         asp = np.diff(ref_ax.get_ylim())[0] / np.diff(ref_ax.get_xlim())[0]
-        # Get max abs
         max_val = np.max(np.abs([ax.get_ylim() for ax in ax[:, time_ax].flat]))
-        # Loop over
         for axis in ax[:, time_ax].flat:
-            # Set ylim
             axis.set_ylim(-max_val, max_val)
-            # Force time plots to have same physical dimensions as imshow panels
-            if external_axis is False:
-                # Use aspect that forces same physical panel size as imshow
-                # We want: data_height/data_width * physical_width/physical_height = constant
-                # For spatial: asp = spatial_height/spatial_width  
-                # For time: we want same physical aspect, so scale by data range ratio
-                time_data_range = 1 * max_val  # y-range of time data
-                spatial_data_height = ref_ax.get_ylim()[1] - ref_ax.get_ylim()[0]
-                spatial_data_width = ref_ax.get_xlim()[1] - ref_ax.get_xlim()[0] 
-                
-                # Scale aspect by the ratio of data ranges to maintain physical size
-                # We want to EXPAND the y-dimension relative to x, so invert the problematic ratios
-                time_asp = asp * (spatial_data_height / time_data_range) * (time_dur_ms / spatial_data_width)
-                axis.set_aspect(time_asp)
-            # axis.set_aspect(asp)
-        # Add title
-        # ax[0, -1].set_title("Timecourse")
-        # Y scalebar
-        if scalebar is True:
-            # Check current y limits and use the limit if signal is < 5 SD
+            time_data_range = 1 * max_val
+            spatial_data_height = ref_ax.get_ylim()[1] - ref_ax.get_ylim()[0]
+            spatial_data_width = ref_ax.get_xlim()[1] - ref_ax.get_xlim()[0]
+            time_asp = (
+                asp
+                * (spatial_data_height / time_data_range)
+                * (time_dur_ms / spatial_data_width)
+            )
+            axis.set_aspect(time_asp)
+        if scalebar:
             y_limits = ax[-1, time_ax].get_ylim()
             value = 5 if y_limits[0] < -5 and y_limits[1] > 5 else y_limits[1]
             value = np.round(value, 2)
@@ -328,36 +659,22 @@ def chroma_overview(
                 ax=ax[-1, time_ax],
                 string=f"{value} SD",
                 x=1.025,
-            flip_text=True,
-            y=0.5,
-            line_width=3,
-        )
-        # X scalebar
-        if scalebar is True:
-            time_frames = times.shape[-1]
-            ms_per_frame = time_dur_ms / time_frames
-            scalebar_target_ms = 300  # Target 300ms scalebar
-            timeunits_ms = scalebar_target_ms
-            strf_dur_ms = data_strf_object.strf_dur_ms
+                flip_text=True,
+                y=0.5,
+                line_width=3,
+            )
+            scalebar_target_ms = 300
             pygor.plotting.add_scalebar(
-                timeunits_ms,
+                scalebar_target_ms,
                 ax=ax[-1, time_ax],
                 string=f"{scalebar_target_ms} ms",
                 line_width=3,
                 orientation="h",
                 y=0,
             )
-        # if time_setting == "2d":
-        """
-        Would be cool to have a 2D space/time plot in RGBUV:D 
-        """
-        # else:
-        #     AssertionError("Unexpected input for time_setting")
     degrees = 15
-    visang_to_space = pygor.strf.pixconverter.visang_to_pix(
-        degrees, pixwidth=40, #block_size=data_strf_object.stim_size_arbitrary
-    )
-    if scalebar is True:
+    visang_to_space = pygor.strf.pixconverter.visang_to_pix(degrees, pixwidth=40)
+    if scalebar:
         pygor.plotting.add_scalebar(
             visang_to_space,
             ax=ax[-1, 0],
@@ -365,8 +682,6 @@ def chroma_overview(
             orientation="h",
             line_width=3,
         )
-    # fig.tight_layout(pad = 0, h_pad = .1, w_pad=0)
-    # plt.tight_layout()
     return fig, ax
 
 
@@ -375,9 +690,9 @@ def _contours_plotter(
 ):
     if ax is None:
         fig, ax = plt.subplots()
-    contours = pygor.utilities.multicolour_reshape(data_strf_object.fit_contours(), data_strf_object.numcolour)[
-        :, roi
-    ]
+    contours = pygor.utilities.multicolour_reshape(
+        data_strf_object.fit_contours(), data_strf_object.numcolour
+    )[:, roi]
     neg_contours = contours[:, 0]
     pos_contours = contours[:, 1]
     if index is None:
@@ -498,8 +813,12 @@ def rgb_representation(
         else:
             xcropper = (None, None)
         # Summary of spatial components
-        processed_rgb = data_strf_object.to_rgb(roi, rgb_channels = [0, 1, 2], remove_borders = remove_border)[:, ycropper[0] : ycropper[1], xcropper[0] : xcropper[1]]
-        processed_rgu = data_strf_object.to_rgb(roi, rgb_channels = [0, 1, 3], remove_borders = remove_border)[:, ycropper[0] : ycropper[1], xcropper[0] : xcropper[1]]
+        processed_rgb = data_strf_object.to_rgb(
+            roi, rgb_channels=[0, 1, 2], remove_borders=remove_border
+        )[:, ycropper[0] : ycropper[1], xcropper[0] : xcropper[1]]
+        processed_rgu = data_strf_object.to_rgb(
+            roi, rgb_channels=[0, 1, 3], remove_borders=remove_border
+        )[:, ycropper[0] : ycropper[1], xcropper[0] : xcropper[1]]
         # for cax in roi_ax[0]:
         ax[0].imshow(processed_rgb, origin="lower", interpolation="none")
         ax[1].imshow(processed_rgu, origin="lower", interpolation="none")
@@ -524,7 +843,7 @@ def visualise_summary(
     )
     strfs_rgb = np.abs(np.rollaxis((np.delete(strfs_chroma, 3, 0)), 0, 4))
     strfs_rgu = np.abs(np.rollaxis((np.delete(strfs_chroma, 2, 0)), 0, 4))
-    
+
     # Proportional normalization - preserve relative magnitudes between RGB channels
     for roi_idx in range(strfs_rgb.shape[0]):
         # RGB normalization
@@ -532,14 +851,18 @@ def visualise_summary(
         rgb_global_max = max(channel.max() for channel in rgb_channels)
         if rgb_global_max > 0:
             for i in range(3):
-                strfs_rgb[roi_idx, :, :, i] = strfs_rgb[roi_idx, :, :, i] / rgb_global_max
-        
-        # RGU normalization  
+                strfs_rgb[roi_idx, :, :, i] = (
+                    strfs_rgb[roi_idx, :, :, i] / rgb_global_max
+                )
+
+        # RGU normalization
         rgu_channels = [strfs_rgu[roi_idx, :, :, i] for i in range(3)]
         rgu_global_max = max(channel.max() for channel in rgu_channels)
         if rgu_global_max > 0:
             for i in range(3):
-                strfs_rgu[roi_idx, :, :, i] = strfs_rgu[roi_idx, :, :, i] / rgu_global_max
+                strfs_rgu[roi_idx, :, :, i] = (
+                    strfs_rgu[roi_idx, :, :, i] / rgu_global_max
+                )
 
     # Create iterators depneding on desired output
     if isinstance(
