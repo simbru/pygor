@@ -1284,6 +1284,120 @@ class Core:
         print(f"Exported to: {output_path}")
         return output_path
 
+    # ── pygor state persistence (.pygor.h5) ──────────────────────────────
+
+    def _save_state(self, group):
+        """Save instance state to an HDF5 group via ``__dict__`` introspection.
+
+        This is the counterpart to :meth:`_from_saved_state`.  Subclasses do
+        **not** need to override this — any attribute in ``self.__dict__`` that
+        is not in the skip-list is serialised automatically.
+        """
+        from pygor.persistence import SKIP_ATTRS, write_value
+
+        group.attrs["__class_name__"] = type(self).__name__
+
+        for attr_name, value in self.__dict__.items():
+            if attr_name in SKIP_ATTRS:
+                continue
+            try:
+                write_value(group, attr_name, value)
+            except Exception as e:
+                warnings.warn(
+                    f"Failed to save attribute '{attr_name}': {e}", stacklevel=2
+                )
+
+    @classmethod
+    def _from_saved_state(cls, group):
+        """Reconstruct an instance from an HDF5 group, bypassing ``__post_init__``.
+
+        Uses ``object.__new__`` so no file I/O or validation runs.
+        """
+        from pygor.persistence import read_group
+
+        instance = object.__new__(cls)
+        attrs = read_group(group)
+        instance.__dict__.update(attrs)
+        instance._reconstruct_internals()
+        return instance
+
+    def _reconstruct_internals(self):
+        """Rebuild non-persisted internal state after loading from saved state.
+
+        Subclasses should call ``super()._reconstruct_internals()`` and then
+        restore their own caches / internal objects.
+        """
+        self._Core__compare_ops_map = {
+            "==": operator.eq,
+            ">": operator.gt,
+            "<": operator.lt,
+            ">=": operator.ge,
+            "<=": operator.le,
+        }
+        self._Core__keyword_lables = {
+            "ipl_depths": getattr(self, "ipl_depths", None),
+        }
+        if not hasattr(self, "_original_images"):
+            self._original_images = None
+        if not hasattr(self, "_pre_registration_images"):
+            self._pre_registration_images = None
+
+    def save_object(self, path, overwrite=False):
+        """Save this single recording to a ``.pygor.h5`` file.
+
+        Parameters
+        ----------
+        path : str or Path
+            Output file path (recommended extension: ``.pygor.h5``).
+        overwrite : bool, optional
+            If True, overwrite an existing file.  Default False.
+
+        Returns
+        -------
+        Path
+            Path to the saved file.
+        """
+        path = pathlib.Path(path)
+        if path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {path}. Use overwrite=True to replace."
+            )
+        with h5py.File(path, "w") as f:
+            from pygor.persistence import PYGOR_H5_VERSION
+
+            f.attrs["__pygor_h5_version__"] = PYGOR_H5_VERSION
+            f.attrs["__num_recordings__"] = 1
+            group = f.create_group("recording_000")
+            self._save_state(group)
+        print(f"Saved to: {path}")
+        return path
+
+    @classmethod
+    def load_object(cls, path):
+        """Load a single recording from a ``.pygor.h5`` file.
+
+        Parameters
+        ----------
+        path : str or Path
+            Path to a ``.pygor.h5`` file containing one recording.
+
+        Returns
+        -------
+        Core (or subclass)
+            The reconstructed recording object.
+        """
+        import pygor.load as pygor_load
+
+        path = pathlib.Path(path)
+        with h5py.File(path, "r") as f:
+            group_names = sorted(k for k in f.keys() if k.startswith("recording_"))
+            if not group_names:
+                raise ValueError(f"No recording groups found in {path}")
+            group = f[group_names[0]]
+            class_name = group.attrs["__class_name__"]
+            rec_cls = getattr(pygor_load, class_name)
+            return rec_cls._from_saved_state(group)
+
     def __repr__(self):
         # For pretty printing
         date = self.metadata["exp_date"].strftime("%d-%m-%Y")

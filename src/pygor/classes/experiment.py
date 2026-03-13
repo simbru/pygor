@@ -1,8 +1,8 @@
 # Dependencies
 from __future__ import annotations
+
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
-from dataclasses import dataclass
-from dataclasses import field
 
 if TYPE_CHECKING:
     from pygor.classes.core_data import Core
@@ -11,12 +11,14 @@ try:
     from collections import Iterable
 except ImportError:
     from collections.abc import Iterable
-from collections import defaultdict
 import os
-import pandas as pd
 import pathlib
-import numpy as np
+from collections import defaultdict
+
 import joblib
+import numpy as np
+import pandas as pd
+
 # Local imports
 import pygor.load
 
@@ -42,7 +44,14 @@ class Experiment:
         self.__update_data__()
 
     @classmethod
-    def from_files(cls, file_paths: list[str] | str, pygor_class_name: str, n_jobs: int = -1, on_error: str = "raise", **class_kwargs: Any) -> Experiment:
+    def from_files(
+        cls,
+        file_paths: list[str] | str,
+        pygor_class_name: str,
+        n_jobs: int = -1,
+        on_error: str = "raise",
+        **class_kwargs: Any,
+    ) -> Experiment:
         """
         Initialize an Experiment from a list of file paths.
 
@@ -87,50 +96,61 @@ class Experiment:
         # Handle single file input
         if isinstance(file_paths, (str, pathlib.Path)):
             file_paths = [file_paths]
-        
+
         # Get the pygor class
         try:
             pygor_class = getattr(pygor.load, pygor_class_name)
         except AttributeError:
             # Only list actual class names (types that start with uppercase)
             available_classes = [
-                name for name in dir(pygor.load)
-                if not name.startswith('_')
+                name
+                for name in dir(pygor.load)
+                if not name.startswith("_")
                 and hasattr(pygor.load, name)
                 and isinstance(getattr(pygor.load, name), type)
             ]
-            raise ValueError(f"Unknown pygor class '{pygor_class_name}'. Available classes: {available_classes}")
-        
+            raise ValueError(
+                f"Unknown pygor class '{pygor_class_name}'. Available classes: {available_classes}"
+            )
+
         def load_single_file(file_path):
             """Helper function to load a single file"""
             try:
                 recording = pygor_class(file_path, **class_kwargs)
-                return ('success', file_path, recording)
+                return ("success", file_path, recording)
             except Exception as e:
-                return ('failed', file_path, e)
-        
+                return ("failed", file_path, e)
+
         # Load files in parallel or sequential
         if n_jobs == 1 or len(file_paths) == 1:
             # Sequential loading with tqdm progress bar
             try:
                 from tqdm import tqdm
-                results = [load_single_file(fp) for fp in tqdm(file_paths, desc="Loading files")]
+
+                results = [
+                    load_single_file(fp)
+                    for fp in tqdm(file_paths, desc="Loading files")
+                ]
             except ImportError:
                 results = [load_single_file(fp) for fp in file_paths]
         else:
             # Parallel loading with tqdm progress bar via joblib callback
             from joblib import Parallel, delayed
+
             try:
-                from tqdm import tqdm
                 import contextlib
+
+                from tqdm import tqdm
 
                 @contextlib.contextmanager
                 def _tqdm_joblib(tqdm_bar):
                     """Context manager to patch joblib for tqdm progress."""
+
                     class _TqdmCallback(joblib.parallel.BatchCompletionCallBack):
                         def __call__(self, *args, **kwargs: Any):
                             tqdm_bar.update(n=self.batch_size)
                             return super().__call__(*args, **kwargs)
+
                     old_callback = joblib.parallel.BatchCompletionCallBack
                     joblib.parallel.BatchCompletionCallBack = _TqdmCallback
                     try:
@@ -146,18 +166,20 @@ class Experiment:
                 results = Parallel(n_jobs=n_jobs, verbose=1)(
                     delayed(load_single_file)(file_path) for file_path in file_paths
                 )
-        
+
         # Process results
         recordings = []
         failed_files = []
 
         for status, file_path, result in results:
-            if status == 'success':
+            if status == "success":
                 recordings.append(result)
                 print(f"Loaded: {pathlib.Path(file_path).name}")
             else:
                 failed_files.append((file_path, result))
-                print(f"Failed to load {pathlib.Path(file_path).name}: {type(result).__name__}: {result}")
+                print(
+                    f"Failed to load {pathlib.Path(file_path).name}: {type(result).__name__}: {result}"
+                )
 
         if failed_files:
             # Categorize errors to help users diagnose the root cause
@@ -178,23 +200,33 @@ class Experiment:
             lines = [f"{len(failed_files)} file(s) failed to load:\n"]
 
             if config_errors:
-                lines.append("  CONFIG / TOML ERRORS (likely affects ALL files — fix config first):")
+                lines.append(
+                    "  CONFIG / TOML ERRORS (likely affects ALL files — fix config first):"
+                )
                 # Show the config error once (it's the same for all files)
                 _, first_err = config_errors[0]
                 lines.append(f"    {type(first_err).__name__}: {first_err}")
-                lines.append(f"    Check your TOML config files (defaults.toml, ~/.pygor/config.toml, ./pygor.toml)")
-                lines.append(f"    Common cause: bare decimals like .5 (use 0.5) or syntax errors\n")
+                lines.append(
+                    f"    Check your TOML config files (defaults.toml, ~/.pygor/config.toml, ./pygor.toml)"
+                )
+                lines.append(
+                    f"    Common cause: bare decimals like .5 (use 0.5) or syntax errors\n"
+                )
 
             if file_errors:
                 lines.append("  FILE ERRORS:")
                 for fp, err in file_errors:
-                    lines.append(f"    {pathlib.Path(fp).name}: {type(err).__name__}: {err}")
+                    lines.append(
+                        f"    {pathlib.Path(fp).name}: {type(err).__name__}: {err}"
+                    )
                 lines.append("")
 
             if other_errors:
                 lines.append("  OTHER ERRORS:")
                 for fp, err in other_errors:
-                    lines.append(f"    {pathlib.Path(fp).name}: {type(err).__name__}: {err}")
+                    lines.append(
+                        f"    {pathlib.Path(fp).name}: {type(err).__name__}: {err}"
+                    )
                 lines.append("")
 
             error_msg = "\n".join(lines)
@@ -214,6 +246,76 @@ class Experiment:
         print(f"\nSuccessfully loaded {len(recordings)} recordings")
 
         # Create experiment with loaded recordings
+        return cls(recording=recordings)
+
+    def save(self, path, overwrite=False):
+        """Save the entire experiment to a single ``.pygor.h5`` file.
+
+        Each recording is stored in its own HDF5 group
+        (``recording_000``, ``recording_001``, …). The class name is
+        written as a group attribute so :meth:`load` can reconstruct the
+        correct subclass.
+
+        Parameters
+        ----------
+        path : str or Path
+            Output file path (recommended extension: ``.pygor.h5``).
+        overwrite : bool, optional
+            If True, replace an existing file.  Default False.
+
+        Returns
+        -------
+        Path
+            Path to the saved file.
+        """
+        import h5py
+
+        from pygor.persistence import PYGOR_H5_VERSION
+
+        path = pathlib.Path(path)
+        if path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {path}. Use overwrite=True to replace."
+            )
+        with h5py.File(path, "w") as f:
+            f.attrs["__pygor_h5_version__"] = PYGOR_H5_VERSION
+            f.attrs["__num_recordings__"] = len(self.recording)
+            for i, rec in enumerate(self.recording):
+                group = f.create_group(f"recording_{i:03d}")
+                rec._save_state(group)
+        print(f"Saved {len(self.recording)} recordings to: {path}")
+        return path
+
+    @classmethod
+    def load(cls, path):
+        """Load an experiment from a ``.pygor.h5`` file.
+
+        Parameters
+        ----------
+        path : str or Path
+            Path to a file previously created by :meth:`save`.
+
+        Returns
+        -------
+        Experiment
+            New Experiment with all recordings reconstructed.
+        """
+        import h5py
+
+        path = pathlib.Path(path)
+        recordings = []
+        with h5py.File(path, "r") as f:
+            group_names = sorted(
+                k for k in f.keys() if k.startswith("recording_")
+            )
+            for gname in group_names:
+                group = f[gname]
+                class_name = group.attrs["__class_name__"]
+                # Resolve the concrete class through pygor.load
+                rec_cls = getattr(pygor.load, class_name)
+                rec = rec_cls._from_saved_state(group)
+                recordings.append(rec)
+        print(f"Loaded {len(recordings)} recordings from: {path}")
         return cls(recording=recordings)
 
     def __update_data__(self):
@@ -259,7 +361,7 @@ class Experiment:
             # Deal with id_dict
             for key in self.id_dict.keys():
                 del self.id_dict[key][index]
-        
+
         # Reset recording_id indices to match new logical order
         self.__update_data__()
 
@@ -278,15 +380,21 @@ class Experiment:
     def detach_data(self, indices):
         """
         Detach recordings by index, name, or full path.
-        
+
         Parameters
         ----------
         indices : int, list of int, str, or list of str
             Recording indices, names, or full paths to detach. If not found, it's ignored.
         """
-        recording_paths = [str(pathlib.Path(rec.metadata["filename"])) for rec in self.recording]
-        recording_paths_norm = [os.path.normcase(os.path.normpath(p)) for p in recording_paths]
-        recording_names = [pathlib.Path(rec.metadata["filename"]).stem for rec in self.recording]
+        recording_paths = [
+            str(pathlib.Path(rec.metadata["filename"])) for rec in self.recording
+        ]
+        recording_paths_norm = [
+            os.path.normcase(os.path.normpath(p)) for p in recording_paths
+        ]
+        recording_names = [
+            pathlib.Path(rec.metadata["filename"]).stem for rec in self.recording
+        ]
 
         def _is_pathlike(value):
             return isinstance(value, (str, pathlib.Path, os.PathLike, np.str_))
@@ -309,13 +417,17 @@ class Experiment:
                     name = pathlib.Path(_to_str(indices)).stem
                     index = recording_names.index(name)
                     if recording_names.count(name) > 1:
-                        print(f"Multiple recordings match name '{name}'. Use full path to disambiguate.")
+                        print(
+                            f"Multiple recordings match name '{name}'. Use full path to disambiguate."
+                        )
                     indices = [index]
                     print(f"Detaching data by name: {indices}")
                 except ValueError:
                     print(f"Recording '{indices}' not found - skipping")
                     return
-        elif isinstance(indices, list) and len(indices) > 0 and _is_pathlike(indices[0]):
+        elif (
+            isinstance(indices, list) and len(indices) > 0 and _is_pathlike(indices[0])
+        ):
             # Handle list of names
             found_indices = []
             not_found = []
@@ -330,17 +442,19 @@ class Experiment:
                         name = pathlib.Path(name_or_path_str).stem
                         index = recording_names.index(name)
                         if recording_names.count(name) > 1:
-                            print(f"Multiple recordings match name '{name}'. Use full path to disambiguate.")
+                            print(
+                                f"Multiple recordings match name '{name}'. Use full path to disambiguate."
+                            )
                         found_indices.append(index)
                     except ValueError:
                         not_found.append(name_or_path_str)
-            
+
             if not_found:
                 print(f"Recordings not found (skipping): {not_found}")
             if not found_indices:
                 print("No recordings found to detach")
                 return
-            
+
             indices = found_indices
             names_to_detach = [recording_names[i] for i in indices]
             print(f"Detaching data by names/paths: {names_to_detach}")
@@ -352,7 +466,7 @@ class Experiment:
             if isinstance(to_print, pd.Series) or isinstance(to_print, np.ndarray):
                 to_print = to_print.to_list()
             print(f"Detaching data: {to_print}")
-        
+
         self.__exp_forgetter__(indices)
 
     def fetch_all(self, key: str, **kwargs: Any):
@@ -383,7 +497,7 @@ class Experiment:
     ):
         """
         Flexibly fetch any methods/attributes from all recordings.
-        
+
         Parameters
         ----------
         methods : list, dict, or mixed
@@ -408,19 +522,19 @@ class Experiment:
             If False, keep per-recording lists (default: False)
         **global_kwargs
             Default keyword arguments for methods that don't specify their own
-            
+
         Returns
         -------
         dict or pandas.DataFrame
             If as_dataframe=False: dict with keys = result names, values = list of results
             If as_dataframe=True and level='recording': DataFrame with one row per recording
             If as_dataframe=True and level='roi': DataFrame with one row per ROI
-            
+
         Examples
         --------
         >>> # Simple list usage
         >>> exp.fetch(['get_polarity_category_cell', 'num_rois'])
-        
+
         >>> # Dictionary format - cleanest for complex parameters
         >>> exp.fetch({
         ...     'polarities': 'get_polarity_category_cell',
@@ -428,7 +542,7 @@ class Experiment:
         ...     'bool_channels': ('bool_by_channel', {'threshold': 2.0}),
         ...     'depths': 'ipl_depths'
         ... }, as_dataframe=True)
-        
+
         >>> # ROI-level analysis for population studies
         >>> roi_data = exp.fetch({
         ...     'depths': 'ipl_depths',
@@ -463,13 +577,13 @@ class Experiment:
                     global_kwargs,
                 )
                 results[result_name].append(result)
-        
+
         # Return as requested format
         if as_dataframe:
             df = pd.DataFrame(results)
-            
+
             # Handle ROI-level analysis
-            if level == 'roi':
+            if level == "roi":
                 # Explode recording-level data into ROI-level data
                 roi_rows = self._build_roi_rows(
                     df,
@@ -519,7 +633,16 @@ class Experiment:
         return method_specs, result_keys, return_single
 
     def _init_metadata_results(self, results):
-        metadata_keys = ["recording_id", "recording_uid", "prefix", "name", "date", "type", "num_rois", "source_path"]
+        metadata_keys = [
+            "recording_id",
+            "recording_uid",
+            "prefix",
+            "name",
+            "date",
+            "type",
+            "num_rois",
+            "source_path",
+        ]
         for key in metadata_keys:
             if key not in results:
                 results[key] = []
@@ -543,7 +666,9 @@ class Experiment:
         global_kwargs,
     ):
         try:
-            method_name, method_kwargs = self._parse_method_spec(method_spec, result_name, global_kwargs)
+            method_name, method_kwargs = self._parse_method_spec(
+                method_spec, result_name, global_kwargs
+            )
             attr = getattr(recording, method_name)
             if hasattr(attr, "__call__"):
                 try:
@@ -582,7 +707,9 @@ class Experiment:
                 # TODO: add warning if longer than 1000 datapoints: likely not a tuning function
                 for result_name in result_keys:
                     result_data = df.loc[rec_idx, result_name]
-                    self._add_roi_result(roi_row, result_name, result_data, num_rois, roi_idx)
+                    self._add_roi_result(
+                        roi_row, result_name, result_data, num_rois, roi_idx
+                    )
                 roi_rows.append(roi_row)
         return roi_rows
 
@@ -606,11 +733,15 @@ class Experiment:
                 roi_row[column_name] = result_data.iloc[roi_idx][col_name]
             return
         if isinstance(result_data, (list, np.ndarray)):
-            handled = self._try_unpack_array(roi_row, result_name, result_data, num_rois, roi_idx)
+            handled = self._try_unpack_array(
+                roi_row, result_name, result_data, num_rois, roi_idx
+            )
             if not handled:
                 roi_row[result_name] = result_data
             return
-        if np.isscalar(result_data) or (isinstance(result_data, np.ndarray) and result_data.ndim == 0):
+        if np.isscalar(result_data) or (
+            isinstance(result_data, np.ndarray) and result_data.ndim == 0
+        ):
             roi_row[result_name] = self._coerce_numpy_scalar(result_data)
             return
         roi_row[result_name] = result_data
@@ -657,7 +788,8 @@ class Experiment:
             # is _0, _1, ... or a DataFrame column name), NOT other fetched
             # methods that happen to share a prefix.
             unpacked_columns = [
-                col for col in roi_df.columns
+                col
+                for col in roi_df.columns
                 if col.startswith(f"{result_name}_") and col not in result_keys_set
             ]
             if unpacked_columns and result_name in roi_df.columns:
@@ -681,18 +813,14 @@ class Experiment:
                 new_results[key] = values
                 continue
 
-            arrays = [
-                v for v in non_null if isinstance(v, np.ndarray) and v.ndim == 2
-            ]
+            arrays = [v for v in non_null if isinstance(v, np.ndarray) and v.ndim == 2]
             if len(arrays) != len(non_null):
                 new_results[key] = values
                 continue
 
             # Determine n_features from the first array
             n_features = arrays[0].shape[0 if unpack_axis == 0 else 1]
-            if any(
-                a.shape[0 if unpack_axis == 0 else 1] != n_features for a in arrays
-            ):
+            if any(a.shape[0 if unpack_axis == 0 else 1] != n_features for a in arrays):
                 new_results[key] = values
                 continue
 
@@ -869,20 +997,24 @@ class Experiment:
             ) from e
 
     def fetch_averages(self):
-        '''
+        """
         gets a numpy array with the average traces of all ROIs from multiple recordings
         contained in an pygor experiment object.
-        
+
         Parameters
         ----------
-        recordings: experiment object, containing data from one or more recordings 
-        exported in .h5 format. 
-        '''
+        recordings: experiment object, containing data from one or more recordings
+        exported in .h5 format.
+        """
         # compute lengths of recordings
         rec_lengths = [int(rec.averages.shape[1]) for rec in self.recording]
         min_trace_len = np.min(rec_lengths)
-        print('trace lengths differ up to', np.max(rec_lengths)-np.min(rec_lengths), 'datapoints')
-        print('truncating traces to', min_trace_len, 'datapoints')
+        print(
+            "trace lengths differ up to",
+            np.max(rec_lengths) - np.min(rec_lengths),
+            "datapoints",
+        )
+        print("truncating traces to", min_trace_len, "datapoints")
 
         # Stack ROI traces across recordings into one 2D array (rows=ROIs, cols=time)
         rows = []
@@ -892,8 +1024,8 @@ class Experiment:
             truncated = rec.averages[:, :min_trace_len]
             # Append truncated ROI rows and mapping
             rows.append(truncated)
-            
-        return(np.vstack(rows))
+
+        return np.vstack(rows)
 
     def run(self, method, **kwargs: Any):
         """
@@ -924,7 +1056,10 @@ class Experiment:
         success_count = 0
         try:
             from tqdm import tqdm
-            iterator = tqdm(enumerate(self.recording), total=len(self.recording), desc=method)
+
+            iterator = tqdm(
+                enumerate(self.recording), total=len(self.recording), desc=method
+            )
         except ImportError:
             iterator = enumerate(self.recording)
         for rec_idx, recording in iterator:
@@ -957,7 +1092,7 @@ class Experiment:
     def pickle_store(self, save_path, filename, compress=False, protocol=None):
         """
         Store experiment as compressed pickle file.
-        
+
         Parameters
         ----------
         save_path : str or Path
@@ -976,11 +1111,12 @@ class Experiment:
         """
         final_path = pathlib.Path(save_path, filename).with_suffix(".pklexp")
         print("Storing as:", final_path, end="\r")
-        
+
         # Use highest pickle protocol for speed with numpy arrays
         if protocol is None:
             import pickle
+
             protocol = pickle.HIGHEST_PROTOCOL
-        
+
         with open(final_path, "wb") as outp:
             joblib.dump(self, outp, compress=compress, protocol=protocol)
