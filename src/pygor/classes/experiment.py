@@ -1027,6 +1027,113 @@ class Experiment:
 
         return np.vstack(rows)
 
+    def transfer_rois_to(self, target: "Experiment", **transfer_kwargs: Any) -> dict:
+        """
+        Transfer ROIs from this experiment's recordings to a target experiment,
+        matching recordings by prefix ({fish}_{plane}).
+
+        For each matched pair, calls ``target_recording.transfer_rois_from(source_recording)``
+        to align and copy ROI masks via image registration.
+
+        Parameters
+        ----------
+        target : Experiment
+            Target experiment to receive ROIs.
+        **transfer_kwargs
+            Keyword arguments passed to each ``transfer_rois_from()`` call
+            (e.g., max_shift, upsample_factor, projection_mode, plot).
+
+        Returns
+        -------
+        dict
+            Summary with keys 'matched', 'source_only', 'target_only',
+            and 'errors'.
+
+        Raises
+        ------
+        ValueError
+            If either experiment has duplicate prefixes (ambiguous matching).
+        """
+        import warnings
+
+        # Build prefix → index maps
+        src_prefixes = self.id_dict["prefix"]
+        tgt_prefixes = target.id_dict["prefix"]
+
+        def _build_prefix_map(prefixes, label):
+            pmap = {}
+            for idx, pfx in enumerate(prefixes):
+                if pfx in pmap:
+                    raise ValueError(
+                        f"Duplicate prefix '{pfx}' in {label} experiment "
+                        f"(indices {pmap[pfx]} and {idx}). "
+                        f"Cannot unambiguously match recordings."
+                    )
+                pmap[pfx] = idx
+            return pmap
+
+        src_map = _build_prefix_map(src_prefixes, "source")
+        tgt_map = _build_prefix_map(tgt_prefixes, "target")
+
+        src_keys = set(src_map.keys())
+        tgt_keys = set(tgt_map.keys())
+        matched_keys = sorted(src_keys & tgt_keys)
+        source_only = sorted(src_keys - tgt_keys)
+        target_only = sorted(tgt_keys - src_keys)
+
+        # Warn on unmatched
+        if source_only:
+            warnings.warn(
+                f"Source recordings with no target match (skipped): {source_only}"
+            )
+        if target_only:
+            warnings.warn(
+                f"Target recordings with no source match (skipped): {target_only}"
+            )
+
+        if not matched_keys:
+            warnings.warn("No matching prefixes found between source and target.")
+            return {
+                "matched": [],
+                "source_only": source_only,
+                "target_only": target_only,
+                "errors": [],
+            }
+
+        # Transfer ROIs for each matched pair
+        errors = []
+        successful = []
+        for pfx in matched_keys:
+            src_rec = self.recording[src_map[pfx]]
+            tgt_rec = target.recording[tgt_map[pfx]]
+            try:
+                tgt_rec.transfer_rois_from(src_rec, **transfer_kwargs)
+                successful.append(pfx)
+            except Exception as e:
+                errors.append((pfx, str(e)))
+                print(f"  ERROR transferring '{pfx}': {e}")
+
+        # Update target id_dict to reflect new ROI counts
+        target.__update_data__()
+
+        # Print summary
+        print(f"\n--- transfer_rois_to summary ---")
+        print(f"  Matched:      {len(successful)}/{len(matched_keys)} prefixes")
+        if source_only:
+            print(f"  Source only:   {source_only}")
+        if target_only:
+            print(f"  Target only:   {target_only}")
+        if errors:
+            print(f"  Errors:        {[e[0] for e in errors]}")
+        print()
+
+        return {
+            "matched": successful,
+            "source_only": source_only,
+            "target_only": target_only,
+            "errors": errors,
+        }
+
     def run(self, method, **kwargs: Any):
         """
         Run a method on each recording in the experiment.
