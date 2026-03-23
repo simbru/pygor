@@ -2217,7 +2217,7 @@ class Core:
 
         ax.imshow(colored, origin="lower")
 
-    def segment_rois(self, mode=None, overwrite=False, **kwargs: Any) -> np.ndarray:
+    def segment_rois(self, mode=None, overwrite=True, **kwargs: Any) -> np.ndarray:
         """
         Segment ROIs using automated methods.
 
@@ -3491,6 +3491,8 @@ class Core:
             warnings.warn("traces_znorm is None, nothing to plot.")
             return
         traces = self.traces_znorm  # (n_rois, n_timepoints)
+        if isinstance(rois, int):
+            rois = [rois]
         if rois is not None:
             traces = traces[np.asarray(rois)]
         n_rois = traces.shape[0]
@@ -3525,7 +3527,14 @@ class Core:
                 figsize = (8, max(3, n_rois / 10))
             fig, ax = plt.subplots(figsize=figsize)
             extent = [x[0], x[-1], n_rois - 0.5, -0.5]
-            ax.imshow(traces, cmap=cmap, interpolation="none", extent=extent, **kwargs)
+            ax.imshow(
+                traces,
+                cmap=cmap,
+                interpolation="none",
+                extent=extent,
+                aspect="auto",
+                **kwargs,
+            )
             if baseline_span is not None:
                 ax.axvspan(
                     *baseline_span,
