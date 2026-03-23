@@ -4,7 +4,7 @@ version = "1.0"
 authors = [
     { name="Simen Bruøygard", email="simen.bruoygard@pm.me" },
 ]
-description = """A package for interacting with Igor Pro, 
+description = """A package for interacting with Igor Pro,
 for internal use, for Baden-lab members
 """
 license = "AGPL-3.0-or-later"
@@ -57,7 +57,9 @@ Issues = "https://github.com/simbru/pygor/issues"
 
 [tool.uv]
 package = true
-dev-dependencies = [
+
+[dependency-groups]
+dev = [
     "uv>=0.4.24",
     "ruff>=0.8.0",
     "igor2>=0.5.12",
