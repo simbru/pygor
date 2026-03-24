@@ -9,16 +9,16 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import pygor
 
 
-def _validate_channel(channel, numcolour):
+def _validate_channel(channel, n_colours):
     """Validate 0-indexed channel parameter."""
     if channel is not None:
         if not isinstance(channel, (int, np.integer)):
             raise TypeError(
                 f"channel must be an int or None, got {type(channel).__name__}"
             )
-        if channel < 0 or channel >= numcolour:
+        if channel < 0 or channel >= n_colours:
             raise ValueError(
-                f"channel={channel} out of range. Use 0-{numcolour - 1} "
+                f"channel={channel} out of range. Use 0-{n_colours - 1} "
                 f"(0-indexed) or None for all channels."
             )
 
@@ -617,7 +617,7 @@ def _compute_alpha_weights_4d(self, roi_indices):
     alpha_4d : ndarray (n_colours, n_selected_rois, h, w) or None
     """
     raw_weights = self.get_amplitude_weights()
-    raw_weights = pygor.utilities.multicolour_reshape(raw_weights, self.numcolour)
+    raw_weights = pygor.utilities.multicolour_reshape(raw_weights, self.n_colours)
     raw_weights = raw_weights[:, roi_indices]
     finite = raw_weights[np.isfinite(raw_weights)]
     if finite.size == 0:
@@ -769,10 +769,10 @@ def plot_collapsed_strfs(
         )
 
     # --- Single-channel / single-colour grid mode (existing path) ---
-    _validate_channel(channel, self.numcolour)
+    _validate_channel(channel, self.n_colours)
     array = self.collapse_times(force_recompute=True)
     if channel is not None:
-        array = pygor.utilities.multicolour_reshape(array, self.numcolour)[channel]
+        array = pygor.utilities.multicolour_reshape(array, self.n_colours)[channel]
     roi_indices = _normalize_roi_indices(roi, array.shape[0])
     if not roi_indices:
         raise ValueError("roi selection is empty")
@@ -922,10 +922,10 @@ def plot_peaktime_strfs(
         )
 
     # --- Single-channel / single-colour grid mode (existing path) ---
-    _validate_channel(channel, self.numcolour)
+    _validate_channel(channel, self.n_colours)
     array = self.get_strf_peak_times()
     if channel is not None:
-        array = pygor.utilities.multicolour_reshape(array, self.numcolour)[channel]
+        array = pygor.utilities.multicolour_reshape(array, self.n_colours)[channel]
     roi_indices = _normalize_roi_indices(roi, array.shape[0])
     if not roi_indices:
         raise ValueError("roi selection is empty")
@@ -948,7 +948,7 @@ def plot_peaktime_strfs(
         alpha_array_raw = self.get_amplitude_weights()
         if channel is not None:
             alpha_array_raw = pygor.utilities.multicolour_reshape(
-                alpha_array_raw, self.numcolour
+                alpha_array_raw, self.n_colours
             )[channel]
         alpha_array_raw = alpha_array_raw[roi_indices]
         if alpha_array_raw.shape == array.shape:
@@ -1143,7 +1143,7 @@ def plot_deltatime_strfs(
         )
 
     # --- Single-channel / single-colour grid mode (existing path) ---
-    _validate_channel(channel, self.numcolour)
+    _validate_channel(channel, self.n_colours)
 
     # Get centered delta times from the data method
     array = self.get_strf_delta_times(
@@ -1159,7 +1159,7 @@ def plot_deltatime_strfs(
     # Resolve roi_indices for alpha weights (must match array shape)
     all_weights = self.get_amplitude_weights()
     if channel is not None:
-        all_weights = pygor.utilities.multicolour_reshape(all_weights, self.numcolour)[
+        all_weights = pygor.utilities.multicolour_reshape(all_weights, self.n_colours)[
             channel
         ]
     roi_indices = _normalize_roi_indices(roi, all_weights.shape[0])

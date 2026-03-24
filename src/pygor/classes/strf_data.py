@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 import natsort
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 # Local imports
 import pygor.data_helpers
@@ -60,16 +60,39 @@ class STRF(Core):
     # Annotations
     strfs: np.ndarray = field(init=False)
     ipl_depths: np.ndarray = field(init=False)
-    numcolour: int = field(init=False)  # gets interpreted from strf array shape
+    n_colours: int = None  # None = auto-detect from H5 keys / config
     strf_keys: list = field(init=False)
     strf_ms: int = field(init=False)
     # Cache for spatial overlap index computations
     _spatial_overlap_cache: dict = field(init=False, default_factory=dict)
 
+    @property
+    def numcolour(self) -> int:
+        """Deprecated: use ``n_colours`` instead.
+
+        Kept for backward compatibility with pickled objects and external code
+        that references the old attribute name.
+        """
+        return self.n_colours
+
+    @numcolour.setter
+    def numcolour(self, value: int):
+        """Deprecated: use ``n_colours`` instead. Backward-compatibility setter."""
+        self.n_colours = value
+
+    def __setattr__(self, name, value):
+        super().__setattr__(name, value)
+        # Keep params in sync when n_colours is set after init
+        if name == "n_colours" and hasattr(self, "params"):
+            self.params._defaults.setdefault("strf", {}).setdefault("general", {})["n_colours"] = value
+
     ## Attributes
     def __post_init__(self):
         # Post initialise the contents of Data class to be inherited
         # super().__dict__["data_types"].append(self.type)
+        # Preserve user-provided n_colours (not None) so auto-detection
+        # doesn't overwrite it.
+        _user_n_colours = self.n_colours
         super().__post_init__()
         if self.filename.suffix == ".h5":
             with h5py.File(self.filename) as HDF5_file:
@@ -97,15 +120,19 @@ class STRF(Core):
                 )
                 # if True in bool_partofmulticolour_list and False in bool_partofmulticolour_list:
                 #     raise AttributeError("There are both single-coloured and multi-coloured STRFs loaded. Manual fix required.")
-                if multicolour_bool is True:
+                if _user_n_colours is not None:
+                    # User explicitly set n_colours — use it
+                    self.n_colours = _user_n_colours
+                    self.multicolour = _user_n_colours > 1
+                elif multicolour_bool is True:
                     identified_labels = np.unique(
                         [(i.split("_")[-1]) for i in self.strf_keys]
                     )
-                    self.numcolour = len([i for i in identified_labels if i.isdigit()])
+                    self.n_colours = len([i for i in identified_labels if i.isdigit()])
                     self.multicolour = True
                 else:
                     self.multicolour = False
-                    self.numcolour = 1
+                    self.n_colours = 1
                 self.strfs = pygor.data_helpers.load_strf(HDF5_file)
                 if self.strfs is None:
                     warnings.warn(
@@ -121,7 +148,7 @@ class STRF(Core):
                 print(
                     "Number of ROIs not set, likely ROIs array is missing. Setting to number of STRFs divided by number of colours."
                 )
-                self.num_rois = int(self.num_strfs / self.numcolour)
+                self.num_rois = int(self.num_strfs / self.n_colours)
             self.set_bootstrap_settings_default()
             if self.bs_settings["do_bootstrap"] == True:
                 self.run_bootstrap()
@@ -130,20 +157,28 @@ class STRF(Core):
         else:
             # ScanM files (.smp/.smh): STRFs don't exist yet, set defaults
             # These will be populated after STRF calculation
-            strf_defaults = self.params.get_defaults("strf").get("general", {})
-            self.numcolour = strf_defaults.get("num_colours", 1)
-            self.multicolour = self.numcolour > 1
+            if _user_n_colours is not None:
+                self.n_colours = _user_n_colours
+            else:
+                strf_defaults = self.params.get_defaults("strf").get("general", {})
+                # Support legacy config key "num_colours" for backward compatibility
+                self.n_colours = strf_defaults.get("n_colours", strf_defaults.get("num_colours", 1))
+            self.multicolour = self.n_colours > 1
             self.strfs = None
             self.strf_keys = []
             self.num_strfs = 0
             self.strf_dur_ms = None  # Will be set when STRFs are calculated
+        # __setattr__ keeps params["strf.general.n_colours"] in sync
+        # automatically, but only after params exists. Re-assign to trigger
+        # sync now that __post_init__ has created params.
+        self.n_colours = self.n_colours
 
     def _validate_data_consistency(self):
         """
         Validate data consistency after loading.
 
         Checks:
-        1. num_rois matches expected STRF count (num_strfs / numcolour)
+        1. num_rois matches expected STRF count (num_strfs / n_colours)
         2. ipl_depths length matches num_rois
 
         Raises warnings for inconsistencies that could indicate data problems.
@@ -155,14 +190,14 @@ class STRF(Core):
         if self.strfs is None or self.num_strfs == 0:
             return
 
-        expected_rois = int(self.num_strfs / self.numcolour)
+        expected_rois = int(self.num_strfs / self.n_colours)
 
         # Check 1: num_rois vs STRF count consistency
         if self.num_rois != expected_rois:
             raise ValueError(
                 f"Data inconsistency in {self.name}: "
                 f"num_rois ({self.num_rois}) != expected from STRFs ({expected_rois}). "
-                f"STRFs: {self.num_strfs}, Colors: {self.numcolour}. "
+                f"STRFs: {self.num_strfs}, Colors: {self.n_colours}. "
                 f"This usually means ROIs were re-segmented without recomputing "
                 f"STRFs. Recompute STRFs or restore the original ROI segmentation."
             )
@@ -296,10 +331,10 @@ class STRF(Core):
     def strfs_chroma(self, border=False):
         if border == False:
             return pygor.utilities.multicolour_reshape(
-                self.strfs_no_border, self.numcolour
+                self.strfs_no_border, self.n_colours
             )
         else:
-            return pygor.utilities.multicolour_reshape(self.strfs, self.numcolour)
+            return pygor.utilities.multicolour_reshape(self.strfs, self.n_colours)
 
     ## Bootstrapping
     def __calc_pval_time(self, parallel=None, **kwargs: Any) -> np.ndarray:
@@ -579,10 +614,10 @@ class STRF(Core):
     def get_pvals_table(self) -> pd.DataFrame:
         if self.multicolour == True:
             space_vals = pygor.utilities.multicolour_reshape(
-                np.array(self.pval_space), self.numcolour
+                np.array(self.pval_space), self.n_colours
             ).T
             time_vals = pygor.utilities.multicolour_reshape(
-                np.array(self.pval_time), self.numcolour
+                np.array(self.pval_time), self.n_colours
             ).T
             space_sig = space_vals < self.bs_settings["space_sig_thresh"]
             time_sig = time_vals < self.bs_settings["time_sig_thresh"]
@@ -922,33 +957,33 @@ class STRF(Core):
     def get_chroma_times(self, filter="all"):
         if filter == "all":
             return pygor.utilities.multicolour_reshape(
-                self.get_timecourses(), self.numcolour
+                self.get_timecourses(), self.n_colours
             )
         if filter == "dominant":
             return pygor.utilities.multicolour_reshape(
-                self.get_timecourses_dominant(), self.numcolour
+                self.get_timecourses_dominant(), self.n_colours
             )
         else:
             raise ValueError("filter must be 'all' or 'dominant'")
 
     def get_chroma_strf(self, roi=None):
         if roi is None:
-            index = range(self.num_rois * self.numcolour)
+            index = range(self.num_rois * self.n_colours)
             return pygor.utilities.multicolour_reshape(
-                self.strfs[index], self.numcolour
+                self.strfs[index], self.n_colours
             )
         else:
             if isinstance(roi, Iterable) is False:
                 roi = [roi]
-            # start_index = np.linspace(0, self.num_rois * self.numcolour, self.num_rois + 1)[roi].astype(int)
-            # print(np.linspace(0, self.num_rois * self.numcolour, self.num_rois + 1))
-            start_index = np.arange(0, self.num_rois * self.numcolour)[
-                :: self.numcolour
+            # start_index = np.linspace(0, self.num_rois * self.n_colours, self.num_rois + 1)[roi].astype(int)
+            # print(np.linspace(0, self.num_rois * self.n_colours, self.num_rois + 1))
+            start_index = np.arange(0, self.num_rois * self.n_colours)[
+                :: self.n_colours
             ][roi]
-            end_index = start_index + self.numcolour
+            end_index = start_index + self.n_colours
             indices = np.arange(start_index, end_index)
             return np.squeeze(
-                pygor.utilities.multicolour_reshape(self.strfs[indices], self.numcolour)
+                pygor.utilities.multicolour_reshape(self.strfs[indices], self.n_colours)
             )
 
     def get_timecourses_dominant(self, **kwargs: Any):
@@ -994,7 +1029,7 @@ class STRF(Core):
         try:
             if (
                 roi is not None
-                or self.__strf_masks.shape[0] != self.num_rois * self.numcolour
+                or self.__strf_masks.shape[0] != self.num_rois * self.n_colours
             ):
                 force_recompute = True
         except AttributeError:
@@ -1004,7 +1039,7 @@ class STRF(Core):
             if self.strfs is np.nan:
                 self.__strf_masks = np.nan
             if roi is None:
-                roi = range(0, self.num_rois * self.numcolour)
+                roi = range(0, self.num_rois * self.n_colours)
             else:
                 if isinstance(roi, Iterable) is False:
                     roi = [roi]
@@ -1055,7 +1090,7 @@ class STRF(Core):
 
         Parameters:
         ----------
-        num_colours : int, optional
+        n_colours : int, optional
             The number of colours or LED groups in the multicoloured setup. Default is 4.
         reference_LED_index : list of int, optional
             List of indices corresponding to the reference LEDs for which the average position
@@ -1087,7 +1122,7 @@ class STRF(Core):
         Example:
         --------
         >>> strf_instance = STRF()
-        >>> offset = strf_instance.calc_LED_offset(num_colours=4,
+        >>> offset = strf_instance.calc_LED_offset(n_colours=4,
         ...                                       reference_LED_index=[0, 1, 2],
         ...                                       compare_LED_index=[3])
         >>> print(offset)
@@ -1104,7 +1139,7 @@ class STRF(Core):
                 [
                     np.nanmean(yx, axis=0)
                     for yx in pygor.utilities.multicolour_reshape(
-                        self.get_contours_centres(), self.numcolour
+                        self.get_contours_centres(), self.n_colours
                     )
                 ]
             )
@@ -1260,9 +1295,9 @@ class STRF(Core):
             None, zscore=zscore, spatial_centre=spatial_centre, border=border, **kwargs
         )
         if roi is None:
-            return pygor.utilities.multicolour_reshape(all_collapsed, self.numcolour)
+            return pygor.utilities.multicolour_reshape(all_collapsed, self.n_colours)
         if roi is not None:
-            return pygor.utilities.multicolour_reshape(all_collapsed, self.numcolour)[
+            return pygor.utilities.multicolour_reshape(all_collapsed, self.n_colours)[
                 :, roi
             ]
 
@@ -1317,19 +1352,19 @@ class STRF(Core):
         spaces = self.collapse_times_chroma()
         # Conditionally apply absolute value
         if abs_arrays:
-            spaces_flat = np.abs(spaces.reshape(self.numcolour, self.num_rois, -1))
+            spaces_flat = np.abs(spaces.reshape(self.n_colours, self.num_rois, -1))
         else:
-            spaces_flat = spaces.reshape(self.numcolour, self.num_rois, -1)
+            spaces_flat = spaces.reshape(self.n_colours, self.num_rois, -1)
         # Get signal mask if requested
         if signal_only:
             raw_signal = self.bool_strf_signal()
             signal_mask_2d = pygor.utilities.multicolour_reshape(
-                raw_signal, self.numcolour
+                raw_signal, self.n_colours
             ).T
         else:
-            signal_mask_2d = np.ones((self.num_rois, self.numcolour), dtype=bool)
+            signal_mask_2d = np.ones((self.num_rois, self.n_colours), dtype=bool)
         # Get all possible channel pairs
-        pairs_indices = np.tril_indices(self.numcolour, k=-1)
+        pairs_indices = np.tril_indices(self.n_colours, k=-1)
         pair_names = [
             f"Ch{i}-Ch{j}" for i, j in zip(pairs_indices[0], pairs_indices[1])
         ]
@@ -1836,7 +1871,7 @@ class STRF(Core):
     def get_opponency_bool(self) -> bool:
         if self.multicolour == True:
             arr = pygor.utilities.multicolour_reshape(
-                self.get_polarities(), self.numcolour
+                self.get_polarities(), self.n_colours
             ).T
             # This line looks through rearranged chromatic arr roi by roi
             # and checks the poliarty by getting the unique values and checking
@@ -1862,7 +1897,7 @@ class STRF(Core):
 
     def compute_average_spaces(self):
         spaces = self.collapse_times()
-        spaces = pygor.utilities.multicolour_reshape(spaces, self.numcolour)
+        spaces = pygor.utilities.multicolour_reshape(spaces, self.n_colours)
         spaces = np.average(spaces, axis=0)
         return spaces
 
@@ -2593,7 +2628,7 @@ class STRF(Core):
             - 'angles': Offset angles in degrees (n_colours, n_cells)
         """
         if not self.multicolour:
-            raise ValueError("This method requires multicolour data (numcolour > 1)")
+            raise ValueError("This method requires multicolour data (n_colours > 1)")
 
         if mode == "cs_seg":
             # Get centers for each colour channel: shape (n_colours, n_cells, 2)
@@ -2761,7 +2796,7 @@ class STRF(Core):
 
             # Get RGB representation for the specified ROI using channels 0, 1, 3
             rgb_channels = (
-                [0, 1, 3] if self.numcolour > 3 else list(range(min(3, self.numcolour)))
+                [0, 1, 3] if self.n_colours > 3 else list(range(min(3, self.n_colours)))
             )
             rgb_image = self.to_rgb(roi=roi, channel=rgb_channels)
 
@@ -3008,7 +3043,7 @@ class STRF(Core):
         """
         result = []
         polarities = self.get_polarities()
-        arr = pygor.utilities.multicolour_reshape(polarities, self.numcolour).T
+        arr = pygor.utilities.multicolour_reshape(polarities, self.n_colours).T
 
         if mask_by_channel:
             # Get boolean mask for significant channels
@@ -3070,7 +3105,7 @@ class STRF(Core):
         amp_signs = np.where(amplitudes > 0, 1, -1)
         polarities = np.where(polarities == 2, amp_signs, polarities)
 
-        arr = pygor.utilities.multicolour_reshape(polarities, self.numcolour).T
+        arr = pygor.utilities.multicolour_reshape(polarities, self.n_colours).T
 
         if mask_by_channel:
             # Get boolean mask for significant channels
@@ -3134,7 +3169,7 @@ class STRF(Core):
     def get_time_amps_by_ch(self, ch_idx, **kwargs: Any) -> np.ndarray:
         amps_raw = self.get_time_amps()
         amps_raw_ch_reshape = pygor.utilities.multicolour_reshape(
-            amps_raw, self.numcolour
+            amps_raw, self.n_colours
         )
         return amps_raw_ch_reshape[ch_idx]
 
@@ -3194,12 +3229,12 @@ class STRF(Core):
         if self.multicolour == True:
             if dimstr == "time":
                 largest_by_colour = pygor.utilities.multicolour_reshape(
-                    self.get_time_amps(**kwargs), self.numcolour
+                    self.get_time_amps(**kwargs), self.n_colours
                 )
                 tuning_functions = largest_by_colour
             elif dimstr == "space":
                 largest_by_colour = pygor.utilities.multicolour_reshape(
-                    self.get_space_amps(**kwargs), self.numcolour
+                    self.get_space_amps(**kwargs), self.n_colours
                 )
                 tuning_functions = largest_by_colour
             else:
@@ -3278,7 +3313,7 @@ class STRF(Core):
         else:
             raise ValueError("dimstr must be 'time' or 'space'")
         return (
-            pygor.utilities.multicolour_reshape(np.abs(amps), self.numcolour).T
+            pygor.utilities.multicolour_reshape(np.abs(amps), self.n_colours).T
             > threshold
         )
 
@@ -3321,7 +3356,7 @@ class STRF(Core):
                 total_areas = np.sum((tot_neg_areas, tot_pos_areas), axis=0)
                 # Step 5: Reshape to multichromatic format
                 area_by_colour = pygor.utilities.multicolour_reshape(
-                    total_areas, self.numcolour
+                    total_areas, self.n_colours
                 ).T
             if largest_only == True:
                 # Step 3: Get the largest contour by polarity
@@ -3337,7 +3372,7 @@ class STRF(Core):
                 abs_max = np.max([max_negs, max_pos], axis=0)
                 # Step 5: Reshape to multichromatic format
                 area_by_colour = pygor.utilities.multicolour_reshape(
-                    abs_max, self.numcolour
+                    abs_max, self.n_colours
                 ).T
             return area_by_colour  # transpose for simplicity, invert for UV - R by wavelength (increasing)
         else:
@@ -3353,10 +3388,10 @@ class STRF(Core):
             pos_centroids = self.calc_spectral_centroids()[1]
             # Step 3: Reshaoe ti multichromatic
             speed_by_colour_neg = pygor.utilities.multicolour_reshape(
-                neg_centroids, self.numcolour
+                neg_centroids, self.n_colours
             ).T
             speed_by_colour_pos = pygor.utilities.multicolour_reshape(
-                pos_centroids, self.numcolour
+                pos_centroids, self.n_colours
             ).T
             if dominant_only == False:
                 return np.array([speed_by_colour_neg, speed_by_colour_pos])
@@ -3392,10 +3427,10 @@ class STRF(Core):
             peak_centre = peaktimes[0]
             peak_surround = peaktimes[1]
             peak_centre = pygor.utilities.multicolour_reshape(
-                peak_centre, self.numcolour
+                peak_centre, self.n_colours
             ).T
             peak_surround = pygor.utilities.multicolour_reshape(
-                peak_surround, self.numcolour
+                peak_surround, self.n_colours
             ).T
             return np.array([peak_centre, peak_surround])
         else:
@@ -3593,14 +3628,14 @@ class STRF(Core):
             if (
                 not isinstance(channel, (int, np.integer))
                 or channel < 0
-                or channel >= self.numcolour
+                or channel >= self.n_colours
             ):
                 raise ValueError(
-                    f"channel={channel} out of range. Use 0-{self.numcolour - 1} "
+                    f"channel={channel} out of range. Use 0-{self.n_colours - 1} "
                     f"(0-indexed) or None for all channels."
                 )
             peak_times = pygor.utilities.multicolour_reshape(
-                peak_times, self.numcolour
+                peak_times, self.n_colours
             )[channel]
 
         # Resolve ROI indices
@@ -3634,7 +3669,7 @@ class STRF(Core):
         # Get amplitude weights (matching ROI/channel selection)
         weights = self.get_amplitude_weights()
         if channel is not None:
-            weights = pygor.utilities.multicolour_reshape(weights, self.numcolour)[
+            weights = pygor.utilities.multicolour_reshape(weights, self.n_colours)[
                 channel
             ]
         weights = weights[roi_indices]
@@ -4740,7 +4775,7 @@ class STRF(Core):
         if dur_s is None:
             dur_s = self.strf_dur_ms / 1000
         if isinstance(roi, tuple):
-            chroma_arr = pygor.utilities.multicolour_reshape(self.strfs, self.numcolour)
+            chroma_arr = pygor.utilities.multicolour_reshape(self.strfs, self.n_colours)
             use_map = pygor.plotting.maps_concat[roi[0]]
             anim = pygor.plotting.play_movie(
                 chroma_arr[roi], dur_s=dur_s, cmap=use_map, **kwargs
@@ -4782,7 +4817,7 @@ class STRF(Core):
     #     # Use the index to get the values with their signs intact
     #     result_values = combined_array[max_abs_index, range(combined_array.shape[1])]
     #     # Average every 4th value to get a weighted polarity for each ROI
-    #     mean_pols_by_roi = np.nanmean(result_values.reshape(self.numcolour, -1), axis=0)
+    #     mean_pols_by_roi = np.nanmean(result_values.reshape(self.n_colours, -1), axis=0)
     #     return (np.sum(mean_pols_by_roi[:int(len(mean_pols_by_roi)/2)]), np.sum(mean_pols_by_roi[int(len(mean_pols_by_roi)/2):]))
 
     # def save_pkl(self, save_path, filename):
@@ -4804,14 +4839,14 @@ class STRF(Core):
         remove_borders=None,
         **kwargs: Any,
     ):
-        # input_arr = np.squeeze(pygor.utilities.multicolour_reshape(self.collapse_times(), self.numcolour))[:, roi]
+        # input_arr = np.squeeze(pygor.utilities.multicolour_reshape(self.collapse_times(), self.n_colours))[:, roi]
         def _fetch_data(roi):
-            # start_index = roi + (roi * self.numcolour)
-            start_index = roi * self.numcolour
-            end_index = start_index + self.numcolour
+            # start_index = roi + (roi * self.n_colours)
+            start_index = roi * self.n_colours
+            end_index = start_index + self.n_colours
             return np.squeeze(
                 pygor.utilities.multicolour_reshape(
-                    self.collapse_times(range(start_index, end_index)), self.numcolour
+                    self.collapse_times(range(start_index, end_index)), self.n_colours
                 )
             )
 
@@ -4858,7 +4893,7 @@ class STRF(Core):
     ):
         ## Generate RGB movie
         if channel == "All":
-            num_channels = self.numcolour
+            num_channels = self.n_colours
             channel = np.array(
                 [[i for i in range(num_channels)]] * int(num_channels - 2)
             )
@@ -4923,11 +4958,11 @@ class STRF(Core):
 
     def get_colour_coefvar_raw(self, channels=None):
         if channels is None:
-            channels = np.arange(self.numcolour)
+            channels = np.arange(self.n_colours)
 
         # Get the raw spatiotemporal data (similar to chroma_times in validation script)
         chroma_times = pygor.utilities.multicolour_reshape(
-            self.get_pix_times(), self.numcolour
+            self.get_pix_times(), self.n_colours
         )
 
         cv_values = []
@@ -4954,7 +4989,7 @@ class STRF(Core):
 
     def get_colour_sparseness_index(self, channels=None):
         if channels is None:
-            channels = np.arange(self.numcolour)
+            channels = np.arange(self.n_colours)
         tunings = np.abs(self.calc_tunings_amplitude()[:, channels])
         tunings = np.nan_to_num(tunings)
 
@@ -5147,7 +5182,7 @@ class STRF(Core):
         centres = np.array(centres_list)
         if channel_reshape is True and self.multicolour:
             # print(centres.shape)
-            centres = np.reshape(centres, (-1, self.numcolour, 2))
+            centres = np.reshape(centres, (-1, self.n_colours, 2))
         if roi is None:
             return centres
         else:
@@ -5189,7 +5224,7 @@ class STRF(Core):
         # Get dimensions info
         obj.unravel_strf_indices()  # {'n_rois': 25, 'n_colours': 1, 'total_strfs': 25}
         """
-        n_colours = getattr(self, "numcolour", 1)
+        n_colours = getattr(self, "n_colours", 1)
 
         # Try multiple ways to get total STRF count
         if hasattr(self, "strf") and self.strf is not None:
@@ -5872,23 +5907,23 @@ class STRF(Core):
     def calculate_strf(
         self,
         noise_array: np.ndarray,
-        sta_past_window: float = 2.0,
-        sta_future_window: float = 2.0,
-        n_colours: int = 1,
+        sta_past_window: float | None = None,
+        sta_future_window: float | None = None,
+        n_colours: int | None = None,
         n_triggers_per_colour: int | None = None,
-        edge_crop: int = 2,
-        max_frames_per_trigger: int = 8,
-        event_sd_threshold: float = 2.0,
-        use_znorm: bool = True,
-        adjust_by_polarity: bool = True,
-        skip_first_triggers: int = 0,
-        skip_last_triggers: int = 0,
-        pre_smooth: int = 0,
+        edge_crop: int | None = None,
+        max_frames_per_trigger: int | None = None,
+        event_sd_threshold: float | None = None,
+        use_znorm: bool | None = None,
+        adjust_by_polarity: bool | None = None,
+        skip_first_triggers: int | None = None,
+        skip_last_triggers: int | None = None,
+        pre_smooth: int | None = None,
         roi: int | None = None,
-        n_jobs: int = 1,
-        normalize_strfs: bool = True,
+        n_jobs: int | None = None,
+        normalize_strfs: bool | None = None,
         traces: np.ndarray | None = None,
-        verbose: bool = False,
+        verbose: bool | None = None,
         **kwargs: Any,
     ) -> dict[str, object]:
         """
@@ -5903,53 +5938,69 @@ class STRF(Core):
         noise_array : np.ndarray
             3D noise stimulus array with shape (y, x, triggers) containing visual
             noise patterns used during the experiment
-        sta_past_window : float, default 2.0
-            How far into the past to calculate STA (seconds)
-        sta_future_window : float, default 2.0
-            How far into the future to calculate STA (seconds)
-        n_colours : int, default 1
-            Number of colour channels in the stimulus (use 1 for single-colour experiments)
+        sta_past_window : float or None, default None
+            How far into the past to calculate STA (seconds). If None, uses
+            ``[strf.calculate].sta_past_window`` from config.
+        sta_future_window : float or None, default None
+            How far into the future to calculate STA (seconds). If None, uses
+            ``[strf.calculate].sta_future_window`` from config.
+        n_colours : int or None, default None
+            Number of colour channels in the stimulus. If None, uses
+            ``[strf.general].n_colours`` from config (fallback 1).
         n_triggers_per_colour : int or None, default None
             Number of triggers per colour channel. If None, will be auto-calculated
             for single-colour experiments or must be provided for multi-colour.
-        edge_crop : int, default 2
-            Number of pixels to crop from stimulus edges
-        max_frames_per_trigger : int, default 8
-            Maximum frames between triggers allowed as noise frame
-        event_sd_threshold : float, default 2.0
-            Standard deviation threshold for event detection
-        use_znorm : bool, default True
-            Whether to use z-normalized traces
-        adjust_by_polarity : bool, default True
-            Whether to adjust results by detected polarity
-        skip_first_triggers : int, default 0
-            Number of first triggers to skip
-        skip_last_triggers : int, default 0
-            Number of last triggers to skip
-        pre_smooth : int, default 0
-            Pre-smoothing factor for SD projections
+        edge_crop : int or None, default None
+            Number of pixels to crop from stimulus edges. If None, uses
+            ``[strf.calculate].edge_crop`` from config.
+        max_frames_per_trigger : int or None, default None
+            Maximum frames between triggers allowed as noise frame. If None,
+            uses ``[strf.calculate].max_frames_per_trigger`` from config.
+        event_sd_threshold : float or None, default None
+            Standard deviation threshold for event detection. If None, uses
+            ``[strf.calculate].event_sd_threshold`` from config.
+        use_znorm : bool or None, default None
+            Whether to use z-normalized traces. If None, uses
+            ``[strf.calculate].use_znorm`` from config.
+        adjust_by_polarity : bool or None, default None
+            Whether to adjust results by detected polarity. If None, uses
+            ``[strf.calculate].adjust_by_polarity`` from config.
+        skip_first_triggers : int or None, default None
+            Number of first triggers to skip. If None, uses
+            ``[strf.calculate].skip_first_triggers`` from config.
+        skip_last_triggers : int or None, default None
+            Number of last triggers to skip. If None, uses
+            ``[strf.calculate].skip_last_triggers`` from config.
+        pre_smooth : int or None, default None
+            Pre-smoothing factor for SD projections. If None, uses
+            ``[strf.calculate].pre_smooth`` from config.
         roi : int, list, array or None, default None
             ROI indices to calculate STRFs for. If None, calculates for all ROIs.
             Can be a single ROI index (int), a list of indices, or numpy array.
-        n_jobs : int, default 1
+        n_jobs : int or None, default None
             Number of parallel jobs for ROI processing. Use 1 for sequential
             processing, -1 for all available cores, or any positive integer
             to specify the number of parallel workers. Parallelization is
-            implemented using joblib.
-        normalize_strfs : bool, default True
+            implemented using joblib. If None, uses ``[strf.calculate].n_jobs``
+            and then ``[registration].n_jobs`` from config.
+        normalize_strfs : bool or None, default None
             Whether to apply the same normalization used during H5 loading
             (z-score based on first 1/5 of temporal frames). Set to False
-            to get raw calculated STRFs for comparison.
+            to get raw calculated STRFs for comparison. If None, uses
+            ``[strf.calculate].normalize_strfs`` from config.
         traces : np.ndarray or None, default None
             Optional pre-processed traces array, shape (n_rois, n_frames).
             If None, defaults to ``self.traces_znorm`` (or ``self.traces_raw``
             if ``use_znorm=False``). Pass any custom traces, e.g.
             ``self.traces_deconvolved``, ``self.traces_znorm``, or an
             externally filtered array.
-        verbose : bool, default True
-            Whether to print progress information
+        verbose : bool or None, default None
+            Whether to print progress information. If None, uses
+            ``[strf.calculate].verbose`` from config.
         **kwargs
-            Additional arguments passed to the calculation function
+            Additional arguments passed to the calculation function.
+            Legacy alias ``num_colours`` is accepted for backwards compatibility
+            but is deprecated in favor of ``n_colours``.
 
         Returns
         -------
@@ -5982,9 +6033,107 @@ class STRF(Core):
         >>> metadata = results['metadata']
         """
 
-        # Auto-detect multi-colour experiments if object has numcolour attribute
-        if n_colours == 1 and hasattr(self, "numcolour") and self.numcolour > 1:
-            n_colours = self.numcolour
+        # Backward compatibility: allow deprecated alias num_colours via kwargs.
+        deprecated_num_colours = kwargs.pop("num_colours", None)
+        if deprecated_num_colours is not None:
+            warnings.warn(
+                "'num_colours' is deprecated; use 'n_colours' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if n_colours is not None and int(n_colours) != int(deprecated_num_colours):
+                raise ValueError(
+                    "Conflicting colour count values: both 'n_colours' and "
+                    "deprecated 'num_colours' were provided with different values."
+                )
+            if n_colours is None:
+                n_colours = int(deprecated_num_colours)
+
+        # Resolve calculate parameters from config (if present), then fall back to
+        # hardcoded defaults for full backwards compatibility.
+        strf_defaults = self.params.get_defaults("strf")
+        calc_defaults = strf_defaults.get("calculate", {})
+        general_defaults = strf_defaults.get("general", {})
+        registration_defaults = self.params.get_defaults("registration")
+
+        sta_past_window = (
+            float(sta_past_window)
+            if sta_past_window is not None
+            else float(calc_defaults.get("sta_past_window", 2.0))
+        )
+        sta_future_window = (
+            float(sta_future_window)
+            if sta_future_window is not None
+            else float(calc_defaults.get("sta_future_window", 2.0))
+        )
+        n_colours = (
+            int(n_colours)
+            if n_colours is not None
+            else int(general_defaults.get("n_colours", general_defaults.get("num_colours", 1)))
+        )
+        if n_triggers_per_colour is None and "n_triggers_per_colour" in calc_defaults:
+            n_triggers_per_colour = int(calc_defaults["n_triggers_per_colour"])
+            if n_triggers_per_colour <= 0:
+                n_triggers_per_colour = None
+        edge_crop = (
+            int(edge_crop)
+            if edge_crop is not None
+            else int(calc_defaults.get("edge_crop", 2))
+        )
+        max_frames_per_trigger = (
+            int(max_frames_per_trigger)
+            if max_frames_per_trigger is not None
+            else int(calc_defaults.get("max_frames_per_trigger", 8))
+        )
+        event_sd_threshold = (
+            float(event_sd_threshold)
+            if event_sd_threshold is not None
+            else float(calc_defaults.get("event_sd_threshold", 2.0))
+        )
+        use_znorm = (
+            bool(use_znorm)
+            if use_znorm is not None
+            else bool(calc_defaults.get("use_znorm", True))
+        )
+        adjust_by_polarity = (
+            bool(adjust_by_polarity)
+            if adjust_by_polarity is not None
+            else bool(calc_defaults.get("adjust_by_polarity", True))
+        )
+        skip_first_triggers = (
+            int(skip_first_triggers)
+            if skip_first_triggers is not None
+            else int(calc_defaults.get("skip_first_triggers", 0))
+        )
+        skip_last_triggers = (
+            int(skip_last_triggers)
+            if skip_last_triggers is not None
+            else int(calc_defaults.get("skip_last_triggers", 0))
+        )
+        pre_smooth = (
+            int(pre_smooth)
+            if pre_smooth is not None
+            else int(calc_defaults.get("pre_smooth", 0))
+        )
+        n_jobs = (
+            int(n_jobs)
+            if n_jobs is not None
+            else int(calc_defaults.get("n_jobs", registration_defaults.get("n_jobs", -1)))
+        )
+        normalize_strfs = (
+            bool(normalize_strfs)
+            if normalize_strfs is not None
+            else bool(calc_defaults.get("normalize_strfs", True))
+        )
+        verbose = (
+            bool(verbose)
+            if verbose is not None
+            else bool(calc_defaults.get("verbose", False))
+        )
+
+        # Auto-detect multi-colour experiments if object has n_colours attribute
+        if n_colours == 1 and self.n_colours > 1:
+            n_colours = self.n_colours
             if verbose:
                 print(f"Multi-colour experiment detected: using {n_colours} colours")
 
@@ -6060,7 +6209,7 @@ class STRF(Core):
 
         # Update other internal attributes
         self.num_strfs = len(self.strfs)
-        self.numcolour = n_colours_calc
+        self.n_colours = n_colours_calc
         self.multicolour = n_colours_calc > 1
         self.strf_dur_ms = (sta_past_window + sta_future_window) * 1000
 
@@ -6296,7 +6445,7 @@ def _create_by_channel_method(method_name):
 
     def by_channel_wrapper(self, ch_idx=None, **kwargs: Any):
         result = getattr(self, method_name)(**kwargs)
-        reshaped = pygor.utilities.multicolour_reshape(result, self.numcolour)
+        reshaped = pygor.utilities.multicolour_reshape(result, self.n_colours)
 
         # If ch_idx specified, return only that channel/channels
         if ch_idx is not None:

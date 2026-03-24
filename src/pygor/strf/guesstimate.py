@@ -6,10 +6,10 @@ import matplotlib.pyplot as plt
 # def estimate_rf_mask_metrics(strf_object, sanity_plot = False):
 #     """Generate cartesian centroid and size estimate for each mask
 #     in the STRF object."""
-#     num_colours = 4
+#     n_colours = 4
 #     fetch_masks = strf_object.get_spatial_masks()
 #     combine_masks = fetch_masks[0] * fetch_masks[1]
-#     num_masks = combine_masks.shape[0]/num_colours
+#     num_masks = combine_masks.shape[0]/n_colours
 #     coms = []
 #     sizes = []
 #     # Note that here the estimated mask will come out
@@ -71,14 +71,14 @@ def estimate_rf_mask_metrics(strf_object, sanity_plot=False):
     in the STRF object."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        num_colours = strf_object.numcolour
+        n_colours = strf_object.n_colours
         fetch_masks = strf_object.get_spatial_masks()
         combine_masks = np.invert(np.logical_and(fetch_masks[0], fetch_masks[1]))
         # Note that here the estimated mask will come out
         # systematically larger than the actual mask
         # because we combine the masks, which means including
         # the surround component
-        num_masks = combine_masks.shape[0] / num_colours
+        num_masks = combine_masks.shape[0] / n_colours
         coms = np.array([scipy.ndimage.center_of_mass(mask) for mask in combine_masks])
         sizes = np.sum(combine_masks, axis=(1, 2))
         # sizes = np.nansum(combine_masks, axis=(1, 2))
@@ -135,7 +135,7 @@ def gen_spoof_masks(strf_object, output_shape="masks"):
         # Scale that to match the number of masks (ROIs x polarities x colours)
         spoofed_masks = np.expand_dims(spoofed_masks, axis=(1, 2))  # set up axes
         spoofed_masks = np.repeat(
-            spoofed_masks, strf_object.numcolour, axis=0
+            spoofed_masks, strf_object.n_colours, axis=0
         )  # set up ROIs
         spoofed_masks = np.repeat(spoofed_masks, 2, axis=1)  # set up polarities
         spoofed_masks = np.repeat(spoofed_masks, 20, axis=2)  # set up time

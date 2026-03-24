@@ -76,28 +76,28 @@ def chroma_overview(
         #     "Input object is not a STRF object. Attempting to treat as nxm Numpy array. Use-case not intended, expect errors."
         # )
         # strfs_chroma = data_strf_object
-        # numcolour = strfs_chroma.shape[0]
+        # n_colours = strfs_chroma.shape[0]
         # remove_border = False
     # else:
-    numcolour = data_strf_object.numcolour
+    n_colours = data_strf_object.n_colours
 
     # Handle colour index filtering
     if colour_idx is None:
-        colour_idx = list(range(numcolour))
+        colour_idx = list(range(n_colours))
     elif isinstance(colour_idx, int):
         colour_idx = [colour_idx]
     else:
         colour_idx = list(colour_idx)
 
     # Filter colour maps to match selected indices
-    if isinstance(colour_maps, list) and len(colour_maps) >= numcolour:
+    if isinstance(colour_maps, list) and len(colour_maps) >= n_colours:
         colour_maps = [colour_maps[i] for i in colour_idx]
     elif not isinstance(colour_maps, list):
         colour_maps = [colour_maps] * len(colour_idx)
 
     # Filter column titles if provided
     if column_titles is not None:
-        if len(column_titles) >= numcolour:
+        if len(column_titles) >= n_colours:
             column_titles = [column_titles[i] for i in colour_idx]
         else:
             column_titles = None  # Fallback if titles don't match
@@ -124,7 +124,7 @@ def chroma_overview(
             colour_idx,
             colour_maps,
             column_titles,
-            numcolour,
+            n_colours,
             clim,
             clim_vals,
             remove_border,
@@ -287,15 +287,15 @@ def chroma_overview(
         all_max_val = 0
         # First pass: find global max amplitude
         for n, roi in enumerate(rois_list):
-            start_index = roi * numcolour
-            end_index = start_index + numcolour
+            start_index = roi * n_colours
+            end_index = start_index + n_colours
             fetch_indices = range(start_index, end_index)
             times = np.squeeze(
                 pygor.utilities.multicolour_reshape(
                     data_strf_object.get_timecourses(
                         fetch_indices, method="segmentation", mask_empty=True
                     ),
-                    numcolour,
+                    n_colours,
                 )
             )
             times = times[colour_idx]
@@ -306,15 +306,15 @@ def chroma_overview(
         trace_scale = (ny * trace_scalar) / all_max_val if all_max_val > 0 else 1.0
         # Second pass: plot traces at mosaic row centers
         for n, roi in enumerate(rois_list):
-            start_index = roi * numcolour
-            end_index = start_index + numcolour
+            start_index = roi * n_colours
+            end_index = start_index + n_colours
             fetch_indices = range(start_index, end_index)
             times = np.squeeze(
                 pygor.utilities.multicolour_reshape(
                     data_strf_object.get_timecourses(
                         fetch_indices, method="segmentation", mask_empty=True
                     ),
-                    numcolour,
+                    n_colours,
                 )
             )
             times = times[colour_idx]
@@ -429,7 +429,7 @@ def _contours_plotter_mosaic(
     if ax is None:
         return
     contours = pygor.utilities.multicolour_reshape(
-        data_strf_object.fit_contours(), data_strf_object.numcolour
+        data_strf_object.fit_contours(), data_strf_object.n_colours
     )[:, roi]
     neg_contours = contours[:, 0]
     pos_contours = contours[:, 1]
@@ -500,7 +500,7 @@ def _chroma_overview_legacy(
     colour_idx,
     colour_maps,
     column_titles,
-    numcolour,
+    n_colours,
     clim,
     clim_vals,
     remove_border,
@@ -525,8 +525,8 @@ def _chroma_overview_legacy(
         ax = ax.reshape(1, -1)
     all_collapsed_chroma = data_strf_object.collapse_times_chroma()
     for n, roi in enumerate(rois_specified):
-        start_index = roi * numcolour
-        end_index = start_index + numcolour
+        start_index = roi * n_colours
+        end_index = start_index + n_colours
         fetch_indices = range(start_index, end_index)
         strfs_chroma = np.squeeze(all_collapsed_chroma[:, roi])
         if remove_border is True:
@@ -564,7 +564,7 @@ def _chroma_overview_legacy(
                     data_strf_object.get_timecourses(
                         fetch_indices, method="segmentation", mask_empty=True
                     ),
-                    numcolour,
+                    n_colours,
                 )
             )
             times = times[colour_idx]
@@ -691,7 +691,7 @@ def _contours_plotter(
     if ax is None:
         fig, ax = plt.subplots()
     contours = pygor.utilities.multicolour_reshape(
-        data_strf_object.fit_contours(), data_strf_object.numcolour
+        data_strf_object.fit_contours(), data_strf_object.n_colours
     )[:, roi]
     neg_contours = contours[:, 0]
     pos_contours = contours[:, 1]
@@ -771,7 +771,7 @@ def rgb_representation(
     if isinstance(specify_rois, int) or isinstance(
         specify_rois, np.int32
     ):  # user specifies number of rois from "start", although negative is also allowed
-        specify_rois = range(specify_rois, specify_rois + data_strf_object.numcolour)
+        specify_rois = range(specify_rois, specify_rois + data_strf_object.n_colours)
     # who cares what ipl_sort does here, the input is an int. What's it supposed to do?!
     elif isinstance(specify_rois, Iterable):  # user specifies specific rois
         specify_rois = specify_rois  # lol
@@ -800,7 +800,7 @@ def rgb_representation(
         axs = ax
         fig = plt.gcf()
     rois = list(specify_rois) * 2
-    if len(specify_rois) == data_strf_object.numcolour:
+    if len(specify_rois) == data_strf_object.n_colours:
         axs = [axs]
     for n, ax in enumerate(axs):
         roi = specify_rois[n]  # Because each row represents a roi
@@ -1140,7 +1140,7 @@ def multi_chroma_movie(strf_object, roi, show_cbar=False, **kwargs: Any):
     plot_settings["figure.dpi"] = 100
     plot_settings["savefig.facecolor"] = "white"
 
-    num_colours = strf_object.numcolour
+    num_colours = strf_object.n_colours
     multichrom = pygor.utilities.multicolour_reshape(strf_object.strfs, num_colours)[
         :, roi
     ]

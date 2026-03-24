@@ -215,7 +215,7 @@ class MockSTRFObject:
     def __init__(self, n_cells: int = 2, n_colors: int = 3, **kwargs):
         self.strfs = create_mock_strf_data(n_cells=n_cells, n_colors=n_colors, **kwargs)
         self.multicolour = n_colors > 1
-        self.numcolour = n_colors
+        self.n_colours = n_colors
         self.num_rois = n_cells
         
     def get_strf_shape(self):

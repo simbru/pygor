@@ -25,12 +25,12 @@ def convolve_image(strf_obj, roi_index, img = "example", img_zoom = 1/2, arr_zoo
         img = load_example()
     img = np.rollaxis(np.array([scipy.ndimage.zoom(img[:, :, i], img_zoom) for i in range(3)]), 0, 3)
     # Add UV channel by repeating blue content
-    if strf_obj.numcolour > 3 and img.shape[-1] < strf_obj.numcolour:
+    if strf_obj.n_colours > 3 and img.shape[-1] < strf_obj.n_colours:
         img = np.append(img, np.expand_dims(img[:, :, -1], -1), axis = -1)
-    if strf_obj.numcolour == 1 and img.shape[-1] > strf_obj.numcolour:
+    if strf_obj.n_colours == 1 and img.shape[-1] > strf_obj.n_colours:
         img = np.expand_dims(np.average(img, axis = -1), -1)
-    elif strf_obj.numcolour < 3 and img.shape[-1] > strf_obj.numcolour:
-        img = img[:, :, :strf_obj.numcolour]
+    elif strf_obj.n_colours < 3 and img.shape[-1] > strf_obj.n_colours:
+        img = img[:, :, :strf_obj.n_colours]
     # pix_per_degree_img = img.shape[1]/60 # pix/degrees
     # degrees_per_pix_arr = 86.325/arr.shape[1]
     rf_img_conv_output = np.empty(img.shape)

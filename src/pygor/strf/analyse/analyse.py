@@ -69,7 +69,7 @@ def _roi_by_roi_dict(data_strf_obj, df_return=False):  #
     dict["roi"] = [int(i.split("_")[1]) for i in data_strf_obj.strf_keys]
     # Get IPL info
     dict["ipl_depths"] = np.repeat(
-        data_strf_obj.ipl_depths, data_strf_obj.numcolour
+        data_strf_obj.ipl_depths, data_strf_obj.n_colours
     )
     if np.all(np.isnan(dict["ipl_depths"]) == True):
         raise AttributeError("ipl_depths are all NaNs")
@@ -220,13 +220,13 @@ def _roi_by_roi_dict(data_strf_obj, df_return=False):  #
     dict["space_amplitude"] = data_strf_obj.get_space_amps()
     dict["weight_space"] = preprocessing.normalize(
         pygor.utilities.multicolour_reshape(
-            data_strf_obj.get_space_amps(), data_strf_obj.numcolour
+            data_strf_obj.get_space_amps(), data_strf_obj.n_colours
         ),
         axis=0,
     ).flatten(order="F")
     dict["weight_time"] = preprocessing.normalize(
         pygor.utilities.multicolour_reshape(
-            data_strf_obj.get_time_amps(), data_strf_obj.numcolour
+            data_strf_obj.get_time_amps(), data_strf_obj.n_colours
         ),
         axis=0,
     ).flatten(order="F")
@@ -284,7 +284,7 @@ def _recording_dict(data_strf_obj):
     path = pathlib.Path(data_strf_obj.filename)
     dict["filename"] = path
     dict["multicolour"] = data_strf_obj.multicolour
-    dict["numcolour"] = data_strf_obj.numcolour
+    dict["n_colours"] = data_strf_obj.n_colours
     dict["numstrfs"] = data_strf_obj.num_strfs
     # Deal with metadata
     metadata = data_strf_obj.metadata.copy()
@@ -377,7 +377,7 @@ def _chromatic_dict(
             for j in strf_keys
         ]
         dict["roi"] = [int(i.split("_")[1]) for i in data_strf_obj.strf_keys][
-            :: data_strf_obj.numcolour
+            :: data_strf_obj.n_colours
         ]
         # dict["cell_id"] =
         size = pygor.data_helpers.label_from_str(

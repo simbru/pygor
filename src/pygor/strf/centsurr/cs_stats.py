@@ -378,7 +378,7 @@ def gen_stats(strfs_obj, colour_list = ["R", "G", "B", "UV"], **kwargs: Any):
     spatial_balance = np.repeat(strfs_obj.calc_balance_ratio(mode="white"), len(colour_list))
     spatial_opponency = np.repeat(strfs_obj.calc_spatial_opponency(mode="white"), len(colour_list))
     euclidean_distance = np.reshape(strfs_obj.calc_centre_distances(), -1)
-    for i in np.arange(strfs_obj.num_rois * strfs_obj.numcolour):
+    for i in np.arange(strfs_obj.num_rois * strfs_obj.n_colours):
         prediction_map, prediction_times = strfs_obj.cs_seg(i)
         time_len = prediction_times.shape[1]
         half_time = time_len // 2

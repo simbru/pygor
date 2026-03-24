@@ -240,7 +240,7 @@ def compute_spatial_offset_between_channels(strf_obj, roi, color_channels=(0, 1)
     # Get spatial maps for both channels
     spatial_maps = []
     for color_idx in color_channels:
-        strf_idx = roi * strf_obj.numcolour + color_idx
+        strf_idx = roi * strf_obj.n_colours + color_idx
         if strf_idx >= len(strf_obj.strfs):
             raise IndexError(f"ROI {roi}, color {color_idx} exceeds available STRFs")
         
@@ -310,7 +310,7 @@ def analyze_multicolor_spatial_alignment(strf_obj, roi, threshold=3.0,
     if not strf_obj.multicolour:
         raise ValueError("Multicolor analysis requires multicolor STRF data")
     
-    n_colors = strf_obj.numcolour
+    n_colors = strf_obj.n_colours
     
     # Extract spatial maps for each color channel
     spatial_maps = []
@@ -545,7 +545,7 @@ def compute_color_channel_overlap_wrapper(strf_obj, roi, color_channels=(0, 1), 
     # Get spatial maps for both channels
     spatial_maps = []
     for color_idx in color_channels:
-        strf_idx = roi * strf_obj.numcolour + color_idx
+        strf_idx = roi * strf_obj.n_colours + color_idx
         if strf_idx >= len(strf_obj.strfs):
             raise IndexError(f"ROI {roi}, color {color_idx} exceeds available STRFs")
         

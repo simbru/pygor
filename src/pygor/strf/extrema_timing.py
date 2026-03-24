@@ -125,12 +125,12 @@ def compare_color_channel_timing_wrapper(strf_obj, roi, color_channels=(0, 1), t
         raise ValueError("Color channel comparison requires multicolor STRF data")
     
     # Validate color channel indices
-    if max(color_channels) >= strf_obj.numcolour:
-        raise IndexError(f"Color channel index {max(color_channels)} exceeds available channels (0-{strf_obj.numcolour-1})")
+    if max(color_channels) >= strf_obj.n_colours:
+        raise IndexError(f"Color channel index {max(color_channels)} exceeds available channels (0-{strf_obj.n_colours-1})")
     
     # Calculate STRF indices for the specific color channels
-    strf_idx1 = roi * strf_obj.numcolour + color_channels[0]
-    strf_idx2 = roi * strf_obj.numcolour + color_channels[1]
+    strf_idx1 = roi * strf_obj.n_colours + color_channels[0]
+    strf_idx2 = roi * strf_obj.n_colours + color_channels[1]
     
     # Get timing maps for each color channel
     timing1 = map_extrema_timing_wrapper(

@@ -411,7 +411,7 @@ def plot_distribution(chroma_df, columns_like="area", animate=True):
 
 def ipl_summary_chroma(
     roi_df,
-    numcolours=4,
+    n_colours=4,
     figsize=(12, 7),
     legend=True,
     ipl_border=55,
@@ -510,10 +510,10 @@ def ipl_summary_chroma(
                         loc="left",
                         c=pygor.plotting.polarity_palette[1],
                     )
-            num_cells = int(len(np.unique(roi_df.index)) / numcolours)
+            num_cells = int(len(np.unique(roi_df.index)) / n_colours)
             num_strfs = int(
                 len(np.unique(roi_df.index))#.query("total_contour_area_largest > 0")
-                / numcolours
+                / n_colours
             )
             percent = np.round(num_strfs / num_cells * 100, 2)
             # ax[1, 0].set_xlabel(f"Percentage by colour (n = {num_cells})", size = 10)
@@ -581,7 +581,7 @@ def ipl_summary_chroma(
 
 def ipl_summary_polarity_roi(
     roi_df,
-    numcolours=4,
+    n_colours=4,
     figsize=(8, 4),
     polarities=[-1, 1],
     legend=True,
@@ -879,7 +879,7 @@ def plot_roi_hist(
 
 
 def ipl_summary_polarity_chroma(
-    chroma_df, numcolours=4, figsize=(8, 4), cat_pol=["off", "on"]
+    chroma_df, n_colours=4, figsize=(8, 4), cat_pol=["off", "on"]
 ):
     polarities = ["off", "on", 'opp']
     fig, axs = plt.subplots(
