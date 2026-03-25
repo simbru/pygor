@@ -506,6 +506,7 @@ def transfer_rois(
     target_projection: np.ndarray,
     max_shift: int = 20,
     upsample_factor: int = 10,
+    min_correlation: float = 0.6,
 ) -> Tuple[np.ndarray, dict]:
     """
     Transfer ROI mask from one recording to another using registration.
@@ -523,9 +524,14 @@ def transfer_rois(
     target_projection : ndarray
         Mean projection of target recording
     max_shift : int, optional
-        Maximum expected shift in pixels (default: 20)
+        Maximum expected shift in pixels (default: 20). Raises ValueError
+        if the detected shift exceeds this value.
     upsample_factor : int, optional
         Subpixel precision factor (default: 10)
+    min_correlation : float, optional
+        Minimum Pearson correlation between projections (default: 0.6).
+        Below this value a warning is issued. Below half this value
+        (default: 0.3) a ValueError is raised.
 
     Returns
     -------
@@ -535,6 +541,13 @@ def transfer_rois(
         Transform information with keys:
         - 'shift': (dy, dx) shift in pixels
         - 'error': registration error metric
+        - 'correlation': Pearson correlation between projections
+
+    Raises
+    ------
+    ValueError
+        If detected shift exceeds ``max_shift`` or if projection
+        correlation is below ``min_correlation * 0.5``.
 
     Examples
     --------
@@ -552,6 +565,22 @@ def transfer_rois(
     - Background pixels are labeled as 1
     - Nearest-neighbor interpolation preserves integer ROI labels
     """
+    # Check projection similarity before attempting registration
+    corr = float(np.corrcoef(ref_projection.ravel(), target_projection.ravel())[0, 1])
+    corr_floor = min_correlation * 0.5
+    if corr < corr_floor:
+        raise ValueError(
+            f"Projection correlation {corr:.3f} is below the error threshold "
+            f"({corr_floor:.2f}). Projections are too dissimilar for reliable "
+            f"ROI transfer. Check that the recordings are from the same field of view."
+        )
+    if corr < min_correlation:
+        warnings.warn(
+            f"Projection correlation {corr:.3f} is below the recommended "
+            f"threshold ({min_correlation:.2f}). ROI transfer may be unreliable.",
+            RuntimeWarning,
+        )
+
     # Compute shift between projections
     shift_yx, error, _ = phase_cross_correlation(
         ref_projection,
@@ -560,12 +589,11 @@ def transfer_rois(
         normalization=None,
     )
 
-    # Check if shift is reasonable
+    # Reject unreasonable shifts
     if np.abs(shift_yx).max() > max_shift:
-        warnings.warn(
+        raise ValueError(
             f"Detected shift {shift_yx} exceeds max_shift={max_shift}. "
-            f"ROI transfer may be unreliable.",
-            RuntimeWarning
+            f"ROI transfer aborted — the shift is too large to be reliable."
         )
 
     # phase_cross_correlation(reference=source, moving=target) returns the shift
@@ -579,6 +607,7 @@ def transfer_rois(
     transform = {
         'shift': tuple(roi_shift),
         'error': float(error),
+        'correlation': corr,
     }
 
     return shifted_mask, transform

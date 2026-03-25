@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 # Local imports
+import pygor.config
 import pygor.load
 
 
@@ -70,7 +71,10 @@ class Experiment:
               indices, which can silently misalign merges between Experiments)
         **class_kwargs : dict, optional
             Additional keyword arguments to pass to the pygor class constructor
-            (e.g., dir_num=8 for OSDS data)
+            (e.g., dir_num=8 for OSDS data).
+            If ``config="path/to/settings.toml"`` is provided, that TOML file
+            is validated once before loading starts and then applied to each
+            recording constructor. Invalid/missing config raises immediately.
 
         Returns
         -------
@@ -90,12 +94,22 @@ class Experiment:
 
         >>> # Skip failed files (use with caution — recording indices will shift)
         >>> exp = Experiment.from_files(file_list, 'STRF', on_error="skip")
+
+        >>> # Apply custom config to all recordings
+        >>> exp = Experiment.from_files(file_list, 'STRF', config="settings0.toml")
         """
         if on_error not in ("raise", "skip"):
             raise ValueError(f"on_error must be 'raise' or 'skip', got '{on_error}'")
         # Handle single file input
         if isinstance(file_paths, (str, pathlib.Path)):
             file_paths = [file_paths]
+
+        # Validate custom config once up front to fail fast and clearly.
+        config_path = class_kwargs.get("config")
+        if config_path is not None:
+            pygor.config.load_config(config_path)
+            resolved = pathlib.Path(config_path).expanduser().resolve()
+            print(f"Config loaded successfully: {resolved}")
 
         # Get the pygor class
         try:
@@ -125,7 +139,7 @@ class Experiment:
         if n_jobs == 1 or len(file_paths) == 1:
             # Sequential loading with tqdm progress bar
             try:
-                from tqdm import tqdm
+                from tqdm.auto import tqdm
 
                 results = [
                     load_single_file(fp)
@@ -140,7 +154,7 @@ class Experiment:
             try:
                 import contextlib
 
-                from tqdm import tqdm
+                from tqdm.auto import tqdm
 
                 @contextlib.contextmanager
                 def _tqdm_joblib(tqdm_bar):
@@ -249,7 +263,7 @@ class Experiment:
         return cls(recording=recordings)
 
     def save(self, path, overwrite=False):
-        """Save the entire experiment to a single ``.pygor.h5`` file.
+        """Save the entire experiment to a single ``.experiment.h5`` file.
 
         Each recording is stored in its own HDF5 group
         (``recording_000``, ``recording_001``, …). The class name is
@@ -259,7 +273,7 @@ class Experiment:
         Parameters
         ----------
         path : str or Path
-            Output file path (recommended extension: ``.pygor.h5``).
+            Output file path (recommended extension: ``.experiment.h5``).
         overwrite : bool, optional
             If True, replace an existing file.  Default False.
 
@@ -288,7 +302,7 @@ class Experiment:
 
     @classmethod
     def load(cls, path):
-        """Load an experiment from a ``.pygor.h5`` file.
+        """Load an experiment from a ``.experiment.h5`` file.
 
         Parameters
         ----------
@@ -1027,20 +1041,20 @@ class Experiment:
 
         return np.vstack(rows)
 
-    def transfer_rois_to(self, target: "Experiment", **transfer_kwargs: Any) -> dict:
+    def transfer_rois_from(self, source: "Experiment", **transfer_kwargs: Any) -> dict:
         """
-        Transfer ROIs from this experiment's recordings to a target experiment,
+        Transfer ROIs from a source experiment's recordings to this experiment,
         matching recordings by prefix ({fish}_{plane}).
 
-        For each matched pair, calls ``target_recording.transfer_rois_from(source_recording)``
+        For each matched pair, calls ``self_recording.transfer_rois_from(source_recording)``
         to align and copy ROI masks via image registration.
 
         Parameters
         ----------
-        target : Experiment
-            Target experiment to receive ROIs.
+        source : Experiment
+            Source experiment providing the ROIs.
         **transfer_kwargs
-            Keyword arguments passed to each ``transfer_rois_from()`` call
+            Keyword arguments passed to each recording-level ``transfer_rois_from()`` call
             (e.g., max_shift, upsample_factor, projection_mode, plot).
 
         Returns
@@ -1057,8 +1071,8 @@ class Experiment:
         import warnings
 
         # Build prefix → index maps
-        src_prefixes = self.id_dict["prefix"]
-        tgt_prefixes = target.id_dict["prefix"]
+        src_prefixes = source.id_dict["prefix"]
+        tgt_prefixes = self.id_dict["prefix"]
 
         def _build_prefix_map(prefixes, label):
             pmap = {}
@@ -1104,8 +1118,8 @@ class Experiment:
         errors = []
         successful = []
         for pfx in matched_keys:
-            src_rec = self.recording[src_map[pfx]]
-            tgt_rec = target.recording[tgt_map[pfx]]
+            src_rec = source.recording[src_map[pfx]]
+            tgt_rec = self.recording[tgt_map[pfx]]
             try:
                 tgt_rec.transfer_rois_from(src_rec, **transfer_kwargs)
                 successful.append(pfx)
@@ -1113,11 +1127,11 @@ class Experiment:
                 errors.append((pfx, str(e)))
                 print(f"  ERROR transferring '{pfx}': {e}")
 
-        # Update target id_dict to reflect new ROI counts
-        target.__update_data__()
+        # Update self id_dict to reflect new ROI counts
+        self.__update_data__()
 
         # Print summary
-        print(f"\n--- transfer_rois_to summary ---")
+        print(f"\n--- transfer_rois_from summary ---")
         print(f"  Matched:      {len(successful)}/{len(matched_keys)} prefixes")
         if source_only:
             print(f"  Source only:   {source_only}")
@@ -1162,7 +1176,7 @@ class Experiment:
         """
         success_count = 0
         try:
-            from tqdm import tqdm
+            from tqdm.auto import tqdm
 
             iterator = tqdm(
                 enumerate(self.recording), total=len(self.recording), desc=method

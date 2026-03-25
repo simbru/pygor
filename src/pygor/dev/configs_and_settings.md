@@ -50,7 +50,7 @@ print(obj.params.summary())
 | `triggers` | threshold, min_gap_seconds |
 | `segmentation.cellpose` | diameter, flow_threshold, cellprob_threshold |
 | `segmentation.cellpose_postprocess` | split_large, size_multiplier, etc. (cellpose+ only) |
-| `strf.general` | num_colours |
+| `strf.general` | n_colours |
 | `strf.contouring` | global_thresh_val, min_targets, etc. |
 | `strf.spatial` | snr_threshold, kernel_width, etc. |
 | `strf.temporal` | exclude_firstlast, extrema_threshold |
