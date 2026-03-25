@@ -91,7 +91,8 @@ lambd = 0.003           # Wiener regularization (larger = smoother)
 kernel_window_ms = 800.0      # Kernel support duration (ms)
 
 [strf.general]
-num_colours = 1
+# Source of truth for number of stimulus colour channels
+n_colours = 1
 
 [strf.contouring]
 global_thresh_val = 1.5
@@ -113,11 +114,20 @@ exclude_firstlast = [1, 1]
 extrema_threshold = 3.0
 
 [strf.calculate]
+n_triggers_per_colour = 100  # 0 means auto-detect
 sta_past_window = 2.0
 sta_future_window = 2.0
 edge_crop = 2
+max_frames_per_trigger = 8
 event_sd_threshold = 2.0
 use_znorm = true
+adjust_by_polarity = true
+skip_first_triggers = 0
+skip_last_triggers = 0
+pre_smooth = 0
+n_jobs = -1
+normalize_strfs = true
+verbose = false
 
 [strf.centsurr]
 n_clusters = 3

@@ -3,9 +3,18 @@ Analysis parameter management for pygor.
 
 Provides a unified container for tracking analysis parameters across
 preprocessing, registration, segmentation, and other pipeline steps.
+
+``_defaults`` is the single source of truth for what parameters will be
+used when a processing method is called.  Use bracket syntax to inspect
+or modify defaults::
+
+    rec.params["segmentation.blob.threshold"]        # read
+    rec.params["segmentation.blob.threshold"] = 0.1  # write
+
+Applied-parameter records (``mark_*`` methods) track what *was* used for
+provenance but do not feed back into defaults.
 """
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Union
 import warnings
@@ -29,13 +38,15 @@ except ImportError:
     HAS_TOML_WRITE = False
 
 
-@dataclass
 class AnalysisParams:
-    """
-    Unified parameter management for pygor analysis pipeline.
+    """Unified parameter management for pygor analysis pipeline.
 
-    Stores defaults from config, tracks applied parameters for each processing
-    step, and provides serialization to/from TOML format.
+    Stores defaults from config, tracks applied parameters for each
+    processing step, and provides serialization to/from TOML format.
+
+    ``_defaults`` is the single source of truth for configurable
+    parameters.  Cross-step values like ``artifact_width`` are exposed
+    as properties that read/write through ``_defaults``.
 
     Attributes
     ----------
@@ -54,7 +65,7 @@ class AnalysisParams:
     segmented : bool
         Whether segmentation has been applied
     artifact_width : int
-        Light artifact width in pixels (set during preprocessing, used by registration)
+        Property — reads/writes ``_defaults["preprocessing"]["artifact_width"]``.
 
     Examples
     --------
@@ -64,31 +75,70 @@ class AnalysisParams:
     >>> params.to_toml()  # Export as TOML string
     """
 
-    # Processing step parameters (None = not yet applied)
-    preprocessing: Optional[dict] = None
-    registration: Optional[dict[str, object]] = None
-    segmentation: Optional[dict] = None
-    triggers: Optional[dict] = None
+    def __init__(
+        self,
+        *,
+        preprocessing: Optional[dict] = None,
+        registration: Optional[dict] = None,
+        segmentation: Optional[dict] = None,
+        triggers: Optional[dict] = None,
+        preprocessed: bool = False,
+        registered: bool = False,
+        segmented: bool = False,
+        _config_source: str = "package",
+        _defaults: Optional[dict] = None,
+        analysis_type: str = "Core",
+        steps: Optional[dict] = None,
+        # Legacy — accepted for backward compat but ignored (property reads _defaults)
+        artifact_width: Optional[int] = None,
+    ):
+        # Applied-parameter records (provenance)
+        self.preprocessing = preprocessing
+        self.registration = registration
+        self.segmentation = segmentation
+        self.triggers = triggers
 
-    # Processing state
-    preprocessed: bool = False
-    registered: bool = False
-    segmented: bool = False
+        # Processing state flags
+        self.preprocessed = preprocessed
+        self.registered = registered
+        self.segmented = segmented
 
-    # Key values shared between steps
-    artifact_width: int = 2  # Set during preprocess, used by registration
+        # Internal
+        self._config_source = _config_source
+        self._defaults = _defaults if _defaults is not None else {}
+        self.analysis_type = analysis_type
+        self.steps = steps if steps is not None else {}
 
-    # Internal: track where defaults came from
-    _config_source: str = field(default="package", repr=False)
+        # If caller passed artifact_width explicitly (legacy / _from_dict),
+        # seed it into _defaults so the property picks it up.
+        if artifact_width is not None:
+            self._defaults.setdefault("preprocessing", {})
+            # Only seed if _defaults doesn't already have it
+            self._defaults["preprocessing"].setdefault("artifact_width", artifact_width)
 
-    # Store defaults for reference
-    _defaults: dict = field(default_factory=dict, repr=False)
+    # ------------------------------------------------------------------
+    # artifact_width — property backed by _defaults (single source of truth)
+    # ------------------------------------------------------------------
 
-    # Analysis type this params instance is tracking (matches class name, e.g. "STRF", "CenterSurround")
-    analysis_type: str = field(default="Core", repr=False)
+    @property
+    def artifact_width(self) -> int:
+        """Light artifact width in pixels.
 
-    # General pipeline steps (for methods without dedicated mark_* methods)
-    steps: dict = field(default_factory=dict, repr=False)
+        Reads from ``_defaults["preprocessing"]["artifact_width"]``.
+        Set via this property or via bracket syntax::
+
+            params.artifact_width = 5
+            params["preprocessing.artifact_width"] = 5  # equivalent
+        """
+        return self._defaults.get("preprocessing", {}).get("artifact_width", 2)
+
+    @artifact_width.setter
+    def artifact_width(self, value: int):
+        self._defaults.setdefault("preprocessing", {})["artifact_width"] = value
+
+    # ------------------------------------------------------------------
+    # Construction helpers
+    # ------------------------------------------------------------------
 
     @classmethod
     def from_config(cls, config_path: Union[str, Path, None] = None, analysis_type: str = "Core") -> "AnalysisParams":
@@ -123,16 +173,11 @@ class AnalysisParams:
         """
         from pygor.config import get_defaults
 
-        # Determine config source
         config_source = "custom" if config_path else "package"
 
-        # Get artifact_width from preprocessing defaults
-        preprocess_defaults = get_defaults("preprocessing", config_path)
-        artifact_width = preprocess_defaults.get("artifact_width", 2)
-
-        # Common pipeline defaults (shared by all analysis types)
+        # Build the single _defaults dict — all config lives here
         defaults = {
-            "preprocessing": preprocess_defaults,
+            "preprocessing": get_defaults("preprocessing", config_path),
             "registration": get_defaults("registration", config_path),
             "segmentation": get_defaults("segmentation", config_path),
             "triggers": get_defaults("triggers", config_path),
@@ -141,22 +186,27 @@ class AnalysisParams:
         }
 
         # Load analysis-type-specific defaults using lowercase TOML section name
-        # e.g. "STRF" -> [strf], "CenterSurround" -> [centersurround]
         config_key = analysis_type.lower()
         analysis_defaults = get_defaults(config_key, config_path)
         if analysis_defaults:
             defaults[config_key] = analysis_defaults
 
         return cls(
-            artifact_width=artifact_width,
             _config_source=config_source,
             _defaults=defaults,
             analysis_type=analysis_type,
         )
 
+    # ------------------------------------------------------------------
+    # Reading defaults
+    # ------------------------------------------------------------------
+
     def get_defaults(self, step: str) -> dict:
-        """
-        Get default parameters for a processing step.
+        """Get a **copy** of default parameters for a processing step.
+
+        Returns a snapshot of the current defaults.  Modifications to the
+        returned dict do **not** affect stored defaults — use bracket
+        syntax (``params["key.path"] = value``) to change defaults.
 
         Parameters
         ----------
@@ -169,19 +219,23 @@ class AnalysisParams:
         Returns
         -------
         dict
-            Default parameters for the specified step
+            Copy of default parameters for the specified step
 
         Examples
         --------
         >>> params = AnalysisParams.from_config()
         >>> params.get_defaults("preprocessing")
-        {'artifact_width': 2, 'flip_x': True, ...}
+        {'artifact_width': 3, 'flip_x': True, ...}
         >>> params.get_defaults(params.analysis_type)  # analysis-specific defaults
         {'contouring': {...}, 'spatial': {...}, ...}
         """
         if step not in self._defaults:
             raise ValueError(f"Unknown step: {step}. Must be one of: {list(self._defaults.keys())}")
         return self._defaults.get(step, {}).copy()
+
+    # ------------------------------------------------------------------
+    # Modifying defaults
+    # ------------------------------------------------------------------
 
     def load_config(self, config_path: Union[str, Path]) -> None:
         """
@@ -204,19 +258,13 @@ class AnalysisParams:
         """
         from pygor.config import load_config as _load_config, _deep_merge
 
-        # Load new config (merged with package defaults)
         new_config = _load_config(config_path)
-
-        # Merge into our stored defaults
         self._defaults = _deep_merge(self._defaults, new_config)
-
-        # Update artifact_width from new config
-        if "preprocessing" in new_config:
-            self.artifact_width = self._defaults["preprocessing"].get(
-                "artifact_width", self.artifact_width
-            )
-
         self._config_source = "custom"
+
+    # ------------------------------------------------------------------
+    # Recording applied parameters (provenance)
+    # ------------------------------------------------------------------
 
     def mark_preprocessing(self, params: dict) -> None:
         """
@@ -229,7 +277,6 @@ class AnalysisParams:
         """
         self.preprocessing = params.copy()
         self.preprocessed = True
-        self.artifact_width = params.get("artifact_width", self.artifact_width)
 
     def mark_registration(self, params: dict[str, object], stats: dict[str, object] | None = None) -> None:
         """
@@ -287,6 +334,10 @@ class AnalysisParams:
         """
         self.steps[step_name] = params.copy()
 
+    # ------------------------------------------------------------------
+    # Serialization
+    # ------------------------------------------------------------------
+
     def to_dict(self) -> dict:
         """
         Export all parameters as a nested dictionary.
@@ -302,15 +353,13 @@ class AnalysisParams:
                 "registered": self.registered,
                 "segmented": self.segmented,
             },
-            "shared": {
-                "artifact_width": self.artifact_width,
-            },
             "analysis_type": self.analysis_type,
             "preprocessing": self.preprocessing,
             "registration": self._clean_for_export(self.registration),
             "segmentation": self.segmentation,
             "triggers": self.triggers,
             "_config_source": self._config_source,
+            "_defaults": self._clean_for_export_nested(self._defaults),
         }
         if self.steps:
             result["steps"] = {
@@ -329,6 +378,29 @@ class AnalysisParams:
         for key, value in params.items():
             if isinstance(value, np.ndarray):
                 # Convert small arrays to lists, skip large ones
+                if value.size <= 100:
+                    cleaned[key] = value.tolist()
+                else:
+                    cleaned[f"{key}_shape"] = list(value.shape)
+            elif isinstance(value, (np.floating, np.integer)):
+                cleaned[key] = float(value) if isinstance(value, np.floating) else int(value)
+            elif isinstance(value, tuple):
+                cleaned[key] = list(value)
+            else:
+                cleaned[key] = value
+        return cleaned
+
+    def _clean_for_export_nested(self, params: Optional[dict]) -> Optional[dict]:
+        """Recursively clean nested dicts for serialization."""
+        if params is None:
+            return None
+        import numpy as np
+
+        cleaned = {}
+        for key, value in params.items():
+            if isinstance(value, dict):
+                cleaned[key] = self._clean_for_export_nested(value)
+            elif isinstance(value, np.ndarray):
                 if value.size <= 100:
                     cleaned[key] = value.tolist()
                 else:
@@ -394,7 +466,10 @@ class AnalysisParams:
     def _from_dict(cls, data: dict) -> "AnalysisParams":
         """Create AnalysisParams from a dictionary."""
         state = data.get("state", {})
+
+        # Backward compat: legacy "shared" section stored artifact_width separately
         shared = data.get("shared", {})
+        legacy_aw = shared.get("artifact_width")
 
         instance = cls(
             preprocessing=data.get("preprocessing"),
@@ -404,9 +479,10 @@ class AnalysisParams:
             preprocessed=state.get("preprocessed", False),
             registered=state.get("registered", False),
             segmented=state.get("segmented", False),
-            artifact_width=shared.get("artifact_width", 2),
+            artifact_width=legacy_aw,  # Seeds into _defaults if present
             _config_source=data.get("_config_source", "loaded"),
             analysis_type=data.get("analysis_type", "Core"),
+            _defaults=data.get("_defaults"),
         )
         if "steps" in data:
             instance.steps = data["steps"]
@@ -449,6 +525,10 @@ class AnalysisParams:
         path = Path(path)
         toml_str = path.read_text()
         return cls.from_toml(toml_str)
+
+    # ------------------------------------------------------------------
+    # Display
+    # ------------------------------------------------------------------
 
     def summary(self, show_all: bool = False) -> str:
         """
@@ -560,6 +640,207 @@ class AnalysisParams:
                 self._add_params_to_tree(lines, step_params, None, step_child)
 
         return "\n".join(lines)
+
+    def edit(self, section=None, blocking=True):
+        """Open an interactive parameter editor (requires ``[gui]`` extra).
+
+        Pops up an IGOR-style editable table. Changes are applied
+        immediately when you click away from a cell.
+
+        Parameters
+        ----------
+        section : str, optional
+            Filter to a top-level section (e.g. "segmentation", "strf").
+            If None, show all parameters.
+        blocking : bool, optional
+            If True (default), block until the editor window is closed.
+            If False, return immediately after opening the window.
+
+        Returns
+        -------
+        widget
+            The editor widget (keep a reference to prevent garbage collection).
+
+        Examples
+        --------
+        >>> rec.params.edit()                   # all params
+        >>> rec.params.edit("segmentation")     # just segmentation
+        >>> rec.params.edit(blocking=False)     # non-blocking window
+        """
+        try:
+            from pygor.core.gui.param_editor import launch_editor
+        except ImportError as e:
+            raise ImportError(
+                "Parameter editor requires Qt. Install with:\n"
+                "  uv pip install 'pygor[gui]'"
+            ) from e
+
+        title = f"Parameters — {self.analysis_type}"
+        if section:
+            title += f" [{section}]"
+        return launch_editor(self, section=section, title=title, blocking=blocking)
+
+    # ------------------------------------------------------------------
+    # Bracket access to _defaults
+    # ------------------------------------------------------------------
+
+    def _flatten_defaults(self, prefix="", d=None):
+        """Flatten nested _defaults dict into dotted-path key/value pairs.
+
+        Returns
+        -------
+        list of (str, value)
+            Sorted list of (dotted.path, value) pairs for all leaf values.
+        """
+        if d is None:
+            d = self._defaults
+        items = []
+        for key, value in d.items():
+            path = f"{prefix}.{key}" if prefix else key
+            if isinstance(value, dict):
+                items.extend(self._flatten_defaults(path, value))
+            else:
+                items.append((path, value))
+        return items
+
+    def to_dataframe(self, section=None):
+        """Return defaults as a two-column DataFrame (parameter path, value).
+
+        Parameters
+        ----------
+        section : str, optional
+            Filter to a top-level section (e.g. "segmentation", "strf").
+            If None, show all defaults.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Columns: ``parameter``, ``value``
+
+        Examples
+        --------
+        >>> rec.params.to_dataframe()
+        >>> rec.params.to_dataframe("segmentation")
+        """
+        import pandas as pd
+
+        if section is not None:
+            if section not in self._defaults:
+                raise KeyError(
+                    f"Unknown section '{section}'. "
+                    f"Available: {list(self._defaults.keys())}"
+                )
+            flat = self._flatten_defaults(section, self._defaults[section])
+        else:
+            flat = self._flatten_defaults()
+        return pd.DataFrame(flat, columns=["parameter", "value"])
+
+    def __getitem__(self, dotted_key: str):
+        """Get a default parameter value by dotted path.
+
+        Parameters
+        ----------
+        dotted_key : str
+            Dotted path into the defaults dict, e.g.
+            ``"segmentation.blob.min_sigma"`` or ``"strf.calculate.n_colours"``.
+
+        Returns
+        -------
+        value
+            The parameter value.
+
+        Raises
+        ------
+        KeyError
+            If the path does not exist.
+
+        Examples
+        --------
+        >>> rec.params["segmentation.blob.min_sigma"]
+        0.8
+        """
+        keys = dotted_key.split(".")
+        d = self._defaults
+        for i, k in enumerate(keys):
+            if not isinstance(d, dict) or k not in d:
+                traversed = ".".join(keys[:i])
+                if isinstance(d, dict):
+                    available = list(d.keys())
+                    raise KeyError(
+                        f"Key '{k}' not found at '{traversed}'. "
+                        f"Available keys: {available}"
+                    )
+                else:
+                    raise KeyError(
+                        f"'{traversed}' is a leaf value ({d!r}), "
+                        f"cannot descend into '{k}'"
+                    )
+            d = d[k]
+        return d
+
+    def __setitem__(self, dotted_key: str, value):
+        """Set a default parameter value by dotted path.
+
+        Only allows setting existing keys to prevent typos from silently
+        creating new parameters. The change affects subsequent processing
+        steps that read from defaults.
+
+        Parameters
+        ----------
+        dotted_key : str
+            Dotted path into the defaults dict, e.g.
+            ``"segmentation.blob.min_sigma"``.
+        value
+            The new value.
+
+        Raises
+        ------
+        KeyError
+            If the path does not exist (prevents typos).
+
+        Examples
+        --------
+        >>> rec.params["segmentation.blob.min_sigma"] = 1.2
+        >>> rec.params["strf.calculate.n_colours"] = 4
+        """
+        keys = dotted_key.split(".")
+        d = self._defaults
+        for i, k in enumerate(keys[:-1]):
+            if not isinstance(d, dict) or k not in d:
+                traversed = ".".join(keys[:i])
+                if isinstance(d, dict):
+                    available = list(d.keys())
+                    raise KeyError(
+                        f"Key '{k}' not found at '{traversed}'. "
+                        f"Available keys: {available}"
+                    )
+                else:
+                    raise KeyError(
+                        f"'{traversed}' is a leaf value ({d!r}), "
+                        f"cannot descend into '{k}'"
+                    )
+            d = d[k]
+
+        final_key = keys[-1]
+        if not isinstance(d, dict) or final_key not in d:
+            parent = ".".join(keys[:-1])
+            if isinstance(d, dict):
+                available = list(d.keys())
+                raise KeyError(
+                    f"Key '{final_key}' not found at '{parent}'. "
+                    f"Available keys: {available}. "
+                    f"Only existing parameters can be set (prevents typos)."
+                )
+            else:
+                raise KeyError(
+                    f"'{parent}' is a leaf value ({d!r}), "
+                    f"cannot set '{final_key}' on it"
+                )
+        d[final_key] = value
+
+    # ------------------------------------------------------------------
+    # Internal display helpers
+    # ------------------------------------------------------------------
 
     def _add_params_to_tree(
         self,

@@ -118,7 +118,12 @@ def load_config(config_path: Union[str, Path, None] = None) -> dict:
 
     # Merge user config if provided
     if config_path is not None:
-        user_config = _load_toml_file(Path(config_path))
+        config_path = Path(config_path)
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f"Config file not found: {config_path.resolve()}"
+            )
+        user_config = _load_toml_file(config_path)
         return _deep_merge(defaults, user_config)
 
     return defaults
@@ -161,101 +166,3 @@ def get_defaults(section: str, config_path: Union[str, Path, None] = None) -> di
         result = result.get(key, {})
     return result.copy() if isinstance(result, dict) else result
 
-
-# -----------------------------------------------------------------------------
-# Convenience functions (backward compatible)
-# -----------------------------------------------------------------------------
-
-def get_preprocess_defaults() -> dict:
-    """
-    Get preprocessing defaults from package config.
-
-    Returns
-    -------
-    dict
-        Preprocessing parameters with keys:
-        - artifact_width: int
-        - flip_x: bool
-        - detrend: bool
-        - smooth_window_s: float
-        - time_bin: int
-        - fix_first_frame: bool
-    """
-    return get_defaults("preprocessing")
-
-
-def get_registration_defaults() -> dict:
-    """
-    Get registration defaults from package config.
-
-    Returns
-    -------
-    dict
-        Registration parameters with keys:
-        - n_reference_frames: int
-        - batch_size: int
-        - upsample_factor: int
-        - normalization: str or None
-        - order: int
-        - mode: str
-    """
-    return get_defaults("registration")
-
-
-def get_trigger_defaults() -> dict:
-    """
-    Get trigger detection defaults from package config.
-
-    Returns
-    -------
-    dict
-        Trigger parameters with keys:
-        - threshold: int
-        - min_gap_seconds: float
-    """
-    return get_defaults("triggers")
-
-
-def get_segmentation_defaults() -> dict:
-    """
-    Get segmentation defaults from package config.
-
-    Returns
-    -------
-    dict
-        Segmentation parameters with nested keys:
-        - cellpose: {...}
-        - postprocess: {...}
-    """
-    return get_defaults("segmentation")
-
-
-def get_instrument_defaults() -> dict:
-    """
-    Get instrument calibration defaults from package config.
-
-    Returns
-    -------
-    dict
-        Instrument parameters with keys:
-        - frame_rate_hz: float
-        - fish_screen_dist_mm: float
-        - screen_width_mm: float
-        - screen_width_pix_au: int
-        - screen_height_pix_au: int
-        - screen_width_visang: float
-        - lens_to_retina_distance_um: float
-    """
-    return get_defaults("instrument")
-
-
-# -----------------------------------------------------------------------------
-# Legacy constants for backward compatibility
-# -----------------------------------------------------------------------------
-# These are kept for any code that imports them directly.
-# New code should use get_defaults() or the convenience functions.
-
-PREPROCESS_DEFAULTS = get_preprocess_defaults()
-REGISTRATION_DEFAULTS = get_registration_defaults()
-TRIGGER_DEFAULTS = get_trigger_defaults()
-SEGMENTATION_DEFAULTS = get_segmentation_defaults()

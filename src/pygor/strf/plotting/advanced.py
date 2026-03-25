@@ -1140,8 +1140,8 @@ def multi_chroma_movie(strf_object, roi, show_cbar=False, **kwargs: Any):
     plot_settings["figure.dpi"] = 100
     plot_settings["savefig.facecolor"] = "white"
 
-    num_colours = strf_object.n_colours
-    multichrom = pygor.utilities.multicolour_reshape(strf_object.strfs, num_colours)[
+    n_colours = strf_object.n_colours
+    multichrom = pygor.utilities.multicolour_reshape(strf_object.strfs, n_colours)[
         :, roi
     ]
     # Use RC context manager to temporarily use the modified rc dict

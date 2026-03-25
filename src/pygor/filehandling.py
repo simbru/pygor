@@ -13,8 +13,7 @@ import joblib
 from IPython.core import display
 from ipywidgets import Output
 
-# from tqdm.autonotebook import tqdm
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 
 def find_files_in(

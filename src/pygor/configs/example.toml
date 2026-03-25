@@ -16,4 +16,4 @@ batch_size = 10
 # flow_threshold = 0.9
 
 # [strf.general]
-# num_colours = 4
+# n_colours = 4
