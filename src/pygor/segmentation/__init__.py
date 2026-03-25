@@ -48,17 +48,18 @@ def list_methods():
 
 
 def _load_mode_defaults(config_key, data=None):
-    """Load mode-specific segmentation defaults from config.
+    """Load mode-specific segmentation defaults from the data object's params.
 
-    Tries the data object's params first (respects user config), then
-    falls back to package defaults via pygor.config.
+    Reads from ``data.params`` which is the single source of truth for
+    per-recording configuration (already merges package defaults + user
+    config at construction time).
 
     Parameters
     ----------
     config_key : str
         Segmentation mode key (e.g. "blob", "watershed", "flood_fill")
     data : Core/STRF, optional
-        Data object whose params may contain user config overrides
+        Data object whose params contain merged config defaults
 
     Returns
     -------
@@ -67,15 +68,7 @@ def _load_mode_defaults(config_key, data=None):
     """
     mode_defaults = {}
 
-    # Read fresh from disk so live edits to defaults.toml take effect immediately
-    try:
-        from pygor.config import get_defaults
-        mode_defaults = get_defaults(f"segmentation.{config_key}")
-    except (KeyError, AttributeError, ImportError):
-        pass
-
-    # Fallback to data object's cached params (e.g. when user passed config= at construction)
-    if not mode_defaults and data is not None and hasattr(data, "params"):
+    if data is not None and hasattr(data, "params"):
         try:
             seg_defaults = data.params.get_defaults("segmentation")
             mode_defaults = seg_defaults.get(config_key, {})

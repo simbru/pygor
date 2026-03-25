@@ -93,6 +93,7 @@ class Core:
     trigger_mode: int = 1  # defualt value
     num_rois: int = field(init=False)
     params: AnalysisParams = field(init=False)  # Analysis parameters
+    roi_origin: dict | None = field(init=False, default=None)  # ROI provenance tracking
 
     def __post_init__(self):
         """initialize Core by auto-detecting file format and loading data."""
@@ -1342,13 +1343,14 @@ class Core:
         if not hasattr(self, "_pre_registration_images"):
             self._pre_registration_images = None
 
-    def save_object(self, path, overwrite=False):
-        """Save this single recording to a ``.pygor.h5`` file.
+    def save_object(self, path=None, overwrite=False):
+        """Save this single recording to a ``.recording.h5`` file.
 
         Parameters
         ----------
         path : str or Path
-            Output file path (recommended extension: ``.pygor.h5``).
+            Output file path. Defaults to the source filename with
+            ``.recording.h5`` extension to distinguish from IGOR exports.
         overwrite : bool, optional
             If True, overwrite an existing file.  Default False.
 
@@ -1357,6 +1359,15 @@ class Core:
         Path
             Path to the saved file.
         """
+        if path is None:
+            # Use .recording.h5 to distinguish from IGOR-exported .h5 files.
+            # .with_suffix replaces only the last suffix, so .smp → .recording.h5
+            # requires stripping first, then adding the compound extension.
+            stem = pathlib.Path(self.filename).resolve()
+            # Strip all existing suffixes (e.g. ".smp", ".smh", ".h5")
+            while stem.suffix:
+                stem = stem.with_suffix("")
+            path = stem.with_suffix(".recording.h5")
         path = pathlib.Path(path)
         if path.exists() and not overwrite:
             raise FileExistsError(
@@ -1372,14 +1383,18 @@ class Core:
         print(f"Saved to: {path}")
         return path
 
+    def save(self, path=None, overwrite=False):
+        """Alias for save_object."""
+        return self.save_object(path, overwrite)
+
     @classmethod
     def load_object(cls, path):
-        """Load a single recording from a ``.pygor.h5`` file.
+        """Load a single recording from a ``.recording.h5`` file.
 
         Parameters
         ----------
         path : str or Path
-            Path to a ``.pygor.h5`` file containing one recording.
+            Path to a ``.recording.h5`` file containing one recording.
 
         Returns
         -------
@@ -1962,6 +1977,7 @@ class Core:
         """
         self.rois = roi_mask
         self.num_rois = len(np.unique(roi_mask)) - 1
+        self.roi_origin = None  # Clear stale provenance; caller should set explicitly
         print(f"Successfully updated object.rois: {self.num_rois} ROIs saved")
 
     def transfer_rois_from(
@@ -1970,9 +1986,9 @@ class Core:
         *,
         max_shift: int = 20,
         upsample_factor: int = 10,
+        min_correlation: float = 0.6,
         projection_mode: str = "mean",
         plot: bool = False,
-        overwrite: bool = True,
         extract_traces: bool = False,
     ) -> dict:
         """
@@ -1988,19 +2004,21 @@ class Core:
             Source data object containing ROIs to transfer. Must have valid
             `rois` attribute (not None) and `average_stack` or `images`.
         max_shift : int, optional
-            Maximum expected shift in pixels (default: 20). A warning is raised
+            Maximum expected shift in pixels (default: 20). Raises ValueError
             if the detected shift exceeds this value.
         upsample_factor : int, optional
             Subpixel precision factor for phase cross-correlation (default: 10).
             Higher values increase precision but slow computation.
+        min_correlation : float, optional
+            Minimum Pearson correlation between projections (default: 0.6).
+            Below this a warning is issued; below half this value a ValueError
+            is raised.
         projection_mode : str, optional
             How to compute reference images for alignment (default: "mean").
             Options: "mean", "std", "correlation".
         plot : bool, optional
             If True, display a 4-panel comparison figure showing alignment quality
             (default: False).
-        overwrite : bool, optional
-            If True, save transferred ROIs to H5 file if available (default: True).
         extract_traces : bool, optional
             If True, automatically extract traces from transferred ROIs (default: False).
 
@@ -2010,13 +2028,17 @@ class Core:
             Transform information with keys:
             - 'shift': (dy, dx) shift in pixels
             - 'error': registration error metric (lower is better)
+            - 'correlation': Pearson correlation between projections
             - 'num_rois': number of ROIs transferred
+            - 'lost_roi_ids': list of ROI IDs lost to edge clipping
             - 'source_name': name of source recording
 
         Raises
         ------
         ValueError
-            If source has no ROIs or if image dimensions don't match.
+            If source has no ROIs, image dimensions don't match,
+            detected shift exceeds ``max_shift``, or projection
+            correlation is critically low.
         RuntimeError
             If source has no image data to use for alignment.
 
@@ -2066,10 +2088,36 @@ class Core:
             target_projection=target_proj,
             max_shift=max_shift,
             upsample_factor=upsample_factor,
+            min_correlation=min_correlation,
         )
+
+        # Detect ROIs lost to edge clipping
+        source_unique = np.unique(source.rois)
+        source_ids = sorted(source_unique[source_unique < 0], reverse=True)  # [-1,-2,-3,...]
+        shifted_unique = np.unique(shifted_mask)
+        shifted_ids_set = set(shifted_unique[shifted_unique < 0])
+        lost_ids = [rid for rid in source_ids if rid not in shifted_ids_set]
+
+        if lost_ids:
+            warnings.warn(
+                f"{len(lost_ids)} ROI(s) lost to edge clipping after shift: {lost_ids}. "
+                "Traces for these ROIs will be NaN-filled to preserve indexing.",
+                RuntimeWarning,
+            )
 
         # Update self with transferred ROIs
         self.update_rois(shifted_mask)
+
+        # Set ROI provenance (after update_rois which resets roi_origin to None)
+        self.roi_origin = {
+            "method": "transferred",
+            "source": source.name,
+            "shift": transform["shift"],
+            "error": transform["error"],
+            "correlation": transform["correlation"],
+            "expected_roi_ids": [int(x) for x in source_ids],
+            "lost_roi_ids": [int(x) for x in lost_ids],
+        }
 
         # Optionally extract traces
         if extract_traces and self.images is not None:
@@ -2079,7 +2127,9 @@ class Core:
         result = {
             "shift": transform["shift"],
             "error": transform["error"],
+            "correlation": transform["correlation"],
             "num_rois": self.num_rois,
+            "lost_roi_ids": self.roi_origin["lost_roi_ids"],
             "source_name": source.name,
         }
 
@@ -2088,13 +2138,17 @@ class Core:
             self._plot_roi_transfer(source, shifted_mask, transform, projection_mode)
 
         # Print summary
-        print(
+        summary = (
             f"ROI Transfer complete.\n"
             f"  Source: {source.name}\n"
             f"  Shift: (y={result['shift'][0]:.2f}, x={result['shift'][1]:.2f}) pixels\n"
             f"  Registration error: {result['error']:.4f}\n"
+            f"  Projection correlation: {result['correlation']:.4f}\n"
             f"  ROIs transferred: {result['num_rois']}"
         )
+        if lost_ids:
+            summary += f"\n  Lost ROIs (clipped at edge): {lost_ids} ({len(lost_ids)} of {len(source_ids)})"
+        print(summary)
 
         return result
 
@@ -2403,13 +2457,12 @@ class Core:
         """
         from pygor.segmentation import segment_rois as _segment_rois
 
-        # Load default mode and roi_order from config if not specified
+        # Load default mode and roi_order from per-recording params
         if mode is None or "roi_order" not in kwargs:
             try:
-                from pygor.config import get_defaults
-
-                general = get_defaults("segmentation.general")
-            except (KeyError, AttributeError, ImportError):
+                seg_defaults = self.params.get_defaults("segmentation")
+                general = seg_defaults.get("general", {})
+            except (ValueError, AttributeError):
                 general = {}
             if mode is None:
                 mode = general.get("mode", "blob")
@@ -2423,6 +2476,9 @@ class Core:
 
         # Record segmentation in params
         self.params.mark_segmentation({"mode": mode, **kwargs})
+
+        # Track ROI provenance
+        self.roi_origin = {"method": "segmented", "mode": mode, "source": self.name}
 
         return roi_mask
 
@@ -2534,6 +2590,7 @@ class Core:
                 self.num_rois = len(
                     np.unique(igor_style_mask)[np.unique(igor_style_mask) < 0]
                 )
+                self.roi_origin = {"method": "manual", "source": self.name}
                 print(f"Successfully updated {self.num_rois} ROIs in memory")
 
                 # Recompute dependent data since ROIs changed
@@ -2978,6 +3035,28 @@ class Core:
         # Returns shape (n_rois, n_frames)
         traces_raw = extract_traces(self.images, self.rois)
 
+        # If ROIs were transferred with lost ROIs, NaN-pad to preserve 1:1 indexing
+        if (
+            self.roi_origin is not None
+            and self.roi_origin.get("lost_roi_ids")
+        ):
+            expected_ids = self.roi_origin["expected_roi_ids"]  # [-1, -2, -3, ...]
+            lost_set = set(self.roi_origin["lost_roi_ids"])
+            n_expected = len(expected_ids)
+            n_frames_raw = traces_raw.shape[1]
+
+            padded = np.full((n_expected, n_frames_raw), np.nan, dtype=np.float32)
+            present_idx = 0
+            for i, roi_id in enumerate(expected_ids):
+                if roi_id not in lost_set:
+                    padded[i] = traces_raw[present_idx]
+                    present_idx += 1
+            traces_raw = padded
+            print(
+                f"  NaN-padded {len(lost_set)} lost ROI(s) to preserve "
+                f"1:1 indexing with source ({n_expected} total rows)"
+            )
+
         n_rois, n_frames = traces_raw.shape
 
         # Compute baseline window from backwards pre-stimulus period (before first trigger)
@@ -3315,6 +3394,18 @@ class Core:
         )
 
         return snippets, averages
+
+    def compute_averages(self) -> tuple[np.ndarray, np.ndarray]:  
+        """
+        Alias for compute_snippets_and_averages (shorthand).
+        """
+        return self.compute_snippets_and_averages()
+
+    def extract_traces(self) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Alias for extract_traces_from_rois (shorthand).
+        """
+        return self.extract_traces_from_rois()
 
     def plot_averages(
         self,
@@ -3758,36 +3849,29 @@ class Core:
         """
         Get interpolated and upscaled traces_znorm in millisecond precision.
 
-        Converts traces from frame precision to line precision (~500 Hz sampling)
-        using linear interpolation, matching IGOR Pro's OS_BasicAveraging behavior.
+        Converts traces from frame precision to millisecond precision (1 kHz sampling)
+        using linear interpolation.
 
         Returns
         -------
         numpy.ndarray
             Interpolated traces with shape (n_rois, n_timepoints_ms) where
-            n_timepoints_ms corresponds to line precision sampling rate.
+            n_timepoints_ms = n_frames * ms_per_frame.
         """
         if self.traces_znorm is None:
             return None
 
         # Get dimensions
-        n_rois, n_frames = self.traces_znorm.shape
+        # n_rois, n_frames = self.traces_znorm.shape
 
-        # Calculate frame duration and line duration
-        frame_duration_s = 1.0 / self.frame_hz  # Frame duration in seconds
-        line_duration_s = self.linedur_s  # Line duration in seconds (typically ~0.002s)
-
-        # Calculate number of lines per frame (nY equivalent)
-        lines_per_frame = int(frame_duration_s / line_duration_s)
-
-        # Total interpolated time points (line precision)
-        n_points_ms = n_frames * lines_per_frame
+        # Calculate frame duration in milliseconds
+        frame_duration_s = 1.0 / self.frame_hz
+        ms_per_frame = int(frame_duration_s * 1000)
 
         # Use scipy.ndimage.zoom for fast interpolation
         from scipy.ndimage import zoom
 
-        # Calculate zoom factor for time axis
-        zoom_factor = lines_per_frame
+        zoom_factor = ms_per_frame
 
         # Interpolate all ROI traces at once using zoom
         # zoom applies along the last axis (time axis)

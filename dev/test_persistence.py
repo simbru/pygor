@@ -61,7 +61,7 @@ for i, (orig, reloaded) in enumerate(zip(exp.recording, loaded.recording)):
     # STRF-specific
     if hasattr(orig, "strfs") and orig.strfs is not None:
         assert np.allclose(reloaded.strfs, orig.strfs, equal_nan=True), f"{tag}: strfs"
-        assert reloaded.numcolour == orig.numcolour, f"{tag}: numcolour"
+        assert reloaded.n_colours == orig.n_colours, f"{tag}: n_colours"
         assert reloaded.multicolour == orig.multicolour, f"{tag}: multicolour"
         assert reloaded.strf_keys == orig.strf_keys, f"{tag}: strf_keys"
 
