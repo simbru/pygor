@@ -1,3 +1,10 @@
+"""
+For this demo please download the example data from the following link:
+https://drive.google.com/drive/folders/1LtO1XTIgLIYS6jkh-3tXqc7XdXKJ9OSh
+
+You will need both the .smp and the .smh file
+"""
+
 # %%
 from pygor.load import Core
 # Load up data

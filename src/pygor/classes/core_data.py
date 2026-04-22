@@ -2482,6 +2482,105 @@ class Core:
 
         return roi_mask
 
+    def view_images(
+        self,
+        cmap: str = "Greys_r",
+        figsize: tuple = (7, 7),
+        vmin: float | None = None,
+        vmax: float | None = None,
+        start_frame: int = 0,
+        **kwargs: Any,
+    ):
+        """
+        Scroll through the preprocessed image stack (``self.images``) with a
+        matplotlib slider. Use the slider or mouse wheel over the figure to
+        advance frames; left/right arrow keys step one frame.
+
+        Parameters
+        ----------
+        cmap : str
+            Matplotlib colormap.
+        figsize : tuple
+            Figure size.
+        vmin, vmax : float, optional
+            Intensity limits. Default: global stack min/max.
+        start_frame : int
+            Initial frame index.
+        **kwargs
+            Passed to ``ax.imshow``.
+
+        Returns
+        -------
+        (fig, ax, slider)
+        """
+        from matplotlib.widgets import Slider
+
+        stack = self.images
+        if stack is None or stack.ndim != 3:
+            raise ValueError("self.images must be a 3D array [time, y, x].")
+        n_frames = stack.shape[0]
+        # Percentile-based contrast avoids outlier flattening
+        if vmin is None or vmax is None:
+            lo, hi = np.percentile(stack, (1, 99))
+            if vmin is None:
+                vmin = float(lo)
+            if vmax is None:
+                vmax = float(hi)
+        start_frame = int(np.clip(start_frame, 0, n_frames - 1))
+
+        fig, ax = plt.subplots(figsize=figsize)
+        plt.subplots_adjust(bottom=0.15)
+        im = ax.imshow(
+            stack[start_frame],
+            cmap=cmap,
+            origin="lower",
+            vmin=vmin,
+            vmax=vmax,
+            **kwargs,
+        )
+        title = ax.set_title(f"Frame {start_frame} / {n_frames - 1}")
+        ax.axis("off")
+
+        slider_ax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
+        slider = Slider(
+            slider_ax,
+            "Frame",
+            0,
+            n_frames - 1,
+            valinit=start_frame,
+            valstep=1,
+        )
+
+        def _update(val):
+            idx = int(slider.val)
+            im.set_data(stack[idx])
+            title.set_text(f"Frame {idx} / {n_frames - 1}")
+            fig.canvas.draw_idle()
+
+        def _on_scroll(event):
+            if event.inaxes is ax or event.inaxes is slider_ax:
+                step = 1 if event.button == "up" else -1
+                new_val = int(np.clip(slider.val + step, 0, n_frames - 1))
+                slider.set_val(new_val)
+
+        def _on_key(event):
+            if event.key in ("right", "up"):
+                step = 1
+            elif event.key in ("left", "down"):
+                step = -1
+            else:
+                return
+            new_val = int(np.clip(slider.val + step, 0, n_frames - 1))
+            slider.set_val(new_val)
+
+        slider.on_changed(_update)
+        fig.canvas.mpl_connect("scroll_event", _on_scroll)
+        fig.canvas.mpl_connect("key_press_event", _on_key)
+
+        # Keep slider alive (avoid GC on some backends)
+        ax._pygor_slider = slider
+        return fig, ax, slider
+
     def view_images_interactive(self, **kwargs: Any) -> None:
         """
         View the image stack interactively using Napari.
