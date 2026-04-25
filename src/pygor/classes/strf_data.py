@@ -2588,6 +2588,7 @@ class STRF(Core):
         angle_range_360=True,
         plot=False,
         minimal_plot=False,
+        channels=None,
     ):
         """
         Calculate direction and magnitude of each colour channel's offset from the cell's true center.
@@ -2616,16 +2617,23 @@ class STRF(Core):
             Whether to plot a demo visualization (default: False)
         minimal_plot : bool, optional
             If True, creates a minimal plot with just arrows on RGB background (default: False)
+        channels : list[int] or None, optional
+            Channel indices to include when computing the true centre and offsets.
+            Default None = use all ``self.n_colours`` channels. Pass e.g. ``[0,1,2,3]`` to
+            exclude an aggregate "All" channel from a 5-colour dataset so the true centre
+            isn't biased by it. Returned arrays along the channel axis follow the order
+            of ``channels``.
 
         Returns
         -------
         dict
             Dictionary with keys:
             - 'true_centers': Array of true centers for each cell (n_cells, 2)
-            - 'channel_centers': Array of channel centers (n_colours, n_cells, 2)
-            - 'offsets': Offset vectors (n_colours, n_cells, 2)
-            - 'magnitudes': Offset magnitudes (n_colours, n_cells)
-            - 'angles': Offset angles in degrees (n_colours, n_cells)
+            - 'channel_centers': Array of channel centers (n_selected, n_cells, 2)
+            - 'offsets': Offset vectors (n_selected, n_cells, 2)
+            - 'magnitudes': Offset magnitudes (n_selected, n_cells)
+            - 'angles': Offset angles in degrees (n_selected, n_cells)
+            where n_selected = len(channels) if channels is not None else n_colours.
         """
         if not self.multicolour:
             raise ValueError("This method requires multicolour data (n_colours > 1)")
@@ -2745,6 +2753,17 @@ class STRF(Core):
             raise ValueError(
                 f"Unknown mode: {mode}. Use 'cs_seg', 'minmax', or 'weighted'"
             )
+
+        # Restrict to requested channels — excludes e.g. a 5th "All" aggregate
+        # from biasing the true-centre computation.
+        if channels is not None:
+            ch_idx_list = list(channels)
+            if any(c < 0 or c >= channel_centers.shape[0] for c in ch_idx_list):
+                raise ValueError(
+                    f"channels {ch_idx_list} out of range [0, {channel_centers.shape[0] - 1}]"
+                )
+            channel_centers = channel_centers[ch_idx_list]
+            n_colours = channel_centers.shape[0]
 
         # Calculate true center as mean across colour channels for each cell
         # Shape: (n_cells, 2)
@@ -2951,16 +2970,16 @@ class STRF(Core):
                 "angles": angles_deg,
             }
 
-    def get_colour_channel_offsets_true_centers(self, roi=None, **kwargs: Any):
-        results = self.calc_colour_channel_offsets(roi=roi, **kwargs)
+    def get_colour_channel_offsets_true_centers(self, roi=None, channels=None, **kwargs: Any):
+        results = self.calc_colour_channel_offsets(roi=roi, channels=channels, **kwargs)
         return results["true_centers"]
 
-    def get_colour_channel_offsets_magnitudes(self, roi=None, **kwargs: Any):
-        results = self.calc_colour_channel_offsets(roi=roi, **kwargs)
+    def get_colour_channel_offsets_magnitudes(self, roi=None, channels=None, **kwargs: Any):
+        results = self.calc_colour_channel_offsets(roi=roi, channels=channels, **kwargs)
         return results["magnitudes"]
 
-    def get_colour_channel_offsets_angles(self, roi=None, **kwargs: Any):
-        results = self.calc_colour_channel_offsets(roi=None, **kwargs)
+    def get_colour_channel_offsets_angles(self, roi=None, channels=None, **kwargs: Any):
+        results = self.calc_colour_channel_offsets(roi=None, channels=channels, **kwargs)
         return results["angles"]
 
     def get_pca_major_axis_lengths(self, roi=None, **kwargs: Any):
@@ -3697,6 +3716,39 @@ class STRF(Core):
             delta_times[i] = peak_times[i] - centres[i]
 
         return delta_times
+
+    def pairwise_timings(self):
+        """Per-ROI antisymmetric matrix of channel-pair slopes (ms per channel step).
+
+        Returns shape (n_rois, n_colours, n_colours):
+            M[r, i, j] = (latency[r, j] - latency[r, i]) / (j - i)
+        Diagonal = 0. M[r, j, i] = -M[r, i, j]. NaN propagates from missing channels.
+        """
+        pt = pygor.utilities.multicolour_reshape(
+            self.get_peaktimes(), self.n_colours
+        )                                                    # (n_colours, n_rois)
+        n_colours = pt.shape[0]
+        diff = pt[None, :, :] - pt[:, None, :]               # y[j]-y[i], shape (n_c, n_c, n_rois)
+        step = (np.arange(n_colours)[None, :]
+                - np.arange(n_colours)[:, None]).astype(float)
+        step[step == 0] = np.nan                             # diagonal → nan, avoid /0
+        with np.errstate(invalid="ignore", divide="ignore"):
+            slope = diff / step[:, :, None]
+        return np.moveaxis(slope, -1, 0)                     # (n_rois, n_c, n_c)
+
+    def median_pairwise_timings(self, min_channels=3):
+        """Theil-Sen scalar per ROI. Median of upper-triangle pair slopes."""
+        pt = pygor.utilities.multicolour_reshape(
+            self.get_peaktimes(), self.n_colours
+        )                                                    # (n_colours, n_rois)
+        slopes = self.pairwise_timings()                     # (n_rois, n_c, n_c)
+        n_c = slopes.shape[1]
+        iu = np.triu_indices(n_c, k=1)                       # only i<j pairs
+        upper = slopes[:, iu[0], iu[1]]                      # (n_rois, n_pairs)
+        med = np.nanmedian(upper, axis=1)
+        n_valid = np.isfinite(pt).sum(axis=0)
+        med[n_valid < min_channels] = np.nan
+        return med
 
     def compute_latency_vectors(
         self,
