@@ -61,9 +61,21 @@ def extract_timecourse(arr_3d, level=None, centred=True):
     return np.ma.array([time_course_neg, time_course_pos])
 
 
-def polarity(arr, exclude_FirstLast=(1, 1), axis=-1, force_pol=False):
+def polarity(
+    arr,
+    exclude_FirstLast=(1, 1),
+    axis=-1,
+    force_pol=False,
+    biphasic_ratio=0.5,
+):
     """
     Compute the polarity of a given numpy array along a specified axis.
+
+    Uses an amplitude-gated heuristic: when the kernel is monophasic-dominant
+    (secondary_mag / primary_mag < biphasic_ratio), polarity is taken from the
+    sign of the dominant extremum. When the kernel is genuinely biphasic
+    (ratio >= biphasic_ratio), polarity is taken from the temporal ordering —
+    the extremum closer to spike (later index) wins.
 
     Parameters
     ----------
@@ -79,6 +91,11 @@ def polarity(arr, exclude_FirstLast=(1, 1), axis=-1, force_pol=False):
     force_pol : bool, optional
         Whether to force the polarity calculation for arrays with identical maximum and minimum values.
         Defaults to False.
+    biphasic_ratio : float, optional
+        Threshold on secondary/primary absolute amplitude above which the kernel
+        is treated as genuinely biphasic (timing rule applies). Below threshold,
+        polarity follows the sign of the dominant extremum. Defaults to 0.5.
+        Pass 0.0 to always use the timing rule (original behaviour).
 
     Returns
     -------
@@ -95,13 +112,10 @@ def polarity(arr, exclude_FirstLast=(1, 1), axis=-1, force_pol=False):
         If the input array is empty after excluding the first and last samples.
     """
     # Check that input makes sense
-    if (
-        isinstance(arr, np.ma.MaskedArray) is True
-        or isinstance(arr, np.ndarray) is True
-    ):
-        if isinstance(arr, np.ndarray) is True:
-            # Force data (bug testing)
-            arr = arr.data
+    was_masked = isinstance(arr, np.ma.MaskedArray)
+    if was_masked or isinstance(arr, np.ndarray):
+        if was_masked:
+            arr = arr.data  # .data on masked array returns underlying ndarray
         # Time axis needs to be first or last. If it is not, move it to last index using transpose
         if axis != -1:
             arr = np.moveaxis(arr, axis, -1)
@@ -110,38 +124,47 @@ def polarity(arr, exclude_FirstLast=(1, 1), axis=-1, force_pol=False):
             shape = tuple(np.array(arr.shape)[:2])
             pol_arr = np.zeros(shape)
             return pol_arr
-        # Get the positions of maximum and minimum (cropped by time as specified in exlcude_PrePost)
+        # Crop edges and compute both positions AND values of extrema
         try:
-            max_locs = np.ma.argmax(
-                arr[..., exclude_FirstLast[0] : arr.shape[-1] - exclude_FirstLast[1]],
-                axis=-1,
-            )
-            min_locs = np.ma.argmin(
-                arr[..., exclude_FirstLast[0] : arr.shape[-1] - exclude_FirstLast[1]],
-                axis=-1,
-            )
+            cropped = arr[..., exclude_FirstLast[0] : arr.shape[-1] - exclude_FirstLast[1]]
+            max_locs = np.argmax(cropped, axis=-1)
+            min_locs = np.argmin(cropped, axis=-1)
+            max_vals = np.max(cropped, axis=-1)
+            min_vals = np.min(cropped, axis=-1)
         except ValueError:
             raise ValueError(
                 "Input array is seemingly empty. Perhaps adjust exclude_FirstLast to avoid cropping all numbers."
             )
-        # Get a boolean array of where maximum comes before minimum
-        pol_arr = max_locs > min_locs
+
+        # Amplitude-gated polarity logic.
+        # primary_sign: sign of the larger-magnitude extremum.
+        # ratio: |secondary| / |primary|. Below biphasic_ratio → monophasic-dominant.
+        abs_max = np.abs(max_vals)
+        abs_min = np.abs(min_vals)
+        primary_mag = np.maximum(abs_max, abs_min)
+        secondary_mag = np.minimum(abs_max, abs_min)
+        # Avoid divide-by-zero; where primary_mag==0 the array is all-zero → polarity 0.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = np.where(primary_mag > 0, secondary_mag / primary_mag, 0.0)
+
+        primary_is_positive = abs_max > abs_min  # sign of the dominant extremum
+        # Timing rule: later extremum wins (closer to spike).
+        timing_positive = max_locs > min_locs
+
+        # Combine: use primary sign when monophasic-dominant, timing rule when biphasic.
+        monophasic = ratio < biphasic_ratio
+        pol_bool = np.where(monophasic, primary_is_positive, timing_positive)
     else:
         raise AttributeError(
             f"Funciton expected input as np.ndarray or np.ma.MaskedArray, not {type(arr)}"
         )
-    # We are assigining polarity, so boolean array needs to be converted to polarity array (e.g, 0 should be -1)
-    pol_arr = np.where(pol_arr == True, 1, -1)
-    # In some rare cases we might need to force a polarity (for example an array multiplied by its polarties,
-    # without loosing the underlying data (e.g., if 0 * n == 0, we lose n). The below allows overriding the
-    # behaviour where if min and max locs are the same, 0 is put in place
+    # Convert boolean to {+1, -1}
+    pol_arr = np.where(pol_bool, 1, -1)
+    # Ambiguous cases (max_locs == min_locs → effectively flat / all-zero after cropping)
     if force_pol is False and pol_arr.ndim > 0:
         pol_arr[np.where(max_locs == min_locs)] = 0
-    # Retain mask if input array contained mask
-    if (
-        isinstance(arr, np.ma.MaskedArray) == True
-        or isinstance(arr, np.ma.MaskedArray) is True
-    ):  # and np.all(arr.mask != False):
+    # Retain mask if input array was masked
+    if was_masked:
         pol_arr = np.ma.array(
             data=pol_arr, mask=arr[..., 0].mask
         )  # take mask from first frame
@@ -245,12 +268,32 @@ def only_spectrum(timecourse_1d, sampling_rate=15.625):
     return spectral_centroid(timecourse_1d, sampling_rate=sampling_rate)[1]
     # return spectral_centroid(timecourse_1d, sampling_rate = 15.625)[1]
 
-def find_peaktime(arr):
+def find_peaktime(arr, polarity="auto"):
     """
-    Return index(es) of the strongest local extremum (max absolute value among turning points).
+    Return index(es) of the strongest local extremum among turning points.
     Accepts 1D (T,) or 2D (N, T) arrays. Returns int or ndarray (N,).
+
+    polarity : {"auto", +1, -1, None}
+        "auto" (default): compute polarity from the input via
+        pygor.strf.temporal.polarity() and restrict turning points to that sign.
+        +1 / -1: explicit polarity, restrict to matching-sign turning points.
+        None: unrestricted — pick absolute strongest turning point regardless
+        of sign (legacy behaviour).
+        When restricted, falls back to unrestricted argmax-|y| if no
+        matching turning point exists.
     """
     x = np.asarray(arr)
+
+    def _resolve_polarity(y):
+        if polarity == "auto":
+            try:
+                pol = int(np.asarray(pygor.strf.temporal.polarity(y)).item())
+            except (ValueError, TypeError):
+                pol = 0
+            return pol if pol in (1, -1) else None
+        if polarity in (1, -1):
+            return polarity
+        return None
 
     def strongest_extremum_1d(y):
         y = np.asarray(y)
@@ -274,6 +317,12 @@ def find_peaktime(arr):
         # Turning points: maxima ( + to - ) or minima ( - to + )
         tp = np.flatnonzero(((s[:-1] > 0) & (s[1:] <= 0)) | ((s[:-1] < 0) & (s[1:] >= 0))) + 1
         if tp.size:
+            pol = _resolve_polarity(y)
+            if pol in (1, -1):
+                matching = tp[np.sign(y[tp]) == pol]
+                if matching.size:
+                    return int(matching[np.argmax(np.abs(y[matching]))])
+                # fall through to unrestricted choice if no matching TP
             return int(tp[np.argmax(np.abs(y[tp]))])
 
         # Fallback: global strongest response by magnitude
