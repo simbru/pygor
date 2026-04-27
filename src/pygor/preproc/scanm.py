@@ -316,7 +316,17 @@ def read_smp_data(
 
     result = {}
     pixels_per_frame = frame_width * frame_height
-    
+
+    # Z-stack acquisition records NFrPerStep raw frames per z-step; IGOR averages
+    # these into one logical frame. Header NumberOfFrames counts logical frames.
+    # Mirrors ScM_FileIO.ipf isAvZStack gate (ScanType==11 AND NFrPerStep>1).
+    SCM_SCANTYPE_ZSTACK = 11
+    is_av_zstack = (
+        header.get("ScanType") == SCM_SCANTYPE_ZSTACK
+        and (header.get("NFrPerStep", 1) or 1) > 1
+    )
+    n_fr_per_step = header.get("NFrPerStep", 1) if is_av_zstack else 1
+
     for ch in channels_to_load:
         if ch in channel_data and len(channel_data[ch]) > 0:
             ch_data = channel_data[ch]  # Already 1D array from vectorized extraction
@@ -325,12 +335,20 @@ def read_smp_data(
             ch_data = ch_data[:actual_frames * pixels_per_frame]
             # Reshape to (frames, height, raw_width)
             ch_data = ch_data.reshape(actual_frames, frame_height, frame_width)
-            
+
             if decode:
                 # Crop to imaging region: skip line offset, remove retrace
                 # XPixLineOffs is the number of pixels to skip at the start
                 ch_data = ch_data[:, :, line_offset:line_offset + decoded_width]
-            
+
+            if n_fr_per_step > 1:
+                n_log = ch_data.shape[0] // n_fr_per_step
+                if n_log > 0:
+                    ch_data = ch_data[:n_log * n_fr_per_step]
+                    ch_data = ch_data.reshape(
+                        n_log, n_fr_per_step, *ch_data.shape[1:]
+                    ).mean(axis=1).astype(np.uint16)
+
             result[ch] = ch_data
 
     return result
@@ -450,9 +468,15 @@ def _compute_timing_params(header: dict, images: np.ndarray) -> dict:
     # Line duration: raw FrameWidth already includes all pixels per line
     # Do NOT add retrace/offset again - they're already in FrameWidth
     line_duration_s = frame_width_raw * pixel_duration_us * 1e-6
-    
-    # Frame duration (lines * line_duration)
-    frame_duration_s = frame_height * line_duration_s
+
+    # Frame duration (lines * line_duration). For z-stack mode, NFrPerStep
+    # raw frames are averaged into one logical frame, so duration scales.
+    is_av_zstack = (
+        header.get("ScanType") == 11
+        and (header.get("NFrPerStep", 1) or 1) > 1
+    )
+    n_fr_per_step = header.get("NFrPerStep", 1) if is_av_zstack else 1
+    frame_duration_s = frame_height * line_duration_s * n_fr_per_step
     
     # Account for n_planes if doing volumetric imaging
     n_planes = header.get("dZPixels", 1)
