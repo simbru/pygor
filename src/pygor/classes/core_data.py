@@ -1907,6 +1907,7 @@ class Core:
         lower_percentile=100.0,
         orientation=None,
         plot=False,
+        clip_to_range=True,
     ):
         """Automatically estimate IPL depths from ROI positions without GUI.
 
@@ -1927,6 +1928,9 @@ class Core:
         plot : bool, optional
             Whether to show a diagnostic plot with image, boundaries,
             centroids, and depth KDE (default: True).
+        clip_to_range : bool, optional
+            If True, clip estimated depths to the valid physiological range
+            [0, 100] (default: True).
 
         Returns
         -------
@@ -1946,12 +1950,41 @@ class Core:
             lower_percentile=lower_percentile,
             orientation=orientation,
         )
-        depths = calculate_ipl_depths(
+        depths = np.asarray(
+            calculate_ipl_depths(
             self.roi_centroids,
             upper,
             lower,
             orientation=orientation,
+            ),
+            dtype=float,
         )
+
+        # Guard against occasional ill-conditioned boundary matches that can
+        # produce non-finite or out-of-range percentages.
+        non_finite = ~np.isfinite(depths)
+        if np.any(non_finite):
+            depths = depths.copy()
+            depths[non_finite] = np.nan
+            warnings.warn(
+                f"{self.name}: {int(np.sum(non_finite))} IPL depths were non-finite "
+                "and were set to NaN.",
+                stacklevel=2,
+            )
+
+        if clip_to_range:
+            out_of_range = np.isfinite(depths) & ((depths < 0.0) | (depths > 100.0))
+            if np.any(out_of_range):
+                raw_min = float(np.nanmin(depths))
+                raw_max = float(np.nanmax(depths))
+                depths = depths.copy()
+                depths[out_of_range] = np.clip(depths[out_of_range], 0.0, 100.0)
+                warnings.warn(
+                    f"{self.name}: Clipped {int(np.sum(out_of_range))} IPL depths to "
+                    f"[0, 100] (raw range was {raw_min:.2f} to {raw_max:.2f}).",
+                    stacklevel=2,
+                )
+
         self.ipl_depths = depths
         if plot:
             mean_image = np.average(self.images, axis=0)
@@ -3342,6 +3375,45 @@ class Core:
         if self.traces_raw is None:
             print("Traces not available, computing them now...")
             self.extract_traces_from_rois()
+
+        # If transferred ROIs were NaN-padded to preserve source indexing,
+        # drop clipped rows before downstream metrics so per-ROI arrays
+        # stay aligned with self.num_rois and ROI mask-derived indexing.
+        if (
+            isinstance(self.traces_raw, np.ndarray)
+            and isinstance(self.traces_znorm, np.ndarray)
+            and self.traces_raw.shape[0] != self.num_rois
+            and self.roi_origin is not None
+            and self.roi_origin.get("lost_roi_ids")
+        ):
+            expected_ids = self.roi_origin.get("expected_roi_ids", [])
+            lost_ids = set(self.roi_origin.get("lost_roi_ids", []))
+            if self.traces_raw.shape[0] == len(expected_ids):
+                keep_rows = [
+                    i for i, roi_id in enumerate(expected_ids) if roi_id not in lost_ids
+                ]
+                if len(keep_rows) == self.num_rois:
+                    self.traces_raw = self.traces_raw[keep_rows]
+                    self.traces_znorm = self.traces_znorm[keep_rows]
+                    print(
+                        "Dropped "
+                        f"{len(lost_ids)} clipped ROI row(s) from trace arrays "
+                        f"to match num_rois={self.num_rois}"
+                    )
+                else:
+                    warnings.warn(
+                        "Trace/ROI mismatch detected after ROI transfer, but "
+                        "could not infer rows to keep from roi_origin metadata. "
+                        "Computed snippets may have inconsistent ROI indexing.",
+                        RuntimeWarning,
+                    )
+            else:
+                warnings.warn(
+                    "Trace/ROI mismatch detected: trace rows do not match either "
+                    "num_rois or expected_roi_ids length. Computed snippets may "
+                    "have inconsistent ROI indexing.",
+                    RuntimeWarning,
+                )
 
         if self.triggertimes is None:
             raise ValueError("Triggertimes not available. Cannot compute snippets.")
