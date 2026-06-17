@@ -688,6 +688,44 @@ class STRF(Core):
             if hasattr(self, attr):
                 delattr(self, attr)
 
+    def keep_rois(self, roi_indices, update_dependent=True):
+        """Keep only the specified ROIs, also subsetting STRF arrays.
+
+        Extends :meth:`Core.keep_rois` (which handles traces, masks, averages,
+        quality_indices, etc.) by additionally subsetting ``self.strfs``,
+        ``self.strf_keys`` and ``self.num_strfs`` so the (large) receptive-field
+        arrays stay aligned with the retained ROIs. Useful for discarding
+        no-signal ROIs before saving to shrink file size.
+
+        Parameters
+        ----------
+        roi_indices : list or array-like
+            0-indexed ROI indices to keep (same convention as Core.keep_rois).
+        update_dependent : bool, optional
+            Forwarded to Core.keep_rois.
+        """
+        keep = np.unique(np.asarray(roi_indices).astype(int).ravel())
+
+        # Subset STRFs using the original indices BEFORE Core reindexes the mask.
+        # Flattened strf order is roi-major / colour-minor: flat = roi*nc + colour.
+        if update_dependent and self.strfs is not None:
+            nc = self.n_colours
+            n_total = self.strfs.shape[0]
+            if keep.size == 0:
+                flat = np.array([], dtype=int)
+            else:
+                flat = (keep[:, None] * nc + np.arange(nc)).ravel()
+            if flat.size == 0 or flat.max() < n_total:  # guard against mismatch
+                self.strfs = self.strfs[flat]
+                if isinstance(self.strf_keys, (list, tuple)):
+                    self.strf_keys = [self.strf_keys[i] for i in flat]
+                elif isinstance(self.strf_keys, np.ndarray):
+                    self.strf_keys = self.strf_keys[flat]
+                self.num_strfs = len(self.strfs)
+                self._invalidate_strf_caches()
+
+        return super().keep_rois(roi_indices, update_dependent=update_dependent)
+
     def fit_contours(
         self, roi=None, force=True
     ) -> np.ndarray[list[list[list[float, float]]]]:
@@ -4756,7 +4794,7 @@ class STRF(Core):
             plt.colorbar(ax.images[0], ax=ax, orientation="vertical")
 
     def plot_strfs_space(self, roi=None, **kwargs: Any):
-        return pygor.strf.plotting.simple.plot_collapsed_strfs(self, **kwargs)
+        return pygor.strf.plotting.simple.plot_collapsed_strfs(self, roi = roi, **kwargs)
 
     def plot_peaktime_strfs(self, roi=None, **kwargs: Any):
         """Plot raw peak timing values for each ROI.
@@ -4838,22 +4876,30 @@ class STRF(Core):
             )
         return anim
 
-    def play_multichrom_strf(self, roi=None, dur_s=None, **kwargs: Any):
+    def play_multichrom_strf(self, roi=None, dur_s=None, cmap=None, **kwargs: Any):
         # anim = pygor.strf.plot.multi_chroma_movie(self, roi, **kwargs)
         if dur_s is None:
             dur_s = self.strf_dur_ms / 1000
+        # Resolve colormaps: None -> package default; str -> broadcast to every
+        # channel; list/tuple -> used as-is (one cmap per colour channel).
+        if cmap is None:
+            cmap_list = pygor.plotting.maps_concat
+        elif isinstance(cmap, str):
+            cmap_list = [cmap] * self.n_colours
+        else:
+            cmap_list = list(cmap)
         if roi is None:
             anim = pygor.plotting.play_movie_4d(
                 self.strfs_chroma(),
                 dur_s=dur_s,
-                cmap_list=pygor.plotting.maps_concat,
+                cmap_list=cmap_list,
                 **kwargs,
             )
         else:
             anim = pygor.plotting.play_movie_4d(
                 self.strfs_chroma()[:, roi],
                 dur_s=dur_s,
-                cmap_list=pygor.plotting.maps_concat,
+                cmap_list=cmap_list,
                 **kwargs,
             )
         return anim
@@ -6252,9 +6298,11 @@ class STRF(Core):
         strfs_reordered = np.transpose(
             strfs_calc, (1, 0, 2, 3, 4)
         )  # (n_rois, n_colours, time, x, y)
+        # float32 storage (post_process_strf_all may upcast to float64; cast back
+        # so self.strfs and saved .h5 keep the half-size float32 contract).
         self.strfs = strfs_reordered.reshape(
             n_rois_calc * n_colours_calc, n_time, n_x, n_y
-        )
+        ).astype(np.float32, copy=False)
 
         # Invalidate all caches that depend on self.strfs
         self._invalidate_strf_caches()

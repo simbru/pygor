@@ -12,6 +12,7 @@ import scipy
 import warnings
 from sklearn.preprocessing import MinMaxScaler
 import scipy.signal
+import scipy.ndimage
 
 # Local imports
 import pygor.strf.contouring
@@ -286,9 +287,6 @@ def corr_spacetime(arr_3d, convolve = True, kernel_width = 3, kernel_depth = 5,
     ndarray
         The spatial-temporal correlations of the input array.
     """
-    kernel = np.expand_dims(np.ones((kernel_width, kernel_width)), axis = 0) # Needs to be same dimension (so 3d in, this should have 3 dims too)
-    kernel = np.repeat(kernel, kernel_depth, axis = 0)
-    # ^ potential here to define your own kernel. Didn't seem worthwhile implementing just yet. 
     if isinstance(arr_3d, np.ma.MaskedArray):
         arr_3d = np.where(arr_3d.mask, 0, arr_3d.data)
     # Define a function to get prod_funct based on the mode
@@ -312,9 +310,19 @@ def corr_spacetime(arr_3d, convolve = True, kernel_width = 3, kernel_depth = 5,
     prod_funct = get_prod_funct(mode)
     # Convolves input according to kernel and returns sum of products at each location as corrs
     if convolve is True:
-        # convolved_corr = scipy.ndimage.correlate(arr_3d[::time_subsample, ::pix_subsample, ::pix_subsample], weights=kernel, mode = corr_mode)
-        convolved_corr = scipy.signal.fftconvolve(arr_3d[::time_subsample, ::pix_subsample, ::pix_subsample], kernel, mode = "same")
-        if pix_subsample > 1: 
+        # Box (uniform) kernel of shape (kernel_depth, kernel_width, kernel_width) is
+        # separable, so uniform_filter computes the windowed mean in O(N) via three 1-D
+        # passes (vs fftconvolve's O(N log N) + large complex128 temporaries). mode=
+        # "constant", cval=0 replicates fftconvolve's zero padding; *prod(size) converts
+        # the windowed mean back to the windowed sum the FFT path produced.
+        # NB: assumes odd kernel sizes (defaults 5/3/3) so centring matches mode="same";
+        # even sizes would offset by half a pixel.
+        sub = arr_3d[::time_subsample, ::pix_subsample, ::pix_subsample]
+        size = (kernel_depth, kernel_width, kernel_width)
+        convolved_corr = scipy.ndimage.uniform_filter(
+            sub, size=size, mode="constant", cval=0.0
+        ) * np.prod(size)
+        if pix_subsample > 1:
             convolved_corr = np.kron(convolved_corr, np.ones((time_subsample, pix_subsample, pix_subsample)))
         # Then we collapse convolved_corr by a simple mathematical operation (variance-based ones work best)
         corr_arr = prod_funct(convolved_corr, axis = 0)

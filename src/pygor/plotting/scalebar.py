@@ -46,6 +46,8 @@ def add_scalebar(
     flip_text=False,
     offset_modifier=1,
     text_size=None,
+    text_colour='k',
+    line_colour='k',
     line_width=None,
     transform=None,
     align_to_axis=False,
@@ -76,6 +78,10 @@ def add_scalebar(
         Modifier for the text offset distance. Default is 1.
     text_size : float, optional
         The size of the text. Default is None (uses axes label size).
+    text_colour : str, optional
+        The colour of the scalebar text. Default is 'k'.
+    line_colour : str, optional
+        The colour of the scalebar line. Default is 'k'.
     line_width : float, optional
         The width of the scalebar line. Default is None (uses rcParams['axes.linewidth']).
     transform : str or Transform, optional
@@ -214,7 +220,7 @@ def add_scalebar(
     points = rotate(points, origin=midpoint, degrees=rotation_angle)
 
     # Add the scalebar line and text to the axes
-    line = plt.Line2D(points[:, 0], points[:, 1], color='k', linewidth=line_width,
+    line = plt.Line2D(points[:, 0], points[:, 1], color=line_colour, linewidth=line_width,
                     clip_on=False, clip_box=ax.bbox, mew=1, solid_capstyle="butt")
     ax.add_line(line)
     
@@ -296,6 +302,7 @@ def add_scalebar(
             ha=text_ha,
             va=text_va,
             fontsize=text_size,
+            color=text_colour,
             rotation=text_rotation + rotation_angle,
             transform=transform,
             clip_on=False,

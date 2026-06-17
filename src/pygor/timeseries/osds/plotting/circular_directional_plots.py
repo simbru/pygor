@@ -360,6 +360,160 @@ def _add_orbit_trace(fig, position, trace_data, trial_data, color, y_limits,
 # Main plotting function
 # ============================================================================
 
+def plot_tuning_function_strip(osds_obj, roi_index, metric='peak', show_trials=True,
+                               phase_colors=("#FF5C5C", "#3D3AC4"),
+                               phase_labels=("ON edge", "OFF edge"),
+                               scalebar_s=2.0, trace_alpha=1.0, trial_alpha=0.1,
+                               figsize=None, data_crop=None):
+    """
+    Plot directional tuning as a horizontal strip of trace snippets (one axes per
+    direction, phases overlaid) plus a polar tuning inset on the right.
+
+    This is the row-layout companion to ``plot_tuning_function_with_traces`` (which
+    arranges traces in an orbit). It reproduces the poster-style figure with each
+    direction labelled (0deg, 45deg, ...), phases overlaid as coloured lines
+    (e.g. ON edge / OFF edge), a shared F (SD) y-axis, a time scale bar, and a
+    polar plot summarising the per-phase tuning.
+
+    Parameters
+    ----------
+    osds_obj : OSDS object
+        Object containing directional response data.
+    roi_index : int
+        ROI index to analyse.
+    metric : str or callable
+        Summary metric for the polar inset ('peak', 'auc', 'mean', or callable).
+    show_trials : bool
+        Overlay individual trial traces faintly behind the averages.
+    phase_colors : sequence of str
+        Colour per phase (defaults to red ON edge, blue OFF edge).
+    phase_labels : sequence of str
+        Legend label per phase.
+    scalebar_s : float or None
+        Length of the time scale bar in seconds. None disables it.
+    trace_alpha : float
+        Alpha for the average traces.
+    trial_alpha : float
+        Alpha for individual trial traces.
+    figsize : tuple or None
+        Figure size. Auto-scaled from the number of directions if None.
+    data_crop : tuple or None
+        (start, end) sample indices to crop each snippet before plotting.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+    trace_axes : list of matplotlib.axes.Axes
+        One axes per direction (sorted by angle).
+    ax_polar : matplotlib.axes.Axes
+        The polar tuning inset.
+    """
+    # --- Pull and sort the data (phases kept separate) -----------------------
+    data_dict = _prepare_tuning_data(osds_obj, roi_index, use_phases=True,
+                                     show_trials=show_trials, data_crop=data_crop)
+    sort_indices = data_dict['sort_indices']
+    sorted_angles = data_dict['angles']
+    sorted_directions_deg = data_dict['directions_deg']
+    phases_data = data_dict['phases_data']
+    phases_trial_data = data_dict['phases_trial_data']
+    n_phases = data_dict['dir_phase_num']
+
+    if phases_data is None:
+        # Single-phase recording: treat the whole snippet as one phase.
+        phases_data = [data_dict['data']]
+        phases_trial_data = [data_dict['trial_data']] if data_dict['trial_data'] is not None else None
+        n_phases = 1
+
+    # Sort each phase by direction so the strip reads 0deg -> 315deg.
+    phases_data = [p[sort_indices] for p in phases_data]
+    if show_trials and phases_trial_data is not None:
+        phases_trial_data = [p[sort_indices] for p in phases_trial_data]
+    else:
+        phases_trial_data = None
+
+    n_dirs = len(sorted_directions_deg)
+    phase_len = phases_data[0].shape[1]
+    # Averages/snippets come from IGOR ("Snippets0"/"Averages0") and are sampled at
+    # the line duration, NOT the frame rate. pygor itself uses
+    # ms_dur = averages.shape[-1] * linedur_s * 1000 (see Core), so seconds-per-sample
+    # is linedur_s. Using 1/frame_hz would be too large by the lines-per-frame factor.
+    dt_s = getattr(osds_obj, 'linedur_s', None)
+    t = np.arange(phase_len) * dt_s if dt_s else np.arange(phase_len)
+
+    # --- Global y-limits across all directions and phases --------------------
+    if phases_trial_data is not None:
+        pool = np.concatenate([p.flatten() for p in phases_trial_data])
+    else:
+        pool = np.concatenate([p.flatten() for p in phases_data])
+    y_min, y_max = float(np.min(pool)), float(np.max(pool))
+    y_pad = 0.05 * (y_max - y_min)
+    y_min, y_max = y_min - y_pad, y_max + y_pad
+
+    # --- Per-phase tuning values for the polar inset -------------------------
+    phase_values = [_calculate_metric(p, metric) for p in phases_data]
+
+    # --- Figure layout: n_dirs trace axes + 1 polar axes ---------------------
+    if figsize is None:
+        scale = 1.25
+        figsize = (scale * n_dirs + 1, scale)
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(1, n_dirs + 1,
+                          width_ratios=[1] * n_dirs + [1.6], wspace=0.15)
+
+    trace_axes = []
+    for d in range(n_dirs):
+        ax = fig.add_subplot(gs[0, d], sharey=trace_axes[0] if trace_axes else None)
+        for ph in range(n_phases):
+            color = phase_colors[ph % len(phase_colors)]
+            if phases_trial_data is not None:
+                ax.plot(t, phases_trial_data[ph][d].T, color=color, alpha=trial_alpha, lw=2)
+            ax.plot(t, phases_data[ph][d], color=color, alpha=trace_alpha, lw=1)
+        ax.set_ylim(y_min, y_max)
+        ax.set_xlim(t[0], t[-1])
+        ax.set_title(f"{int(round(sorted_directions_deg[d]))}°", fontsize=9, pad=2)
+        # Clean spines; keep only the left axis on the first panel.
+        for side in ('top', 'right', 'bottom'):
+            ax.spines[side].set_visible(False)
+        ax.set_xticks([])
+        if d == 0:
+            ax.set_ylabel("F (SD)")
+            ax.spines['left'].set_visible(True)
+        else:
+            ax.spines['left'].set_visible(False)
+            ax.tick_params(left=False, labelleft=False)
+        trace_axes.append(ax)
+
+    # Time scale bar at the right end of the last panel (x-axis is in seconds).
+    if scalebar_s and dt_s:
+        import pygor.plotting
+        pygor.plotting.add_scalebar(
+            scalebar_s, string=f"{scalebar_s:g} s", orientation='h',
+            x=0.95, y=0.0, align_to_axis=True, ax=trace_axes[-1]
+        )
+
+    # --- Polar tuning inset --------------------------------------------------
+    ax_polar = fig.add_subplot(gs[0, n_dirs], projection='polar')
+    ax_polar.set_theta_zero_location('E')
+    polar_angles = np.append(sorted_angles, sorted_angles[0])
+    global_max = max(np.max(v) for v in phase_values)
+    for ph in range(n_phases):
+        color = phase_colors[ph % len(phase_colors)]
+        vals = np.append(phase_values[ph], phase_values[ph][0])
+        label = phase_labels[ph] if ph < len(phase_labels) else f"phase {ph}"
+        ax_polar.plot(polar_angles, vals, color=color, alpha=1, label=label)
+        ax_polar.fill(polar_angles, vals, color=color, alpha=0.2)
+    ax_polar.set_ylim(0, global_max * 1.1)
+    ax_polar.set_thetagrids(np.degrees(sorted_angles),
+                            [f"{int(round(d))}°" for d in sorted_directions_deg],
+                            fontsize=7)
+    ax_polar.set_yticklabels([])
+    ax_polar.grid(True, alpha=0.3)
+    ax_polar.legend(loc='upper left', bbox_to_anchor=(1.0, 1.1),
+                    fontsize=8, frameon=False)
+
+    return fig, trace_axes, ax_polar
+
+
 def plot_tuning_function_with_traces(osds_obj, roi_index, ax=None, show_trials=True, 
                                     metric='peak', trace_scale=0.2, minimal=True, 
                                     polar_color="#3D3AC4", trace_alpha=1, use_phases=None, 

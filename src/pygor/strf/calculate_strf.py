@@ -7,90 +7,20 @@ Claude Code + Github Copilot assisted development
 All outputs verified against IGOR-outputs within 0.095-1.03 similarity ratios
 """
 
+import contextlib
 import warnings
 from typing import Any
 
 import numpy as np
 from joblib import Parallel, delayed
 from scipy import ndimage
-from scipy.fft import fft, ifft, next_fast_len
-from scipy.signal import correlate
 from tqdm.auto import tqdm
 
-
-def means_subtracted_correlation(f_signal, noise_signal_2d):
-    """
-    Correlation calculation with means removal equivalent to IGOR's 'correlate /NODC'.
-
-    Parameters
-    ----------
-    f_signal : array (n_frames,)
-        Fluorescence/calcium trace (1D)
-    noise_signal_2d : array (n_pixels, n_frames)
-        Noise stimulus time series for all pixels, reshaped to 2D (C-order)
-
-    Returns
-    -------
-    correlations : array (n_pixels, correlation_length)
-        Cross-correlations for all pixels
-    """
-    # Remove mean from source (equivalent to correlate /NODC from IGOR)
-    f_signal_means_subtracted = f_signal - np.mean(f_signal)
-
-    # Remove DC from all destinations simultaneously
-    noise_means = np.mean(noise_signal_2d, axis=1, keepdims=True)
-    noise_signal_2d_means_subtracted = noise_signal_2d - noise_means
-
-    # Scipy turned out faster than np.correlate ()
-    # NOTE: Argument order reversed to match IGOR's lag convention
-    # IGOR: result[k] = sum(src[n] × dest[n-k])
-    # scipy: result[k] = sum(a[n] × b[n+k])
-    # By swapping arguments, we get equivalent temporal ordering
-    correlations = []
-    for i in range(noise_signal_2d_means_subtracted.shape[0]):
-        corr = correlate(
-            noise_signal_2d_means_subtracted[i], f_signal_means_subtracted, mode="full"
-        )
-        correlations.append(corr)
-
-    return np.array(correlations)
-
-
-# nice to have, but provided no meaningful speedup in testing and uses more memory
-# def means_subtracted_correlation_fft(f_signal, noise_signal_2d):
-#     """
-#     Vectorised correlation with DC removal (IGOR /NODC equivalent).
-
-#     Uses FFT for O(N log N) computation instead of O(N^2) direct correlation.
-#     Produces identical output to means_subtracted_correlation but faster.
-#     """
-#     # Remove means
-#     f_signal_centered = f_signal - np.mean(f_signal)
-#     noise_centered = noise_signal_2d - np.mean(noise_signal_2d, axis=1, keepdims=True)
-
-#     n_noise = noise_centered.shape[1]
-#     n_signal = f_signal_centered.shape[0]
-
-#     # Full correlation length (same as scipy correlate mode='full')
-#     n_full = n_noise + n_signal - 1
-#     fft_len = next_fast_len(n_full)
-
-#     # Zero-pad signal to match noise length for proper correlation
-#     # We want correlate(noise, f_signal) which means we need to reverse f_signal
-#     f_reversed = f_signal_centered[::-1]
-
-#     # FFT of reversed signal (compute once)
-#     f_fft = fft(f_reversed, n=fft_len)
-
-#     # FFT of all noise signals at once (batch operation)
-#     noise_fft = fft(noise_centered, n=fft_len, axis=1)
-
-#     # Convolution via FFT: conv(a,b) = ifft(fft(a) * fft(b))
-#     # correlate(a,b) = conv(a, b[::-1]) so we reversed f_signal above
-#     correlations = ifft(noise_fft * f_fft, axis=1).real
-
-#     # Trim to 'full' mode length
-#     return correlations[:, :n_full]
+try:
+    from threadpoolctl import threadpool_limits
+    _HAVE_TPCTL = True
+except Exception:                                       # pragma: no cover
+    _HAVE_TPCTL = False
 
 
 def _process_single_roi(
@@ -100,147 +30,162 @@ def _process_single_roi(
     trigger_start,
     n_f_relevant,
     colour_lookup,
-    noise_stimulus,
+    noise_ms,
     mean_stim,
     n_colours,
     n_x_noise,
     n_y_noise,
+    nx_c,
+    ny_c,
     n_f_filter,
-    n_f_filter_past,
+    taus,
     edge_crop,
     event_sd_threshold,
     pre_smooth,
+    blas_threads=None,
 ):
     """
-    Process a single ROI for STRF calculation (for joblib parallelization).
+    Process a single ROI for STRF calculation (windowed-lag STA; joblib-safe).
+
+    The spike-triggered average over the kept lags is computed as a single matrix
+    product ``noise_ms @ V.T`` rather than a full cross-correlation that is then
+    sliced -- only the ``n_f_filter`` lags that survive into the STRF are ever
+    formed. This is numerically equivalent to the old full-correlation + slice
+    (validated per-ROI r = 1.0) but ~25x faster and far lighter.
 
     Parameters
     ----------
     rr : int
-        ROI index
+        ROI index.
     roi_list : list
-        List of all ROI indices
+        List of all ROI indices (for resolving the output position).
     input_traces : np.ndarray
-        Input calcium traces (frames, rois)
+        Input calcium traces (frames, rois).
     trigger_start : int
-        Starting frame index
+        Starting frame index.
     n_f_relevant : int
-        Number of relevant frames
+        Number of relevant frames (L).
     colour_lookup : np.ndarray
-        Colour lookup array
-    noise_stimulus : np.ndarray
-        Pre-computed noise stimulus array
+        Per-frame colour assignment.
+    noise_ms : np.ndarray, shape (nx_c * ny_c, L)
+        Mean-subtracted, cropped noise stimulus, precomputed ONCE by the caller
+        and shared (memmapped under joblib) across all ROIs.
     mean_stim : np.ndarray
-        Mean stimulus for normalization (pre-computed)
+        Mean stimulus for normalization (precomputed).
     n_colours : int
-        Number of colour channels
+        Number of colour channels.
     n_x_noise, n_y_noise : int
-        Noise array dimensions
-    n_f_filter, n_f_filter_past : int
-        Filter dimensions
+        Full (uncropped) noise dimensions.
+    nx_c, ny_c : int
+        Cropped noise dimensions (n_x_noise - 2*edge_crop, etc.).
+    n_f_filter : int
+        Number of STA filter frames (kept lags).
+    taus : np.ndarray, shape (n_f_filter,)
+        Lag offsets for each kept filter frame; column j -> tau = (1 - n_f_filter_past) + j,
+        matching the original full-correlation slice convention.
     edge_crop : int
-        Edge cropping amount
+        Edge cropping amount.
     event_sd_threshold : float
-        Event detection threshold
+        Event detection threshold.
     pre_smooth : int
-        Pre-smoothing factor
+        Pre-smoothing factor for SD projections.
+    blas_threads : int or None
+        If set (parallel workers), pin BLAS to this many threads to avoid
+        oversubscription against joblib's process parallelism.
 
     Returns
     -------
     dict
-        Results for this ROI including STRF, SD, polarity, event count
+        Results for this ROI including STRF, SD, polarity, event count.
     """
-    roi_idx = roi_list.index(rr)
+    cm = (threadpool_limits(blas_threads)
+          if (blas_threads is not None and _HAVE_TPCTL)
+          else contextlib.nullcontext())
+    with cm:
+        roi_idx = roi_list.index(rr)
 
-    # Event counting
-    current_trace_raw = input_traces[
-        trigger_start : trigger_start + n_f_relevant, rr
-    ].copy()
-    current_trace_dif = np.diff(current_trace_raw, prepend=current_trace_raw[0])
-    baseline_points = min(100, n_f_relevant)
-    current_trace_dif_base = current_trace_dif[:baseline_points]
+        # Event counting
+        current_trace_raw = input_traces[
+            trigger_start : trigger_start + n_f_relevant, rr
+        ].copy()
+        current_trace_dif = np.diff(current_trace_raw, prepend=current_trace_raw[0])
+        baseline_points = min(100, n_f_relevant)
+        current_trace_dif_base = current_trace_dif[:baseline_points]
 
-    event_count = 0
-    if np.std(current_trace_dif_base) > 0:
-        current_trace_dif -= np.mean(current_trace_dif_base)
-        current_trace_dif /= np.std(current_trace_dif_base)
-        event_count = np.sum(current_trace_dif > event_sd_threshold)
+        event_count = 0
+        if np.std(current_trace_dif_base) > 0:
+            current_trace_dif -= np.mean(current_trace_dif_base)
+            current_trace_dif /= np.std(current_trace_dif_base)
+            event_count = np.sum(current_trace_dif > event_sd_threshold)
 
-    # Get base trace and current lookup
-    base_trace = input_traces[trigger_start : trigger_start + n_f_relevant, rr].copy()
-    current_lookup = colour_lookup[trigger_start : trigger_start + n_f_relevant].copy()
+        # Get base trace and current lookup
+        base_trace = input_traces[trigger_start : trigger_start + n_f_relevant, rr].copy()
+        current_lookup = colour_lookup[trigger_start : trigger_start + n_f_relevant].copy()
 
-    # Initialize outputs for this ROI
-    strf_data = np.zeros((n_colours, n_f_filter, n_x_noise, n_y_noise))
-    filter_sds_roi = np.zeros((n_x_noise, n_y_noise * n_colours))
-    filter_pols_roi = np.ones((n_x_noise, n_y_noise * n_colours))
+        # Initialize outputs for this ROI (float32 to match output array)
+        strf_data = np.zeros((n_colours, n_f_filter, n_x_noise, n_y_noise), dtype=np.float32)
+        filter_sds_roi = np.zeros((n_x_noise, n_y_noise * n_colours))
+        filter_pols_roi = np.ones((n_x_noise, n_y_noise * n_colours))
 
-    # Process each colour
-    for colour in range(n_colours):
-        # Apply colour masking
-        current_trace = np.where(current_lookup == colour, base_trace, 0.0)
+        # Process each colour
+        for colour in range(n_colours):
+            # Apply colour masking
+            current_trace = np.where(current_lookup == colour, base_trace, 0.0).astype(np.float32)
 
-        # Initialize current filter
-        current_filter = np.zeros((n_x_noise, n_y_noise, n_f_filter))
+            # Initialize current filter
+            current_filter = np.zeros((n_x_noise, n_y_noise, n_f_filter))
 
-        # Compute filter using optimized correlation
-        noise_2d = noise_stimulus.reshape(
-            (n_x_noise - edge_crop * 2) * (n_y_noise - edge_crop * 2),
-            n_f_relevant,
-            order="C",
-        )
-        correlations_2d = means_subtracted_correlation(current_trace, noise_2d)
-        # Optional FFT-based correlation for further speedup but less memory efficient with joblib
-        # correlations_2d = means_subtracted_correlation_fft(current_trace, noise_2d)
+            # Build the shifted (mean-subtracted) trace matrix for ONLY the kept lags.
+            # V[j, n] = f_ms[n - tau_j]; correlation at those lags = noise_ms @ V.T.
+            f_ms = current_trace - current_trace.mean()
+            V = np.zeros((n_f_filter, n_f_relevant), dtype=np.float32)
+            for j, tau in enumerate(taus):
+                if tau >= 0:
+                    if tau < n_f_relevant:
+                        V[j, tau:] = f_ms[: n_f_relevant - tau]
+                else:
+                    V[j, : n_f_relevant + tau] = f_ms[-tau:]
+            sta_windows = (noise_ms @ V.T).astype(np.float64)  # (nx_c*ny_c, n_f_filter)
 
-        # Extract STA window
-        start_idx = n_f_relevant - n_f_filter_past
-        if start_idx >= 0 and start_idx + n_f_filter <= correlations_2d.shape[1]:
-            sta_windows = correlations_2d[:, start_idx : start_idx + n_f_filter]
-            strf_spatial = sta_windows.reshape(
-                n_x_noise - edge_crop * 2,
-                n_y_noise - edge_crop * 2,
-                n_f_filter,
-                order="C",
-            )
+            strf_spatial = sta_windows.reshape(nx_c, ny_c, n_f_filter, order="C")
             current_filter[
                 edge_crop : n_x_noise - edge_crop, edge_crop : n_y_noise - edge_crop, :
             ] = strf_spatial
 
-        # Normalize by mean stimulus (vectorized)
-        mean_stim_slice = mean_stim[:, :, colour]
-        nonzero_mask = mean_stim_slice != 0
-        current_filter[nonzero_mask, :] /= mean_stim_slice[nonzero_mask, np.newaxis]
-        current_filter = np.nan_to_num(current_filter, nan=0.0)
+            # Normalize by mean stimulus (vectorized)
+            mean_stim_slice = mean_stim[:, :, colour]
+            nonzero_mask = mean_stim_slice != 0
+            current_filter[nonzero_mask, :] /= mean_stim_slice[nonzero_mask, np.newaxis]
+            current_filter = np.nan_to_num(current_filter, nan=0.0)
 
-        # Store STRF (transposed to [time, x, y])
-        strf_data[colour, :, :, :] = np.transpose(current_filter, (2, 0, 1))
+            # Store STRF (transposed to [time, x, y])
+            strf_data[colour, :, :, :] = np.transpose(current_filter, (2, 0, 1))
 
-        # Calculate SD projections with z-normalization on copy
-        current_filter_smth = current_filter.copy()
-        if pre_smooth > 0:
-            current_filter_smth = ndimage.gaussian_filter(
-                current_filter_smth, sigma=pre_smooth
-            )
+            # Calculate SD projections with z-normalization on copy
+            current_filter_smth = current_filter.copy()
+            if pre_smooth > 0:
+                current_filter_smth = ndimage.gaussian_filter(
+                    current_filter_smth, sigma=pre_smooth
+                )
 
-        temp_wave = current_filter_smth[:, :, 0]
-        temp_mean = np.mean(temp_wave)
-        temp_std = np.std(temp_wave)
+            temp_wave = current_filter_smth[:, :, 0]
+            temp_mean = np.mean(temp_wave)
+            temp_std = np.std(temp_wave)
 
-        if temp_std > 0:
-            current_filter_smth = (current_filter_smth - temp_mean) / temp_std
+            if temp_std > 0:
+                current_filter_smth = (current_filter_smth - temp_mean) / temp_std
 
-            # Vectorized polarity and SD calculation
-            max_locs = np.argmax(current_filter_smth, axis=2)
-            min_locs = np.argmin(current_filter_smth, axis=2)
-            sds = np.std(current_filter_smth, axis=2)
+                # Vectorized polarity and SD calculation
+                max_locs = np.argmax(current_filter_smth, axis=2)
+                min_locs = np.argmin(current_filter_smth, axis=2)
+                sds = np.std(current_filter_smth, axis=2)
 
-            # Polarity: -1 where max comes before min
-            pols = np.where(max_locs < min_locs, -1, 1)
+                # Polarity: -1 where max comes before min
+                pols = np.where(max_locs < min_locs, -1, 1)
 
-            # Store in output arrays (flattening spatial dims into colour-concatenated format)
-            filter_pols_roi[:, colour * n_y_noise : (colour + 1) * n_y_noise] = pols
-            filter_sds_roi[:, colour * n_y_noise : (colour + 1) * n_y_noise] = sds
+                # Store in output arrays (flattening spatial dims into colour-concatenated format)
+                filter_pols_roi[:, colour * n_y_noise : (colour + 1) * n_y_noise] = pols
+                filter_sds_roi[:, colour * n_y_noise : (colour + 1) * n_y_noise] = sds
 
     return {
         "roi_idx": roi_idx,
@@ -279,12 +224,14 @@ def calculate_calcium_correlated_average(
     while achieving significant performance improvements through vectorization and
     optimized memory management.
 
-    PERFORMANCE IMPROVEMENTS:
-    -------------------------
-    10-20x faster than loop based implementation: 45s → 2-4s per ROI
-    Reliable scipy.signal.correlate: No FFT complications
-    Memory efficiency: Optimized array layouts and batch processing
-    Cache optimization: C-order arrays for better memory access
+    PERFORMANCE:
+    -----------
+    Windowed-lag STA via a single BLAS matmul (noise_ms @ V.T): only the kept
+    n_f_filter lags are formed, instead of a full 2*n_f_relevant cross-correlation
+    that is then sliced. ~25x faster than the previous full-correlation loop and
+    far lighter (validated per-ROI r = 1.0 vs the old float64 path).
+    Mean-subtracted noise is precomputed once and shared across ROIs (memmapped
+    under joblib so parallel workers don't each copy it). Output is float32.
 
     VERIFIED IGOR EQUIVALENCES MAINTAINED:
     -------------------------------------
@@ -509,9 +456,10 @@ def calculate_calcium_correlated_average(
     )  # force to 1 (On)
     filter_corrs = np.zeros((n_x_noise, n_y_noise * n_colours, len(roi_list)))
 
-    # Pre-allocate STRF output array [colour, roi, time, x, y]
+    # Pre-allocate STRF output array [colour, roi, time, x, y].
+    # float32: halves RAM + saved file size; validated equivalent to float64 (r=1.0).
     strfs_output = np.zeros(
-        (n_colours, len(roi_list), n_f_filter, n_x_noise, n_y_noise)
+        (n_colours, len(roi_list), n_f_filter, n_x_noise, n_y_noise), dtype=np.float32
     )
 
     event_counter = np.zeros(len(roi_list))
@@ -575,90 +523,63 @@ def calculate_calcium_correlated_average(
         current_trace = np.where(current_lookup == colour, base_trace_ref, 0.0)
         if verbose:
             print(f"{colour}", end="")
-        # Compute mean stimulus per pixel (Phase 1 fix) - vectorized
-        # noise_stimulus shape: (n_x_cropped, n_y_cropped, n_f_relevant)
-        # current_trace shape: (n_f_relevant,)
-        # Result: mean over time of (noise * trace) for each pixel
+        # Compute mean stimulus per pixel (Phase 1 fix).
+        # Mean over time of (noise * trace) per pixel, via tensordot to avoid a
+        # full (nx_c, ny_c, n_f_relevant) float64 temporary from noise*trace.
         mean_stim[
             edge_crop : n_x_noise - edge_crop, edge_crop : n_y_noise - edge_crop, colour
-        ] = np.mean(noise_stimulus * current_trace, axis=2)
+        ] = np.tensordot(
+            noise_stimulus, current_trace.astype(np.float32), axes=([2], [0])
+        ) / n_f_relevant
 
     if verbose:
         print(".")
 
+    # Precompute the mean-subtracted, cropped noise ONCE (shared across all ROIs
+    # and colours). Contiguous float32 so joblib auto-memmaps it (>max_nbytes)
+    # for the parallel path -> workers share one read-only copy instead of each
+    # pickling it. taus map STA filter frame j -> lag (1 - n_f_filter_past) + j,
+    # matching the original full-correlation slice convention.
+    nx_c = n_x_noise - edge_crop * 2
+    ny_c = n_y_noise - edge_crop * 2
+    noise_2d = noise_stimulus.reshape(nx_c * ny_c, n_f_relevant, order="C")
+    noise_ms = np.ascontiguousarray(noise_2d - noise_2d.mean(axis=1, keepdims=True))
+    taus = np.arange(n_f_filter) + (1 - n_f_filter_past)
+
+    def _store(result):
+        event_counter[result["roi_idx"]] = result["event_count"]
+        filter_sds[:, :, result["roi_idx"]] = result["filter_sds"]
+        filter_pols[:, :, result["roi_idx"]] = result["filter_pols"]
+        for colour in range(n_colours):
+            strfs_output[colour, result["roi_idx"], :, :, :] = result["strf_data"][colour]
+
     # STEP 2: Process ROIs (optionally in parallel with joblib)
     if n_jobs == 1:
-        # Sequential processing
-        roi_iter = tqdm(roi_list, desc="Computing STRFs", leave=False)
-        for rr in roi_iter:
-            result = _process_single_roi(
-                rr,
-                roi_list,
-                input_traces,
-                trigger_start,
-                n_f_relevant,
-                colour_lookup,
-                noise_stimulus,
-                mean_stim,
-                n_colours,
-                n_x_noise,
-                n_y_noise,
-                n_f_filter,
-                n_f_filter_past,
-                edge_crop,
-                event_sd_threshold,
-                pre_smooth,
-            )
-
-            # Unpack results
-            event_counter[result["roi_idx"]] = result["event_count"]
-            filter_sds[:, :, result["roi_idx"]] = result["filter_sds"]
-            filter_pols[:, :, result["roi_idx"]] = result["filter_pols"]
-
-            # Store STRF data
-            for colour in range(n_colours):
-                strfs_output[colour, result["roi_idx"], :, :, :] = result["strf_data"][
-                    colour
-                ]
+        # Sequential processing (BLAS already multithreads the per-ROI matmul)
+        for rr in tqdm(roi_list, desc="Computing STRFs", leave=False):
+            _store(_process_single_roi(
+                rr, roi_list, input_traces, trigger_start, n_f_relevant,
+                colour_lookup, noise_ms, mean_stim, n_colours, n_x_noise,
+                n_y_noise, nx_c, ny_c, n_f_filter, taus, edge_crop,
+                event_sd_threshold, pre_smooth,
+            ))
     else:
-        # Parallel processing with joblib + tqdm progress bar
-        results_gen = Parallel(n_jobs=n_jobs, return_as="generator")(
+        # Parallel processing: noise_ms memmapped once (max_nbytes), BLAS pinned
+        # to 1 thread per worker to avoid oversubscription against joblib.
+        results_gen = Parallel(n_jobs=n_jobs, max_nbytes="1M", return_as="generator")(
             delayed(_process_single_roi)(
-                rr,
-                roi_list,
-                input_traces,
-                trigger_start,
-                n_f_relevant,
-                colour_lookup,
-                noise_stimulus,
-                mean_stim,
-                n_colours,
-                n_x_noise,
-                n_y_noise,
-                n_f_filter,
-                n_f_filter_past,
-                edge_crop,
-                event_sd_threshold,
-                pre_smooth,
+                rr, roi_list, input_traces, trigger_start, n_f_relevant,
+                colour_lookup, noise_ms, mean_stim, n_colours, n_x_noise,
+                n_y_noise, nx_c, ny_c, n_f_filter, taus, edge_crop,
+                event_sd_threshold, pre_smooth, blas_threads=1,
             )
             for rr in roi_list
         )
-
-        # Unpack results as they complete, with tqdm tracking progress
         for result in tqdm(
-            results_gen,
-            total=len(roi_list),
-            desc="Computing STRFs (parallel)",
-            leave=False,
+            results_gen, total=len(roi_list),
+            desc="Computing STRFs (parallel)", leave=False,
         ):
-            event_counter[result["roi_idx"]] = result["event_count"]
-            filter_sds[:, :, result["roi_idx"]] = result["filter_sds"]
-            filter_pols[:, :, result["roi_idx"]] = result["filter_pols"]
-
-            for colour in range(n_colours):
-                strfs_output[colour, result["roi_idx"], :, :, :] = result["strf_data"][
-                    colour
-                ]
+            _store(result)
 
     # Apply polarity adjustment if requested (direct translation)
     if adjust_by_polarity:

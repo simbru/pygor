@@ -329,6 +329,225 @@ def compute_direction_selectivity_index(responses, directions_deg):
     }
 
 
+# Metrics that reduce a single trace (last axis) to a scalar amplitude. These
+# are the only ones meaningful for a per-trial / direction-shuffle permutation
+# test. Template-based metrics ('correlation', 'r2', 'distance') compare each
+# direction against a grand-mean template across directions, so shuffling the
+# direction labels would corrupt the template -> deliberately unsupported.
+_PERMUTABLE_METRICS = {
+    'max', 'absmax', 'peak', 'min', 'avg', 'mean', 'range',
+    'auc', 'peak_positive', 'peak_negative', 'auc_pos',
+}
+
+
+def _reduce_trace_metric(arr, metric, axis=-1):
+    """
+    Reduce traces along `axis` to a scalar per element using an amplitude metric.
+
+    Mirrors the amplitude metrics in
+    ``pygor.timeseries.osds.tuning_computation.compute_tuning_function`` so the
+    permutation test uses the same response definition as the standard pipeline.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Traces with time along `axis`.
+    metric : str or callable
+        One of ``_PERMUTABLE_METRICS`` or a callable taking a 1D array.
+    axis : int
+        Axis to reduce (the time axis).
+
+    Returns
+    -------
+    np.ndarray
+        `arr` with `axis` removed.
+    """
+    if callable(metric):
+        return np.apply_along_axis(metric, axis, arr)
+    if metric == 'max':
+        return np.max(arr, axis=axis)
+    if metric in ('absmax', 'peak'):
+        return np.max(np.abs(arr), axis=axis)
+    if metric == 'min':
+        return np.min(arr, axis=axis)
+    if metric in ('avg', 'mean'):
+        return np.mean(arr, axis=axis)
+    if metric == 'range':
+        return np.max(arr, axis=axis) - np.min(arr, axis=axis)
+    if metric == 'auc':
+        return np.trapezoid(np.abs(arr), axis=axis)
+    if metric == 'peak_positive':
+        return np.max(arr, axis=axis)
+    if metric == 'peak_negative':
+        return np.min(arr, axis=axis)
+    if metric == 'auc_pos':
+        return np.trapezoid(np.clip(arr, 0, None), axis=axis)
+    raise ValueError(
+        f"Metric '{metric}' is not supported for the DSI permutation test. "
+        f"Supported: {sorted(_PERMUTABLE_METRICS)} or a callable. "
+        f"Template-based metrics (correlation/r2/distance) are excluded because "
+        f"shuffling direction labels invalidates the cross-direction template."
+    )
+
+
+def _vector_magnitude_vectorized(tuning, directions_rad):
+    """
+    Mean resultant length (gDSI) over the last axis, fully vectorized.
+
+    Matches ``compute_direction_vector_magnitude`` (negative responses clipped
+    to zero) but works on arbitrary leading dimensions without a Python loop,
+    so it is cheap to evaluate once per permutation.
+
+    Parameters
+    ----------
+    tuning : np.ndarray
+        Responses with directions along the last axis.
+    directions_rad : np.ndarray
+        Direction of each column, in radians.
+
+    Returns
+    -------
+    np.ndarray
+        Resultant length (0-1), shape ``tuning.shape[:-1]``.
+    """
+    w = np.clip(tuning, 0, None)
+    total = w.sum(axis=-1)
+    cx = (w * np.cos(directions_rad)).sum(axis=-1)
+    cy = (w * np.sin(directions_rad)).sum(axis=-1)
+    resultant = np.hypot(cx, cy)
+    nonzero = total > 0
+    out = np.zeros_like(total, dtype=float)
+    np.divide(resultant, total, out=out, where=nonzero)
+    return out
+
+
+def compute_dsi_permutation_test(
+    per_trial_responses,
+    directions_deg,
+    n_permutations=1000,
+    alpha=0.05,
+    seed=None,
+    decision='gdsi',
+):
+    """
+    Permutation test for direction-selectivity significance.
+
+    Tests the null hypothesis that a cell is **not** direction-selective, i.e.
+    that its per-trial responses are exchangeable across directions. For each
+    permutation the pooled (direction x trial) responses of every ROI are
+    randomly reassigned to directions (keeping trial counts), a shuffled tuning
+    curve is formed by averaging over trials, and null selectivity statistics
+    are computed. One-sided p-values are the fraction of null statistics >= the
+    observed statistic. This addresses the well-known issue that a selectivity
+    index can be large purely by chance with noisy or few-trial responses.
+
+    Two statistics are computed from the **same** shuffle:
+
+    - ``gdsi`` (direction vector magnitude / 1 - circular variance): the
+      recommended significance statistic. It pools information across all
+      directions, so its null distribution is well behaved and the test has
+      good power. This is the field-standard DS significance statistic.
+    - ``dsi`` (argmax-based pairwise index, what ``get_dsi`` reports): kept as a
+      familiar effect size. Note its null is biased upward (argmax over noisy
+      direction means is large by construction), so a pure-DSI permutation test
+      is conservative / low power -- exactly why a high DSI alone is not proof
+      of direction selectivity.
+
+    Parameters
+    ----------
+    per_trial_responses : np.ndarray
+        Scalar response per (ROI, direction, trial), shape
+        ``(n_rois, n_directions, n_trials)``.
+    directions_deg : array-like
+        Direction of each column in degrees, length ``n_directions``.
+    n_permutations : int
+        Number of shuffles for the null distribution (default 1000).
+    alpha : float
+        Significance threshold for the ``is_ds`` decision (default 0.05).
+    seed : int or None
+        Seed for the random generator (reproducibility).
+    decision : {'gdsi', 'dsi'}
+        Which statistic drives the binary ``is_ds`` / ``p_value`` outputs.
+        Default ``'gdsi'`` (recommended). Both p-values are always returned.
+
+    Returns
+    -------
+    dict
+        - 'p_value', 'is_ds': p-value and decision for the chosen ``decision``
+          statistic, shape ``(n_rois,)``.
+        - 'dsi', 'gdsi': observed statistics per ROI, ``(n_rois,)``. Computed
+          from per-trial responses (mean over trials), so for non-linear
+          metrics (e.g. 'range') 'dsi' may differ slightly from ``get_dsi()``,
+          which reduces the trial-average trace.
+        - 'p_value_dsi', 'p_value_gdsi': one-sided p-values for each statistic,
+          ``(n_rois,)``, with the (1 + count) / (n + 1) correction.
+        - 'null_dsi', 'null_gdsi': null distributions, ``(n_permutations, n_rois)``.
+        - 'preferred_direction': observed preferred direction (deg), ``(n_rois,)``.
+        - 'decision', 'n_permutations', 'alpha': echoes of the inputs.
+    """
+    if decision not in ('gdsi', 'dsi'):
+        raise ValueError("decision must be 'gdsi' or 'dsi'")
+    per_trial_responses = np.asarray(per_trial_responses, dtype=float)
+    if per_trial_responses.ndim != 3:
+        raise ValueError(
+            "per_trial_responses must be 3D (n_rois, n_directions, n_trials), "
+            f"got shape {per_trial_responses.shape}"
+        )
+    directions_deg = np.asarray(directions_deg)
+    n_rois, n_dir, n_trials = per_trial_responses.shape
+    if directions_deg.shape[0] != n_dir:
+        raise ValueError(
+            f"directions_deg length ({directions_deg.shape[0]}) must match "
+            f"n_directions ({n_dir})"
+        )
+    directions_rad = np.deg2rad(directions_deg)
+
+    # Observed statistics from the trial-averaged tuning curve.
+    tuning_obs = per_trial_responses.mean(axis=2)  # (n_rois, n_dir)
+    obs = compute_direction_selectivity_index(tuning_obs, directions_deg)
+    dsi_obs = np.atleast_1d(obs['dsi'])
+    gdsi_obs = np.atleast_1d(_vector_magnitude_vectorized(tuning_obs, directions_rad))
+
+    # Pool responses per ROI; each permutation shuffles direction labels within
+    # an ROI (independent shuffle per row), then averages back into directions.
+    rng = np.random.default_rng(seed)
+    flat = per_trial_responses.reshape(n_rois, n_dir * n_trials)
+    null_dsi = np.empty((n_permutations, n_rois), dtype=float)
+    null_gdsi = np.empty((n_permutations, n_rois), dtype=float)
+    for i in range(n_permutations):
+        shuffled = rng.permuted(flat, axis=1).reshape(n_rois, n_dir, n_trials)
+        tuning_null = shuffled.mean(axis=2)
+        null_dsi[i] = compute_direction_selectivity_index(
+            tuning_null, directions_deg
+        )['dsi']
+        null_gdsi[i] = _vector_magnitude_vectorized(tuning_null, directions_rad)
+
+    # One-sided p with add-one correction (both statistics are >= 0).
+    p_value_dsi = (1 + np.sum(null_dsi >= dsi_obs[np.newaxis, :], axis=0)) / (
+        n_permutations + 1
+    )
+    p_value_gdsi = (1 + np.sum(null_gdsi >= gdsi_obs[np.newaxis, :], axis=0)) / (
+        n_permutations + 1
+    )
+    p_value = p_value_gdsi if decision == 'gdsi' else p_value_dsi
+    is_ds = p_value < alpha
+
+    return {
+        'p_value': p_value,
+        'is_ds': is_ds,
+        'dsi': dsi_obs,
+        'gdsi': gdsi_obs,
+        'p_value_dsi': p_value_dsi,
+        'p_value_gdsi': p_value_gdsi,
+        'null_dsi': null_dsi,
+        'null_gdsi': null_gdsi,
+        'preferred_direction': np.atleast_1d(obs['preferred_direction']),
+        'decision': decision,
+        'n_permutations': n_permutations,
+        'alpha': alpha,
+    }
+
+
 def compute_preferred_direction(responses, directions_deg):
     """
     Find the preferred direction angle.

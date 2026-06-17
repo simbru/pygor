@@ -207,8 +207,9 @@ class Core:
         #         stacklevel=3,
         #     )
         # Imply from averages the ms_duration of one repeat
+        # but keep in mind linespeed can be 1 or 2 ms, so factor in 
         if self.averages is not None:
-            self.ms_dur = self.averages.shape[-1]
+            self.ms_dur = self.averages.shape[-1] * self.linedur_s * 1000
         else:
             self.ms_dur = None
         # Ensure triggertimes_frame does not include uneccessary nans
@@ -611,6 +612,19 @@ class Core:
                 instance.preprocess()
 
         return instance
+
+    @property
+    def averages_ms(self): 
+        """
+        Interpolate the averages_ms to get ms-percision. Useful in cases where line duration != 1 ms.
+        """
+        from scipy.interpolate import make_interp_spline
+        org_length = self.averages.shape[-1]
+        x_org = np.linspace(0, 1, org_length)
+        upscale_target = int(np.rint(self.ms_dur))
+        x_new = np.linspace(0, 1, upscale_target)
+        upsampled = make_interp_spline(x_org, self.averages, k=3, axis=1)(x_new)        
+        return upsampled
 
     def preprocess(
         self,
@@ -1359,16 +1373,22 @@ class Core:
         Path
             Path to the saved file.
         """
+        # Canonical suffix for native pygor single-recording saves.
+        # Always enforced (even on user-supplied paths) so filetype is
+        # unambiguous on disk and distinct from IGOR-exported .h5 files.
+        suffix = ".recording.h5"
         if path is None:
-            # Use .recording.h5 to distinguish from IGOR-exported .h5 files.
-            # .with_suffix replaces only the last suffix, so .smp → .recording.h5
-            # requires stripping first, then adding the compound extension.
-            stem = pathlib.Path(self.filename).resolve()
-            # Strip all existing suffixes (e.g. ".smp", ".smh", ".h5")
+            path = pathlib.Path(self.filename).resolve()
+        else:
+            path = pathlib.Path(path)
+        # Strip any existing trailing extensions, then enforce the canonical
+        # suffix. .with_suffix replaces only the last component, so a compound
+        # ".recording.h5" requires stripping all suffixes first.
+        if not path.name.endswith(suffix):
+            stem = path
             while stem.suffix:
                 stem = stem.with_suffix("")
-            path = stem.with_suffix(".recording.h5")
-        path = pathlib.Path(path)
+            path = stem.with_name(stem.name + suffix)
         if path.exists() and not overwrite:
             raise FileExistsError(
                 f"File already exists: {path}. Use overwrite=True to replace."
@@ -3717,6 +3737,7 @@ class Core:
         cmap: str = "inferno",
         unit: str = "seconds",
         show_baseline: bool = True,
+        ax: Any = None,
         **kwargs: Any,
     ):
         """
@@ -3746,6 +3767,11 @@ class Core:
             If True, overlay a shaded region indicating the baseline window
             used for z-normalization. Requires baseline_info to be available
             (i.e. traces must have been extracted). Default False.
+        ax : matplotlib.axes.Axes, optional
+            Existing axis to draw into. In imshow mode the heatmap is drawn
+            directly on it. In line mode the axis's slot is subdivided into
+            one sub-axis per ROI (the passed axis is removed). If None, a new
+            figure is created. Default None.
         **kwargs
             Passed to plt.plot (line mode) or ax.imshow (imshow mode).
         """
@@ -3785,9 +3811,12 @@ class Core:
                 )
         if n_rois > n_rois_imshow:
             # --- imshow mode ---
-            if figsize is None:
-                figsize = (8, max(3, n_rois / 10))
-            fig, ax = plt.subplots(figsize=figsize)
+            if ax is None:
+                if figsize is None:
+                    figsize = (8, max(3, n_rois / 10))
+                fig, ax = plt.subplots(figsize=figsize)
+            else:
+                fig = ax.figure
             extent = [x[0], x[-1], n_rois - 0.5, -0.5]
             ax.imshow(
                 traces,
@@ -3810,17 +3839,28 @@ class Core:
             ax.set_ylabel("ROI")
             return fig, ax
         # --- line trace mode ---
-        if figsize is None:
-            figsize = (8, max(3, n_rois * 0.4))
-        fig, axs = plt.subplots(
-            n_rois,
-            1,
-            figsize=figsize,
-            sharex=True,
-            gridspec_kw={"hspace": 0},
-        )
-        if n_rois == 1:
-            axs = [axs]
+        if ax is None:
+            if figsize is None:
+                figsize = (8, max(3, n_rois * 0.4))
+            fig, axs = plt.subplots(
+                n_rois,
+                1,
+                figsize=figsize,
+                sharex=True,
+                gridspec_kw={"hspace": 0},
+            )
+            if n_rois == 1:
+                axs = [axs]
+        else:
+            # Subdivide the passed axis's slot into one sub-axis per ROI.
+            fig = ax.figure
+            subspec = ax.get_subplotspec().subgridspec(
+                n_rois, 1, hspace=0
+            )
+            ax.remove()
+            axs = [fig.add_subplot(subspec[i]) for i in range(n_rois)]
+            for a in axs[1:]:
+                a.sharex(axs[0])
         colors = plt.cm.jet(np.linspace(0, 1, n_rois))
         for i, ax in enumerate(axs):
             ax.plot(x, traces[i], color=colors[i], linewidth=0.7, **kwargs)

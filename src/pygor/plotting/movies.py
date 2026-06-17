@@ -200,8 +200,16 @@ def play_movie_4d(
     axis=None,
     frameon=False,
     norm_by="input",
+    alpha=None,
+    interpolation="none",
     **kwargs: Any,
 ):
+    """
+    alpha : None/False (opaque), True (per-pixel alpha = |value|/global-max,
+        clipped 0..1, recomputed each frame), or a float/2D-array passed through.
+    interpolation : imshow interpolation. Default "none" (crisp pixels). Pass
+        "antialiased" for the old smoothed look.
+    """
     # This is way more efficient than the legacy version and does not rely on ipywidgets
     # https://stackoverflow.com/questions/39472017/how-to-animate-the-colorbar-in-matplotlib
     # Return default matplotlib plotting parameters to new dict and change those needed
@@ -232,6 +240,18 @@ def play_movie_4d(
     input_arr = input_arr.reshape(columns * rows, frames, y, x, order="f")
     if norm_by == "input":
         max_abs_val = np.max(np.abs(input_arr))
+    # Global amplitude max for alpha normalisation (independent of norm_by)
+    alpha_max = np.max(np.abs(input_arr))
+
+    def _alpha_for(frame2d):
+        if alpha is None or alpha is False:
+            return None
+        if alpha is True:
+            if alpha_max > 0:
+                return np.clip(np.abs(frame2d) / alpha_max, 0, 1)
+            return np.zeros_like(frame2d)
+        return alpha  # float or 2D array, passed straight through
+
     # Check attributes and kwargs
     n_panels = rows * columns
     if "cmap_list" not in kwargs:
@@ -260,7 +280,14 @@ def play_movie_4d(
             ax.axis("off")
             ax.set_aspect("equal")
             # Plotting
-            im = ax.imshow(input_arr[n, 0], cmap=cmap_list[n], origin="lower")
+            a0 = _alpha_for(input_arr[n, 0])
+            im = ax.imshow(
+                input_arr[n, 0],
+                cmap=cmap_list[n],
+                origin="lower",
+                interpolation=interpolation,
+                **({"alpha": a0} if a0 is not None else {}),
+            )
             # Equalise the colormap
             im.set_clim(-max_abs_val, max_abs_val)
             # Optional colorbars
@@ -287,6 +314,9 @@ def play_movie_4d(
                 im = ax.get_images()[0]
                 # Fill the animation with data
                 im.set_array(input_arr[n][frame])
+                a = _alpha_for(input_arr[n][frame])
+                if a is not None:
+                    im.set_alpha(a)
 
         # Create the animation based on the above function
         animation = matplotlib.animation.FuncAnimation(

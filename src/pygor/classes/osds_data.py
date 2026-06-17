@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from pygor.timeseries.osds.plotting import circular_directional_plots
+from pygor.timeseries.osds.plotting import roi_metrics_overlay
 from pygor.timeseries.osds import tuning_metrics, tuning_computation
 
 import warnings
@@ -443,6 +444,176 @@ class OSDS(Core):
         """
         result = self.compute_tuning_metrics(roi_indices, metric, phase_aware)['dsi']
         return self._extract_phase(result, phase_idx)
+
+    def _per_trial_direction_responses(self, metric=None, window=None):
+        """
+        Per-trial scalar response for each ROI and direction.
+
+        Reduces each single-trial, single-direction snippet to a scalar using
+        the same amplitude metric as the standard tuning pipeline, giving the
+        raw material for the DSI permutation test.
+
+        Parameters
+        ----------
+        metric : str or callable or None
+            Amplitude metric (see compute_dsi_significance). If None, uses
+            self.tuning_metric.
+        window : int, tuple, or None
+            Time window within each direction epoch (same semantics as
+            compute_tuning_function). If None, uses the whole epoch.
+
+        Returns
+        -------
+        np.ndarray
+            Per-trial responses, shape (n_rois, n_directions, n_trials).
+        """
+        if metric is None:
+            metric = self.tuning_metric
+        if self.snippets is None or np.isnan(self.snippets).all():
+            raise ValueError(
+                "Snippets not found. Run compute_snippets_and_averages() first "
+                "(the permutation test needs single-trial responses)."
+            )
+        # (n_directions, n_trials, n_rois, timepoints_per_direction)
+        dir_snips = self.split_snippets_directionally()
+        if window is not None:
+            if isinstance(window, int):
+                dir_snips = dir_snips[..., :window]
+            elif isinstance(window, (tuple, list)) and len(window) == 2:
+                dir_snips = dir_snips[..., window[0]:window[1]]
+            else:
+                raise ValueError("window must be int or (start, end) tuple")
+        # Reduce time axis -> (n_directions, n_trials, n_rois)
+        resp = tuning_metrics._reduce_trace_metric(dir_snips, metric, axis=-1)
+        # -> (n_rois, n_directions, n_trials)
+        return resp.transpose(2, 0, 1)
+
+    def compute_dsi_significance(
+        self,
+        roi_indices=None,
+        metric=None,
+        n_permutations=1000,
+        alpha=0.05,
+        seed=None,
+        window=None,
+        decision='gdsi',
+    ):
+        """
+        Permutation test for direction-selectivity significance.
+
+        Shuffles direction labels across the pooled per-trial responses to build
+        a null distribution per ROI, then reports one-sided p-values and a
+        binary DS classification. Use this when a high selectivity index alone
+        is not enough - it can be large by chance with noisy/few-trial data.
+
+        Two statistics are computed from the same shuffle: the argmax-based DSI
+        (``get_dsi``'s definition, kept as a familiar effect size) and the
+        direction vector magnitude / gDSI (recommended for the significance
+        decision because its null is well behaved). See
+        pygor.timeseries.osds.tuning_metrics.compute_dsi_permutation_test.
+
+        Parameters
+        ----------
+        roi_indices : list, int, or None
+            ROIs to test. If None, tests all ROIs.
+        metric : str or callable or None
+            Amplitude metric for the per-trial response. If None, uses
+            self.tuning_metric. Template metrics (correlation/r2/distance) are
+            not supported (shuffling directions breaks the template).
+        n_permutations : int
+            Number of shuffles (default 1000).
+        alpha : float
+            Significance threshold for is_ds (default 0.05).
+        seed : int or None
+            RNG seed for reproducibility.
+        window : int, tuple, or None
+            Time window within each direction epoch (as in
+            compute_tuning_function). If None, uses the whole epoch.
+        decision : {'gdsi', 'dsi'}
+            Statistic driving the binary is_ds / p_value (default 'gdsi').
+
+        Returns
+        -------
+        dict
+            Keys: 'p_value', 'is_ds', 'dsi', 'gdsi', 'p_value_dsi',
+            'p_value_gdsi', 'null_dsi', 'null_gdsi', 'preferred_direction',
+            'roi_indices', 'decision', 'n_permutations', 'alpha'.
+
+        Notes
+        -----
+        Observed 'dsi'/'gdsi' come from per-trial responses (mean over trials),
+        so for non-linear metrics (e.g. the default 'range') 'dsi' may differ
+        slightly from get_dsi(), which reduces the trial-average trace.
+        """
+        if isinstance(roi_indices, int):
+            roi_indices = [roi_indices]
+        per_trial = self._per_trial_direction_responses(metric=metric, window=window)
+        if roi_indices is not None:
+            per_trial = per_trial[list(roi_indices)]
+        result = tuning_metrics.compute_dsi_permutation_test(
+            per_trial,
+            self.directions_list,
+            n_permutations=n_permutations,
+            alpha=alpha,
+            seed=seed,
+            decision=decision,
+        )
+        result['roi_indices'] = (
+            list(range(self.num_rois)) if roi_indices is None else list(roi_indices)
+        )
+        return result
+
+    def get_dsi_pvalue(
+        self,
+        roi_indices=None,
+        metric=None,
+        n_permutations=1000,
+        alpha=0.05,
+        seed=None,
+        window=None,
+        decision='gdsi',
+    ):
+        """
+        Permutation p-value for direction selectivity per ROI.
+
+        Convenience wrapper around compute_dsi_significance returning only the
+        p-value array for the chosen ``decision`` statistic. See that method for
+        parameter details.
+
+        Returns
+        -------
+        np.ndarray
+            One-sided permutation p-values, shape (n_rois,).
+        """
+        return self.compute_dsi_significance(
+            roi_indices, metric, n_permutations, alpha, seed, window, decision
+        )['p_value']
+
+    def get_is_ds(
+        self,
+        roi_indices=None,
+        metric=None,
+        n_permutations=1000,
+        alpha=0.05,
+        seed=None,
+        window=None,
+        decision='gdsi',
+    ):
+        """
+        Binary direction-selectivity classification per ROI (p_value < alpha).
+
+        Convenience wrapper around compute_dsi_significance. See that method for
+        parameter details.
+
+        Returns
+        -------
+        np.ndarray
+            Boolean array, True where the ROI is significantly direction-
+            selective. Shape (n_rois,).
+        """
+        return self.compute_dsi_significance(
+            roi_indices, metric, n_permutations, alpha, seed, window, decision
+        )['is_ds']
 
     def get_preferred_direction(self, roi_indices=None, metric=None, phase_aware=None, phase_idx=None):
         """
@@ -1537,6 +1708,48 @@ class OSDS(Core):
             trace_alpha=trace_alpha, use_phases=use_phases, phase_colors=phase_colors,
             orbit_distance=orbit_distance, trace_aspect_x=trace_aspect_x,
             trace_aspect_y=trace_aspect_y, separate_phase_axes=separate_phase_axes, **kwargs
+        )
+
+    def plot_tuning_function_strip(self, roi_index, metric='peak', show_trials=True,
+                                   phase_colors=("#FF5C5C", "#3D3AC4"),
+                                   phase_labels=("ON edge", "OFF edge"),
+                                   scalebar_s=2.0, **kwargs):
+        """
+        Plot directional tuning as a horizontal strip of trace snippets (one axes
+        per direction, phases overlaid) plus a polar tuning inset on the right.
+
+        Companion to :meth:`plot_tuning_function_with_traces` using a row layout.
+        See ``circular_directional_plots.plot_tuning_function_strip`` for the full
+        parameter list.
+
+        Returns
+        -------
+        fig, trace_axes, ax_polar
+        """
+        return circular_directional_plots.plot_tuning_function_strip(
+            self, roi_index, metric=metric, show_trials=show_trials,
+            phase_colors=phase_colors, phase_labels=phase_labels,
+            scalebar_s=scalebar_s, **kwargs
+        )
+
+    def plot_ds_overlay(self, axes=None, metric=None, cmap='viridis',
+                        show_arrows=True, arrow_scale=15.0, **kwargs):
+        """
+        Spatial map of per-ROI directionality on the imaging field of view.
+
+        Each ROI's mask region is filled with a colour mapped from its DSI, and an
+        arrow is drawn in its preferred direction (length proportional to DSI).
+        One subplot per phase (ON edge / OFF edge for moving-bar recordings).
+
+        See ``roi_metrics_overlay.plot_ds_overlay`` for the full parameter list.
+
+        Returns
+        -------
+        fig, axes
+        """
+        return roi_metrics_overlay.plot_ds_overlay(
+            self, axes=axes, metric=metric, cmap=cmap,
+            show_arrows=show_arrows, arrow_scale=arrow_scale, **kwargs
         )
 
 

@@ -462,5 +462,95 @@ class TestVonMisesFitting(unittest.TestCase):
             self.assertLess(diff, 45)
 
 
+class TestDsiPermutationTest(unittest.TestCase):
+    """Permutation test for direction-selectivity significance."""
+
+    directions = np.array([180, 0, 225, 45, 270, 90, 315, 135.])
+
+    def _make_ds(self, pref_deg, kappa, snr, n_trials=8, seed=0):
+        """Trial-coherent (whole-trial gain) von-Mises-ish tuning + noise."""
+        rng = np.random.default_rng(seed)
+        base = np.exp(kappa * np.cos(np.deg2rad(self.directions - pref_deg)))
+        base /= base.max()
+        gains = rng.normal(1, 0.2, (n_trials, 1))
+        sig = snr * base[None, :] * gains
+        noise = rng.normal(0, 1, (n_trials, self.directions.size))
+        return (sig + noise).T  # (n_dir, n_trials)
+
+    def test_ds_vs_noise_classification(self):
+        ds = self._make_ds(270, 3.0, 4.0, seed=1)
+        noise = self._make_ds(0, 0.0, 0.0, seed=2)
+        resp = np.stack([ds, noise], axis=0)  # (n_rois, n_dir, n_trials)
+        out = tuning_metrics.compute_dsi_permutation_test(
+            resp, self.directions, n_permutations=2000, seed=7
+        )
+        # gDSI decision: DS cell significant, noise cell not.
+        self.assertTrue(out['is_ds'][0])
+        self.assertFalse(out['is_ds'][1])
+        self.assertLess(out['p_value_gdsi'][0], 0.05)
+        self.assertGreater(out['p_value_gdsi'][1], 0.05)
+
+    def test_output_shapes_and_pvalue_range(self):
+        resp = np.random.default_rng(0).normal(0, 1, (5, 8, 6))
+        out = tuning_metrics.compute_dsi_permutation_test(
+            resp, self.directions, n_permutations=500, seed=0
+        )
+        for key in ('dsi', 'gdsi', 'p_value', 'p_value_dsi', 'p_value_gdsi'):
+            self.assertEqual(out[key].shape, (5,))
+        self.assertEqual(out['null_gdsi'].shape, (500, 5))
+        # add-one correction: p in [1/(n+1), 1]
+        self.assertTrue(np.all(out['p_value_gdsi'] >= 1 / 501))
+        self.assertTrue(np.all(out['p_value_gdsi'] <= 1.0))
+
+    def test_decision_selects_statistic(self):
+        resp = np.random.default_rng(1).normal(0, 1, (3, 8, 6))
+        out_g = tuning_metrics.compute_dsi_permutation_test(
+            resp, self.directions, n_permutations=300, seed=0, decision='gdsi'
+        )
+        out_d = tuning_metrics.compute_dsi_permutation_test(
+            resp, self.directions, n_permutations=300, seed=0, decision='dsi'
+        )
+        np.testing.assert_array_equal(out_g['p_value'], out_g['p_value_gdsi'])
+        np.testing.assert_array_equal(out_d['p_value'], out_d['p_value_dsi'])
+
+    def test_reproducible_with_seed(self):
+        resp = np.random.default_rng(2).normal(0, 1, (4, 8, 5))
+        a = tuning_metrics.compute_dsi_permutation_test(
+            resp, self.directions, n_permutations=300, seed=42
+        )
+        b = tuning_metrics.compute_dsi_permutation_test(
+            resp, self.directions, n_permutations=300, seed=42
+        )
+        np.testing.assert_array_equal(a['null_gdsi'], b['null_gdsi'])
+
+    def test_vector_magnitude_matches_circ_r(self):
+        rng = np.random.default_rng(3)
+        t = rng.normal(0, 1, (5, 8))
+        vec = tuning_metrics._vector_magnitude_vectorized(
+            t, np.deg2rad(self.directions)
+        )
+        ref = tuning_metrics.compute_direction_vector_magnitude(t, self.directions)
+        np.testing.assert_allclose(vec, ref, atol=1e-10)
+
+    def test_template_metric_rejected(self):
+        a = np.random.default_rng(0).normal(0, 1, (2, 3, 4))
+        with self.assertRaises(ValueError):
+            tuning_metrics._reduce_trace_metric(a, 'correlation')
+
+    def test_reduce_metric_matches_amplitude_defs(self):
+        a = np.random.default_rng(0).normal(0, 1, (3, 4, 10))
+        np.testing.assert_allclose(
+            tuning_metrics._reduce_trace_metric(a, 'range'),
+            a.max(-1) - a.min(-1),
+        )
+        np.testing.assert_allclose(
+            tuning_metrics._reduce_trace_metric(a, 'mean'), a.mean(-1)
+        )
+        np.testing.assert_allclose(
+            tuning_metrics._reduce_trace_metric(a, 'auc_pos'),
+            np.trapezoid(np.clip(a, 0, None), axis=-1),
+        )
+
+
 if __name__ == '__main__':
     unittest.main()

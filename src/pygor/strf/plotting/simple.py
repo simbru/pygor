@@ -684,6 +684,7 @@ def plot_collapsed_strfs(
     cbar_width_px=2,
     colour_labels=None,
     px_scale=0.05,
+    alpha=None,
 ):
     """Plot time-collapsed spatial STRFs.
 
@@ -727,14 +728,21 @@ def plot_collapsed_strfs(
     # --- Mosaic mode: multicolour data with no specific channel ---
     use_mosaic = hasattr(self, "multicolour") and self.multicolour and channel is None
     if use_mosaic:
-        data_4d = self.collapse_times_by_channel(
-            force_recompute=True,
-        )  # (n_colours, n_rois, h, w)
-        n_rois_per_colour = data_4d.shape[1]
+        # Collapse ONLY the requested ROIs instead of all of them. collapse_3d is
+        # per-ROI independent, so a subset gives the same result as collapsing all
+        # then slicing -- but avoids the (slow) full-recording collapse loop.
+        n_colours = self.n_colours
+        n_rois_per_colour = len(self.strfs) // n_colours
         roi_indices = _normalize_roi_indices(roi, n_rois_per_colour)
         if not roi_indices:
             raise ValueError("roi selection is empty")
-        data_4d = data_4d[:, roi_indices]
+        # Flattened strf order is roi-major / colour-minor: flat = roi*nc + colour.
+        flat = [r * n_colours + c for r in roi_indices for c in range(n_colours)]
+        collapsed = self.collapse_times(roi=flat)  # (len(flat), h, w), cached
+        h, w = collapsed.shape[1], collapsed.shape[2]
+        data_4d = np.ma.reshape(
+            collapsed, (len(roi_indices), n_colours, h, w)
+        ).transpose(1, 0, 2, 3)  # -> (n_colours, n_sel_rois, h, w)
 
         # Symmetric limits per row
         n_rois = len(roi_indices)
@@ -747,11 +755,23 @@ def plot_collapsed_strfs(
                 cv = _symmetric_cval(roi_data, None)
                 row_limits.append((-cv, cv))
 
+        # Per-pixel alpha: True -> |value| / row colour-limit (opacity tracks
+        # amplitude, matching the colour scale); float -> constant; array -> used as-is.
+        alpha_weights_4d = None
+        if alpha is True:
+            alpha_weights_4d = np.empty(data_4d.shape, dtype=float)
+            for r in range(n_rois):
+                cv = row_limits[r][1]  # vmax (symmetric)
+                w_ = np.abs(data_4d[:, r]) / cv if cv > 0 else np.zeros_like(data_4d[:, r])
+                alpha_weights_4d[:, r] = np.ma.clip(w_, 0, 1).filled(0)  # masked border -> 0
+        elif alpha is not None and alpha is not False:
+            alpha_weights_4d = np.broadcast_to(alpha, data_4d.shape).astype(float).copy()
+
         mosaic, layout_info = _build_colour_mosaic(
             data_4d,
             row_limits,
             cmap,
-            None,
+            alpha_weights_4d,
             "white",
             gap_px,
             cbar_width_px if show_cbar else 0,
@@ -770,13 +790,21 @@ def plot_collapsed_strfs(
 
     # --- Single-channel / single-colour grid mode (existing path) ---
     _validate_channel(channel, self.n_colours)
-    array = self.collapse_times(force_recompute=True)
+    n_colours = self.n_colours
     if channel is not None:
-        array = pygor.utilities.multicolour_reshape(array, self.n_colours)[channel]
-    roi_indices = _normalize_roi_indices(roi, array.shape[0])
-    if not roi_indices:
-        raise ValueError("roi selection is empty")
-    array = array[roi_indices]
+        # One colour channel: collapse only the requested ROIs for that channel.
+        n_rois_per_colour = len(self.strfs) // n_colours
+        roi_indices = _normalize_roi_indices(roi, n_rois_per_colour)
+        if not roi_indices:
+            raise ValueError("roi selection is empty")
+        flat = [r * n_colours + channel for r in roi_indices]
+        array = self.collapse_times(roi=flat)
+    else:
+        # Single-colour data: flattened index == roi index.
+        roi_indices = _normalize_roi_indices(roi, len(self.strfs))
+        if not roi_indices:
+            raise ValueError("roi selection is empty")
+        array = self.collapse_times(roi=roi_indices)
 
     # Grid layout
     max_x = _normalize_max_x(max_x)
