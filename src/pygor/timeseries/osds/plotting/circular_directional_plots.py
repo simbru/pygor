@@ -364,7 +364,9 @@ def plot_tuning_function_strip(osds_obj, roi_index, metric='peak', show_trials=T
                                phase_colors=("#FF5C5C", "#3D3AC4"),
                                phase_labels=("ON edge", "OFF edge"),
                                scalebar_s=2.0, trace_alpha=1.0, trial_alpha=0.1,
-                               figsize=None, data_crop=None):
+                               figsize=None, data_crop=None, subplot_spec=None,
+                               show_legend=True, show_titles=True, polar_labels=True,
+                               legend_bbox_to_anchor=(1.0, 1.1)):
     """
     Plot directional tuning as a horizontal strip of trace snippets (one axes per
     direction, phases overlaid) plus a polar tuning inset on the right.
@@ -399,6 +401,22 @@ def plot_tuning_function_strip(osds_obj, roi_index, metric='peak', show_trials=T
         Figure size. Auto-scaled from the number of directions if None.
     data_crop : tuple or None
         (start, end) sample indices to crop each snippet before plotting.
+    subplot_spec : matplotlib.gridspec.SubplotSpec or None
+        If given, draw the strip into this slot of an existing figure (used to
+        stack several ROIs as rows of one figure) instead of creating a new
+        figure. ``figsize`` is ignored in that case.
+    show_legend : bool
+        Draw the phase legend on the polar inset. Disable when stacking rows to
+        avoid repeating it per ROI.
+    show_titles : bool
+        Draw the per-direction angle titles (0deg, 45deg, ...) above the trace
+        panels. Disable on all but the top row when stacking ROIs.
+    polar_labels : bool
+        Draw the theta degree tick labels around the polar inset. False keeps
+        the grid lines but drops the label ring (declutter).
+    legend_bbox_to_anchor : tuple
+        ``bbox_to_anchor`` for the polar legend; raise the y to make room for
+        annotations placed to the right of the polar.
 
     Returns
     -------
@@ -453,12 +471,17 @@ def plot_tuning_function_strip(osds_obj, roi_index, metric='peak', show_trials=T
     phase_values = [_calculate_metric(p, metric) for p in phases_data]
 
     # --- Figure layout: n_dirs trace axes + 1 polar axes ---------------------
-    if figsize is None:
-        scale = 1.25
-        figsize = (scale * n_dirs + 1, scale)
-    fig = plt.figure(figsize=figsize)
-    gs = fig.add_gridspec(1, n_dirs + 1,
-                          width_ratios=[1] * n_dirs + [1.6], wspace=0.15)
+    if subplot_spec is not None:
+        fig = subplot_spec.get_gridspec().figure
+        gs = subplot_spec.subgridspec(1, n_dirs + 1,
+                                      width_ratios=[1] * n_dirs + [1.6], wspace=0.15)
+    else:
+        if figsize is None:
+            scale = 1.25
+            figsize = (scale * n_dirs + 1, scale)
+        fig = plt.figure(figsize=figsize)
+        gs = fig.add_gridspec(1, n_dirs + 1,
+                              width_ratios=[1] * n_dirs + [1.6], wspace=0.15)
 
     trace_axes = []
     for d in range(n_dirs):
@@ -466,11 +489,12 @@ def plot_tuning_function_strip(osds_obj, roi_index, metric='peak', show_trials=T
         for ph in range(n_phases):
             color = phase_colors[ph % len(phase_colors)]
             if phases_trial_data is not None:
-                ax.plot(t, phases_trial_data[ph][d].T, color=color, alpha=trial_alpha, lw=2)
-            ax.plot(t, phases_data[ph][d], color=color, alpha=trace_alpha, lw=1)
+                ax.plot(t, phases_trial_data[ph][d].T, color=color, alpha=trial_alpha, linewidth=plt.rcParams['lines.linewidth']/2)
+            ax.plot(t, phases_data[ph][d], color=color, alpha=trace_alpha)
         ax.set_ylim(y_min, y_max)
         ax.set_xlim(t[0], t[-1])
-        ax.set_title(f"{int(round(sorted_directions_deg[d]))}°", fontsize=9, pad=2)
+        if show_titles:
+            ax.set_title(f"{int(round(sorted_directions_deg[d]))}°")
         # Clean spines; keep only the left axis on the first panel.
         for side in ('top', 'right', 'bottom'):
             ax.spines[side].set_visible(False)
@@ -503,13 +527,14 @@ def plot_tuning_function_strip(osds_obj, roi_index, metric='peak', show_trials=T
         ax_polar.plot(polar_angles, vals, color=color, alpha=1, label=label)
         ax_polar.fill(polar_angles, vals, color=color, alpha=0.2)
     ax_polar.set_ylim(0, global_max * 1.1)
-    ax_polar.set_thetagrids(np.degrees(sorted_angles),
-                            [f"{int(round(d))}°" for d in sorted_directions_deg],
-                            fontsize=7)
+    theta_labels = ([f"{int(round(d))}°" for d in sorted_directions_deg]
+                    if polar_labels else [''] * len(sorted_directions_deg))
+    ax_polar.set_thetagrids(np.degrees(sorted_angles), theta_labels, fontsize=plt.rcParams['font.size']/2)
     ax_polar.set_yticklabels([])
     ax_polar.grid(True, alpha=0.3)
-    ax_polar.legend(loc='upper left', bbox_to_anchor=(1.0, 1.1),
-                    fontsize=8, frameon=False)
+    if show_legend:
+        ax_polar.legend(loc='upper left', bbox_to_anchor=legend_bbox_to_anchor,
+                        fontsize=plt.rcParams['font.size']/1.5, frameon=False)
 
     return fig, trace_axes, ax_polar
 

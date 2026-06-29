@@ -1713,7 +1713,10 @@ class OSDS(Core):
     def plot_tuning_function_strip(self, roi_index, metric='peak', show_trials=True,
                                    phase_colors=("#FF5C5C", "#3D3AC4"),
                                    phase_labels=("ON edge", "OFF edge"),
-                                   scalebar_s=2.0, **kwargs):
+                                   scalebar_s=2.0, subplot_spec=None,
+                                   show_legend=True, show_titles=True,
+                                   polar_labels=True, legend_bbox_to_anchor=(1.0, 1.1),
+                                   **kwargs):
         """
         Plot directional tuning as a horizontal strip of trace snippets (one axes
         per direction, phases overlaid) plus a polar tuning inset on the right.
@@ -1729,7 +1732,10 @@ class OSDS(Core):
         return circular_directional_plots.plot_tuning_function_strip(
             self, roi_index, metric=metric, show_trials=show_trials,
             phase_colors=phase_colors, phase_labels=phase_labels,
-            scalebar_s=scalebar_s, **kwargs
+            scalebar_s=scalebar_s, subplot_spec=subplot_spec,
+            show_legend=show_legend, show_titles=show_titles,
+            polar_labels=polar_labels, legend_bbox_to_anchor=legend_bbox_to_anchor,
+            **kwargs
         )
 
     def plot_ds_overlay(self, axes=None, metric=None, cmap='viridis',
