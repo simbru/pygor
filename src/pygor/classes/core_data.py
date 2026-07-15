@@ -177,6 +177,35 @@ class Core:
             self.linedur_s = float(try_fetch_table_params(HDF5_file, "LineDuration"))
             self.trigger_mode = int(try_fetch_table_params(HDF5_file, "Trigger_Mode"))
             self.n_planes = int(try_fetch_table_params(HDF5_file, "nPlanes"))
+            # Capture the raw OS_Parameters wave + its IGORWaveDimensionLabels
+            # attribute verbatim, so export_to_h5 can round-trip every named
+            # slot (not just the handful pygor understands) back to IGOR.
+            try:
+                os_params_ds = HDF5_file["OS_Parameters"]
+                self._os_parameters_raw = np.array(os_params_ds)
+                self._os_parameters_labels_raw = np.array(
+                    os_params_ds.attrs["IGORWaveDimensionLabels"]
+                )
+            except (KeyError, Exception):
+                self._os_parameters_raw = None
+                self._os_parameters_labels_raw = None
+            # Same verbatim capture for the ScanM metadata waves, so export can
+            # round-trip them (and their dimension labels) back to IGOR.
+            try:
+                wpn_ds = HDF5_file["wParamsNum"]
+                self._wparamsnum_raw = np.array(wpn_ds)
+                self._wparamsnum_labels_raw = (
+                    np.array(wpn_ds.attrs["IGORWaveDimensionLabels"])
+                    if "IGORWaveDimensionLabels" in wpn_ds.attrs
+                    else None
+                )
+            except (KeyError, Exception):
+                self._wparamsnum_raw = None
+                self._wparamsnum_labels_raw = None
+            try:
+                self._wparamsstr_raw = np.array(HDF5_file["wParamsStr"])
+            except (KeyError, Exception):
+                self._wparamsstr_raw = None
             self.average_stack = try_fetch(HDF5_file, "Stack_Ave")
             exp_params = try_fetch(HDF5_file, "wExpParams")
             if exp_params is not None:
@@ -1156,7 +1185,10 @@ class Core:
             # Trigger channel (if available)
             if hasattr(self, "trigger_images") and self.trigger_images is not None:
                 trigger_t = self.trigger_images.transpose(2, 1, 0)
-                f.create_dataset("wDataCh2", data=trigger_t, dtype=np.int16)
+                # Must be float32 (matches genuine IGOR exports). int16 wraps the
+                # high TTL baseline (~55k > 32767) to negative, so IGOR's trigger
+                # scan (>2^16-threshold) never resets and detects only one trigger.
+                f.create_dataset("wDataCh2", data=trigger_t, dtype=np.float32)
 
             # Average stack
             if self.average_stack is not None:
@@ -1166,7 +1198,7 @@ class Core:
 
             #  ROIs
             if self.rois is not None:
-                f.create_dataset("ROIs", data=self.rois.T, dtype=np.int16)
+                f.create_dataset("ROIs", data=self.rois.T, dtype=np.float32)
 
             if self.roi_sizes is not None:
                 f.create_dataset("RoiSizes", data=self.roi_sizes, dtype=np.int32)
@@ -1194,7 +1226,7 @@ class Core:
                 triggertimes = np.full(max_triggers, np.nan)
                 if self.triggertimes is not None and len(self.triggertimes) > 0:
                     triggertimes[: len(self.triggertimes)] = self.triggertimes
-                f.create_dataset("Triggertimes", data=triggertimes, dtype=np.float64)
+                f.create_dataset("Triggertimes", data=triggertimes, dtype=np.float32)
 
                 triggertimes_frame = np.full(max_triggers, np.nan)
                 if (
@@ -1205,63 +1237,26 @@ class Core:
                         self.triggertimes_frame
                     )
                 f.create_dataset(
-                    "Triggertimes_Frame", data=triggertimes_frame, dtype=np.float64
+                    "Triggertimes_Frame", data=triggertimes_frame, dtype=np.float32
                 )
 
-            #  wParamsStr (date/time metadata)
-            if hasattr(self, "metadata") and self.metadata is not None:
-                exp_date = self.metadata["exp_date"]
-                exp_time = self.metadata["exp_time"]
-                date_str = f"{exp_date.year}-{exp_date.month:02d}-{exp_date.day:02d}"
-                time_str = f"{exp_time.hour:02d}-{exp_time.minute:02d}-{exp_time.second:02d}-00"
+            #  wParamsNum / wParamsStr (ScanM acquisition metadata, IGOR-faithful)
+            import pygor.preproc.wparams as wparams
 
-                params_str = [""] * 10
-                params_str[4] = date_str
-                params_str[5] = time_str
-                params_str[0] = str(self.filename.stem)
-
-                dt = h5py.special_dtype(vlen=str)
-                params_str_ds = f.create_dataset(
-                    "wParamsStr", (len(params_str),), dtype=dt
-                )
-                for i, s in enumerate(params_str):
-                    params_str_ds[i] = s.encode("utf-8")
-
-            #  wParamsNum (XYZ position)
-            if hasattr(self, "metadata") and self.metadata is not None:
-                params_num = np.zeros(50, dtype=np.float64)
-                xyz = self.metadata.get("objectiveXYZ", (0, 0, 0))
-                params_num[26] = xyz[0]
-                params_num[27] = xyz[2]
-                params_num[28] = xyz[1]
-                f.create_dataset("wParamsNum", data=params_num, dtype=np.float64)
+            wpn_data, wpn_labels = wparams.build_wparamsnum(self)
+            wparams.write_wparamsnum(f, wpn_data, wpn_labels)
+            wparams.write_wparamsstr(f, wparams.build_wparamsstr(self))
 
             #  OS_Parameters
-            if hasattr(self, "linedur_s") and self.linedur_s is not None:
-                os_params_keys = [
-                    "placeholder",
-                    "LineDuration",
-                    "nPlanes",
-                    "Trigger_Mode",
-                    "Skip_First_Triggers",
-                    "Skip_Last_Triggers",
-                ]
-                os_params_values = np.array(
-                    [
-                        0,
-                        self.linedur_s,
-                        self.n_planes,
-                        self.trigger_mode,
-                        0,
-                        0,
-                    ],
-                    dtype=np.float64,
-                )
+            import pygor.preproc.os_parameter_table as os_param_table
 
-                os_params_ds = f.create_dataset("OS_Parameters", data=os_params_values)
-                os_params_ds.attrs["OS_Parameters"] = np.array(
-                    [b"Keys"] + [k.encode() for k in os_params_keys], dtype=object
-                )
+            live_values = os_param_table.collect_known_os_parameters(self)
+            os_params_data, os_params_labels = os_param_table.build_os_parameters(
+                live_values,
+                getattr(self, "_os_parameters_raw", None),
+                getattr(self, "_os_parameters_labels_raw", None),
+            )
+            os_param_table.write_os_parameters(f, os_params_data, os_params_labels)
 
             #  Optional data - check for both None and nan
             def _is_valid(attr):
@@ -1282,7 +1277,7 @@ class Core:
                 f.create_dataset("Snippets0", data=self.snippets.T, dtype=np.float32)
 
             if _is_valid(self.ipl_depths):
-                f.create_dataset("Positions", data=self.ipl_depths, dtype=np.float64)
+                f.create_dataset("Positions", data=self.ipl_depths, dtype=np.float32)
 
             if _is_valid(self.correlation_projection):
                 f.create_dataset(

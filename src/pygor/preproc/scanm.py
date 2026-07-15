@@ -1129,59 +1129,23 @@ class ScanMData:
             triggertimes_frame[:len(self.triggertimes_frame)] = self.triggertimes_frame
             f.create_dataset("Triggertimes_Frame", data=triggertimes_frame, dtype=np.float64)
             
-            # === wParamsStr (date/time metadata) ===
-            # Core expects specific format: index 4 = date, index 5 = time
-            exp_date = self.metadata["exp_date"]
-            exp_time = self.metadata["exp_time"]
-            date_str = f"{exp_date.year}-{exp_date.month:02d}-{exp_date.day:02d}"
-            time_str = f"{exp_time.hour:02d}-{exp_time.minute:02d}-{exp_time.second:02d}-00"
-            
-            # Create wParamsStr array (minimum 6 elements, with date at 4, time at 5)
-            params_str = [""] * 10
-            params_str[4] = date_str
-            params_str[5] = time_str
-            params_str[0] = str(self.filename.stem)  # Recording name
-            
-            # Encode as bytes for h5py
-            dt = h5py.special_dtype(vlen=str)
-            params_str_ds = f.create_dataset("wParamsStr", (len(params_str),), dtype=dt)
-            for i, s in enumerate(params_str):
-                params_str_ds[i] = s.encode("utf-8")
-            
-            # === wParamsNum (XYZ position, etc.) ===
-            # Core reads XYZ from indices 26, 27, 28
-            params_num = np.zeros(50, dtype=np.float64)
-            xyz = self.metadata.get("objectiveXYZ", (0, 0, 0))
-            params_num[26] = xyz[0]  # X
-            params_num[27] = xyz[2]  # Z (swapped in Core)
-            params_num[28] = xyz[1]  # Y
-            f.create_dataset("wParamsNum", data=params_num, dtype=np.float64)
-            
+            # === wParamsNum / wParamsStr (ScanM metadata, IGOR-faithful) ===
+            import pygor.preproc.wparams as wparams
+
+            wpn_data, wpn_labels = wparams.build_wparamsnum(self)
+            wparams.write_wparamsnum(f, wpn_data, wpn_labels)
+            wparams.write_wparamsstr(f, wparams.build_wparamsstr(self))
+
             # === OS_Parameters (timing, trigger settings) ===
-            # Create OS_Parameters dataset with attributes
-            os_params_keys = [
-                "placeholder",  # Index 0 is skipped in Core
-                "LineDuration",
-                "nPlanes", 
-                "Trigger_Mode",
-                "Skip_First_Triggers",
-                "Skip_Last_Triggers",
-            ]
-            os_params_values = np.array([
-                0,  # placeholder
-                self.linedur_s,
-                self.n_planes,
-                self.trigger_mode,
-                0,  # skip_first (applied already)
-                0,  # skip_last (applied already)
-            ], dtype=np.float64)
-            
-            os_params_ds = f.create_dataset("OS_Parameters", data=os_params_values)
-            # Store keys as attribute (Core reads keys from here)
-            os_params_ds.attrs["OS_Parameters"] = np.array(
-                [b"Keys"] + [k.encode() for k in os_params_keys], 
-                dtype=object
+            import pygor.preproc.os_parameter_table as os_param_table
+
+            live_values = os_param_table.collect_known_os_parameters(self)
+            os_params_data, os_params_labels = os_param_table.build_os_parameters(
+                live_values,
+                getattr(self, "_os_parameters_raw", None),
+                getattr(self, "_os_parameters_labels_raw", None),
             )
+            os_param_table.write_os_parameters(f, os_params_data, os_params_labels)
             
             # === Optional: averages, snippets ===
             if self.averages is not None:

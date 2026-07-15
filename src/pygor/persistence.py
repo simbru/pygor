@@ -61,6 +61,8 @@ def _json_default(obj):
         return {"__path__": str(obj)}
     if isinstance(obj, (set, frozenset)):
         return list(obj)
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
     raise TypeError(f"Not JSON serializable: {type(obj).__name__}")
 
 

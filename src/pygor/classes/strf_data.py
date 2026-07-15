@@ -715,14 +715,23 @@ class STRF(Core):
                 flat = np.array([], dtype=int)
             else:
                 flat = (keep[:, None] * nc + np.arange(nc)).ravel()
-            if flat.size == 0 or flat.max() < n_total:  # guard against mismatch
-                self.strfs = self.strfs[flat]
-                if isinstance(self.strf_keys, (list, tuple)):
-                    self.strf_keys = [self.strf_keys[i] for i in flat]
-                elif isinstance(self.strf_keys, np.ndarray):
-                    self.strf_keys = self.strf_keys[flat]
-                self.num_strfs = len(self.strfs)
-                self._invalidate_strf_caches()
+            if flat.size != 0 and flat.max() >= n_total:
+                raise ValueError(
+                    f"keep_rois: roi_indices reach {keep.max()}, but strfs only "
+                    f"cover {n_total // nc} ROIs. strfs/strf_keys would desync "
+                    f"from rois/traces if silently skipped. Check roi_indices are "
+                    f"0-indexed against the CURRENT strfs count (not a stale count "
+                    f"from before an earlier keep_rois/ROI-drop call), or run "
+                    f"calculate_strf() again after any prior ROI-count change so "
+                    f"strfs matches self.rois before calling keep_rois again."
+                )
+            self.strfs = self.strfs[flat]
+            if isinstance(self.strf_keys, (list, tuple)):
+                self.strf_keys = [self.strf_keys[i] for i in flat]
+            elif isinstance(self.strf_keys, np.ndarray):
+                self.strf_keys = self.strf_keys[flat]
+            self.num_strfs = len(self.strfs)
+            self._invalidate_strf_caches()
 
         return super().keep_rois(roi_indices, update_dependent=update_dependent)
 
@@ -1338,6 +1347,138 @@ class STRF(Core):
             return pygor.utilities.multicolour_reshape(all_collapsed, self.n_colours)[
                 :, roi
             ]
+
+    def export_to_h5(self, output_path=None, overwrite: bool = False) -> pathlib.Path:
+        """Export STRF data to an IGOR-compatible H5 file.
+
+        Extends :meth:`Core.export_to_h5` by additionally writing the STRF
+        representation waves that IGOR's ``OS_STRFs`` pipeline produces, so the
+        exported file opens in IGOR looking like its native output:
+
+        - ``STRF0_{roi}_{colour}`` : individual RF kernels, IGOR ``(x, y, frame)``
+        - ``STRF_Corr0`` / ``STRF_SD0`` : per-ROI time-collapsed projections
+          stacked as ``(nX, nY*nColours, nROI)``
+        - ``STRFs_concatenated`` : all kernels tiled ``(nX, nY*nColours, nF*nROI)``
+        - ``STRF_Corr_Montage`` : 20-ROI-per-row display grid
+        - ``STRF_Corr_Montage_RGB`` / ``_RGB2`` : RGB montage, only written when
+          ``n_colours >= 4`` (colour indices 0/1/3 map to R/G/UV)
+
+        Notes
+        -----
+        Both ``STRF_Corr0`` and ``STRF_SD0`` are sourced from pygor's single
+        collapsed representation (:meth:`collapse_times`, polarity x space-time
+        correlation). IGOR defines these differently (8-neighbour correlation vs
+        per-pixel temporal SD); here they are written identically by design.
+
+        The individual-filter naming ``STRF0_...`` round-trips through
+        :func:`pygor.data_helpers.load_strf`.
+        """
+        # Base Core/IGOR waves (images, ROIs, traces, wParams, OS_Parameters).
+        output_path = super().export_to_h5(output_path, overwrite=overwrite)
+
+        if self.strfs is None or self.num_strfs == 0:
+            warnings.warn(
+                "No STRFs to export; wrote base waves only.", stacklevel=2
+            )
+            return output_path
+
+        n_colours = int(self.n_colours)
+        n_rois = int(self.num_rois)
+
+        # Individual kernels split by colour: (n_colours, n_rois, time, y, x)
+        strfs_by_colour = np.ma.filled(
+            pygor.utilities.multicolour_reshape(self.strfs, n_colours), 0.0
+        )
+        nf, ny, nx = strfs_by_colour.shape[2:]
+
+        # Time-collapsed per-ROI projections: (n_colours, n_rois, y, x)
+        collapsed = np.ma.filled(self.collapse_times(), 0.0)
+        collapsed_by_colour = pygor.utilities.multicolour_reshape(
+            collapsed, n_colours
+        )
+        cy, cx = collapsed_by_colour.shape[2:]
+
+        # Per-ROI cell with colours stacked along y: (n_rois, cy*n_colours, cx)
+        proj_cells = np.ma.asarray(
+            np.concatenate(
+                [collapsed_by_colour[c] for c in range(n_colours)], axis=1
+            )
+        )
+        # IGOR STRF_Corr/STRF_SD order: (nX, nY*nColours, nROI)
+        strf_corr = np.ma.filled(proj_cells, 0.0).transpose(2, 1, 0)
+
+        # Display montage, ≤20 ROIs per row. IGOR shrinks the width to nROIs when
+        # everything fits on one row, so mirror that. Feeding a masked array makes
+        # the padding of the final incomplete row come out as NaN (as IGOR does).
+        montage_max_x = min(20, n_rois)
+        montage_img, _, _ = pygor.strf.plotting.simple._build_grid_image(
+            proj_cells, max_x=montage_max_x
+        )
+        strf_corr_montage = np.ma.filled(montage_img, np.nan).T
+
+        # Concatenated kernels, IGOR block layout (see OS_STRFs.ipf).
+        concat = np.zeros((nx, ny * n_colours, nf * n_rois), dtype=np.float32)
+        for roi in range(n_rois):
+            for colour in range(n_colours):
+                kernel_igor = strfs_by_colour[colour, roi].transpose(2, 1, 0)
+                concat[
+                    :,
+                    colour * ny : (colour + 1) * ny,
+                    roi * nf : (roi + 1) * nf,
+                ] = kernel_igor
+
+        with h5py.File(output_path, "a") as f:
+            for roi in range(n_rois):
+                for colour in range(n_colours):
+                    f.create_dataset(
+                        f"STRF0_{roi}_{colour}",
+                        data=strfs_by_colour[colour, roi].transpose(2, 1, 0),
+                        dtype=np.float32,
+                    )
+            f.create_dataset("STRF_Corr0", data=strf_corr, dtype=np.float32)
+            f.create_dataset("STRF_SD0", data=strf_corr, dtype=np.float32)
+            f.create_dataset("STRFs_concatenated", data=concat, dtype=np.float32)
+            f.create_dataset(
+                "STRF_Corr_Montage", data=strf_corr_montage, dtype=np.float32
+            )
+            if n_colours >= 4:
+                rgb, rgb2 = self._build_igor_rgb_montages(
+                    collapsed_by_colour, max_x=montage_max_x
+                )
+                f.create_dataset(
+                    "STRF_Corr_Montage_RGB", data=rgb, dtype=np.float32
+                )
+                f.create_dataset(
+                    "STRF_Corr_Montage_RGB2", data=rgb2, dtype=np.float32
+                )
+
+        print(f"Exported STRF representation waves to: {output_path}")
+        return output_path
+
+    @staticmethod
+    def _build_igor_rgb_montages(
+        collapsed_by_colour, max_x: int = 20, rgb_attenuation: float = 20.0
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Build IGOR's ``STRF_Corr_Montage_RGB`` / ``_RGB2`` waves.
+
+        Colour indices 0/1/3 (R/G/UV) become the R/G/B planes; the signed and
+        absolute versions are attenuated, offset and clipped to 16-bit exactly as
+        ``OS_STRFs.ipf`` does. Requires ``n_colours >= 4``.
+        """
+        rgb_channels = (0, 1, 3)
+        planes = []
+        for c in rgb_channels:
+            grid, _, _ = pygor.strf.plotting.simple._build_grid_image(
+                np.ma.asarray(collapsed_by_colour[c]), max_x=max_x
+            )
+            planes.append(np.ma.filled(grid, np.nan))
+        rgb = np.transpose(np.stack(planes, axis=-1), (1, 0, 2))  # IGOR (x, y, 3)
+        rgb2 = np.abs(rgb)
+        scale = 2**15 - 1
+        max_val = 2**16 - 1
+        rgb = np.clip((rgb / rgb_attenuation + 1) * scale, 0, max_val)
+        rgb2 = np.clip(rgb2 / rgb_attenuation * scale, 0, max_val)
+        return rgb, rgb2
 
     def get_amplitude_weights(self, roi=None):
         """
