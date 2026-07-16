@@ -414,7 +414,7 @@ def _crop_box(px, py, crop, n_x, n_y):
 
 def extract_snippets_spatial(
     noise_array, frame_to_pattern, event_frames,
-    n_f_filter_past, n_f_filter, center=None, crop: int | None = 6, baseline=0.5, max_gib=1.5,
+    n_f_filter_past, n_f_filter, center=None, crop: int | None = 6, baseline=0.5, max_gib=6,
 ):
     """Per-event SPATIOTEMPORAL stimulus history cropped around the RF.
 
@@ -1442,6 +1442,7 @@ down_full, up_full, _, _ = updown_spatial(
     pre_window_s=pre_window_s, ignore_frac=ignore_frac, split_at=split_at,
 )
 diff_full = up_full - down_full          # split axis (the informative object)
+event_sta_full = (up_full + down_full) / 2   # real event STA = linear-null's filter
 sta_full = obj.strfs[demo_roi]           # == event STA (ordinary reverse corr)
 comp_clim = float(np.max(np.abs([down_full, up_full])))  # shared scale for up/down
 movie_dur = obj.strf_dur_ms / 1000
@@ -1479,26 +1480,42 @@ plot_cluster_means_1d(csplit["kernels"], taus, frame_duration, sizes=csplit["siz
 # %% STC (spike-triggered covariance) -- both ensembles + null band ----------
 # Sort-free 2nd-order analysis. Eigen-filters = the extra features a non-linear
 # cell is sensitive to; eigenvalues outside the linear-null band are genuine.
-lag_mask = time_crop_lags(taus, frame_duration, lo_s=-2.0, hi_s=2)
+#
+# lag_mask MUST stay tight and n_sample MUST stay >> D (=n_lags_kept*nx_c*ny_c):
+# PCA fit on a prior sample smaller than D overestimates its own top-variance
+# directions (eigenvalue selection bias), so ANY other ensemble projected onto
+# them reads out an artificial, near-uniform NEGATIVE shift across most of the
+# spectrum -- gibberish eigen-filters with no real structure, not a null result.
+# Measured on ROI 44: wide lags (D=17918, n_sample=6000) -> median eigenvalue
+# -0.19 (should be ~0); narrow lags (D=5491) + n_sample=20000 -> -0.02.
+lag_mask = time_crop_lags(taus, frame_duration, lo_s=-1.0, hi_s=0.2)
 taus_c = taus[lag_mask]
 prior_basis = stimulus_prior_basis(
     noise_array, frame_to_pattern, (px, py), crop, taus, lag_mask,
-    n_f_filter_past, n_f_filter, n_pca=120, n_sample=6000,
+    n_f_filter_past, n_f_filter, n_pca=120, n_sample=20000,
 )
 stc_evt = stc_event(spatial_snips, lag_mask, prior_basis, n_keep=6)           # event-triggered
 stc_cont = stc_continuous(                                                    # continuous weighted
     obj, demo_roi, noise_array, frame_to_pattern, trigger_start, taus, lag_mask,
     (px, py), crop, n_f_filter_past, n_f_filter, prior_basis, n_keep=6, stride=2,
 )
-null_tops, _ = stc_null_eigenvalues(                                          # linear-null band
+null_tops, null_all = stc_null_eigenvalues(                                   # linear-null band
     event_sta_full, noise_array, frame_to_pattern, taus, lag_mask,
-    n_f_filter_past, n_f_filter, (px, py), crop, prior_basis, noise_sigma=1.5, n_boot=20,
+    n_f_filter_past, n_f_filter, (px, py), crop, prior_basis,
+    threshold=thresh,  # MUST match real detect_events threshold or null n_events
+    noise_sigma=1.5, n_boot=20,          # diverges wildly (was default 2.0 -> 11x too few)
 )
-above = stc_evt["eigvals"].max() > np.percentile(null_tops, 97.5)
+# Two-sided band from null_tops (each boot's own top-6-by-|eig|), NOT null_all
+# (every dim pooled): keep_eigvals is an extreme-value/order statistic (max of
+# 120), so it must be compared against the null's extreme-value distribution,
+# not its bulk/typical-eigenvalue distribution -- the latter is far too narrow
+# (no multiple-comparisons correction) and falsely flags ~6/6 on every ROI.
+null_band = float(np.percentile(np.abs(null_tops), 97.5))
+above = np.abs(stc_evt["keep_eigvals"]) > null_band
 print(f"event STC top6 eig: {np.round(stc_evt['keep_eigvals'], 2)}")
 print(f"cont  STC top6 eig: {np.round(stc_cont['keep_eigvals'], 2)}")
-print(f"null 97.5% band top = {np.percentile(null_tops, 97.5):.2f}  ->  "
-      f"{'FEATURES above null' if above else 'NO features above null (linear)'}")
+print(f"null two-sided 97.5% band = +/-{null_band:.2f}  ->  "
+      f"{int(above.sum())}/{len(above)} kept eigenvalues exceed it")
 
 plot_stc_spectrum(stc_evt, null_tops=null_tops); plt.show()
 plot_stc_filters(stc_evt, taus_c, frame_duration, edge_crop=1); plt.show()
@@ -1511,6 +1528,13 @@ pygor.plotting.play_movie_4d(csplit["kernels"])          # per-cluster kernel mo
 pygor.plotting.play_movie_4d(stc_evt["filters"])
 
 # %% Three-way comparison: pygor STRF | snippet (STA + clusters) | STC -------
+# event_sta_full defined earlier (STRF-like component movies cell) -- reused here.
+null = linear_null_kernels(
+    event_sta_full, noise_array, frame_to_pattern, taus,
+    n_f_filter_past, n_f_filter, pixels, frame_duration,
+    threshold=thresh, pre_window_s=pre_window_s, ignore_frac=ignore_frac,
+    noise_sigma=1.0, seed=0,
+)
 snippet_kernels = [("event STA", event_sta_full)] + [
     (f"clust{c}", csplit["kernels"][c]) for c in range(csplit["k"])
 ]
@@ -1523,16 +1547,12 @@ plt.show()
 # trace through the identical detect -> split pipeline and compare split axes.
 # Linear cell -> real ~ null -> (real - null) ~ 0. Surviving structure = non-linear.
 # Tune noise_sigma so null n_events ~ real n_events (same selectivity).
-event_sta_full = (up_full + down_full) / 2   # real event STA = the null's filter
-null = linear_null_kernels(
-    event_sta_full, noise_array, frame_to_pattern, taus,
-    n_f_filter_past, n_f_filter, pixels, frame_duration,
-    threshold=thresh, pre_window_s=pre_window_s, ignore_frac=ignore_frac,
-    noise_sigma=1.0, seed=0,
-)
+
 print(f"real n_events={len(event_frames)}   null n_events={null['n_events']}")
 _, null_stats = plot_diff_compare(
     diff_full, null["diff"], taus, frame_duration, roi=demo_roi, edge_crop=2,
 )
 print("null comparison:", {k: round(v, 3) for k, v in null_stats.items()})
 plt.show()
+
+# %%
