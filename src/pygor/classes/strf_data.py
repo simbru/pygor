@@ -4779,7 +4779,7 @@ class STRF(Core):
         latency_maps = self.get_strf_delta_times(use_segmentation=use_segmentation)
 
         if roi is None:
-            rois = list(range(self.num_roi))
+            rois = list(range(self.num_rois))
         elif np.isscalar(roi):
             rois = [roi]
         else:
@@ -5983,9 +5983,10 @@ class STRF(Core):
         """
         import pygor.strf.extrema_timing as extrema_timing
 
-        return extrema_timing.map_spectral_centroid_wrapper(
+        return extrema_timing.map_extrema_timing_wrapper(
             self,
             roi=roi,
+            threshold=threshold,
             exclude_firstlast=exclude_firstlast,
             return_milliseconds=return_milliseconds,
             frame_rate_hz=frame_rate_hz,
@@ -6056,7 +6057,7 @@ class STRF(Core):
         """
         import pygor.strf.spatial_alignment as spatial_alignment
 
-        return spatial_alignment.analyze_multicolour_spatial_alignment(
+        return spatial_alignment.analyze_multicolor_spatial_alignment(
             self,
             roi=roi,
             threshold=threshold,
@@ -6087,10 +6088,10 @@ class STRF(Core):
         """
         import pygor.strf.spatial_alignment as spatial_alignment
 
-        return spatial_alignment.compute_colour_channel_overlap_wrapper(
+        return spatial_alignment.compute_color_channel_overlap_wrapper(
             self,
             roi=roi,
-            colour_channels=colour_channels,
+            color_channels=colour_channels,
             threshold=threshold,
             collapse_method=collapse_method,
         )
