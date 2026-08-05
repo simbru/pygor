@@ -63,6 +63,9 @@ dev = [
     "uv>=0.4.24",
     "ruff>=0.8.0",
     "igor2>=0.5.12",
+    "ipykernel>=7.2.0",
+    "pytest>=8.0",
+    "pytest-timeout>=2.3",
 ]
 
 constraint-dependencies = ["pyqt5-qt5 <=5.15.2"]
@@ -76,3 +79,13 @@ build-backend = "hatchling.build"
 
 [tool.pyright]
 typeCheckingMode = "basic"
+
+[tool.pytest.ini_options]
+testpaths = ["src/pygor/test"]
+# No test should need this long. A test that does has hung, and the run should
+# say so rather than sit there until someone notices.
+timeout = 300
+markers = [
+    "demo_data: needs examples/strf_demo_data.h5, skipped when absent",
+    "slow: runs for tens of seconds or more",
+]
