@@ -648,6 +648,8 @@ class Core:
         Interpolate the averages_ms to get ms-percision. Useful in cases where line duration != 1 ms.
         """
         from scipy.interpolate import make_interp_spline
+        if self.averages is None:
+            return None
         org_length = self.averages.shape[-1]
         x_org = np.linspace(0, 1, org_length)
         upscale_target = int(np.rint(self.ms_dur))
@@ -1859,6 +1861,7 @@ class Core:
         d3[:, :, 2] = base2
         ax.imshow(pygor.utilities.min_max_norm(d3, 0, 1), origin="lower")
 
+    @pygor.core.gui.interactive
     def get_depth(self):
         """
         Get the depth of the images in the stack.
@@ -1891,6 +1894,7 @@ class Core:
         """
         return pygor.core.methods.update_h5_key(self, key, value, overwrite)
 
+    @pygor.core.gui.interactive
     def update_ipl_depths(self, depths=None):
         """
         Update IPL depths on the in-memory object, optionally using interactive depth selection.
@@ -2666,6 +2670,7 @@ class Core:
         ax._pygor_slider = slider
         return fig, ax, slider
 
+    @pygor.core.gui.interactive
     def view_images_interactive(self, **kwargs: Any) -> None:
         """
         View the image stack interactively using Napari.
@@ -2678,6 +2683,7 @@ class Core:
         session = pygor.core.gui.methods.NapariViewStack(self, **kwargs)
         session.run()
 
+    @pygor.core.gui.interactive
     def draw_rois(
         self,
         attribute="calculate_image_average",

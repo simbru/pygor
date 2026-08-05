@@ -4,11 +4,12 @@ import unittest
 
 import h5py
 import numpy as np
+import pytest
 
 import pygor.load
+from pygor.test.helpers import DEMO_DATA as example_data
 
-file_loc = pathlib.Path(__file__).parents[3]
-example_data = file_loc.joinpath("examples/strf_demo_data.h5")
+pytestmark = pytest.mark.demo_data
 
 
 def _wparamsnum_lookup(ds, name):

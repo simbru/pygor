@@ -15,6 +15,7 @@ import pathlib
 
 # import sklearn.preprocessing
 import re
+import sys
 import warnings
 
 import h5py
@@ -26,6 +27,7 @@ import pandas as pd
 from tqdm.auto import tqdm
 
 # Local imports
+import pygor.core.gui
 import pygor.data_helpers
 import pygor.strf.bootstrap
 import pygor.strf.calculate_strf
@@ -47,6 +49,25 @@ import pygor.utils.unit_conversion as unit_conversion
 
 # import scipy
 from .core_data import Core, try_fetch_table_params
+
+
+def _can_prompt_user() -> bool:
+    """True if input() would reach a human.
+
+    A Jupyter kernel answers prompts through a widget rather than a terminal,
+    so isatty() alone would wrongly rule out the notebook workflow.
+    """
+    try:
+        from IPython import get_ipython
+
+        if get_ipython() is not None:
+            return True
+    except ImportError:
+        pass
+    try:
+        return sys.stdin is not None and sys.stdin.isatty()
+    except ValueError:  # stdin closed, e.g. under a captured test runner
+        return False
 
 
 @dataclass(repr=False)
@@ -540,21 +561,19 @@ class STRF(Core):
         """
         if self.bs_settings["do_bootstrap"] == False:
             raise AttributeError("self.bs_settings['do_bootstrap'] is not True")
-        if self.bs_settings["do_bootstrap"] == True:
-            if self.bs_settings["bs_already_ran"] == True:
-                if force == False:
-                    user_verify = input(
-                        "Do you want re-do bootstrap? Type 'y'/'yes' or 'n'/'no'"
-                    )
-                    user_verify = user_verify.lower()
-                else:
-                    user_verify = "y"
-                if user_verify == "y" or user_verify == "yes":
-                    before_time = datetime.datetime.now()
-                    self.__calc_pval_time(parallel=parallel)
-                    self.__calc_pval_space(parallel=parallel)
-                    after_time = datetime.datetime.now()
-                elif user_verify == "n" or user_verify == "no":
+        if self.bs_settings["bs_already_ran"] and not force:
+            if not _can_prompt_user():
+                # No one is there to answer, so blocking on input() would hang
+                # the caller forever (this used to stall the test suite).
+                raise RuntimeError(
+                    "Bootstrap has already been run and there is no terminal to "
+                    "confirm re-running it. Pass force=True to re-run."
+                )
+            user_verify = input(
+                "Do you want re-do bootstrap? Type 'y'/'yes' or 'n'/'no'"
+            ).lower()
+            if user_verify not in ("y", "yes"):
+                if user_verify in ("n", "no"):
                     print(
                         f"Skipping recomputing bootstrap due to user input:'{user_verify}'"
                     )
@@ -562,18 +581,16 @@ class STRF(Core):
                     print(
                         f"Input '{user_verify}' is invalid, no action done. Please use 'y'/'n'."
                     )
-            else:
-                before_time = datetime.datetime.now()
-                self.__calc_pval_time(parallel=parallel)
-                self.__calc_pval_space(parallel=parallel)
-                after_time = datetime.datetime.now()
-                self.bs_settings["bs_already_ran"] = True
-            # Write time metadata
-            self.bs_settings["bs_datetime"] = before_time
-            self.bs_settings["bs_datetime_str"] = before_time.strftime(
-                "%d/%m/%y %H:%M:%S"
-            )
-            self.bs_settings["bs_dur_timedelta"] = after_time - before_time
+                return
+        before_time = datetime.datetime.now()
+        self.__calc_pval_time(parallel=parallel)
+        self.__calc_pval_space(parallel=parallel)
+        after_time = datetime.datetime.now()
+        self.bs_settings["bs_already_ran"] = True
+        # Write time metadata
+        self.bs_settings["bs_datetime"] = before_time
+        self.bs_settings["bs_datetime_str"] = before_time.strftime("%d/%m/%y %H:%M:%S")
+        self.bs_settings["bs_dur_timedelta"] = after_time - before_time
 
     @property
     def pval_time(self, parallel=None) -> np.ndarray:
@@ -4779,7 +4796,7 @@ class STRF(Core):
         latency_maps = self.get_strf_delta_times(use_segmentation=use_segmentation)
 
         if roi is None:
-            rois = list(range(self.num_roi))
+            rois = list(range(self.num_rois))
         elif np.isscalar(roi):
             rois = [roi]
         else:
@@ -5983,9 +6000,10 @@ class STRF(Core):
         """
         import pygor.strf.extrema_timing as extrema_timing
 
-        return extrema_timing.map_spectral_centroid_wrapper(
+        return extrema_timing.map_extrema_timing_wrapper(
             self,
             roi=roi,
+            threshold=threshold,
             exclude_firstlast=exclude_firstlast,
             return_milliseconds=return_milliseconds,
             frame_rate_hz=frame_rate_hz,
@@ -6056,7 +6074,7 @@ class STRF(Core):
         """
         import pygor.strf.spatial_alignment as spatial_alignment
 
-        return spatial_alignment.analyze_multicolour_spatial_alignment(
+        return spatial_alignment.analyze_multicolor_spatial_alignment(
             self,
             roi=roi,
             threshold=threshold,
@@ -6087,10 +6105,10 @@ class STRF(Core):
         """
         import pygor.strf.spatial_alignment as spatial_alignment
 
-        return spatial_alignment.compute_colour_channel_overlap_wrapper(
+        return spatial_alignment.compute_color_channel_overlap_wrapper(
             self,
             roi=roi,
-            colour_channels=colour_channels,
+            color_channels=colour_channels,
             threshold=threshold,
             collapse_method=collapse_method,
         )
@@ -6640,6 +6658,7 @@ class STRF(Core):
 
         return selected_timecourses  # , top_indices, selected_amplitudes
 
+    @pygor.core.gui.interactive
     def napari_strfs(self, **kwargs: Any):
         import pygor.strf.gui.methods as gui
 
@@ -6760,7 +6779,6 @@ _SKIP_METHODS = {
     "__repr__",
     "__getattr__",
     "__setattr__",
-    "napari_strfs",  # GUI method
 }
 
 for attr_name in dir(STRF):
@@ -6771,7 +6789,9 @@ for attr_name in dir(STRF):
         and attr_name not in _SKIP_METHODS
     ):
         attr = getattr(STRF, attr_name)
-        if callable(attr):  # Only add to callable methods
+        # A _by_channel copy of a GUI method is a second way to open the same
+        # blocking window, and one that nothing knows to avoid.
+        if callable(attr) and not pygor.core.gui.is_interactive(attr):
             setattr(
                 STRF, f"{attr_name}_by_channel", _create_by_channel_method(attr_name)
             )

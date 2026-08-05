@@ -1,147 +1,91 @@
-# Pygor Test Suite
+# Pygor test suite
 
-## Overview
+## Running it
 
-The Pygor test suite has been comprehensively improved to provide robust validation of the codebase functionality. The tests now properly validate outputs, catch real errors, and provide confidence in the code reliability.
-
-## Key Improvements Made
-
-### 1. Fixed Import Issues
-- Added proper path configuration to handle module imports
-- Tests can now run without requiring pygor to be installed in development mode
-- Added dependency checking to provide clear error messages
-
-### 2. Removed Over-Permissive Exception Handling
-- Replaced `warnings.warn()` calls with proper test failures
-- Removed overly broad try-catch blocks that masked real errors
-- Added specific validation for different types of exceptions
-
-### 3. Added Comprehensive Output Validation
-- Tests now validate actual function outputs, not just that they run
-- Added array shape, type, and value range validation
-- Implemented proper assertions for all test cases
-
-### 4. New STRF Method Testing
-- Added comprehensive tests for `map_extrema_timing()`
-- Added tests for `compute_spatial_overlap_metrics()`
-- Added tests for `analyze_multicolor_spatial_alignment()`
-- Validates STRF axis convention compliance
-
-### 5. Edge Case and Error Handling Tests
-- Tests with empty/zero arrays
-- Tests with invalid inputs (NaN, Inf, wrong shapes)
-- Boundary condition testing (extreme thresholds)
-- Memory efficiency validation with larger arrays
-
-### 6. Test Utilities and Infrastructure
-- Created mock data generation functions
-- Added reusable assertion helpers
-- Implemented temporary file management
-- Added STRF axis convention validation
-
-## Test Files
-
-### Core Test Files
-- `test_Core.py`: Tests for base Core class functionality
-- `test_STRF.py`: Tests for STRF-specific methods and analysis
-- `test_analyses_import.py`: Tests for dynamic module import system
-
-### New Test Files
-- `test_edge_cases.py`: Edge cases, error handling, and boundary conditions
-- `test_utilities.py`: Helper functions and mock data generation
-- `run_tests.py`: Comprehensive test runner with dependency checking
-
-## Running Tests
-
-### Using Python Test Runner (Recommended)
 ```bash
-# From project root
-python src/pygor/test/run_tests.py
+# from pygor/
+python src/pygor/test/run_tests.py         # everything
+python src/pygor/test/run_tests.py -k strf # one topic
+pytest                                     # same thing, config is in pyproject.toml
 ```
 
-### Using Windows Batch File
-```cmd
-# From test directory
-run_test.bat
-```
+`run_tests.py` forwards its arguments to pytest and exists because the README
+and `run_test.bat` point at it. Everything else — test paths, the per-test
+timeout, the markers — is configured under `[tool.pytest.ini_options]` in
+`pyproject.toml`.
 
-### Using Standard unittest
+pytest and pytest-timeout come from the dev dependency group, so `uv sync`
+installs them.
+
+## Test data
+
+The integration tests read `examples/strf_demo_data.h5`, which is downloaded
+separately (see the main README). Tests that need it carry the `demo_data`
+marker and `conftest.py` skips them when the file is absent, so a fresh clone
+still runs the unit tests.
+
 ```bash
-# From project root
-PYTHONPATH=src python -m unittest discover src/pygor/test -v
+pytest -m "not demo_data"   # unit tests only, no recording needed
 ```
 
-## Test Organization
+## Running unattended
 
-### TestCore
-- Basic data type validation
-- Core data structure validation  
-- Metadata and ROI property testing
-- Trigger timing consistency checks
+Three things used to stop the suite finishing on its own, and the fixes are
+worth knowing about before adding tests:
 
-### TestSTRF
-- STRF-specific method testing
-- Bootstrap functionality validation
-- New extrema timing analysis tests
-- Spatial alignment analysis tests
-- Array structure validation
+- **napari windows.** Anything that opens a viewer blocks until a human closes
+  it, and under a headless session Qt aborts the process outright. GUI methods
+  are now tagged with `@pygor.core.gui.interactive`; the smoke tests filter on
+  that marker, and `STRF` no longer generates `_by_channel` copies of them.
+  **Tag any new GUI method with the decorator** — the tests will not find it by
+  name.
+- **stdin prompts.** `run_bootstrap()` asked for confirmation on stdin. It now
+  raises when there is no terminal, so a batch script gets an error instead of
+  hanging.
+- **matplotlib.** `conftest.py` forces the Agg backend and closes figures
+  between tests, so `plt.show()` is a no-op.
 
-### TestSTRF_plot
-- Plotting method validation
-- Visual output testing
+Per-test timeout is 300s. A test that hits it has hung, and the run says so
+instead of sitting there.
 
-### TestEdgeCases
-- Empty/zero array handling
-- Invalid input validation
-- NaN and infinite value handling
-- Memory efficiency testing
-- Parameter boundary validation
+## Layout
 
-## Test Data Requirements
+| File | What it covers |
+|---|---|
+| `conftest.py` | Headless setup, demo-data skipping, shared objects |
+| `helpers.py` | Demo-data path, and the introspection behind the smoke tests |
+| `test_Core.py` | `Core` against the demo recording |
+| `test_STRF.py` | `STRF` against the demo recording |
+| `test_edge_cases.py` | Extrema timing and spatial overlap on synthetic arrays |
+| `test_analyses_import.py` | Dynamic class discovery in `pygor.load` |
+| `test_experiment_fetch.py` | `Experiment.fetch` against mocked recordings |
+| `test_ipl.py`, `test_core_ipl_depths.py` | IPL depth estimation |
+| `test_osds_tuning.py` | Direction and orientation tuning metrics |
+| `test_export_*.py` | H5 export round-trips |
 
-Tests use mock data generation and the example data file:
-- `examples/strf_demo_data.h5`: Required for integration testing
-- Mock data generators: For unit testing without file dependencies
+Fixtures for the demo recording come in two forms. `core` and `strf` are loaded
+once per session and must be treated as read-only; `fresh_core` and
+`fresh_strf` give a test its own copy to mutate.
 
-## Validation Criteria
+## The method smoke tests
 
-### Array Structure Validation
-- STRF arrays must follow [cell, time, y, x] convention
-- Time dimension should be smaller than spatial dimensions
-- All arrays must be finite (no NaN/Inf unless expected)
+`test_method_is_wired_up` calls every public no-argument method on `Core` and
+`STRF`, and `test_roi_method_is_wired_up` does the same for methods whose only
+required argument is an ROI index. Both fail on `AttributeError`, `NameError`
+and `UnboundLocalError` — the signature of a rename that missed a call site —
+and accept any other exception that carries a message, since a method refusing
+its input is doing its job.
 
-### Output Validation
-- Method outputs must match expected types and shapes
-- Numerical outputs must be within reasonable ranges
-- Error conditions must be handled gracefully
+They do not check that any answer is correct. They exist because this codebase
+delegates heavily to submodules, and four such delegating calls were found
+pointing at functions that had been renamed.
 
-### Performance Validation
-- Methods must handle typical dataset sizes (32GB+ memory usage)
-- Vectorized operations preferred for efficiency
-- Memory usage should be reasonable for given input sizes
+`KNOWN_BROKEN` in `test_STRF.py` lists methods that fail on the demo recording
+for real reasons. They run as `xfail`, so the suite stays green while the debt
+stays visible, and each one flips to `XPASS` the moment it is fixed.
 
-## Future Improvements
+## Adding tests
 
-1. **Integration Testing**: Full workflow testing from data loading to analysis
-2. **Performance Benchmarking**: Systematic performance testing with various data sizes
-3. **Comparison Testing**: Validation against known good outputs or IGOR results
-4. **Continuous Integration**: Automated test running on code changes
-
-## Troubleshooting
-
-### Import Errors
-- Ensure all dependencies are installed (numpy, h5py, matplotlib, etc.)
-- Check that PYTHONPATH includes the src directory
-- Verify example data file exists in examples/
-
-### Test Failures
-- Check that test data file is not corrupted
-- Verify that recent code changes don't break existing functionality
-- Review test output for specific assertion failures
-
-### Memory Issues
-- Large test arrays may require substantial RAM
-- Consider reducing test data size if memory constrained
-- Monitor memory usage during test execution
-
-The improved test suite now provides robust validation and will catch real issues rather than giving false confidence through overly permissive testing.
+- Mark anything that reads the demo recording with `@pytest.mark.demo_data`.
+- Write output to `tmp_path`, never next to the source file.
+- Tag new GUI methods with `@pygor.core.gui.interactive`.
