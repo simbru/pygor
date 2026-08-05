@@ -5,6 +5,8 @@ from pygor.anatomy.ipl import (
     determine_orientation,
     calculate_ipl_depths,
     estimate_ipl_boundaries,
+    estimate_ipl_boundaries_anatomy,
+    orientation_from_anatomy,
     plot_ipl_estimation,
 )
 
@@ -13,5 +15,7 @@ __all__ = [
     "determine_orientation",
     "calculate_ipl_depths",
     "estimate_ipl_boundaries",
+    "estimate_ipl_boundaries_anatomy",
+    "orientation_from_anatomy",
     "plot_ipl_estimation",
 ]

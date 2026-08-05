@@ -1923,48 +1923,85 @@ class Core:
         orientation=None,
         plot=False,
         clip_to_range=True,
+        source="rois",
+        anatomy_kwargs=None,
     ):
-        """Automatically estimate IPL depths from ROI positions without GUI.
+        """Automatically estimate IPL depths without GUI.
 
-        Uses percentile-based boundary estimation along the scan axis to
-        approximate the outer (0 %) and inner (100 %) IPL boundaries from
-        the spatial distribution of ROI centroids.
+        Two sources of boundaries are available:
+
+        ``source="rois"`` (default) bins the ROI centroids along the scan axis
+        and takes percentiles within each bin. This assumes the ROIs sample
+        the full depth of the IPL, so it degrades badly if non-responsive ROIs
+        have been removed -- the extremes that define the boundaries are then
+        missing, and estimated depths run far outside [0, 100] before clipping.
+
+        ``source="anatomy"`` reads the band out of ``average_stack`` instead,
+        via :func:`~pygor.anatomy.ipl.estimate_ipl_boundaries_anatomy`. Culling
+        ROIs does not change the image, so this is the one to use on a curated
+        ROI set. It also detects orientation from the image, avoiding the
+        pixel-spread bias in the ROI-based detector on non-square frames.
 
         Parameters
         ----------
         n_bins : int, optional
-            Number of bins along the scan axis (default: 15).
+            Number of bins along the scan axis (default: 8). ROI source only;
+            pass ``anatomy_kwargs={"n_bins": ...}`` for the anatomy source.
         upper_percentile : float, optional
-            Percentile for the outer (0 %) boundary (default: 5.0).
+            Percentile for the outer (0 %) boundary (default: 0.0). ROI source only.
         lower_percentile : float, optional
-            Percentile for the inner (100 %) boundary (default: 95.0).
+            Percentile for the inner (100 %) boundary (default: 100.0). ROI source only.
         orientation : str or None, optional
             ``"horizontal"`` or ``"vertical"``. Auto-detected if None.
         plot : bool, optional
             Whether to show a diagnostic plot with image, boundaries,
-            centroids, and depth KDE (default: True).
+            centroids, and depth KDE (default: False).
         clip_to_range : bool, optional
             If True, clip estimated depths to the valid physiological range
             [0, 100] (default: True).
+        source : {"rois", "anatomy"}, optional
+            Where the boundaries come from (default: "rois", preserving the
+            previous behaviour).
+        anatomy_kwargs : dict or None, optional
+            Extra arguments for the anatomy estimator, e.g.
+            ``{"k_sigma": 2.0, "border_crop": 6}``.
 
         Returns
         -------
         np.ndarray, shape (n_rois,)
             Estimated IPL depth percentages.
+
+        Notes
+        -----
+        With ``source="anatomy"`` on a curated ROI set, depths typically span
+        less than the full 0-100 range: if no surviving ROI sits at the band
+        edge, none should be assigned 0 % or 100 %. That compression is
+        expected, not a fitting failure.
         """
         from pygor.anatomy.ipl import (
             calculate_ipl_depths,
             estimate_ipl_boundaries,
+            estimate_ipl_boundaries_anatomy,
             plot_ipl_estimation,
         )
 
-        upper, lower = estimate_ipl_boundaries(
-            self.roi_centroids,
-            n_bins=n_bins,
-            upper_percentile=upper_percentile,
-            lower_percentile=lower_percentile,
-            orientation=orientation,
-        )
+        if source not in ("rois", "anatomy"):
+            raise ValueError(f"source must be 'rois' or 'anatomy', got {source!r}")
+
+        if source == "anatomy":
+            upper, lower, orientation = estimate_ipl_boundaries_anatomy(
+                self.average_stack,
+                orientation=orientation,
+                **(anatomy_kwargs or {}),
+            )
+        else:
+            upper, lower = estimate_ipl_boundaries(
+                self.roi_centroids,
+                n_bins=n_bins,
+                upper_percentile=upper_percentile,
+                lower_percentile=lower_percentile,
+                orientation=orientation,
+            )
         depths = np.asarray(
             calculate_ipl_depths(
             self.roi_centroids,

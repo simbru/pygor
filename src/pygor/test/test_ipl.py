@@ -84,10 +84,16 @@ class TestCalculateIplDepths(unittest.TestCase):
     """Tests for calculate_ipl_depths."""
 
     def _flat_horizontal_setup(self):
-        """Flat horizontal boundaries: upper at y=10, lower at y=110."""
+        """Flat horizontal boundaries: upper at y=10, lower at y=110.
+
+        upper_boundary is 0 % and lower_boundary is 100 %, by argument
+        position -- see calculate_ipl_depths. Anatomically 0 % is the ON/GCL
+        side and 100 % the OFF/INL side, but the function is told which is
+        which purely by the order it receives them in.
+        """
         x = np.linspace(0, 100, 200)
-        upper = np.column_stack((np.full(200, 10.0), x))   # y=10 (100%)
-        lower = np.column_stack((np.full(200, 110.0), x))   # y=110 (0%)
+        upper = np.column_stack((np.full(200, 10.0), x))    # y=10  (0%)
+        lower = np.column_stack((np.full(200, 110.0), x))   # y=110 (100%)
         return upper, lower
 
     def test_midpoint_roi_gets_50_percent(self):
@@ -98,35 +104,56 @@ class TestCalculateIplDepths(unittest.TestCase):
 
     def test_roi_on_upper_boundary(self):
         upper, lower = self._flat_horizontal_setup()
-        roi = np.array([[10.0, 50.0]])  # y=10 = upper boundary = 100%
+        roi = np.array([[10.0, 50.0]])  # y=10 = upper boundary = 0%
         depths = calculate_ipl_depths(roi, upper, lower, orientation="horizontal")
-        np.testing.assert_allclose(depths, [100.0], atol=1.0)
+        np.testing.assert_allclose(depths, [0.0], atol=1.0)
 
     def test_roi_on_lower_boundary(self):
         upper, lower = self._flat_horizontal_setup()
-        roi = np.array([[110.0, 50.0]])  # y=110 = lower boundary = 0%
+        roi = np.array([[110.0, 50.0]])  # y=110 = lower boundary = 100%
         depths = calculate_ipl_depths(roi, upper, lower, orientation="horizontal")
-        np.testing.assert_allclose(depths, [0.0], atol=1.0)
+        np.testing.assert_allclose(depths, [100.0], atol=1.0)
 
     def test_multiple_rois(self):
         upper, lower = self._flat_horizontal_setup()
         rois = np.array([
-            [10.0, 20.0],   # 100%
+            [10.0, 20.0],   # 0%
             [60.0, 50.0],   # 50%
-            [110.0, 80.0],  # 0%
-            [35.0, 40.0],   # 75%
+            [110.0, 80.0],  # 100%
+            [35.0, 40.0],   # 25%
         ])
         depths = calculate_ipl_depths(rois, upper, lower, orientation="horizontal")
-        np.testing.assert_allclose(depths, [100.0, 50.0, 0.0, 75.0], atol=1.0)
+        np.testing.assert_allclose(depths, [0.0, 50.0, 100.0, 25.0], atol=1.0)
+
+    def test_swapping_boundaries_mirrors_depths(self):
+        """Passing the boundaries the other way round returns 100 - depth.
+
+        This is silent -- no error, no warning -- and is what made
+        NapariDepthPrompt report inverted depths for as long as it did.
+        """
+        upper, lower = self._flat_horizontal_setup()
+        rois = np.array([[10.0, 20.0], [35.0, 40.0], [110.0, 80.0]])
+        forward = calculate_ipl_depths(rois, upper, lower, orientation="horizontal")
+        reversed_ = calculate_ipl_depths(rois, lower, upper, orientation="horizontal")
+        np.testing.assert_allclose(reversed_, 100.0 - forward, atol=1e-6)
 
     def test_vertical_orientation(self):
         # Vertical boundaries: upper at x=10, lower at x=110
         y = np.linspace(0, 100, 200)
-        upper = np.column_stack((y, np.full(200, 10.0)))   # x=10 (100%)
-        lower = np.column_stack((y, np.full(200, 110.0)))   # x=110 (0%)
+        upper = np.column_stack((y, np.full(200, 10.0)))    # x=10  (0%)
+        lower = np.column_stack((y, np.full(200, 110.0)))   # x=110 (100%)
         roi = np.array([[50.0, 60.0]])  # x=60, midpoint between 10 and 110
         depths = calculate_ipl_depths(roi, upper, lower, orientation="vertical")
         np.testing.assert_allclose(depths, [50.0], atol=1.0)
+
+    def test_vertical_endpoints(self):
+        """Depth runs 0 % at upper_boundary to 100 % at lower_boundary in X."""
+        y = np.linspace(0, 100, 200)
+        upper = np.column_stack((y, np.full(200, 10.0)))
+        lower = np.column_stack((y, np.full(200, 110.0)))
+        rois = np.array([[50.0, 10.0], [50.0, 110.0], [50.0, 35.0]])
+        depths = calculate_ipl_depths(rois, upper, lower, orientation="vertical")
+        np.testing.assert_allclose(depths, [0.0, 100.0, 25.0], atol=1.0)
 
     def test_auto_orientation_detection(self):
         """Should auto-detect horizontal from boundary shape."""

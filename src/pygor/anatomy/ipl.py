@@ -131,17 +131,33 @@ def calculate_ipl_depths(roi_centroids, upper_boundary, lower_boundary,
 
     For each ROI centroid, finds the closest point on each boundary (matching
     by X coordinate for horizontal scans, Y for vertical) and linearly
-    interpolates the depth position as a percentage (0 % = upper/outer
-    boundary, 100 % = lower/inner boundary).
+    interpolates the depth position as a percentage.
+
+    ``upper_boundary`` is 0 % and ``lower_boundary`` is 100 % by argument
+    position alone -- neither name implies a geometric or anatomical side.
+    The interpolation is signed, so passing the two the other way round
+    returns ``100 - depth``, silently.
+
+    Lab convention for what those percentages mean anatomically:
+
+    ====== ================================================
+    0 %    ON layer, proximal, GCL side
+    100 %  OFF layer, distal, INL side
+    ====== ================================================
+
+    The ON/OFF border sits near 40 %. Whichever boundary is passed as
+    ``upper_boundary`` defines the 0 % end, so it is the caller's job to
+    make that the GCL/ON side consistently across recordings -- this
+    function cannot check it.
 
     Parameters
     ----------
     roi_centroids : array-like, shape (n_rois, 2)
         ROI centroid positions in (y, x) format.
     upper_boundary : array-like, shape (M, 2)
-        The 0 % (outer) boundary in (y, x) format.
+        The 0 % boundary in (y, x) format.
     lower_boundary : array-like, shape (M, 2)
-        The 100 % (inner) boundary in (y, x) format.
+        The 100 % boundary in (y, x) format.
     orientation : str or None, optional
         ``"horizontal"`` or ``"vertical"``. If None, auto-detected from
         the lower boundary curve via :func:`determine_orientation`.
@@ -196,14 +212,10 @@ def _depths_vertical(lower, upper, roi_centroids):
     x_upper = upper[closest_upper, 1]
     x_lower = lower[closest_lower, 1]
 
-    # Handle reversed boundaries
-    if np.mean(x_lower) > np.mean(x_upper):
-        return (roi_x - x_upper) / (x_lower - x_upper) * 100
-    else:
-        return (x_upper - roi_x) / (x_upper - x_lower) * 100
+    return (roi_x - x_upper) / (x_lower - x_upper) * 100
 
 
-def estimate_ipl_boundaries(roi_centroids, n_bins=1, upper_percentile=0,
+def estimate_ipl_boundaries(roi_centroids, n_bins=8, upper_percentile=0,
                             lower_percentile=100.0,
                             orientation=None, margin_fraction=.1,
                             n_points=100):
@@ -219,7 +231,9 @@ def estimate_ipl_boundaries(roi_centroids, n_bins=1, upper_percentile=0,
     roi_centroids : array-like, shape (n_rois, 2)
         ROI centroid positions in (y, x) format.
     n_bins : int, optional
-        Number of bins along the scan axis (default: 15).
+        Number of bins along the scan axis (default: 8, matching
+        ``Core.estimate_ipl_depths``). At least 3 bins must end up with 2 or
+        more ROIs, so values below 3 always raise.
     upper_percentile : float, optional
         Percentile for the outer (0 %) boundary within each bin
         (default: 5.0).
@@ -275,8 +289,8 @@ def estimate_ipl_boundaries(roi_centroids, n_bins=1, upper_percentile=0,
     # Clamp to valid range
     bin_indices = np.clip(bin_indices, 0, n_bins - 1)
 
-    upper_depths = []  # 100 % boundary depth values
-    lower_depths = []  # 0 % boundary depth values
+    upper_depths = []  # 0 % boundary depth values (upper_percentile, ON/GCL side)
+    lower_depths = []  # 100 % boundary depth values (lower_percentile, OFF/INL side)
     scan_centers = []
     valid_bins = 0
 
@@ -375,6 +389,252 @@ def estimate_ipl_boundaries(roi_centroids, n_bins=1, upper_percentile=0,
     return upper_boundary, lower_boundary
 
 
+def orientation_from_anatomy(image, smooth_sigma=1.5, border_crop=6):
+    """Detect scan orientation from the image rather than the ROI centroids.
+
+    The depth axis is the one running across the IPL, along which mean
+    intensity rises and falls; along the scan axis the band is roughly
+    uniform. Comparing the coefficient of variation of the two mean profiles
+    is scale-free, so unequal sampling between axes (e.g. a 64 x 128 frame)
+    does not bias the result the way comparing raw pixel spreads does.
+
+    Unlike :func:`_auto_detect_orientation`, this does not depend on the ROI
+    set, so it is unaffected by ROIs having been culled.
+
+    Parameters
+    ----------
+    image : np.ndarray, 2D
+        Anatomical image, e.g. the mean of the imaging stack.
+    smooth_sigma : float, optional
+        Gaussian pre-smoothing in pixels (default: 1.5).
+    border_crop : int, optional
+        Pixels trimmed from each edge before profiling, to exclude the light
+        artifact strip (default: 6).
+
+    Returns
+    -------
+    str
+        ``"horizontal"`` (depth along Y) or ``"vertical"`` (depth along X).
+    """
+    from scipy.ndimage import gaussian_filter
+
+    image = np.asarray(image, dtype=float)
+    cropped = _crop_borders(image, border_crop)[0]
+    img = gaussian_filter(cropped, smooth_sigma)
+    prof_y = img.mean(axis=1)
+    prof_x = img.mean(axis=0)
+    cv_y = prof_y.std() / (prof_y.mean() + 1e-12)
+    cv_x = prof_x.std() / (prof_x.mean() + 1e-12)
+    return "horizontal" if cv_y >= cv_x else "vertical"
+
+
+def _crop_borders(image, border_crop):
+    """Trim the light-artifact frame edge; returns (cropped, y_offset, x_offset)."""
+    c = int(border_crop)
+    if c <= 0 or 2 * c >= min(image.shape):
+        return image, 0, 0
+    return image[c:-c, c:-c], c, c
+
+
+def _contiguous_support(profile, centre, fraction):
+    """Indices of the contiguous run around ``centre`` above ``fraction`` of peak.
+
+    Returns a single index when ``centre`` itself is below the cut-off, which
+    happens when the profile is bimodal and the intensity-weighted centre falls
+    in the dip between two lobes. The caller drops such bins (zero width), and
+    that is deliberate: re-anchoring on the profile peak instead recovers bins
+    whose band is genuinely ill-defined, and they then distort the fit.
+    """
+    above = profile >= fraction * profile.max()
+    if not above[centre]:
+        return np.array([centre])
+    lo = centre
+    while lo > 0 and above[lo - 1]:
+        lo -= 1
+    hi = centre
+    while hi < len(profile) - 1 and above[hi + 1]:
+        hi += 1
+    return np.arange(lo, hi + 1)
+
+
+def estimate_ipl_boundaries_anatomy(image, orientation=None, n_bins=16,
+                                    k_sigma=2.0, smooth_sigma=1.5,
+                                    border_crop=6, baseline_percentile=10.0,
+                                    centre_poly_deg=2, width_poly_deg=1,
+                                    n_points=200, trim_vertical=True,
+                                    trim_fraction=0.25):
+    """Estimate IPL boundaries from the anatomy instead of the ROI cloud.
+
+    :func:`estimate_ipl_boundaries` takes per-bin percentiles of the ROI
+    centroids as the band edges, which requires the ROIs to sample the full
+    depth of the IPL. That fails when non-responsive ROIs have been removed:
+    the extremes that define the boundaries are gone, unevenly. This function
+    reads the band out of the image, so culling ROIs does not affect it.
+
+    Within each bin along the scan axis, the intensity profile across depth
+    gives an intensity-weighted centre and standard deviation; the band is
+    taken as centre +/- ``k_sigma`` SD. Centre and half-width are then fitted
+    separately across the scan axis -- the centre carries the retinal
+    curvature, the half-width is near-constant -- which is far more stable
+    than fitting the two edges independently.
+
+    Parameters
+    ----------
+    image : np.ndarray, 2D
+        Anatomical image, e.g. the mean of the imaging stack.
+    orientation : str or None, optional
+        ``"horizontal"``/``"vertical"``. Detected via
+        :func:`orientation_from_anatomy` if None.
+    n_bins : int, optional
+        Bins along the scan axis (default: 16).
+    k_sigma : float, optional
+        Half-width of the band in intensity-weighted SD (default: 2.0).
+    smooth_sigma : float, optional
+        Gaussian pre-smoothing in pixels (default: 1.5).
+    border_crop : int, optional
+        Pixels trimmed from each frame edge (default: 6).
+    baseline_percentile : float, optional
+        Per-profile background level subtracted before weighting (default: 10).
+    centre_poly_deg, width_poly_deg : int, optional
+        Polynomial degrees for the centre line and half-width (default: 2, 1).
+    n_points : int, optional
+        Points in each returned boundary (default: 200).
+    trim_vertical : bool, optional
+        For vertical sections, take the moments over the band's own support
+        rather than the whole profile (default: True). See the note below.
+    trim_fraction : float, optional
+        Support cut-off as a fraction of peak, used when trimming (default: 0.25).
+
+    Returns
+    -------
+    upper_boundary, lower_boundary : np.ndarray, shape (n_points, 2)
+        Boundaries in (y, x) format, as :func:`calculate_ipl_depths` expects.
+        ``upper_boundary`` is always the band edge at the *smaller* coordinate
+        along the depth axis -- smaller Y when horizontal, smaller X when
+        vertical -- and so becomes 0 %. See the polarity note below.
+    orientation : str
+        The orientation used.
+
+    Raises
+    ------
+    ValueError
+        If the band could not be tracked across at least 3 bins.
+
+    Notes
+    -----
+    Polarity is assigned geometrically, not anatomically. Nothing in the
+    intensity profile distinguishes the INL border from the GCL border, so
+    the smaller-coordinate edge is called 0 % unconditionally. A section
+    scanned or mounted the other way round therefore yields ``100 - depth``
+    with no warning and no way to detect it from the image alone. Depths are
+    only comparable across recordings that share a scan/mounting convention;
+    where that is in doubt, draw the boundaries by hand with
+    :class:`~pygor.core.gui.methods.NapariDepthPrompt`, which takes the
+    assignment from the user instead.
+
+    Validated against IGOR-drawn ``Positions`` on one horizontal recording
+    (``examples/strf_demo_data.h5``): r = 0.99, with the geometric convention
+    matching. The vertical branch has no ground-truth validation.
+    """
+    from scipy.ndimage import gaussian_filter, median_filter
+
+    image = np.asarray(image, dtype=float)
+    if orientation is None:
+        orientation = orientation_from_anatomy(image, smooth_sigma, border_crop)
+
+    cropped, y_off, x_off = _crop_borders(image, border_crop)
+    img = gaussian_filter(cropped, smooth_sigma)
+    # Work in (depth, scan) regardless of orientation.
+    depth_scan = img if orientation == "horizontal" else img.T
+    depth_off, scan_off = (y_off, x_off) if orientation == "horizontal" else (x_off, y_off)
+    n_depth, n_scan = depth_scan.shape
+    depth_idx = np.arange(n_depth, dtype=float)
+
+    edges = np.linspace(0, n_scan, n_bins + 1).astype(int)
+    centres, band_mid, band_half = [], [], []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        if hi <= lo:
+            continue
+        profile = depth_scan[:, lo:hi].mean(axis=1)
+        profile = np.clip(profile - np.percentile(profile, baseline_percentile), 0, None)
+        total = profile.sum()
+        if total <= 0:
+            continue
+        weights = profile
+        if trim_vertical and orientation == "vertical":
+            # A vertical section puts the depth axis along the long side of the
+            # frame, so the band sits in ~50 % dark margin; including that in
+            # the moment inflates the SD and pushes the borders into the dark.
+            # A horizontal section's band nearly fills its axis, where trimming
+            # would instead cut into the band, so it is left alone.
+            centre = int(np.clip(round((depth_idx * profile).sum() / total), 0, n_depth - 1))
+            support = _contiguous_support(profile, centre, trim_fraction)
+            weights = np.zeros_like(profile)
+            weights[support] = profile[support]
+            total = weights.sum()
+            if total <= 0:
+                continue
+        mid = float((depth_idx * weights).sum() / total)
+        var = float((weights * (depth_idx - mid) ** 2).sum() / total)
+        half = k_sigma * np.sqrt(max(var, 0.0))
+        if half <= 0:
+            continue
+        centres.append((lo + hi) / 2.0)
+        band_mid.append(mid)
+        band_half.append(half)
+
+    if len(centres) < 3:
+        raise ValueError(
+            "Could not track the IPL band across the scan axis; the image may "
+            "not show a clear band, or n_bins is too high for its size."
+        )
+
+    centres = np.asarray(centres)
+    band_mid = median_filter(np.asarray(band_mid), size=3, mode="nearest")
+    band_half = median_filter(np.asarray(band_half), size=3, mode="nearest")
+
+    # Reject bins whose centre or width is far from the rest before fitting.
+    # A single bad bin at either end of the scan axis will otherwise drag a
+    # degree-2 fit into a pronounced bow.
+    keep = np.ones(len(centres), dtype=bool)
+    for values in (band_mid, band_half):
+        med = np.median(values)
+        mad = np.median(np.abs(values - med))
+        if mad > 0:
+            keep &= np.abs(values - med) <= 4.0 * mad
+    if keep.sum() >= 3:
+        centres, band_mid, band_half = centres[keep], band_mid[keep], band_half[keep]
+
+    def _fit(values, deg):
+        deg = int(np.clip(deg, 0, max(0, len(centres) - 2)))
+        return np.polyfit(centres, values, deg)
+
+    # The border crop keeps the light artifact out of the profiling, but the
+    # returned boundaries should still span the whole frame -- otherwise ROIs
+    # in the outer few pixels have no boundary at their scan position and get
+    # matched to the truncated end instead. Fit inside the cropped region,
+    # report across the full extent.
+    n_scan_full = image.shape[1] if orientation == "horizontal" else image.shape[0]
+    scan_fine = np.linspace(0, n_scan_full - 1, n_points)
+    # Evaluate only within the fitted span, holding flat outside, so a
+    # higher-order term cannot run away past the outermost bin.
+    scan_clamped = np.clip(scan_fine - scan_off, centres.min(), centres.max())
+    mid_fine = np.polyval(_fit(band_mid, centre_poly_deg), scan_clamped)
+    half_fine = np.clip(np.polyval(_fit(band_half, width_poly_deg), scan_clamped), 1.0, None)
+
+    upper_depths = mid_fine - half_fine + depth_off
+    lower_depths = mid_fine + half_fine + depth_off
+    scan_coords = scan_fine
+
+    if orientation == "horizontal":  # depth = y, scan = x
+        upper = np.column_stack((upper_depths, scan_coords))
+        lower = np.column_stack((lower_depths, scan_coords))
+    else:                            # depth = x, scan = y
+        upper = np.column_stack((scan_coords, upper_depths))
+        lower = np.column_stack((scan_coords, lower_depths))
+    return upper, lower, orientation
+
+
 def plot_ipl_estimation(image, roi_centroids, upper_boundary, lower_boundary,
                         depths, ax=None, figsize=(10, 6), cmap_image="Greys_r",
                         depth_bins=10, depth_range=(0.0, 100.0)):
@@ -455,8 +715,10 @@ def plot_ipl_estimation(image, roi_centroids, upper_boundary, lower_boundary,
     y_lower_med = np.median(lower_boundary[:, 0])
 
     def _depth_to_y(depth_vals):
+        # upper_boundary is 0 %, matching calculate_ipl_depths. Mapping these
+        # the other way round mirrored the histogram against the image panel.
         norm = (depth_vals - depth_min) / (depth_max - depth_min)
-        return y_lower_med + norm * (y_upper_med - y_lower_med)
+        return y_upper_med + norm * (y_lower_med - y_upper_med)
 
     if len(valid_depths) > 0:
         in_range = (valid_depths >= depth_min) & (valid_depths <= depth_max)
@@ -483,7 +745,7 @@ def plot_ipl_estimation(image, roi_centroids, upper_boundary, lower_boundary,
     ax_kde.set_xlim(left=0)
     
     # Add IPL depth labels on left side of histogram
-    ax_kde.set_yticks([y_lower_med, y_upper_med])
+    ax_kde.set_yticks([y_upper_med, y_lower_med])
     ax_kde.set_yticklabels(['0%', '100%'])
     # ax_kde.set_ylabel("IPL depth")
     ax_kde.tick_params(axis="y", which="both", left=True, labelleft=True)
