@@ -15,6 +15,7 @@ import pathlib
 
 # import sklearn.preprocessing
 import re
+import sys
 import warnings
 
 import h5py
@@ -48,6 +49,25 @@ import pygor.utils.unit_conversion as unit_conversion
 
 # import scipy
 from .core_data import Core, try_fetch_table_params
+
+
+def _can_prompt_user() -> bool:
+    """True if input() would reach a human.
+
+    A Jupyter kernel answers prompts through a widget rather than a terminal,
+    so isatty() alone would wrongly rule out the notebook workflow.
+    """
+    try:
+        from IPython import get_ipython
+
+        if get_ipython() is not None:
+            return True
+    except ImportError:
+        pass
+    try:
+        return sys.stdin is not None and sys.stdin.isatty()
+    except ValueError:  # stdin closed, e.g. under a captured test runner
+        return False
 
 
 @dataclass(repr=False)
@@ -541,21 +561,19 @@ class STRF(Core):
         """
         if self.bs_settings["do_bootstrap"] == False:
             raise AttributeError("self.bs_settings['do_bootstrap'] is not True")
-        if self.bs_settings["do_bootstrap"] == True:
-            if self.bs_settings["bs_already_ran"] == True:
-                if force == False:
-                    user_verify = input(
-                        "Do you want re-do bootstrap? Type 'y'/'yes' or 'n'/'no'"
-                    )
-                    user_verify = user_verify.lower()
-                else:
-                    user_verify = "y"
-                if user_verify == "y" or user_verify == "yes":
-                    before_time = datetime.datetime.now()
-                    self.__calc_pval_time(parallel=parallel)
-                    self.__calc_pval_space(parallel=parallel)
-                    after_time = datetime.datetime.now()
-                elif user_verify == "n" or user_verify == "no":
+        if self.bs_settings["bs_already_ran"] and not force:
+            if not _can_prompt_user():
+                # No one is there to answer, so blocking on input() would hang
+                # the caller forever (this used to stall the test suite).
+                raise RuntimeError(
+                    "Bootstrap has already been run and there is no terminal to "
+                    "confirm re-running it. Pass force=True to re-run."
+                )
+            user_verify = input(
+                "Do you want re-do bootstrap? Type 'y'/'yes' or 'n'/'no'"
+            ).lower()
+            if user_verify not in ("y", "yes"):
+                if user_verify in ("n", "no"):
                     print(
                         f"Skipping recomputing bootstrap due to user input:'{user_verify}'"
                     )
@@ -563,18 +581,16 @@ class STRF(Core):
                     print(
                         f"Input '{user_verify}' is invalid, no action done. Please use 'y'/'n'."
                     )
-            else:
-                before_time = datetime.datetime.now()
-                self.__calc_pval_time(parallel=parallel)
-                self.__calc_pval_space(parallel=parallel)
-                after_time = datetime.datetime.now()
-                self.bs_settings["bs_already_ran"] = True
-            # Write time metadata
-            self.bs_settings["bs_datetime"] = before_time
-            self.bs_settings["bs_datetime_str"] = before_time.strftime(
-                "%d/%m/%y %H:%M:%S"
-            )
-            self.bs_settings["bs_dur_timedelta"] = after_time - before_time
+                return
+        before_time = datetime.datetime.now()
+        self.__calc_pval_time(parallel=parallel)
+        self.__calc_pval_space(parallel=parallel)
+        after_time = datetime.datetime.now()
+        self.bs_settings["bs_already_ran"] = True
+        # Write time metadata
+        self.bs_settings["bs_datetime"] = before_time
+        self.bs_settings["bs_datetime_str"] = before_time.strftime("%d/%m/%y %H:%M:%S")
+        self.bs_settings["bs_dur_timedelta"] = after_time - before_time
 
     @property
     def pval_time(self, parallel=None) -> np.ndarray:
