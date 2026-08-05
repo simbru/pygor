@@ -1,7 +1,6 @@
 import unittest
 import numpy as np
 from unittest.mock import MagicMock
-from collections import defaultdict
 
 from pygor.classes.experiment import Experiment
 

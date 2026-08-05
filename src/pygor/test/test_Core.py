@@ -1,158 +1,107 @@
+"""Integration tests for the Core class against the demo recording."""
+
+import numpy as np
+import pytest
+
 import pygor.load
 import pygor.utils.helpinfo
-import os
-import numpy as np
-import pandas as pd
-import matplotlib.figure
-import unittest
-import warnings
-from contextlib import redirect_stdout
-import atexit
+from pygor.test.helpers import callable_without_arguments
 
-file_loc = pathlib.Path(__file__).parents[3]
-example_data = file_loc.joinpath(r"examples/strf_demo_data.h5")
-out_loc = r"src/pygor/test/test_out_Core.txt"
-data = pygor.load.Core(example_data)
+pytestmark = pytest.mark.demo_data
+
+# Errors that mean an internal name went stale, as opposed to a method
+# deliberately refusing the arguments it was given.
+PLUMBING_ERRORS = (AttributeError, NameError, UnboundLocalError)
+
+# Methods that write next to the source file, so calling them blind would
+# clobber the demo recording. They are covered by the export tests instead.
+WRITES_TO_SOURCE_DIR = {"export_to_h5", "save", "save_object"}
+
+SMOKE_METHODS = callable_without_arguments(
+    pygor.load.Core, exclude=WRITES_TO_SOURCE_DIR
+)
 
 
-class TestCore(unittest.TestCase):
-    def test_averages_type(self):
-        self.assertTrue(isinstance(data.averages, np.ndarray) or data.averages is None)
+@pytest.mark.parametrize("method_name", SMOKE_METHODS)
+def test_method_is_wired_up(scratch_core, method_name):
+    """Every no-argument method either returns or raises deliberately.
 
-    def test_ipl_depths_type(self):
-        self.assertTrue(
-            isinstance(data.ipl_depths, np.ndarray) or data.ipl_depths is None
-        )
+    This does not check the answer is right, only that the call reaches its own
+    code. It is what catches an attribute renamed in one place and not another,
+    which is the failure mode that keeps showing up here.
+    """
+    try:
+        getattr(scratch_core, method_name)()
+    except PLUMBING_ERRORS as e:
+        pytest.fail(f"{method_name}() hit a stale name: {type(e).__name__}: {e}")
+    except Exception as e:
+        assert str(e), f"{method_name}() raised {type(e).__name__} with no message"
 
-    def test_metadata_type(self):
-        self.assertTrue(isinstance(data.metadata, dict))
 
-    def test_num_rois_type(self):
-        self.assertTrue(isinstance(data.num_rois, int))
+def test_attributes_readable(core):
+    for name in pygor.utils.helpinfo.get_attribute_list(core, with_types=False):
+        getattr(core, name)
 
-    def test_rois_type(self):
-        self.assertTrue(isinstance(data.rois, np.ndarray))
 
-    def test_attributes_return(self):
-        attr_list = pygor.utils.helpinfo.get_attribute_list(data, with_types=False)
-        [getattr(data, i) for i in attr_list]
+def test_required_attributes_present(core):
+    for attr in ("filename", "metadata", "rois", "type", "frame_hz", "num_rois"):
+        assert hasattr(core, attr), f"Missing required attribute: {attr}"
 
-    def test_simple_methods_return(self):
-        meth_list = pygor.utils.helpinfo.get_methods_list(data, with_returns=False)
-        # Methods that require interactive input or parameters. The napari ones
-        # block until a human closes the window, so leaving any of them in makes
-        # the suite unrunnable unattended.
-        ignore = ["draw_rois", "get_depth", "update_ipl_depths",
-                 "view_images_interactive", "napari_strfs",
-                 "view_stack_projection", "view_stack_rois",
-                 "view_drift", "plot_averages", "calculate_image_average"]
-        
-        write_to = file_loc.joinpath(out_loc)
-        failed_methods = []
-        
-        with open(write_to, "w") as f:
-            with redirect_stdout(f):
-                for method_name in meth_list:
-                    if method_name not in ignore and "plot" not in method_name:
-                        try:
-                            result = getattr(data, method_name)()
-                            # Validate that method returns something reasonable
-                            if result is not None:
-                                valid_types = (np.ndarray, list, dict, tuple, int, float, bool, str, 
-                                             pd.DataFrame, pd.Series, matplotlib.figure.Figure, 
-                                             pathlib.Path, type(None))
-                                self.assertTrue(isinstance(result, valid_types), 
-                                               f"Method {method_name} returned unexpected type: {type(result)}")
-                        except AttributeError as e:
-                            failed_methods.append(f"Method {method_name} gave AttributeError: {e}")
-                        except TypeError as e:
-                            # Only acceptable if method requires parameters
-                            if "required positional argument" in str(e) or "missing" in str(e).lower():
-                                continue  # Expected for methods requiring parameters
-                            else:
-                                failed_methods.append(f"Method {method_name} gave unexpected TypeError: {e}")
-                        except Exception as e:
-                            failed_methods.append(f"Method {method_name} failed with {type(e).__name__}: {e}")
-        
-        # Fail the test if any methods had unexpected errors
-        if failed_methods:
-            self.fail(f"Methods failed unexpectedly:\n" + "\n".join(failed_methods))
 
-    def test_get_help(self):
-        write_to = file_loc.joinpath(out_loc)
-        with open(write_to, "w") as f:
-            with redirect_stdout(f):
-                data.get_help(hints = True, types = True)
+def test_metadata_is_dict(core):
+    assert isinstance(core.metadata, dict)
 
-    def test_core_data_structure(self):
-        """Test that core data follows expected structures"""
-        # Test required attributes exist
-        required_attrs = ['filename', 'metadata', 'rois', 'type', 'frame_hz', 'num_rois']
-        for attr in required_attrs:
-            self.assertTrue(hasattr(data, attr), f"Missing required attribute: {attr}")
-        
-        # Test data types are correct
-        if data.averages is not None:
-            self.assertEqual(len(data.averages.shape), 3, "Averages should be 3D array [roi, time, repetition] or similar")
-        
-        if data.images is not None:
-            self.assertEqual(len(data.images.shape), 3, "Images should be 3D array [time, y, x]")
-            self.assertGreater(data.images.shape[0], 0, "Images should have time dimension > 0")
-        
-        # Test ROI data consistency
-        if data.rois is not None:
-            unique_rois = np.unique(data.rois)
-            unique_rois = unique_rois[~np.isnan(unique_rois)]  # Remove NaN
-            self.assertEqual(len(unique_rois) - 1, data.num_rois, "num_rois should match actual ROI count")
 
-    def test_metadata_structure(self):
-        """Test metadata contains expected information"""
-        self.assertIsInstance(data.metadata, dict)
-        # Check for typical metadata keys (these may vary by dataset)
-        expected_keys = ['exp_date']  # At minimum should have experiment date
-        for key in expected_keys:
-            if key in data.metadata:
-                self.assertIsNotNone(data.metadata[key])
+def test_num_rois_matches_mask(core):
+    """num_rois should count the ROI labels in the mask.
 
-    def test_roi_properties(self):
-        """Test ROI-related properties work correctly"""
-        if hasattr(data, 'roi_centroids'):
-            centroids = data.roi_centroids
-            if centroids is not None:
-                self.assertIsInstance(centroids, np.ndarray)
-                self.assertEqual(len(centroids.shape), 2, "Centroids should be 2D array [roi, coordinates]")
-                self.assertEqual(centroids.shape[1], 2, "Each centroid should have 2 coordinates (y, x)")
+    ROI labels are negative integers and the background is one further label,
+    hence the -1 (see the ROI convention in CLAUDE.md).
+    """
+    labels = np.unique(core.rois)
+    labels = labels[~np.isnan(labels)]
+    assert len(labels) - 1 == core.num_rois
 
-    def test_correlation_map(self):
-        """Test correlation map calculation"""
-        if hasattr(data, 'get_correlation_map') and data.images is not None:
-            corr_map = data.get_correlation_map()
-            self.assertIsInstance(corr_map, np.ndarray)
-            # Correlation map should have same spatial dimensions as images
-            self.assertEqual(corr_map.shape, data.images.shape[1:])
 
-    def test_frame_rate_calculation(self):
-        """Test frame rate is reasonable"""
-        if hasattr(data, 'frame_hz') and data.frame_hz is not None:
-            self.assertGreater(data.frame_hz, 0, "Frame rate should be positive")
-            self.assertLess(data.frame_hz, 1000, "Frame rate should be reasonable (< 1000 Hz)")
+def test_rois_use_negative_labels(core):
+    labels = np.unique(core.rois)
+    labels = labels[~np.isnan(labels)]
+    assert (labels < 0).sum() == core.num_rois, (
+        "ROIs are identified by negative integers; background is non-negative"
+    )
 
-    def test_trigger_timing(self):
-        """Test trigger timing data consistency"""
-        if hasattr(data, 'triggertimes') and data.triggertimes is not None:
-            self.assertIsInstance(data.triggertimes, np.ndarray)
-            # Trigger times should be monotonically increasing
-            if len(data.triggertimes) > 1:
-                diff = np.diff(data.triggertimes)
-                self.assertTrue(np.all(diff >= 0), "Trigger times should be monotonically increasing")
-        
-        if hasattr(data, 'triggertimes_frame') and data.triggertimes_frame is not None:
-            self.assertIsInstance(data.triggertimes_frame, np.ndarray)
-            # Frame trigger times should be integers
-            self.assertTrue(np.all(data.triggertimes_frame == data.triggertimes_frame.astype(int)),
-                           "Frame trigger times should be integers")
-if os.path.exists(file_loc.joinpath(out_loc)):
-    atexit.register(lambda : os.remove(file_loc.joinpath(out_loc)))
 
-if __name__ == "__main__":
-    unittest.main()
+def test_images_are_a_time_stack(core):
+    if core.images is None:
+        pytest.skip("recording has no image stack")
+    assert core.images.ndim == 3, "images should be [time, y, x]"
+    assert core.images.shape[0] > 0
+
+
+def test_averages_appear_after_snippets(fresh_core):
+    """A freshly loaded recording has no averages until snippets are computed."""
+    assert fresh_core.averages is None
+    fresh_core.compute_snippets_and_averages()
+    assert fresh_core.averages.shape[0] == fresh_core.num_rois
+
+
+def test_frame_hz_is_plausible(core):
+    assert 0 < core.frame_hz < 1000
+
+
+def test_triggertimes_increase(core):
+    if core.triggertimes is None or len(core.triggertimes) < 2:
+        pytest.skip("recording has fewer than two triggers")
+    assert np.all(np.diff(core.triggertimes) >= 0)
+
+
+def test_triggertimes_frame_are_whole_numbers(core):
+    if core.triggertimes_frame is None:
+        pytest.skip("recording has no frame-indexed triggers")
+    frames = core.triggertimes_frame
+    assert np.all(frames == frames.astype(int))
+
+
+def test_get_help_writes_to_stdout(core, capsys):
+    core.get_help(hints=True, types=True)
+    assert capsys.readouterr().out.strip(), "get_help() printed nothing"

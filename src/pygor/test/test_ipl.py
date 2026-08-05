@@ -4,7 +4,6 @@ AI-generated: Tests created with Claude Code assistance.
 """
 
 import unittest
-import warnings
 import numpy as np
 
 from pygor.anatomy.ipl import (

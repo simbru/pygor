@@ -2,18 +2,10 @@
 echo Pygor Test Suite
 echo ================
 
-REM Navigate to project root
+REM Navigate to pygor root, where pyproject.toml holds the pytest config
 cd /d "%~dp0\..\..\.."
 
-REM Try to activate conda environment if it exists
-if exist "%CONDA_PREFIX%" (
-    echo Activating conda environment...
-    call conda activate strfsclone 2>nul
-)
-
-REM Run the comprehensive test suite
-echo Running comprehensive test suite...
-python src/pygor/test/run_tests.py
+python src/pygor/test/run_tests.py %*
 
 echo.
 echo Test run complete. Check output above for results.

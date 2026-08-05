@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from pygor.timeseries.osds import tuning_metrics
+from pygor.timeseries.osds import tuning_metrics, von_mises_fitting
 
 
 class TestOSDSTuningMetrics(unittest.TestCase):
@@ -103,7 +103,6 @@ class TestPhaseIdxExtraction(unittest.TestCase):
 
     def setUp(self):
         """Create mock OSDS object for testing _extract_phase."""
-        from pygor.classes.osds_data import OSDS
 
         # Create a minimal mock that just tests the _extract_phase method
         class MockOSDSForExtract:
@@ -311,6 +310,10 @@ class TestCircularStd(unittest.TestCase):
         self.assertTrue(np.isnan(std))
 
 
+@unittest.skipUnless(
+    hasattr(von_mises_fitting, "fit_von_mises_direction"),
+    "von_mises_fitting.py is commented out in full, so there is nothing to fit with",
+)
 class TestVonMisesFitting(unittest.TestCase):
     """Test von Mises curve fitting functions."""
 
