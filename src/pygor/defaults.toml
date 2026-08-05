@@ -93,6 +93,10 @@ kernel_window_ms = 800.0      # Kernel support duration (ms)
 [strf.general]
 # Source of truth for number of stimulus colour channels
 n_colours = 1
+# Noise box width in screen au, used for every metric reported in visual angle.
+# 0 = read it from the recording name, which only works for names that pair the
+# number with the stimulus label ("SWN_200").
+box_size_au = 0
 
 [strf.contouring]
 global_thresh_val = 1.5

@@ -1,6 +1,41 @@
+import re
+
 import numpy as np
 
 screen_height_width_visang = (54.059, 86.305)
+
+# Plausible noise box widths in screen au. Wide enough for any box that has been
+# run, narrow enough to exclude a YYMMDD date or a YYYY year.
+BOX_SIZE_AU_RANGE = (10, 1000)
+
+# The box width is written next to the stimulus label: "SWN_200", "SWN200",
+# "ColourSWN_200", "200_SWN".
+_SWN_BOX_PATTERN = re.compile(r"SWN[_\-. ]?(\d+)|(\d+)[_\-. ]?SWN", re.IGNORECASE)
+
+
+def parse_box_size_au(name, valid_range=BOX_SIZE_AU_RANGE):
+    """Infer the noise box width in screen au from a recording name.
+
+    Recording names are the only place the box width is recorded, so it has to
+    be read back out of them. The number sitting next to the stimulus label is
+    the box width, and that pairing is tried first. Failing that, a single
+    plausible number anywhere in the name is accepted.
+
+    Returns None when the name gives no unambiguous answer -- notably for the
+    YYMMDD-prefixed names, where taking the largest number would return the
+    date. Callers must handle None rather than fall back to a guess: a wrong
+    box width silently rescales every metric reported in visual angle.
+    """
+    lo, hi = valid_range
+    for match in _SWN_BOX_PATTERN.finditer(str(name)):
+        found = int(match.group(1) or match.group(2))
+        if lo <= found <= hi:
+            return found
+    numbers = {int(tok) for tok in re.split(r"\D+", str(name)) if tok}
+    candidates = sorted(num for num in numbers if lo <= num <= hi)
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
 
 
 def calculate_boxes_on_screen(
