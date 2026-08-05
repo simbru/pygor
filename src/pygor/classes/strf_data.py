@@ -61,6 +61,7 @@ class STRF(Core):
     strfs: np.ndarray = field(init=False)
     ipl_depths: np.ndarray = field(init=False)
     n_colours: int = None  # None = auto-detect from H5 keys / config
+    box_size_au: int = None  # noise box width in screen au; None = config, then name
     strf_keys: list = field(init=False)
     strf_ms: int = field(init=False)
     # Cache for spatial overlap index computations
@@ -281,27 +282,40 @@ class STRF(Core):
     @property  #
     def stim_size_arbitrary(self):
         """
-        Get the largest stimulus size from the object's name.
+        Get the noise box width (screen au) behind this recording's STRFs.
 
-        The `name` is expected to contain numbers separated by underscores.
-        The method extracts all numeric parts, sorts them naturally (as opposed
-        to lexicographically), and returns the largest number as the stimulus size.
+        Resolution order: the `box_size_au` attribute, then
+        `strf.general.box_size_au` from the config, then the recording name via
+        :func:`pygor.utils.unit_conversion.parse_box_size_au`.
+
+        Names are the weakest of the three and the only one that is a guess:
+        "231013_0_2_SWN_200_Colours" contains both a date and a box width, and
+        the parser only accepts the number paired with the stimulus label or a
+        lone plausible one. Ambiguous names return np.nan and warn rather than
+        pick a number, because everything scaled by `stim_size` (offset
+        magnitudes, contour areas, RF-centre spread) is silently wrong if the
+        box width is.
 
         Returns
         -------
-        int
-            The largest number extracted from the `name` attribute, representing
-            the stimulus size.
+        int or float
+            Box width in screen au, or np.nan if it could not be determined.
         """
-        found_items = [int(i) for i in self.name.split("_") if i.isdigit()]
-        if len(found_items) == 0:
+        if self.box_size_au is not None:
+            return self.box_size_au
+        configured = self.params.get_defaults("strf").get("general", {}).get("box_size_au")
+        if configured:
+            return configured
+        found = pygor.utils.unit_conversion.parse_box_size_au(self.name)
+        if found is None:
             warnings.warn(
-                "No numbers found in name, cannot extract stimulus size. Returning np.nan instead."
+                f"Cannot read a stimulus box width from name '{self.name}'; "
+                "metrics in visual angle will be nan. Set `.box_size_au` on the "
+                "recording (or strf.general.box_size_au in the config) to fix.",
+                stacklevel=2,
             )
             return np.nan
-        else:
-            stim_size = natsort.natsorted(found_items)[-1]  # Fetch the largest number
-            return stim_size
+        return found
 
     @property
     def stim_size(self, upscaling_factor=4):
