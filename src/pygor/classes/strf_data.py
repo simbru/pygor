@@ -26,6 +26,7 @@ import pandas as pd
 from tqdm.auto import tqdm
 
 # Local imports
+import pygor.core.gui
 import pygor.data_helpers
 import pygor.strf.bootstrap
 import pygor.strf.calculate_strf
@@ -6641,6 +6642,7 @@ class STRF(Core):
 
         return selected_timecourses  # , top_indices, selected_amplitudes
 
+    @pygor.core.gui.interactive
     def napari_strfs(self, **kwargs: Any):
         import pygor.strf.gui.methods as gui
 
@@ -6761,7 +6763,6 @@ _SKIP_METHODS = {
     "__repr__",
     "__getattr__",
     "__setattr__",
-    "napari_strfs",  # GUI method
 }
 
 for attr_name in dir(STRF):
@@ -6772,7 +6773,9 @@ for attr_name in dir(STRF):
         and attr_name not in _SKIP_METHODS
     ):
         attr = getattr(STRF, attr_name)
-        if callable(attr):  # Only add to callable methods
+        # A _by_channel copy of a GUI method is a second way to open the same
+        # blocking window, and one that nothing knows to avoid.
+        if callable(attr) and not pygor.core.gui.is_interactive(attr):
             setattr(
                 STRF, f"{attr_name}_by_channel", _create_by_channel_method(attr_name)
             )

@@ -1861,6 +1861,7 @@ class Core:
         d3[:, :, 2] = base2
         ax.imshow(pygor.utilities.min_max_norm(d3, 0, 1), origin="lower")
 
+    @pygor.core.gui.interactive
     def get_depth(self):
         """
         Get the depth of the images in the stack.
@@ -1893,6 +1894,7 @@ class Core:
         """
         return pygor.core.methods.update_h5_key(self, key, value, overwrite)
 
+    @pygor.core.gui.interactive
     def update_ipl_depths(self, depths=None):
         """
         Update IPL depths on the in-memory object, optionally using interactive depth selection.
@@ -2668,6 +2670,7 @@ class Core:
         ax._pygor_slider = slider
         return fig, ax, slider
 
+    @pygor.core.gui.interactive
     def view_images_interactive(self, **kwargs: Any) -> None:
         """
         View the image stack interactively using Napari.
@@ -2680,6 +2683,7 @@ class Core:
         session = pygor.core.gui.methods.NapariViewStack(self, **kwargs)
         session.run()
 
+    @pygor.core.gui.interactive
     def draw_rois(
         self,
         attribute="calculate_image_average",
