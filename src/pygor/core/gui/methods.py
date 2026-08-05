@@ -227,13 +227,15 @@ class NapariDepthPrompt:
         """Calculates the depth of each ROI between the 0% and 100% boundaries."""
         from pygor.anatomy.ipl import calculate_ipl_depths
         print("Processing user selection...")
-        # "0% boundary" = outer/lower, "100% boundary" = inner/upper
-        lower = np.squeeze(self.viewer.layers["0% boundary"].data[0])
-        upper = np.squeeze(self.viewer.layers["100% boundary"].data[0])
+        # calculate_ipl_depths treats upper_boundary as 0 %, so the layer drawn
+        # as "0% boundary" is the one that belongs there. These were previously
+        # passed the other way round, which returned 100 - depth silently.
+        zero_pct = np.squeeze(self.viewer.layers["0% boundary"].data[0])
+        hundred_pct = np.squeeze(self.viewer.layers["100% boundary"].data[0])
         self.result = calculate_ipl_depths(
             self.pygor_object.roi_centroids,
-            upper_boundary=upper,
-            lower_boundary=lower,
+            upper_boundary=zero_pct,
+            lower_boundary=hundred_pct,
         )
 
     def on_close(self):
@@ -275,9 +277,14 @@ class NapariDepthPrompt:
         self.viewer.layers.selection.events.active.connect(self.on_layer_switch)
         self.last_active_layer = self.viewer.layers[-1] #last added layer is always active first, and therefore the last_active_layer on firs layer switch
         self.napari.run()
-        # Set the exception hook globally
-        # sys.excepthook = self.handle_exception
-        self.event_loop.exec_()  # Block until close event triggers
+        # Under %gui qt, napari.run() returns immediately with the window still
+        # open, so block on the secondary loop until the close handler quits it.
+        # As a plain script it instead blocks until the window closes, meaning
+        # on_close has already fired and already called quit() on a loop that
+        # was never running -- entering it here would then hang forever with no
+        # window left to close. Only enter it while there is still a window.
+        if self.result is None and self.viewer.window._qt_window.isVisible():
+            self.event_loop.exec_()  # Block until close event triggers
         return self.result  # Now `self.result` is updated before returning
 
 class NapariRoiPrompt():
