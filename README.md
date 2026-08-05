@@ -1,4 +1,4 @@
-# Pygor: OS_scirpts (IGOR) style workflows in Python, for Baden-lab members
+# Pygor: Python alternative to IGOR Pro workflows, for Baden-lab members
 
 Welcome to Pygor!
 
@@ -11,6 +11,8 @@ A Python toolkit for working alongside Baden-lab's IGOR Pro pipeline. Pygor allo
 - **Data classes**: Load recordings via `pygor.load.Core()`, `pygor.load.STRF()`, etc. Classes inherit from `Core` and include built-in methods for visualization and analysis.
 - **Experiment collections**: Group multiple recordings with `pygor.classes.experiment.Experiment` for batch analysis.
 - **Extensible**: Add custom analysis objects by inheriting from existing classes.
+
+This project is based on and builds on [Euler lab's IGOR scripts](https://github.com/eulerlab/ret_preproc/tree/master/dataProcessing/Igor) and [Baden lab's OS Scripts (IGOR)](https://github.com/BadenLab/Igor_scripts/tree/main).
 
 ## How do I install Pygor?
 
@@ -188,6 +190,7 @@ Guidelines:
 ## Acknowledgements
 
 Pygor builds on excellent open-source tools:
+
 - **[Euler lab ret_preproc](https://github.com/eulerlab/ret_preproc)** - Pygor's ScanM file reader (`pygor.preproc.scanm`) is derived from the Euler lab's IGOR and Python implementations.
   - ScM_FileIO.ipf by Thomas Euler (MPImF/Heidelberg, CIN/Uni Tübingen)
   - [readScanM.py](https://github.com/eulerlab/ret_preproc/tree/master/dataProcessing/Python/read_scanm_python) by Andre Chagas (processing_pypeline)
