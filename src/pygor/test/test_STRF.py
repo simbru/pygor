@@ -29,8 +29,11 @@ class TestSTRF(unittest.TestCase):
     def test_simple_methods_return(self):
         meth_list = pygor.utils.helpinfo.get_methods_list(self.strfs, with_returns=False)
         bs_refs = [i for i in meth_list if "bootstrap" in i or "bs" in i]
-        # Only exclude methods that genuinely require interactive input
-        ignore = ["draw_rois", "get_depth"]
+        # Only exclude methods that genuinely require interactive input.
+        # These all open a napari window and block until a human closes it, so
+        # leaving any of them in makes the suite unrunnable unattended.
+        ignore = ["draw_rois", "get_depth", "update_ipl_depths",
+                  "view_images_interactive"]
         # Methods that require parameters or special setup should be tested separately
         requires_params = ["napari_strfs", "plot_averages", "view_stack_projection", "view_stack_rois", "view_drift"]
         # Methods that require bootstrap data to be available

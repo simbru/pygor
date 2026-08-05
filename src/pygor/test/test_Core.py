@@ -39,8 +39,12 @@ class TestCore(unittest.TestCase):
 
     def test_simple_methods_return(self):
         meth_list = pygor.utils.helpinfo.get_methods_list(data, with_returns=False)
-        # Methods that require interactive input or parameters
-        ignore = ["draw_rois", "get_depth", "view_stack_projection", "view_stack_rois", 
+        # Methods that require interactive input or parameters. The napari ones
+        # block until a human closes the window, so leaving any of them in makes
+        # the suite unrunnable unattended.
+        ignore = ["draw_rois", "get_depth", "update_ipl_depths",
+                 "view_images_interactive", "napari_strfs",
+                 "view_stack_projection", "view_stack_rois",
                  "view_drift", "plot_averages", "calculate_image_average"]
         
         write_to = file_loc.joinpath(out_loc)
