@@ -1886,8 +1886,13 @@ class STRF(Core):
             amplitudes = self.get_space_amps()
             amp_signs = np.where(amplitudes > 0, 1, -1)
             cat = amp_signs
-            # Apply amplitude check similar to spatiotemporal mode
-            bool_mask = self.bool_by_channel(dimstr="space").flatten()
+            # Amplitude alone passes single hot pixels: ~38% of channels clearing
+            # the threshold have no segmented RF, clustered just above it. Require
+            # a segmented centre too, otherwise noise-polarity in an empty channel
+            # flips the cell to opponent.
+            bool_mask = self.bool_by_channel(dimstr="space").flatten() & ~np.isnan(
+                self.get_seg_areas()
+            )
             cat = np.where(bool_mask, cat, np.nan)
 
             # opponency_indices = self.get_opponency_index()
@@ -1981,8 +1986,11 @@ class STRF(Core):
         amplitudes = self.get_space_amps()
         amp_signs = np.where(amplitudes > 0, 1, -1)
         cat = amp_signs
-        # Apply amplitude check similar to spatiotemporal mode
-        bool_mask = self.bool_by_channel(dimstr="space").flatten()
+        # Same gate as get_polarities(mode="opponency_index"): amplitude alone lets a
+        # single hot pixel stand in for a receptive field
+        bool_mask = self.bool_by_channel(dimstr="space").flatten() & ~np.isnan(
+            self.get_seg_areas()
+        )
         cat = np.where(bool_mask, cat, np.nan)
         return cat
 
@@ -2031,9 +2039,14 @@ class STRF(Core):
         indices = np.where(
             denominator != 0, (uppers_sum + lowers_sum) / denominator, np.nan
         )
-        # Apply bool_by_channel masking if requested
+        # Apply bool_by_channel masking if requested. A channel also needs a segmented
+        # RF, not just amplitude over threshold — see get_polarities(mode="opponency_index").
         if mask_by_channel:
             bool_mask = self.bool_by_channel(threshold=mask_threshold, dimstr=dimstr)
+            seg_mask = pygor.utilities.multicolour_reshape(
+                ~np.isnan(self.get_seg_areas()), self.n_colours
+            ).T
+            bool_mask = bool_mask & seg_mask
 
             # Handle channel-specific masking
             if ch_idx is not None and self.multicolour:
@@ -2043,17 +2056,22 @@ class STRF(Core):
                 # For single colour, use first/only channel mask
                 channel_mask = bool_mask[:, 0] if bool_mask.ndim > 1 else bool_mask
             else:
-                # No specific channel requested for multicolour - this is ambiguous
-                # The indices came from collapse_times (all channels combined)
-                # So we need to decide masking strategy - use ANY channel passes
-                channel_mask = np.any(bool_mask, axis=1)
+                # No channel requested: indices are one per ROI-channel in the flat
+                # order, so the mask flattens back to match rather than collapsing
+                # across channels. Collapsing with np.any() used to make the shapes
+                # mismatch, which silently skipped the mask entirely.
+                channel_mask = bool_mask.flatten()
 
-            # Apply mask - ensure indices and channel_mask have compatible shapes
-            if len(channel_mask) == len(indices):
-                indices = np.where(channel_mask, indices, np.nan)
-            else:
-                # Shape mismatch - likely due to ROI filtering, skip masking
-                pass
+            # A roi subset shortens indices but not the mask; take the same rows.
+            if roi is not None and len(channel_mask) != len(indices):
+                channel_mask = channel_mask[np.atleast_1d(roi)]
+
+            if len(channel_mask) != len(indices):
+                raise ValueError(
+                    f"mask length {len(channel_mask)} does not match "
+                    f"{len(indices)} polarity indices; masking would be skipped"
+                )
+            indices = np.where(channel_mask, indices, np.nan)
 
         # Return scalar if single ROI requested, array otherwise
         if roi is not None and np.isscalar(roi):
@@ -3111,7 +3129,7 @@ class STRF(Core):
                             mag = magnitudes[ch_idx, roi]
                             angle = angles_deg[ch_idx, roi]
                             legend_entries.append(
-                                f"{channel_names[ch_idx]}: ({channel_x:.1f}, {channel_y:.1f}) | {mag:.1f}μm, {angle:.0f}°"
+                                f"{channel_names[ch_idx]}: ({channel_x:.1f}, {channel_y:.1f}) | {mag:.1f}deg, {angle:.0f}°"
                             )
 
                 # Create custom legend with channel info outside the plot
@@ -3231,7 +3249,7 @@ class STRF(Core):
         return pols_out
 
     def get_polarity_category_cell(
-        self, mask_by_channel=False, threshold=2, dimstr="spatiotemporal", channels=None
+        self, mask_by_channel=False, threshold=2, dimstr="space", channels=None
     ) -> str:
         """
         Get polarity category for each cell across colour channels.
@@ -3239,11 +3257,11 @@ class STRF(Core):
         Parameters
         ----------
         mask_by_channel : bool, optional
-            Whether to mask polarities using self.bool_by_channel (default: True)
+            Whether to mask polarities using self.bool_by_channel (default: False)
         threshold : float, optional
             Threshold for bool_by_channel masking (default: 2)
         dimstr : str, optional
-            Dimension for bool_by_channel ('time' or 'space', default: 'time')
+            Dimension for bool_by_channel ('time' or 'space', default: 'space')
         channels : list of int, optional
             Channel indices to consider (e.g. [0,1,2,3] for only single-colour
             channels). If None, all channels are used.
@@ -3285,7 +3303,7 @@ class STRF(Core):
         return result
 
     def get_polarity_category_cell_simple(
-        self, mask_by_channel=False, threshold=2, dimstr="spatiotemporal", channels=None
+        self, mask_by_channel=False, threshold=2, dimstr="space", channels=None
     ) -> str:
         """
         Get simplified polarity category for each cell across colour channels.
@@ -3298,7 +3316,7 @@ class STRF(Core):
         threshold : float, optional
             Threshold for bool_by_channel masking (default: 2)
         dimstr : str, optional
-            Dimension for bool_by_channel ('time' or 'space', default: 'spatiotemporal')
+            Dimension for bool_by_channel ('time' or 'space', default: 'space')
         channels : list of int, optional
             Channel indices to consider (e.g. [0,1,2,3] for only single-colour
             channels). If None, all channels are used.
