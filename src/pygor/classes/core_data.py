@@ -648,6 +648,8 @@ class Core:
         Interpolate the averages_ms to get ms-percision. Useful in cases where line duration != 1 ms.
         """
         from scipy.interpolate import make_interp_spline
+        if self.averages is None:
+            return None
         org_length = self.averages.shape[-1]
         x_org = np.linspace(0, 1, org_length)
         upscale_target = int(np.rint(self.ms_dur))
