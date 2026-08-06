@@ -3207,7 +3207,122 @@ class STRF(Core):
         return results["magnitudes"]
 
     def get_colour_channel_offsets_angles(self, roi=None, channels=None, **kwargs: Any):
-        results = self.calc_colour_channel_offsets(roi=None, channels=channels, **kwargs)
+        results = self.calc_colour_channel_offsets(roi=roi, channels=channels, **kwargs)
+        return results["angles"]
+
+    def calc_colour_channel_offsets_pairwise(
+        self, roi=None, channels=None, angle_range_360=True, **kwargs
+    ):
+        """
+        Separation between every pair of colour channel centres, for each cell.
+
+        :meth:`calc_colour_channel_offsets` measures each channel against the mean of
+        that cell's segmented channels, so a channel's magnitude depends on how many
+        other channels were segmented: with one channel it is 0 by construction, with
+        two the pair splits the separation evenly, and with four a displaced channel
+        keeps only 3/4 of it. Cells differ systematically in how many channels segment,
+        so that estimator cannot be compared across them. Pairwise separations do not
+        have the problem -- ``d(i, j)`` depends on channels i and j and nothing else.
+
+        Centres come from the same ``get_seg_centres`` call the channel-mean version
+        uses, so the two differ only in the arithmetic applied afterwards.
+
+        Parameters
+        ----------
+        roi : int or array-like, optional
+            ROI indices to return. Default None returns all ROIs.
+        channels : list[int] or None, optional
+            Channel indices to include, e.g. ``[0,1,2,3]`` to exclude an aggregate
+            "All" channel from a 5-colour dataset. Default None uses all channels.
+            Pair indices in ``pairs`` refer to positions in this list.
+        angle_range_360 : bool, optional
+            If True angles run 0-360 degrees, otherwise -180 to +180 (default: True).
+        **kwargs
+            Passed through to :meth:`get_seg_centres` (``label``, ``weighted``,
+            ``weighting_exp``, and any ``cs_seg`` arguments).
+
+        Returns
+        -------
+        dict
+            - 'pairs': list of (i, j) channel index pairs, i < j
+            - 'pair_names': list of 'Ch{i}-Ch{j}' labels, matching the pairs order
+            - 'channel_centers': (n_selected, n_cells, 2) centres, as fetched
+            - 'distances': (n_pairs, n_cells) separation in visual angle
+            - 'angles': (n_pairs, n_cells) direction from channel i to channel j, degrees
+            - 'vectors': (n_pairs, n_cells, 2) separation vectors, (dy, dx) in pixels
+
+        Examples
+        --------
+        >>> res = strf_obj.calc_colour_channel_offsets_pairwise(channels=[0, 1, 2, 3])
+        >>> res['pair_names'][res['distances'][:, 7].argmax()]  # widest pair for ROI 7
+        """
+        if not self.multicolour:
+            raise ValueError("This method requires multicolour data (n_colours > 1)")
+
+        channel_centers = self.get_seg_centres(channel_reshape=True, **kwargs)
+        channel_centers = np.transpose(channel_centers, (1, 0, 2))
+
+        if channels is not None:
+            ch_idx_list = list(channels)
+            if any(c < 0 or c >= channel_centers.shape[0] for c in ch_idx_list):
+                raise ValueError(
+                    f"channels {ch_idx_list} out of range "
+                    f"[0, {channel_centers.shape[0] - 1}]"
+                )
+            channel_centers = channel_centers[ch_idx_list]
+
+        n_selected, n_cells, _ = channel_centers.shape
+        if n_selected < 2:
+            raise ValueError(
+                f"pairwise offsets need at least 2 channels, got {n_selected}"
+            )
+
+        pairs = [(i, j) for i in range(n_selected) for j in range(i + 1, n_selected)]
+        pair_names = [f"Ch{i}-Ch{j}" for i, j in pairs]
+
+        vectors = np.stack(
+            [channel_centers[j] - channel_centers[i] for i, j in pairs]
+        )
+        distances = np.linalg.norm(vectors, axis=2) * self.stim_size
+        angles_deg = np.degrees(np.arctan2(vectors[:, :, 0], vectors[:, :, 1]))
+        # A zero separation has no direction, and neither does a missing centre
+        angles_deg[np.linalg.norm(vectors, axis=2) == 0] = np.nan
+        if angle_range_360:
+            angles_deg = np.where(angles_deg < 0, angles_deg + 360, angles_deg)
+
+        results = {
+            "pairs": pairs,
+            "pair_names": pair_names,
+            "channel_centers": channel_centers,
+            "distances": distances,
+            "angles": angles_deg,
+            "vectors": vectors,
+        }
+        if roi is None:
+            return results
+
+        roi_indices = list(roi) if hasattr(roi, "__iter__") else [roi]
+        for r in roi_indices:
+            if r >= n_cells or r < 0:
+                raise ValueError(f"roi {r} out of range [0, {n_cells - 1}]")
+        for key in ("channel_centers", "distances", "angles", "vectors"):
+            results[key] = results[key][:, roi_indices]
+        return results
+
+    def get_colour_channel_offsets_pairwise_distances(
+        self, roi=None, channels=None, **kwargs: Any
+    ):
+        results = self.calc_colour_channel_offsets_pairwise(
+            roi=roi, channels=channels, **kwargs
+        )
+        return results["distances"]
+
+    def get_colour_channel_offsets_pairwise_angles(
+        self, roi=None, channels=None, **kwargs: Any
+    ):
+        results = self.calc_colour_channel_offsets_pairwise(
+            roi=roi, channels=channels, **kwargs
+        )
         return results["angles"]
 
     def get_pca_major_axis_lengths(self, roi=None, **kwargs: Any):
