@@ -220,6 +220,28 @@ average. Averaging gave snippets `(59, 25, 7872)` and averages
 `(n_rois, n_loops, snippet_length)` layout on a stimulus where trials
 actually mean something.
 
+## Parameters
+
+`pygor/gui/param_bus.py` is the single source of truth. Every panel reads
+and writes `recording.params` through it, and it announces each change so
+the other panels follow. Before that each tab held a copy of the config
+taken at construction: editing a tab never reached the parameter table,
+editing the table never reached the tabs, and whichever was consulted
+last was not necessarily what the next run used.
+
+Because the panels edit the config itself, `segment_rois` is called with
+no parameter arguments — it reads that config directly.
+
+The full table is not a tab. It lists every parameter there is, which is
+more than the per-step tabs ask anyone to read, so `Pygor > Parameter
+table` opens it floating when something the tabs do not cover is wanted.
+
+Dropdowns listing what a recording can offer — trace sources, population
+metrics — are rebuilt whenever the panel refreshes, keeping the current
+choice where it survives. They were previously filled once at
+construction, so a recording opened before its traces existed offered
+`<no traces>` for the rest of the session even after extraction had run.
+
 ## Population panel
 
 `pygor/gui/widgets/population.py` shows one metric across every ROI, so a

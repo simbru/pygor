@@ -496,8 +496,33 @@ class PlotDock(QWidget):
         self.controls_stack.setCurrentIndex(self.mode_box.currentIndex())
         self.refresh()
 
+    def reload_sources(self):
+        """Rebuild the source list, keeping the current choice if it stays.
+
+        A recording opened before its traces exist has none to offer, so
+        the list has to be rebuilt once extraction has run rather than
+        left as it was at construction.
+        """
+        available = available_sources(self.recording) or ["<no traces>"]
+        current = [
+            self.source_box.itemText(i) for i in range(self.source_box.count())
+        ]
+        if available == current:
+            return
+
+        selected = self.source_box.currentText()
+        self.source_box.blockSignals(True)
+        try:
+            self.source_box.clear()
+            self.source_box.addItems(available)
+            index = self.source_box.findText(selected)
+            self.source_box.setCurrentIndex(index if index >= 0 else 0)
+        finally:
+            self.source_box.blockSignals(False)
+
     def refresh(self):
         """Redraw the axis for the current view."""
+        self.reload_sources()
         # Labels can outrun the trace array: an ROI drawn by hand exists in
         # the mask before traces are extracted for it.
         self.roi_spin.setMaximum(self._roi_upper_bound())

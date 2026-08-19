@@ -1149,28 +1149,28 @@ def test_colour_by_metric_toggles_and_restores(recording):
         viewer.close()
 
 
-def test_expensive_metrics_wait_for_an_explicit_request(recording):
+def test_expensive_metrics_wait_for_an_explicit_request(recording, monkeypatch):
     from pygor.gui.launch import launch
     from pygor.gui.metrics import MetricSpec
+
+    calls = []
+
+    def _count(rec):
+        calls.append(1)
+        return np.arange(rec.num_rois, dtype=float)
+
+    slow = MetricSpec(key="slow", label="Slow", compute=_count, expensive=True)
+    monkeypatch.setattr(
+        "pygor.gui.widgets.population.available_metrics", lambda rec: (slow,)
+    )
 
     viewer = launch(recording, show=False, block=False)
     try:
         dock = viewer.window.dock_widgets["Population"]
-        calls = []
-
-        def _count(rec):
-            calls.append(1)
-            return np.arange(rec.num_rois, dtype=float)
-
-        dock._specs = (
-            MetricSpec(key="slow", label="Slow", compute=_count, expensive=True),
-        )
-        dock.metric_box.clear()
-        dock.metric_box.addItem("Slow")
-
         # Selecting an expensive metric must not run it
         assert calls == []
         assert dock._values is None
+        assert "press Compute" in dock.status.text()
 
         dock.refresh(force=True)
         assert calls == [1]
@@ -1517,6 +1517,65 @@ def test_registration_normalisation_none_is_passed_as_none(recording):
 
         assert seen["normalization"] is None
         assert seen["n_reference_frames"] == 4
+    finally:
+        viewer.close()
+
+
+def test_trace_sources_appear_once_traces_are_extracted(recording):
+    """A recording opened without traces has none to offer at first."""
+    from pygor.gui.launch import launch
+
+    recording.traces_raw = None
+    recording.traces_znorm = None
+    viewer = launch(recording, show=False, block=False)
+    try:
+        plot = viewer.window.dock_widgets["Plot"]
+        assert [
+            plot.source_box.itemText(i) for i in range(plot.source_box.count())
+        ] == ["<no traces>"]
+
+        recording.extract_traces_from_rois()
+        plot.refresh()
+
+        sources = [
+            plot.source_box.itemText(i) for i in range(plot.source_box.count())
+        ]
+        assert "traces_znorm" in sources
+        assert "<no traces>" not in sources
+        assert "traces_znorm" in plot.status.text()
+    finally:
+        viewer.close()
+
+
+def test_metrics_appear_once_traces_are_extracted(recording):
+    from pygor.gui.launch import launch
+
+    recording.traces_raw = None
+    recording.traces_znorm = None
+    viewer = launch(recording, show=False, block=False)
+    try:
+        population = viewer.window.dock_widgets["Population"]
+        assert "trace_range" not in [s.key for s in population._specs]
+
+        recording.extract_traces_from_rois()
+        population.refresh()
+
+        assert "trace_range" in [s.key for s in population._specs]
+    finally:
+        viewer.close()
+
+
+def test_reloading_keeps_the_selected_metric(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        population = viewer.window.dock_widgets["Population"]
+        population.metric_box.setCurrentIndex(2)
+        chosen = population.current_metric_label
+
+        population.refresh()
+        assert population.current_metric_label == chosen
     finally:
         viewer.close()
 

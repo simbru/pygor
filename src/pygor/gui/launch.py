@@ -211,7 +211,8 @@ def launch(recording, show=True, block=False, title=None):
         recording,
         viewer,
         labels_layer=labels_layer,
-        on_traces_changed=plot_dock.refresh,
+        # Extraction changes which metrics exist, not just the plot
+        on_traces_changed=lambda: (plot_dock.refresh(), population_dock.refresh()),
         on_layer_restored=rebind_all,
         default_layers=default_layers,
         on_depths_updated=lambda: _show_metric(population_dock, "IPL depth"),

@@ -141,15 +141,34 @@ class PopulationDock(QWidget):
     # ------------------------------------------------------------------
 
     def reload_metrics(self):
-        """Refill the dropdown with the metrics this recording supports."""
-        self._specs = available_metrics(self.recording)
+        """Refill the dropdown, keeping the current choice if it survives.
+
+        Which metrics a recording can offer changes as it is worked on:
+        trace metrics only exist once traces have been extracted. The list
+        is rebuilt when that set changes, rather than being fixed at
+        construction.
+        """
+        specs = available_metrics(self.recording)
+        if [s.key for s in specs] == [s.key for s in self._specs]:
+            return False
+
+        selected = self.metric_box.currentText()
+        self._specs = specs
         self.metric_box.blockSignals(True)
-        self.metric_box.clear()
-        for spec in self._specs:
-            self.metric_box.addItem(spec.label)
-            index = self.metric_box.count() - 1
-            self.metric_box.setItemData(index, spec.description, Qt.ToolTipRole)
-        self.metric_box.blockSignals(False)
+        try:
+            self.metric_box.clear()
+            for spec in self._specs:
+                self.metric_box.addItem(spec.label)
+                index = self.metric_box.count() - 1
+                self.metric_box.setItemData(index, spec.description, Qt.ToolTipRole)
+            index = self.metric_box.findText(selected)
+            self.metric_box.setCurrentIndex(index if index >= 0 else 0)
+        finally:
+            self.metric_box.blockSignals(False)
+
+        spec = self.current_spec
+        self.compute_button.setVisible(bool(spec and spec.expensive))
+        return True
 
     @property
     def current_spec(self):
@@ -165,6 +184,7 @@ class PopulationDock(QWidget):
 
     def refresh(self, force=False):
         """Recompute the selected metric and update everything it drives."""
+        self.reload_metrics()
         spec = self.current_spec
         self._labels = self.roi_labels
 
