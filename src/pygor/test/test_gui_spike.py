@@ -717,6 +717,7 @@ def test_number_layer_labels_each_roi(recording):
         assert numbers.data.shape == (recording.num_rois, 2)
         # Numbers must sit above the ROI labels to stay readable
         assert [layer.name for layer in viewer.layers][-1] == NUMBER_LAYER_NAME
+        np.testing.assert_allclose(numbers.text.color.constant, [1, 1, 1, 1])
     finally:
         viewer.close()
 

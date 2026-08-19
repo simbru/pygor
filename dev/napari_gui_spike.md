@@ -40,8 +40,13 @@ Confirmed working, headless, against a stub recording:
   separation and saturation is floored well above zero, so no entry can
   come out grey.
 - A "ROI numbers" Points layer draws each ROI's number at its centroid in
-  the matching colour, sitting above the labels. It follows strokes,
-  segmentation and pushes, and can be hidden with its visibility toggle.
+  white, sitting above the labels. It follows strokes, segmentation and
+  pushes, and can be hidden with its visibility toggle. napari's text has
+  no outline field (`anchor`, `blending`, `color`, `rotation`, `scaling`,
+  `size`, `string`, `translation`, `visible`), so a black border round the
+  numbers is not available. Faking one with offset duplicate text would
+  need the offsets in data coordinates, which do not scale with zoom, so
+  the outline thickness would change as the view is zoomed.
 
 ### ROI numbering
 

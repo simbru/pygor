@@ -10,6 +10,10 @@ import scipy.ndimage
 
 NUMBER_LAYER_NAME = "ROI numbers"
 
+# White reads against both the greyscale stack and the ROI colours.
+# napari text has no outline option, so a black border is not available.
+TEXT_COLOR = "white"
+
 
 def label_centroids(labels):
     """Return (label_values, centroid_coordinates) for a label image."""
@@ -23,17 +27,16 @@ def label_centroids(labels):
 
 
 def _number_properties(labels_layer):
-    """Build the point coordinates, text and colours for the current mask."""
+    """Build the point coordinates and text for the current mask."""
     values, centroids = label_centroids(labels_layer.data)
-    colors = np.array([labels_layer.get_color(int(v)) for v in values]).reshape(-1, 4)
-    return values, centroids, colors
+    return values, centroids
 
 
 def ensure_number_layer(viewer, labels_layer, visible=True):
     """Add or refresh the ROI number layer, returning it (None if no ROIs)."""
     if labels_layer is None:
         return None
-    values, centroids, colors = _number_properties(labels_layer)
+    values, centroids = _number_properties(labels_layer)
     if not len(values):
         return viewer.layers[NUMBER_LAYER_NAME] if NUMBER_LAYER_NAME in viewer.layers else None
 
@@ -41,7 +44,7 @@ def ensure_number_layer(viewer, labels_layer, visible=True):
     text = {
         "string": "{label}",
         "size": 8,
-        "color": colors,
+        "color": TEXT_COLOR,
         "anchor": "center",
     }
 
