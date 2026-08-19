@@ -173,17 +173,17 @@ def launch(recording, show=True, block=False, title=None):
 
     from pygor.gui.widgets.actions import ActionsDock
     from pygor.gui.widgets.population import PopulationDock
-    from pygor.gui.widgets.traces import TraceDock
+    from pygor.gui.widgets.plot import PlotDock
 
-    trace_dock = TraceDock(recording, viewer, labels_layer=labels_layer)
+    plot_dock = PlotDock(recording, viewer, labels_layer=labels_layer)
     population_dock = PopulationDock(recording, viewer, labels_layer=labels_layer)
     actions_dock = ActionsDock(
         recording,
         viewer,
         labels_layer=labels_layer,
-        on_traces_changed=trace_dock.refresh,
+        on_traces_changed=plot_dock.refresh,
         on_layer_restored=lambda layer: (
-            trace_dock.rebind(layer),
+            plot_dock.rebind(layer),
             population_dock.rebind(layer),
         ),
         default_layers=default_layers,
@@ -193,8 +193,10 @@ def launch(recording, show=True, block=False, title=None):
     # list, so anything put there competes with them for height. Both
     # pygor panels go right instead, tabbed so only one is visible at a
     # time, and the trace plot gets the full width along the bottom.
-    trace_area = viewer.window.add_dock_widget(
-        trace_dock, name="Traces", area="bottom"
+    plot_dock.set_population(population_dock)
+
+    plot_area = viewer.window.add_dock_widget(
+        plot_dock, name="Plot", area="bottom"
     )
     analysis_area = viewer.window.add_dock_widget(
         actions_dock, name="Analysis", area="right"
@@ -205,9 +207,9 @@ def launch(recording, show=True, block=False, title=None):
 
     from pygor.gui.menus import build_pygor_menu
 
-    build_pygor_menu(viewer, actions_dock, trace_dock, recording)
+    build_pygor_menu(viewer, actions_dock, plot_dock, recording)
 
-    _size_docks(viewer, trace_area, analysis_area)
+    _size_docks(viewer, plot_area, analysis_area)
     viewer.reset_view()
 
     if block:
@@ -216,7 +218,7 @@ def launch(recording, show=True, block=False, title=None):
     return viewer
 
 
-def _size_docks(viewer, trace_area, analysis_area):
+def _size_docks(viewer, plot_area, analysis_area):
     """Give the docks a usable size on open.
 
     Qt distributes space by size hints, which left the plots a few pixels
@@ -225,5 +227,5 @@ def _size_docks(viewer, trace_area, analysis_area):
     from qtpy.QtCore import Qt
 
     window = viewer.window._qt_window
-    window.resizeDocks([trace_area], [240], Qt.Vertical)
+    window.resizeDocks([plot_area], [260], Qt.Vertical)
     window.resizeDocks([analysis_area], [360], Qt.Horizontal)

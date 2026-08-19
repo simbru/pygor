@@ -211,7 +211,7 @@ def test_viewer_builds_with_layers_and_docks(recording, make_napari_viewer=None)
         assert "Image stack" in names
         assert "ROIs" in names
         docked = viewer.window.dock_widgets
-        assert "Traces" in docked
+        assert "Plot" in docked
         assert "Analysis" in docked
     finally:
         viewer.close()
@@ -222,7 +222,7 @@ def test_trace_dock_follows_label_selection(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         labels_layer = viewer.layers["ROIs"]
 
         labels_layer.selected_label = 2
@@ -242,7 +242,7 @@ def test_roi_navigation_steps_and_wraps(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         assert dock.n_rois == recording.num_rois
 
         dock.set_roi(1)
@@ -264,7 +264,7 @@ def test_roi_spinbox_and_layer_stay_in_sync(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         labels_layer = viewer.layers["ROIs"]
 
         dock.roi_spin.setValue(3)
@@ -281,7 +281,7 @@ def test_follow_frame_is_off_by_default(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         assert dock.follow_box.isChecked() is False
         assert dock._cursor is None
         assert dock._background is None
@@ -294,7 +294,7 @@ def test_follow_frame_uses_blitting_when_enabled(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         dock.follow_box.setChecked(True)
         assert dock._cursor is not None
         # Animated artists are excluded from the cached background
@@ -309,11 +309,11 @@ def test_follow_frame_uses_blitting_when_enabled(recording):
 
 def test_centre_view_draws_and_moves_crosshair(recording):
     from pygor.gui.launch import launch
-    from pygor.gui.widgets.traces import CENTRE_LAYER_NAME
+    from pygor.gui.widgets.plot import CENTRE_LAYER_NAME
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         assert CENTRE_LAYER_NAME not in viewer.layers
 
         dock.centre_box.setChecked(True)
@@ -337,11 +337,11 @@ def test_centre_view_draws_and_moves_crosshair(recording):
 
 def test_crosshair_scales_with_image_width(recording):
     from pygor.gui.launch import launch
-    from pygor.gui.widgets.traces import CENTRE_LAYER_NAME
+    from pygor.gui.widgets.plot import CENTRE_LAYER_NAME
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         dock.centre_box.setChecked(True)
         dock.set_roi(1)
 
@@ -359,7 +359,7 @@ def test_new_roi_selects_next_free_label(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         labels_layer = viewer.layers["ROIs"]
         start = dock.max_label
 
@@ -382,7 +382,7 @@ def test_new_roi_label_survives_refresh(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         dock.new_roi()
         pending = dock.selected_label
 
@@ -417,7 +417,7 @@ def test_auto_new_advances_label_per_stroke(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         labels_layer = viewer.layers["ROIs"]
         labels_layer.mode = "paint"
 
@@ -438,7 +438,7 @@ def test_auto_new_off_keeps_label_for_multi_stroke_rois(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         labels_layer = viewer.layers["ROIs"]
         labels_layer.mode = "paint"
 
@@ -456,7 +456,7 @@ def test_auto_new_ignores_erasing(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         labels_layer = viewer.layers["ROIs"]
 
         dock.auto_new_box.setChecked(True)
@@ -476,7 +476,7 @@ def test_labels_layer_defaults(recording):
         labels_layer = viewer.layers["ROIs"]
         assert labels_layer.preserve_labels is True
         assert labels_layer.contiguous is True
-        assert viewer.window.dock_widgets["Traces"].auto_new_box.isChecked() is True
+        assert viewer.window.dock_widgets["Plot"].auto_new_box.isChecked() is True
     finally:
         viewer.close()
 
@@ -487,7 +487,7 @@ def test_entering_draw_mode_leaves_an_occupied_label(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         labels_layer = viewer.layers["ROIs"]
         assert dock.selected_label == 1
 
@@ -508,7 +508,7 @@ def test_extract_traces_picks_up_hand_drawn_rois(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         actions = viewer.window.dock_widgets["Analysis"]
         labels_layer = viewer.layers["ROIs"]
         before = recording.num_rois
@@ -559,7 +559,7 @@ def test_removing_roi_layer_is_detected_not_silent(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         actions = viewer.window.dock_widgets["Analysis"]
 
         actions.lock_box.setChecked(False)
@@ -582,7 +582,7 @@ def test_removing_roi_layer_rescues_unpushed_edits(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         labels_layer = viewer.layers["ROIs"]
         before = recording.num_rois
 
@@ -603,7 +603,7 @@ def test_restore_rebuilds_layer_and_rebinds_docks(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         actions = viewer.window.dock_widgets["Analysis"]
         actions.lock_box.setChecked(False)
         viewer.layers.remove(viewer.layers["ROIs"])
@@ -659,7 +659,7 @@ def test_locked_default_layers_come_straight_back(recording):
     viewer = launch(recording, show=False, block=False)
     try:
         actions = viewer.window.dock_widgets["Analysis"]
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         assert actions.lock_box.isChecked() is True
 
         viewer.layers.remove(viewer.layers["Image stack"])
@@ -705,7 +705,7 @@ def test_trace_dock_reads_correct_row_after_erasing_an_roi(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         actions = viewer.window.dock_widgets["Analysis"]
         labels_layer = viewer.layers["ROIs"]
 
@@ -738,7 +738,7 @@ def test_trace_colour_matches_the_roi_colour(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         labels_layer = viewer.layers["ROIs"]
 
         for label in (1, 2, 3):
@@ -792,7 +792,7 @@ def test_number_layer_follows_new_rois(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         labels_layer = viewer.layers["ROIs"]
         labels_layer.mode = "paint"
         before = len(viewer.layers[NUMBER_LAYER_NAME].data)
@@ -846,7 +846,7 @@ def test_menu_toggles_track_the_docks_both_ways(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         view = _submenu(_pygor_menu(viewer), "View")
         items = {a.text(): a for a in view.actions()}
 
@@ -902,7 +902,7 @@ def test_palette_expands_as_rois_are_added(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         labels_layer = viewer.layers["ROIs"]
         labels_layer.mode = "paint"
 
@@ -1016,6 +1016,66 @@ def test_expensive_metrics_wait_for_an_explicit_request(recording):
         viewer.close()
 
 
+def test_plot_dock_switches_between_views(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        plot = viewer.window.dock_widgets["Plot"]
+        assert plot.view == plot.TRACE
+        assert "traces_znorm" in plot.status.text()
+
+        plot.set_view(plot.HISTOGRAM)
+        assert plot.view == plot.HISTOGRAM
+        # A histogram leaves bars on the axis, a trace does not
+        assert len(plot.ax.patches) > 0
+
+        plot.set_view(plot.TRACE)
+        assert len(plot.ax.patches) == 0
+        assert len(plot.ax.lines) == 1
+    finally:
+        viewer.close()
+
+
+def test_histogram_follows_the_population_metric(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        plot = viewer.window.dock_widgets["Plot"]
+        population = viewer.window.dock_widgets["Population"]
+        plot.set_view(plot.HISTOGRAM)
+
+        first = population.current_metric_label
+        assert first in plot.status.text()
+
+        population.metric_box.setCurrentIndex(1)
+        second = population.current_metric_label
+        assert second != first
+        assert second in plot.status.text()
+    finally:
+        viewer.close()
+
+
+def test_histogram_marks_the_selected_roi(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        plot = viewer.window.dock_widgets["Plot"]
+        population = viewer.window.dock_widgets["Population"]
+        plot.set_view(plot.HISTOGRAM)
+
+        plot.set_roi(2)
+        expected = population.value_for_label(2)
+        assert expected is not None
+        marker = [line for line in plot.ax.lines]
+        assert len(marker) == 1
+        np.testing.assert_allclose(marker[0].get_xdata()[0], expected)
+    finally:
+        viewer.close()
+
+
 def test_actions_dock_builds_all_buttons(recording):
     from pygor.gui.launch import launch
 
@@ -1047,7 +1107,7 @@ def test_launch_against_real_recording():
     viewer = launch(rec, show=False, block=False)
     try:
         assert "Image stack" in [layer.name for layer in viewer.layers]
-        dock = viewer.window.dock_widgets["Traces"]
+        dock = viewer.window.dock_widgets["Plot"]
         if "ROIs" in viewer.layers:
             viewer.layers["ROIs"].selected_label = 1
             trace, _ = dock.current_trace()

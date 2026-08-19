@@ -1,15 +1,17 @@
 """Whole-recording view of the ROIs, for choosing which one to inspect.
 
-The trace dock answers "what does this ROI do"; this answers "which ROI
+The plot dock answers "what does this ROI do"; this answers "which ROI
 should I be looking at". One metric is selected at a time and drives three
-views together: a histogram of its distribution, a sortable table of
-per-ROI values, and optionally the colour of the ROIs themselves.
+things together: a sortable table of per-ROI values, optionally the colour
+of the ROIs themselves, and the plot dock's histogram view.
+
+The histogram lives in the plot dock rather than here so that it gets the
+full width of the window, and so the table it is read alongside stays
+visible at the same time.
 """
 
 import numpy as np
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -30,6 +32,9 @@ from pygor.gui.roi_bridge import roi_ids_in_order
 
 class PopulationDock(QWidget):
     """Dock showing one metric across every ROI."""
+
+    #: Emitted whenever the selected metric or its values change
+    metric_changed = Signal()
 
     def __init__(self, recording, viewer, labels_layer=None):
         super().__init__()
@@ -62,11 +67,6 @@ class PopulationDock(QWidget):
         self.status = QLabel("No metric")
         self.status.setWordWrap(True)
 
-        self.figure = Figure(figsize=(4, 2), layout="constrained")
-        self.canvas = FigureCanvas(self.figure)
-        self.canvas.setMinimumHeight(140)
-        self.ax = self.figure.add_subplot(111)
-
         self.table = QTableWidget(0, 2)
         self.table.setHorizontalHeaderLabels(["ROI", "Value"])
         self.table.verticalHeader().setVisible(False)
@@ -85,8 +85,7 @@ class PopulationDock(QWidget):
         layout.addLayout(controls)
         layout.addWidget(self.colour_box)
         layout.addWidget(self.status)
-        layout.addWidget(self.canvas, stretch=1)
-        layout.addWidget(self.table, stretch=2)
+        layout.addWidget(self.table, stretch=1)
         self.setLayout(layout)
 
         self.reload_metrics()
@@ -150,56 +149,41 @@ class PopulationDock(QWidget):
         self.refresh()
 
     def refresh(self, force=False):
-        """Recompute the selected metric and redraw everything it drives."""
+        """Recompute the selected metric and update everything it drives."""
         spec = self.current_spec
         self._labels = self.roi_labels
 
         if spec is None:
             self._values = None
             self.status.setText("No metric available for this recording")
-            self._draw_histogram()
-            self._fill_table()
-            return
-
-        if spec.expensive and not force:
+        elif spec.expensive and not force:
             self._values = None
             self.status.setText(f"{spec.label}: press Compute to run")
-            self._draw_histogram()
-            self._fill_table()
-            return
-
-        values = compute_metric(spec, self.recording, n_rois=len(self._labels))
-        self._values = values
-        if values is None:
-            self.status.setText(f"{spec.label} unavailable for this recording")
         else:
-            finite = np.isfinite(values)
-            self.status.setText(
-                f"{spec.label}: {finite.sum()} of {values.size} ROIs, "
-                f"{np.nanmin(values):.3g} to {np.nanmax(values):.3g}"
-                if finite.any()
-                else f"{spec.label}: no finite values"
+            self._values = compute_metric(
+                spec, self.recording, n_rois=len(self._labels)
             )
-        self._draw_histogram()
+            self.status.setText(self._describe(spec, self._values))
+
         self._fill_table()
         self._apply_colouring()
+        self.metric_changed.emit()
+
+    @staticmethod
+    def _describe(spec, values):
+        if values is None:
+            return f"{spec.label} unavailable for this recording"
+        finite = np.isfinite(values)
+        if not finite.any():
+            return f"{spec.label}: no finite values"
+        return (
+            f"{spec.label}: {finite.sum()} of {values.size} ROIs, "
+            f"{np.nanmin(values):.3g} to {np.nanmax(values):.3g}"
+        )
 
     # ------------------------------------------------------------------
     # Views
     # ------------------------------------------------------------------
-
-    def _draw_histogram(self):
-        self.ax.clear()
-        if self._values is None or not np.isfinite(self._values).any():
-            self.ax.set_axis_off()
-            self.canvas.draw_idle()
-            return
-        finite = self._values[np.isfinite(self._values)]
-        self.ax.set_axis_on()
-        self.ax.hist(finite, bins=min(20, max(4, finite.size // 2)), color="tab:blue")
-        self.ax.set_xlabel(self.current_spec.label)
-        self.ax.set_ylabel("ROIs")
-        self.canvas.draw_idle()
 
     def _fill_table(self):
         self._syncing = True
@@ -236,6 +220,25 @@ class PopulationDock(QWidget):
 
     def _on_colour_toggled(self, checked):
         self._apply_colouring()
+
+    @property
+    def current_values(self):
+        """Values of the selected metric, one per ROI, or None."""
+        return self._values
+
+    @property
+    def current_metric_label(self):
+        spec = self.current_spec
+        return spec.label if spec is not None else ""
+
+    def value_for_label(self, label):
+        """Metric value for one ROI label, or None if it has no row."""
+        if self._values is None:
+            return None
+        matches = np.flatnonzero(self._labels == int(label))
+        if not matches.size:
+            return None
+        return float(self._values[matches[0]])
 
     # ------------------------------------------------------------------
     # Selection, both directions

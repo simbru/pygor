@@ -1,7 +1,13 @@
-"""Matplotlib trace viewer docked into a napari viewer.
+"""One plot for the whole window, switched between views.
 
-Redraws whenever the selected label in the ROI Labels layer changes, and
-moves a vertical cursor to follow the viewer's current frame.
+A trace and a histogram are both a single matplotlib axis and are never
+needed at once: you look at the distribution, then at the cell. Sharing
+one axis between them gives each twice the height and keeps the number of
+docks down. ROI navigation lives here too, since it applies whichever
+view is showing.
+
+New views are added by writing a mode: give it a label, the controls it
+needs, and how to draw itself.
 """
 
 import numpy as np
@@ -9,6 +15,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from qtpy.QtWidgets import (
     QCheckBox,
+    QStackedWidget,
     QComboBox,
     QHBoxLayout,
     QLabel,
@@ -44,8 +51,11 @@ def available_sources(recording):
     return found
 
 
-class TraceDock(QWidget):
-    """Dock widget plotting the trace of the currently selected ROI."""
+class PlotDock(QWidget):
+    """Dock widget holding the window's single plot axis."""
+
+    TRACE = "Trace"
+    HISTOGRAM = "Histogram"
 
     def __init__(self, recording, viewer, labels_layer=None):
         super().__init__()
@@ -54,6 +64,13 @@ class TraceDock(QWidget):
         self._labels_layer = labels_layer
         self._cursor = None
         self._background = None
+
+        self._population = None
+
+        self.mode_box = QComboBox()
+        self.mode_box.addItems([self.TRACE, self.HISTOGRAM])
+        self.mode_box.setToolTip("Which view this plot shows")
+        self.mode_box.currentIndexChanged.connect(self._on_view_changed)
 
         self.source_box = QComboBox()
         self.source_box.addItems(available_sources(recording) or ["<no traces>"])
@@ -115,10 +132,30 @@ class TraceDock(QWidget):
         self.canvas.setMinimumHeight(140)
         self.ax = self.figure.add_subplot(111)
 
+        # One page of controls per view, swapped with the view itself
+        trace_controls = QWidget()
+        trace_row = QHBoxLayout()
+        trace_row.setContentsMargins(0, 0, 0, 0)
+        trace_row.addWidget(QLabel("Source:"))
+        trace_row.addWidget(self.source_box, stretch=1)
+        trace_row.addWidget(self.follow_box)
+        trace_controls.setLayout(trace_row)
+
+        histogram_controls = QWidget()
+        histogram_row = QHBoxLayout()
+        histogram_row.setContentsMargins(0, 0, 0, 0)
+        self.histogram_hint = QLabel("Metric chosen in the Population panel")
+        histogram_row.addWidget(self.histogram_hint, stretch=1)
+        histogram_controls.setLayout(histogram_row)
+
+        self.controls_stack = QStackedWidget()
+        self.controls_stack.addWidget(trace_controls)
+        self.controls_stack.addWidget(histogram_controls)
+
         controls = QHBoxLayout()
-        controls.addWidget(QLabel("Source:"))
-        controls.addWidget(self.source_box, stretch=1)
-        controls.addWidget(self.follow_box)
+        controls.addWidget(QLabel("View:"))
+        controls.addWidget(self.mode_box)
+        controls.addWidget(self.controls_stack, stretch=1)
 
         navigation = QHBoxLayout()
         navigation.addWidget(self.prev_button)
@@ -425,14 +462,88 @@ class TraceDock(QWidget):
             return None
         return step[0]
 
+    # ------------------------------------------------------------------
+    # View switching
+    # ------------------------------------------------------------------
+
+    @property
+    def view(self):
+        """Label of the view currently on the axis."""
+        return self.mode_box.currentText()
+
+    def set_view(self, name):
+        """Switch the plot to a named view."""
+        index = self.mode_box.findText(name)
+        if index >= 0:
+            self.mode_box.setCurrentIndex(index)
+
+    def _on_view_changed(self, index=None):
+        self.controls_stack.setCurrentIndex(self.mode_box.currentIndex())
+        self.refresh()
+
+    def set_population(self, population_dock):
+        """Attach the panel that owns metric selection, for the histogram."""
+        self._population = population_dock
+        if population_dock is not None:
+            population_dock.metric_changed.connect(self._on_metric_changed)
+
+    def _on_metric_changed(self):
+        if self.view == self.HISTOGRAM:
+            self.refresh()
+
     def refresh(self):
-        """Redraw the axis for the current selection and source."""
+        """Redraw the axis for the current view."""
         # Labels can outrun the trace array: an ROI drawn by hand exists in
         # the mask before traces are extracted for it.
         self.roi_spin.setMaximum(self._roi_upper_bound())
         self.ax.clear()
         self._cursor = None
         self._background = None
+
+        if self.view == self.HISTOGRAM:
+            self._draw_histogram()
+            return
+        self._draw_trace()
+
+    def _draw_histogram(self):
+        """Distribution of the metric the population panel has selected."""
+        values = getattr(self._population, "current_values", None)
+        label = getattr(self._population, "current_metric_label", "")
+
+        if values is None or not np.isfinite(values).any():
+            self.status.setText(
+                f"No values to plot for {label}" if label else "No metric selected"
+            )
+            self.ax.set_axis_off()
+            self.canvas.draw_idle()
+            return
+
+        finite = values[np.isfinite(values)]
+        self.ax.set_axis_on()
+        self.ax.hist(
+            finite, bins=min(20, max(4, finite.size // 2)), color="tab:blue"
+        )
+
+        # Mark where the selected ROI sits in the distribution
+        selected = self._population.value_for_label(self.selected_label)
+        if selected is not None and np.isfinite(selected):
+            self.ax.axvline(selected, color=self.roi_color(), lw=1.5)
+            self.status.setText(
+                f"{label}: ROI {self.selected_label} = {selected:.4g}, "
+                f"{finite.size} ROIs from {finite.min():.3g} to {finite.max():.3g}"
+            )
+        else:
+            self.status.setText(
+                f"{label}: {finite.size} ROIs from {finite.min():.3g} to "
+                f"{finite.max():.3g}"
+            )
+
+        self.ax.set_xlabel(label)
+        self.ax.set_ylabel("ROIs")
+        self.canvas.draw_idle()
+
+    def _draw_trace(self):
+        """Time course of the selected ROI."""
         trace, source = self.current_trace()
 
         if trace is None:
