@@ -74,8 +74,17 @@ class TraceDock(QWidget):
 
         self.prev_button = QPushButton("< Prev")
         self.next_button = QPushButton("Next >")
+        self.prev_button.setToolTip("Previous ROI (,)")
+        self.next_button.setToolTip("Next ROI (.)")
         self.prev_button.clicked.connect(lambda: self.step_roi(-1))
         self.next_button.clicked.connect(lambda: self.step_roi(1))
+
+        self.new_button = QPushButton("New ROI")
+        self.new_button.setToolTip(
+            "Select the next unused label (n), so a new ROI is drawn as its "
+            "own ROI rather than merging into the current one."
+        )
+        self.new_button.clicked.connect(self.new_roi)
 
         self.centre_box = QCheckBox("Centre view")
         self.centre_box.setChecked(False)
@@ -100,6 +109,7 @@ class TraceDock(QWidget):
         navigation.addWidget(self.prev_button)
         navigation.addWidget(self.roi_spin)
         navigation.addWidget(self.next_button)
+        navigation.addWidget(self.new_button)
         navigation.addWidget(self.centre_box)
         navigation.addStretch(1)
 
@@ -118,8 +128,9 @@ class TraceDock(QWidget):
         if self.labels_layer is not None:
             self.labels_layer.events.selected_label.connect(self._on_label_changed)
         self.viewer.dims.events.current_step.connect(self._on_frame_changed)
-        self.viewer.bind_key("[", lambda _viewer: self.step_roi(-1), overwrite=True)
-        self.viewer.bind_key("]", lambda _viewer: self.step_roi(1), overwrite=True)
+        self.viewer.bind_key(",", lambda _viewer: self.step_roi(-1))
+        self.viewer.bind_key(".", lambda _viewer: self.step_roi(1))
+        self.viewer.bind_key("n", lambda _viewer: self.new_roi())
 
     @property
     def n_rois(self):
@@ -130,9 +141,40 @@ class TraceDock(QWidget):
             return int(getattr(self.recording, "num_rois", 0) or 0)
         return int(np.asarray(arr).shape[0])
 
+    @property
+    def max_label(self):
+        """Highest label present in the ROI mask, 0 when there are none."""
+        if self.labels_layer is None:
+            return 0
+        return int(np.asarray(self.labels_layer.data).max())
+
+    def _roi_upper_bound(self):
+        """Highest selectable ROI label.
+
+        Includes the current selection, which may point at a label that has
+        no pixels and no trace yet: New ROI selects the next free label
+        before anything is drawn into it, and clamping to the labels that
+        already exist would snap the selection straight back.
+        """
+        return max(1, self.n_rois, self.max_label, self.selected_label)
+
+    def new_roi(self):
+        """Select the next unused label, ready to draw a fresh ROI.
+
+        Without this, painting after selecting ROI 11 keeps adding to ROI
+        11 rather than creating ROI 12. napari has no built-in binding for
+        this, so it is provided here.
+        """
+        if self.labels_layer is None:
+            return
+        target = self.max_label + 1
+        self.roi_spin.setMaximum(max(self.roi_spin.maximum(), target))
+        self.set_roi(target)
+        self.roi_spin.setMaximum(self._roi_upper_bound())
+
     def step_roi(self, delta):
         """Move the selection by delta ROIs, wrapping at both ends."""
-        total = self.n_rois
+        total = self._roi_upper_bound()
         if total < 1 or self.labels_layer is None:
             return
         current = max(1, min(self.selected_label, total))
@@ -301,8 +343,9 @@ class TraceDock(QWidget):
 
     def refresh(self):
         """Redraw the axis for the current selection and source."""
-        # ROI count changes when traces are re-extracted or re-segmented
-        self.roi_spin.setMaximum(max(1, self.n_rois))
+        # Labels can outrun the trace array: an ROI drawn by hand exists in
+        # the mask before traces are extracted for it.
+        self.roi_spin.setMaximum(self._roi_upper_bound())
         self.ax.clear()
         self._cursor = None
         self._background = None

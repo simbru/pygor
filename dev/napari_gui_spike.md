@@ -35,7 +35,11 @@ Confirmed working, headless, against a stub recording:
 - Selecting a label redraws the trace plot for that ROI. Label `n` maps to
   trace row `n - 1` in both mask conventions.
 - ROIs are navigated from the trace dock: prev/next buttons, a spinbox, and
-  the `[` / `]` keys. Selection stays in sync with the Labels layer in both
+  the `,` / `.` keys. A "New ROI" button (`n`) selects the next unused
+  label, so painting or polygon-drawing starts a fresh ROI instead of
+  adding to the currently selected one; napari has no built-in binding for
+  this. The spinbox bound accounts for a pending label that has no pixels
+  and no trace yet. Selection stays in sync with the Labels layer in both
   directions, so napari's picker mode (`5` or `L`, then click) also drives
   the trace plot. "Centre view" moves the camera to the selected ROI and
   marks it with a white cross Points layer sized to a thirtieth of the
@@ -64,6 +68,19 @@ the viewer non-blocking and returns it, so results land on the recording
 object rather than on window close. Private napari attributes are avoided;
 `viewer.window.dock_widgets` is the public accessor (`_dock_widgets` is
 deprecated and warns).
+
+## napari Labels controls, for reference
+
+- **n edit dim** — how many dimensions a paint or fill stroke reaches
+  across. The ROI mask is 2D, so this stays at 2 and each stroke edits the
+  plane. It matters for 3D label volumes, where 3 would paint a sphere
+  through neighbouring slices.
+- **contiguous** — restricts the fill bucket to the connected run of pixels
+  under the cursor. Unticked, filling recolours every pixel carrying that
+  label anywhere in the image.
+- **preserve labels** — when on, painting only writes into background and
+  leaves existing ROIs untouched. Useful for drawing up against ROIs
+  already placed without eating into them. Toggle with `B`.
 
 ## Open items
 

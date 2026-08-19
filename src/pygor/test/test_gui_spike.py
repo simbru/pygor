@@ -225,6 +225,59 @@ def test_crosshair_scales_with_image_width(recording):
         viewer.close()
 
 
+def test_new_roi_selects_next_free_label(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        labels_layer = viewer.layers["ROIs"]
+        start = dock.max_label
+
+        dock.new_roi()
+        assert dock.selected_label == start + 1
+        assert dock.roi_spin.value() == start + 1
+
+        # Drawing into it then asking again must advance, not repeat
+        labels_layer.data[0:2, 0:2] = dock.selected_label
+        labels_layer.refresh()
+        dock.new_roi()
+        assert dock.selected_label == start + 2
+    finally:
+        viewer.close()
+
+
+def test_new_roi_label_survives_refresh(recording):
+    """A pending label has no pixels yet and must not be clamped away."""
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        dock.new_roi()
+        pending = dock.selected_label
+
+        dock.refresh()
+        assert dock.selected_label == pending
+        assert dock.roi_spin.value() == pending
+    finally:
+        viewer.close()
+
+
+def test_navigation_keys_leave_brush_size_alone(recording):
+    """[ and ] are napari's brush size controls, needed while painting."""
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        bound = {str(key) for key in viewer.keymap}
+        assert "[" not in bound
+        assert "]" not in bound
+        assert {",", ".", "N"} <= bound
+    finally:
+        viewer.close()
+
+
 def test_actions_dock_builds_all_buttons(recording):
     from pygor.gui.launch import launch
 
