@@ -109,6 +109,20 @@ def ensure_roi_layer(viewer, recording):
     return layer
 
 
+def refresh_image_layers(viewer, recording):
+    """Point the image layers at the current arrays.
+
+    Preprocessing and registration replace ``recording.images`` rather
+    than editing it, so a layer built earlier still holds the old array
+    and would show stale pixels. Backup stacks appear as layers only once
+    a destructive step has created them.
+    """
+    for name, data, _visible in _image_sources(recording):
+        if name in viewer.layers:
+            viewer.layers[name].data = data
+    ensure_image_layers(viewer, recording)
+
+
 def ensure_default_layers(viewer, recording):
     """Rebuild any of launch's own layers that are missing.
 
@@ -172,6 +186,7 @@ def launch(recording, show=True, block=False, title=None):
     default_layers, labels_layer = ensure_default_layers(viewer, recording)
 
     from pygor.gui.widgets.actions import ActionsDock
+    from pygor.gui.widgets.preprocessing import PreprocessingDock
     from pygor.gui.widgets.population import PopulationDock
     from pygor.gui.widgets.plot import PlotDock
 
@@ -194,6 +209,12 @@ def launch(recording, show=True, block=False, title=None):
     # list, so anything put there competes with them for height. Both
     # pygor panels go right instead, tabbed so only one is visible at a
     # time, and the trace plot gets the full width along the bottom.
+    preprocessing_dock = PreprocessingDock(
+        recording,
+        viewer,
+        on_images_changed=lambda: refresh_image_layers(viewer, recording),
+    )
+
     plot_area = viewer.window.add_dock_widget(
         plot_dock, name="Plot", area="bottom"
     )
@@ -202,6 +223,9 @@ def launch(recording, show=True, block=False, title=None):
     )
     viewer.window.add_dock_widget(
         population_dock, name="Population", area="right", tabify=True
+    )
+    viewer.window.add_dock_widget(
+        preprocessing_dock, name="Preprocessing", area="right", tabify=True
     )
 
     # Parameters are wanted often enough to be there from the start, tabbed
@@ -212,7 +236,14 @@ def launch(recording, show=True, block=False, title=None):
 
     from pygor.gui.menus import build_pygor_menu
 
-    build_pygor_menu(viewer, actions_dock, plot_dock, population_dock, recording)
+    build_pygor_menu(
+        viewer,
+        actions_dock,
+        plot_dock,
+        population_dock,
+        preprocessing_dock,
+        recording,
+    )
 
     _size_docks(viewer, plot_area, analysis_area)
     viewer.reset_view()

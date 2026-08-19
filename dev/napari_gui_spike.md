@@ -175,6 +175,28 @@ histogram, since a depth you cannot see is not much use. Note that
 `calculate_ipl_depths` returns percentages outside 0–100 for ROIs beyond
 the boundary pair, where `estimate_ipl_depths` clips.
 
+## Preprocessing panel
+
+`pygor/gui/widgets/preprocessing.py` runs the steps that alter the stack
+itself: `preprocess` (light artifact, X flip, detrending) and `register`
+(motion correction), plus `reset_images` to undo both. Widget defaults are
+seeded from `params._defaults` so the panel agrees with the config rather
+than hardcoding its own.
+
+Both steps *replace* `recording.images` rather than editing in place, so
+the layers built earlier hold the old array and would show stale pixels.
+`refresh_image_layers` repoints them afterwards, and picks up the backup
+stacks, which only exist once something destructive has run.
+
+The config stores `normalization` as the string `"None"`, while `register`
+wants a real `None`; the panel converts it.
+
+Preprocessing runs on H5 recordings and the mechanism is verified there,
+but H5 exports are already preprocessed by IGOR, so it is semantically a
+second application. Registration is wired but has not been run against a
+real recording — the local stacks are 20684 frames and too slow for a
+check. Both want raw `.smp`/`.smh` data to be exercised properly.
+
 ## Population panel
 
 `pygor/gui/widgets/population.py` shows one metric across every ROI, so a

@@ -14,7 +14,9 @@ from pygor.gui.roi_numbers import NUMBER_LAYER_NAME
 MENU_TITLE = "&Pygor"
 
 
-def build_pygor_menu(viewer, actions_dock, plot_dock, population_dock, recording):
+def build_pygor_menu(
+    viewer, actions_dock, plot_dock, population_dock, preprocessing_dock, recording
+):
     """Add the Pygor menu to a viewer, returning the QMenu."""
     menu = viewer.window.main_menu.addMenu(MENU_TITLE)
 
@@ -35,6 +37,20 @@ def build_pygor_menu(viewer, actions_dock, plot_dock, population_dock, recording
     rois.addSeparator()
     _add(rois, "Push ROIs to recording", lambda: _push(actions_dock))
     _add(rois, "Restore default layers", lambda: _restore(actions_dock))
+
+    preprocessing = menu.addMenu("Preprocessing")
+    _add(
+        preprocessing,
+        "Preprocess with current settings",
+        lambda: preprocessing_dock.run_preprocess(),
+    )
+    _add(
+        preprocessing,
+        "Register with current settings",
+        lambda: preprocessing_dock.run_registration(),
+    )
+    preprocessing.addSeparator()
+    _add(preprocessing, "Reset images", preprocessing_dock.reset_images)
 
     ipl = menu.addMenu("IPL depth")
     _add(ipl, "Draw boundaries", actions_dock.draw_ipl_boundaries)

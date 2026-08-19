@@ -66,6 +66,30 @@ class StubRecording:
         ids = ids[ids > 0]
         return np.array(scipy.ndimage.center_of_mass(labels, labels, ids))
 
+    def preprocess(self, force=False, **kwargs):
+        if self.params.preprocessed and not force:
+            return
+        if self._original_images is None:
+            self._original_images = self.images.copy()
+        self.images = self.images * 2
+        self.params.preprocessed = True
+
+    def register(self, force=False, **kwargs):
+        if self._original_images is None:
+            self._original_images = self.images.copy()
+        self._pre_registration_images = self.images.copy()
+        self.images = self.images + 1
+        self.params.registered = True
+        return {"shifts": np.zeros((len(self.images), 2))}
+
+    def reset_images(self):
+        if self._original_images is None:
+            raise RuntimeError("No original images stored.")
+        self.images = self._original_images.copy()
+        self._pre_registration_images = None
+        self.params.preprocessed = False
+        self.params.registered = False
+
     def compute_snippets_and_averages(self):
         """Mirrors the real layout: (n_rois, n_loops, snippet_length)."""
         rng = np.random.default_rng(1)
@@ -1246,6 +1270,97 @@ def test_averaging_action_updates_the_recording(recording):
         assert recording.averages is not None
         assert recording.averages.shape[0] == recording.num_rois
         assert recording.snippets.ndim == 3
+    finally:
+        viewer.close()
+
+
+def test_preprocessing_dock_reports_what_has_been_applied(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Preprocessing"]
+        assert "Preprocessed: no" in dock.status.text()
+        assert "Registered: no" in dock.status.text()
+
+        recording.preprocess()
+        dock.refresh_status()
+        assert "Preprocessed: yes" in dock.status.text()
+    finally:
+        viewer.close()
+
+
+def test_preprocessing_refreshes_the_image_layer(recording):
+    """preprocess replaces recording.images, so the layer goes stale."""
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Preprocessing"]
+        before = np.array(viewer.layers["Image stack"].data, copy=True)
+
+        recording.preprocess()
+        dock._images_changed("done")
+
+        after = np.asarray(viewer.layers["Image stack"].data)
+        assert not np.array_equal(before, after)
+        np.testing.assert_allclose(after, recording.images)
+        # The backup only exists once something destructive has run
+        assert "Original" in viewer.layers
+    finally:
+        viewer.close()
+
+
+def test_reset_restores_the_images_and_the_flags(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Preprocessing"]
+        original = np.array(recording.images, copy=True)
+
+        recording.preprocess()
+        dock._images_changed("done")
+        assert dock.reset_images() is True
+
+        np.testing.assert_allclose(recording.images, original)
+        np.testing.assert_allclose(viewer.layers["Image stack"].data, original)
+        assert "Preprocessed: no" in dock.status.text()
+    finally:
+        viewer.close()
+
+
+def test_reset_without_a_backup_reports_rather_than_raising(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Preprocessing"]
+        assert dock.reset_images() is False
+        assert "No original images" in dock.status.text()
+    finally:
+        viewer.close()
+
+
+def test_registration_normalisation_none_is_passed_as_none(recording):
+    """The config stores it as the string 'None', register wants None."""
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Preprocessing"]
+        seen = {}
+
+        def capture(**kwargs):
+            seen.update(kwargs)
+            recording.params.registered = True
+
+        recording.register = capture
+        worker = dock.run_registration(normalization="None", n_reference_frames=4)
+        worker.await_workers()
+
+        assert seen["normalization"] is None
+        assert seen["n_reference_frames"] == 4
     finally:
         viewer.close()
 
