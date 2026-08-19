@@ -264,6 +264,72 @@ def test_new_roi_label_survives_refresh(recording):
         viewer.close()
 
 
+def _stroke(labels_layer, coord):
+    """Simulate a completed brush stroke.
+
+    napari wraps a drag in block_history and commits the staged undo
+    history on release, which is what emits the paint event.
+    """
+    with labels_layer.block_history():
+        labels_layer.paint(coord, labels_layer.selected_label, refresh=False)
+
+
+def test_auto_new_advances_label_per_stroke(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        labels_layer = viewer.layers["ROIs"]
+        labels_layer.mode = "paint"
+
+        dock.auto_new_box.setChecked(True)
+        first = dock.selected_label
+        _stroke(labels_layer, (10, 10))
+        second = dock.selected_label
+        assert second != first
+
+        _stroke(labels_layer, (12, 12))
+        assert dock.selected_label == second + 1
+    finally:
+        viewer.close()
+
+
+def test_auto_new_off_keeps_label_for_multi_stroke_rois(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        labels_layer = viewer.layers["ROIs"]
+        labels_layer.mode = "paint"
+
+        dock.auto_new_box.setChecked(False)
+        label = dock.selected_label
+        _stroke(labels_layer, (10, 10))
+        _stroke(labels_layer, (11, 11))
+        assert dock.selected_label == label
+    finally:
+        viewer.close()
+
+
+def test_auto_new_ignores_erasing(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        labels_layer = viewer.layers["ROIs"]
+
+        dock.auto_new_box.setChecked(True)
+        labels_layer.mode = "erase"
+        label = dock.selected_label
+        _stroke(labels_layer, (10, 10))
+        assert dock.selected_label == label
+    finally:
+        viewer.close()
+
+
 def test_navigation_keys_leave_brush_size_alone(recording):
     """[ and ] are napari's brush size controls, needed while painting."""
     from pygor.gui.launch import launch

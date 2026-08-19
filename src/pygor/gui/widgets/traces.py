@@ -79,6 +79,14 @@ class TraceDock(QWidget):
         self.prev_button.clicked.connect(lambda: self.step_roi(-1))
         self.next_button.clicked.connect(lambda: self.step_roi(1))
 
+        self.auto_new_box = QCheckBox("Auto-new")
+        self.auto_new_box.setChecked(False)
+        self.auto_new_box.setToolTip(
+            "After each completed stroke, select the next free label. Suits "
+            "drawing many blob ROIs quickly; turn off to refine one ROI "
+            "across several strokes."
+        )
+
         self.new_button = QPushButton("New ROI")
         self.new_button.setToolTip(
             "Select the next unused label (n), so a new ROI is drawn as its "
@@ -110,6 +118,7 @@ class TraceDock(QWidget):
         navigation.addWidget(self.roi_spin)
         navigation.addWidget(self.next_button)
         navigation.addWidget(self.new_button)
+        navigation.addWidget(self.auto_new_box)
         navigation.addWidget(self.centre_box)
         navigation.addStretch(1)
 
@@ -131,6 +140,8 @@ class TraceDock(QWidget):
         self.viewer.bind_key(",", lambda _viewer: self.step_roi(-1))
         self.viewer.bind_key(".", lambda _viewer: self.step_roi(1))
         self.viewer.bind_key("n", lambda _viewer: self.new_roi())
+        if self.labels_layer is not None:
+            self.labels_layer.events.paint.connect(self._on_paint)
 
     @property
     def n_rois(self):
@@ -147,6 +158,20 @@ class TraceDock(QWidget):
         if self.labels_layer is None:
             return 0
         return int(np.asarray(self.labels_layer.data).max())
+
+    def _on_paint(self, event=None):
+        """Advance to a fresh label after a completed stroke.
+
+        napari commits a stroke's staged undo history on mouse release, and
+        emits ``paint`` from there, so this fires once per stroke rather
+        than once per mouse move. Erasing is excluded: it removes pixels
+        rather than creating an ROI.
+        """
+        if not self.auto_new_box.isChecked():
+            return
+        if str(self.labels_layer.mode) == "erase":
+            return
+        self.new_roi()
 
     def _roi_upper_bound(self):
         """Highest selectable ROI label.

@@ -39,7 +39,14 @@ Confirmed working, headless, against a stub recording:
   label, so painting or polygon-drawing starts a fresh ROI instead of
   adding to the currently selected one; napari has no built-in binding for
   this. The spinbox bound accounts for a pending label that has no pixels
-  and no trace yet. Selection stays in sync with the Labels layer in both
+  and no trace yet.
+- An "Auto-new" toggle advances to the next free label after every
+  completed stroke, for drawing many blob ROIs in a row. It hangs off the
+  Labels layer's `paint` event, which napari emits from
+  `_commit_staged_history` when a stroke's undo history is committed on
+  mouse release, so it fires once per stroke rather than once per mouse
+  move. Erase strokes are skipped. Leave it off to build one ROI from
+  several strokes. Selection stays in sync with the Labels layer in both
   directions, so napari's picker mode (`5` or `L`, then click) also drives
   the trace plot. "Centre view" moves the camera to the selected ROI and
   marks it with a white cross Points layer sized to a thirtieth of the
