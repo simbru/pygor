@@ -34,6 +34,10 @@ Confirmed working, headless, against a stub recording:
   and ROIs as a Labels layer.
 - Selecting a label redraws the trace plot for that ROI. Label `n` maps to
   trace row `n - 1` in both mask conventions.
+- ROIs are navigated from the trace dock: prev/next buttons, a spinbox, and
+  the `[` / `]` keys. Selection stays in sync with the Labels layer in both
+  directions, so napari's picker mode (`5` or `L`, then click) also drives
+  the trace plot. "Centre view" moves the camera to the selected ROI.
 - The viewer's frame slider drives a cursor on the trace plot.
 - magicgui builds the action buttons from type annotations; `thread_worker`
   keeps segmentation and projection off the GUI thread.

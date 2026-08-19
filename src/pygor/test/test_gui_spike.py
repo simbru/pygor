@@ -108,6 +108,45 @@ def test_trace_dock_follows_label_selection(recording):
         viewer.close()
 
 
+def test_roi_navigation_steps_and_wraps(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        assert dock.n_rois == recording.num_rois
+
+        dock.set_roi(1)
+        dock.step_roi(1)
+        assert dock.selected_label == 2
+
+        dock.set_roi(recording.num_rois)
+        dock.step_roi(1)
+        assert dock.selected_label == 1
+
+        dock.step_roi(-1)
+        assert dock.selected_label == recording.num_rois
+    finally:
+        viewer.close()
+
+
+def test_roi_spinbox_and_layer_stay_in_sync(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        labels_layer = viewer.layers["ROIs"]
+
+        dock.roi_spin.setValue(3)
+        assert labels_layer.selected_label == 3
+
+        labels_layer.selected_label = 2
+        assert dock.roi_spin.value() == 2
+    finally:
+        viewer.close()
+
+
 def test_actions_dock_builds_all_buttons(recording):
     from pygor.gui.launch import launch
 

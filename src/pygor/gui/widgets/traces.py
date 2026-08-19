@@ -7,7 +7,16 @@ moves a vertical cursor to follow the viewer's current frame.
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from qtpy.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from qtpy.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 from pygor.gui.roi_bridge import label_to_trace_index
 
@@ -47,6 +56,23 @@ class TraceDock(QWidget):
 
         self.status = QLabel("No ROI selected")
 
+        self.roi_spin = QSpinBox()
+        self.roi_spin.setPrefix("ROI ")
+        self.roi_spin.setMinimum(1)
+        self.roi_spin.setMaximum(max(1, self.n_rois))
+        self.roi_spin.valueChanged.connect(self._on_spin_changed)
+
+        self.prev_button = QPushButton("< Prev")
+        self.next_button = QPushButton("Next >")
+        self.prev_button.clicked.connect(lambda: self.step_roi(-1))
+        self.next_button.clicked.connect(lambda: self.step_roi(1))
+
+        self.centre_box = QCheckBox("Centre view")
+        self.centre_box.setChecked(False)
+
+        # Guards the spinbox <-> layer selection loop from recursing
+        self._syncing = False
+
         self.figure = Figure(figsize=(5, 2.5), layout="constrained")
         self.canvas = FigureCanvas(self.figure)
         self.ax = self.figure.add_subplot(111)
@@ -56,8 +82,16 @@ class TraceDock(QWidget):
         controls.addWidget(self.source_box, stretch=1)
         controls.addWidget(self.follow_box)
 
+        navigation = QHBoxLayout()
+        navigation.addWidget(self.prev_button)
+        navigation.addWidget(self.roi_spin)
+        navigation.addWidget(self.next_button)
+        navigation.addWidget(self.centre_box)
+        navigation.addStretch(1)
+
         layout = QVBoxLayout()
         layout.addLayout(controls)
+        layout.addLayout(navigation)
         layout.addWidget(self.status)
         layout.addWidget(self.canvas, stretch=1)
         self.setLayout(layout)
@@ -70,6 +104,48 @@ class TraceDock(QWidget):
         if self.labels_layer is not None:
             self.labels_layer.events.selected_label.connect(self._on_label_changed)
         self.viewer.dims.events.current_step.connect(self._on_frame_changed)
+        self.viewer.bind_key("[", lambda _viewer: self.step_roi(-1), overwrite=True)
+        self.viewer.bind_key("]", lambda _viewer: self.step_roi(1), overwrite=True)
+
+    @property
+    def n_rois(self):
+        """Number of ROIs available in the current trace source, else 0."""
+        source = self.source_box.currentText() if hasattr(self, "source_box") else None
+        arr = getattr(self.recording, source, None) if source else None
+        if arr is None:
+            return int(getattr(self.recording, "num_rois", 0) or 0)
+        return int(np.asarray(arr).shape[0])
+
+    def step_roi(self, delta):
+        """Move the selection by delta ROIs, wrapping at both ends."""
+        total = self.n_rois
+        if total < 1 or self.labels_layer is None:
+            return
+        current = max(1, min(self.selected_label, total))
+        target = (current - 1 + delta) % total + 1
+        self.set_roi(target)
+
+    def set_roi(self, label):
+        """Select an ROI by label, updating the layer and optionally the camera."""
+        if self.labels_layer is None:
+            return
+        self.labels_layer.selected_label = int(label)
+        if self.centre_box.isChecked():
+            self._centre_on_roi(int(label))
+
+    def _centre_on_roi(self, label):
+        """Move the camera to the centroid of the given ROI label."""
+        data = np.asarray(self.labels_layer.data)
+        coords = np.argwhere(data == label)
+        if not coords.size:
+            return
+        centre = coords.mean(axis=0)
+        self.viewer.camera.center = (0, float(centre[-2]), float(centre[-1]))
+
+    def _on_spin_changed(self, value):
+        if self._syncing:
+            return
+        self.set_roi(value)
 
     @property
     def selected_label(self):
@@ -90,6 +166,13 @@ class TraceDock(QWidget):
         return arr[index], source
 
     def _on_label_changed(self, event=None):
+        self._syncing = True
+        try:
+            label = self.selected_label
+            if 1 <= label <= self.roi_spin.maximum():
+                self.roi_spin.setValue(label)
+        finally:
+            self._syncing = False
         self.refresh()
 
     def _on_frame_changed(self, event=None):
@@ -109,6 +192,8 @@ class TraceDock(QWidget):
 
     def refresh(self):
         """Redraw the axis for the current selection and source."""
+        # ROI count changes when traces are re-extracted or re-segmented
+        self.roi_spin.setMaximum(max(1, self.n_rois))
         self.ax.clear()
         self._cursor = None
         trace, source = self.current_trace()
