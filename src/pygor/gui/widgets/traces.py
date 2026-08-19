@@ -27,6 +27,9 @@ _TRACE_SOURCES = ("traces_znorm", "traces_raw", "traces_deconvolved", "averages"
 # fraction of image width so it scales with the field of view
 CENTRE_LAYER_NAME = "Centred ROI"
 
+# Labels modes that add to the mask, as opposed to erasing or inspecting
+_DRAWING_MODES = ("paint", "polygon", "fill")
+
 
 def available_sources(recording):
     """Return trace attributes present and non-empty on the recording."""
@@ -80,7 +83,7 @@ class TraceDock(QWidget):
         self.next_button.clicked.connect(lambda: self.step_roi(1))
 
         self.auto_new_box = QCheckBox("Auto-new")
-        self.auto_new_box.setChecked(False)
+        self.auto_new_box.setChecked(True)
         self.auto_new_box.setToolTip(
             "After each completed stroke, select the next free label. Suits "
             "drawing many blob ROIs quickly; turn off to refine one ROI "
@@ -142,6 +145,7 @@ class TraceDock(QWidget):
         self.viewer.bind_key("n", lambda _viewer: self.new_roi())
         if self.labels_layer is not None:
             self.labels_layer.events.paint.connect(self._on_paint)
+            self.labels_layer.events.mode.connect(self._on_mode_changed)
 
     @property
     def n_rois(self):
@@ -158,6 +162,21 @@ class TraceDock(QWidget):
         if self.labels_layer is None:
             return 0
         return int(np.asarray(self.labels_layer.data).max())
+
+    def _on_mode_changed(self, event=None):
+        """Move off an occupied label when a drawing mode is entered.
+
+        The selection starts on ROI 1 so its trace can be inspected. With
+        auto-new on, the first stroke would otherwise be absorbed into that
+        ROI instead of starting a new one.
+        """
+        if not self.auto_new_box.isChecked():
+            return
+        if str(self.labels_layer.mode) not in _DRAWING_MODES:
+            return
+        data = np.asarray(self.labels_layer.data)
+        if np.any(data == self.selected_label):
+            self.new_roi()
 
     def _on_paint(self, event=None):
         """Advance to a fresh label after a completed stroke.

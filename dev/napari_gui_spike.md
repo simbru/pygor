@@ -40,8 +40,11 @@ Confirmed working, headless, against a stub recording:
   adding to the currently selected one; napari has no built-in binding for
   this. The spinbox bound accounts for a pending label that has no pixels
   and no trace yet.
-- An "Auto-new" toggle advances to the next free label after every
-  completed stroke, for drawing many blob ROIs in a row. It hangs off the
+- An "Auto-new" toggle, on by default, advances to the next free label
+  after every completed stroke, for drawing many blob ROIs in a row. It
+  also moves off an occupied label when a drawing mode is entered, since
+  the selection starts on ROI 1 for trace inspection and the first stroke
+  would otherwise extend that ROI. It hangs off the
   Labels layer's `paint` event, which napari emits from
   `_commit_staged_history` when a stroke's undo history is committed on
   mouse release, so it fires once per stroke rather than once per mouse
@@ -61,7 +64,14 @@ Confirmed working, headless, against a stub recording:
 - magicgui builds the action buttons from type annotations; `thread_worker`
   keeps segmentation and projection off the GUI thread.
 - Edited labels convert back to an IGOR-style mask and go through
-  `update_rois`, so ROI drawing and analysis share one window.
+  `update_rois`, so ROI drawing and analysis share one window. Extraction
+  reads `recording.rois` rather than the layer, so Extract traces syncs the
+  layer across first; without that, hand-drawn ROIs were silently missing
+  from `traces_raw` and `traces_znorm`. The explicit push button remains,
+  and both skip the write when the mask is unchanged.
+- The Labels layer starts with `preserve_labels` and `contiguous` on, so
+  painting does not eat into ROIs already placed and filling stays within
+  the region under the cursor.
 
 Environment already has everything: napari 0.7.1, magicgui 0.10.2,
 qtpy 2.4.3, matplotlib 3.11.0.

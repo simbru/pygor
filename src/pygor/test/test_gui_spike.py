@@ -45,6 +45,17 @@ class StubRecording:
     def calculate_image_average(self):
         return self.images.mean(axis=0)
 
+    def update_rois(self, roi_mask):
+        self.rois = np.asarray(roi_mask)
+        self.num_rois = int((np.unique(self.rois) < 0).sum())
+
+    def extract_traces_from_rois(self, baseline_dur=10.0):
+        n_frames = self.images.shape[0]
+        shape = (self.num_rois, n_frames)
+        self.traces_raw = np.zeros(shape, dtype=np.float32)
+        self.traces_znorm = np.zeros(shape, dtype=np.float32)
+        return self.traces_raw, self.traces_znorm
+
 
 @pytest.fixture
 def recording():
@@ -326,6 +337,77 @@ def test_auto_new_ignores_erasing(recording):
         label = dock.selected_label
         _stroke(labels_layer, (10, 10))
         assert dock.selected_label == label
+    finally:
+        viewer.close()
+
+
+def test_labels_layer_defaults(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        labels_layer = viewer.layers["ROIs"]
+        assert labels_layer.preserve_labels is True
+        assert labels_layer.contiguous is True
+        assert viewer.window.dock_widgets["Traces"].auto_new_box.isChecked() is True
+    finally:
+        viewer.close()
+
+
+def test_entering_draw_mode_leaves_an_occupied_label(recording):
+    """Selection starts on ROI 1, so drawing would otherwise extend it."""
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        labels_layer = viewer.layers["ROIs"]
+        assert dock.selected_label == 1
+
+        labels_layer.mode = "paint"
+        assert dock.selected_label == dock.max_label + 1
+
+        # Inspecting an ROI must still be possible without being bumped off
+        labels_layer.mode = "pan_zoom"
+        dock.set_roi(1)
+        assert dock.selected_label == 1
+    finally:
+        viewer.close()
+
+
+def test_extract_traces_picks_up_hand_drawn_rois(recording):
+    """Extraction reads recording.rois, which layer edits do not touch."""
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        actions = viewer.window.dock_widgets["Analysis"]
+        labels_layer = viewer.layers["ROIs"]
+        before = recording.num_rois
+
+        dock.new_roi()
+        labels_layer.data[12:14, 12:14] = dock.selected_label
+        labels_layer.refresh()
+
+        assert recording.num_rois == before
+        assert actions.sync_rois_from_layer() is True
+        assert recording.num_rois == before + 1
+
+        raw, znorm = recording.extract_traces_from_rois()
+        assert raw.shape[0] == before + 1
+        assert znorm.shape[0] == before + 1
+    finally:
+        viewer.close()
+
+
+def test_sync_is_a_noop_when_nothing_changed(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        actions = viewer.window.dock_widgets["Analysis"]
+        assert actions.sync_rois_from_layer() is False
     finally:
         viewer.close()
 

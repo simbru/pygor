@@ -74,6 +74,10 @@ def _add_roi_layer(viewer, recording):
         return None
     labels = mask_to_labels(recording.rois)
     layer = viewer.add_labels(labels, name="ROIs", opacity=0.4)
+    # Painting should not eat into ROIs already placed, and filling should
+    # stay within the region under the cursor.
+    layer.preserve_labels = True
+    layer.contiguous = True
     if labels.max() > 0:
         layer.selected_label = 1
     return layer

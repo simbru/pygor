@@ -80,7 +80,14 @@ class ActionsDock(QWidget):
     def _traces_widget(self):
         @magicgui(call_button="Extract traces", layout="vertical")
         def extract(baseline_dur: float = 10.0):
-            self._set_status("Extracting traces...")
+            # Extraction reads recording.rois, so ROIs drawn in the layer
+            # are invisible to it until they are written back.
+            pushed = self.sync_rois_from_layer()
+            self._set_status(
+                f"Extracting traces ({self.recording.num_rois} ROIs)..."
+                if pushed
+                else "Extracting traces..."
+            )
 
             @thread_worker
             def job():
@@ -126,17 +133,35 @@ class ActionsDock(QWidget):
         else:
             self.viewer.add_image(np.asarray(projection), name=name, colormap="viridis")
 
+    def sync_rois_from_layer(self):
+        """Write layer edits back to the recording, if there are any.
+
+        Returns True when the recording's mask was updated. Analysis reads
+        ``recording.rois``, not the layer, so anything drawn by hand has to
+        be pushed across before it can be measured.
+        """
+        if self.labels_layer is None:
+            return False
+        current = self.recording.rois
+        igor = True if current is None else is_igor_style(current)
+        mask = labels_to_mask(self.labels_layer.data, igor_style=igor)
+        if current is not None and np.array_equal(mask, np.asarray(current)):
+            return False
+        self.recording.update_rois(mask)
+        return True
+
     def _push_rois_widget(self):
         @magicgui(call_button="Push edited ROIs to recording", layout="vertical")
         def push():
             if self.labels_layer is None:
                 self._set_status("No ROI layer to push")
                 return
-            current = self.recording.rois
-            igor = True if current is None else is_igor_style(current)
-            mask = labels_to_mask(self.labels_layer.data, igor_style=igor)
-            self.recording.update_rois(mask)
-            self._set_status(f"Pushed {self.recording.num_rois} ROIs to recording")
+            if self.sync_rois_from_layer():
+                self._set_status(
+                    f"Pushed {self.recording.num_rois} ROIs to recording"
+                )
+            else:
+                self._set_status("ROIs already match the recording")
 
         return push
 
