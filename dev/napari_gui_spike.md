@@ -217,10 +217,16 @@ the panel does not have to grow. Dock actions were closures inside the
 magicgui factories, so they were lifted to `run_segmentation`,
 `run_extraction` and `run_correlation_projection` for both to share.
 
-The parameter editor is docked rather than opened as a top-level window.
-`params.edit(blocking=False)` returns a widget the caller must keep alive,
-and dropping it let Python collect the window the moment it appeared —
-pressing the button did nothing visible. Docking hands ownership to Qt.
+The parameter editor is docked from launch rather than opened as a
+top-level window on demand. `params.edit(blocking=False)` returns a widget
+the caller must keep alive, and dropping it let Python collect the window
+the moment it appeared — pressing the button did nothing visible. Docking
+hands ownership to Qt, and the menu entry raises the existing dock.
+
+`ParamEditorWidget` groups its rows into collapsible sections by the first
+part of each dotted path, rather than listing sixty-odd `section.name`
+rows flat. Filtering hides sections left empty and expands those that
+match.
 
 ## napari Labels controls, for reference
 

@@ -905,24 +905,101 @@ def test_menu_tracks_roi_number_visibility(recording):
         viewer.close()
 
 
-def test_parameter_editor_docks_and_survives(recording):
+def test_parameter_editor_is_open_from_the_start(recording):
     """params.edit(blocking=False) returned a widget nothing kept alive."""
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
     try:
         actions = viewer.window.dock_widgets["Analysis"]
-        assert "Parameters" not in viewer.window.dock_widgets
-
-        actions.open_param_editor()
         assert "Parameters" in viewer.window.dock_widgets
 
         # Reopening must raise the existing dock, not stack up duplicates
         actions.open_param_editor()
         names = [n for n in viewer.window.dock_widgets if n == "Parameters"]
         assert len(names) == 1
+        assert actions.status.text() == "Parameter editor already open"
     finally:
         viewer.close()
+
+
+def test_parameters_are_grouped_into_sections(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        editor = viewer.window.dock_widgets["Parameters"]
+        tree = editor._tree
+        sections = [
+            tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())
+        ]
+        assert "preprocessing" in sections
+        assert len(sections) > 1
+
+        # Sections start open, and hold the parameters rather than listing
+        # them flat with dotted prefixes
+        first = tree.topLevelItem(0)
+        assert first.isExpanded() is True
+        assert first.childCount() > 0
+        assert "." not in first.child(0).text(0)
+    finally:
+        viewer.close()
+
+
+def test_filtering_hides_sections_left_empty(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        tree = viewer.window.dock_widgets["Parameters"]._tree
+        editor = viewer.window.dock_widgets["Parameters"]
+
+        editor._filter.setText("registration")
+        visible = [
+            tree.topLevelItem(i).text(0)
+            for i in range(tree.topLevelItemCount())
+            if not tree.topLevelItem(i).isHidden()
+        ]
+        assert visible == ["registration"]
+
+        editor._filter.setText("")
+        visible = [
+            tree.topLevelItem(i).text(0)
+            for i in range(tree.topLevelItemCount())
+            if not tree.topLevelItem(i).isHidden()
+        ]
+        assert len(visible) > 1
+    finally:
+        viewer.close()
+
+
+def test_editing_a_parameter_writes_it_back(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        editor = viewer.window.dock_widgets["Parameters"]
+        path = "preprocessing.artifact_width"
+        leaf = editor._items_by_path[path]
+
+        leaf.setText(1, "7")
+        assert recording.params[path] == 7
+
+        # A value that cannot be parsed reverts rather than corrupting
+        leaf.setText(1, "not_a_number")
+        assert recording.params[path] == 7
+        assert leaf.text(1) == "7"
+        assert "Error" in editor._status.text()
+    finally:
+        viewer.close()
+
+
+def test_booleans_are_not_labelled_as_ints():
+    """bool subclasses int, so the type check order matters."""
+    from pygor.core.gui.param_editor import _type_label
+
+    assert _type_label(True)[0] == "bool"
+    assert _type_label(3)[0] == "int"
 
 
 def test_palette_expands_as_rois_are_added(recording):

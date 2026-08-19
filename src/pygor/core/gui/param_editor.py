@@ -12,24 +12,26 @@ Usage
 
 from qtpy.QtWidgets import (
     QApplication,
-    QTableWidget,
-    QTableWidgetItem,
     QHeaderView,
     QVBoxLayout,
     QWidget,
     QLabel,
     QLineEdit,
     QAbstractItemView,
+    QTreeWidget,
+    QTreeWidgetItem,
 )
 from qtpy.QtCore import Qt, Signal, QEventLoop
 from qtpy.QtGui import QColor
 
 
 # Type display names and colours for the type column
+# bool must precede int: bool is a subclass of int, so checking int first
+# labels every True/False as an int
 _TYPE_INFO = {
+    bool: ("bool", QColor(80, 170, 80)),        # green
     int: ("int", QColor(100, 149, 237)),       # cornflower blue
     float: ("float", QColor(100, 149, 237)),
-    bool: ("bool", QColor(80, 170, 80)),        # green
     str: ("str", QColor(160, 160, 160)),         # grey
     list: ("list", QColor(180, 140, 80)),        # amber
 }
@@ -97,10 +99,11 @@ def _parse_value(text, original_value):
 
 
 class ParamEditorWidget(QWidget):
-    """Editable parameter table widget.
+    """Editable parameter tree widget.
 
-    Shows a three-column table (Parameter, Value, Type) populated from
-    an ``AnalysisParams`` instance. Edits to the Value column are written
+    Shows three columns (Parameter, Value, Type) populated from an
+    ``AnalysisParams`` instance, grouped into collapsible sections by the
+    first part of each dotted path. Edits to the Value column are written
     back to ``params._defaults`` immediately when the user clicks away
     from the cell (matching IGOR's behaviour).
 
@@ -144,93 +147,105 @@ class ParamEditorWidget(QWidget):
         self._filter.textChanged.connect(self._apply_filter)
         layout.addWidget(self._filter)
 
-        # Table
-        self._table = QTableWidget(len(self._items), 3)
-        self._table.setHorizontalHeaderLabels(["Parameter", "Value", "Type"])
-        self._table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.Stretch
-        )
-        self._table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeToContents
-        )
-        self._table.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeToContents
-        )
-        self._table.verticalHeader().setVisible(False)
-        self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        # Qt's own alternating colours come from the widget palette, which
-        # stays light even when the surrounding theme is dark - inside
-        # napari that gave light text on a light band. A translucent grey
-        # set per row composites over whatever base colour the theme uses,
-        # so it works in either.
-        self._table.setAlternatingRowColors(False)
+        self._tree = QTreeWidget()
+        self._tree.setColumnCount(3)
+        self._tree.setHeaderLabels(["Parameter", "Value", "Type"])
+        self._tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self._tree.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self._tree.header().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self._tree.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self._tree.setRootIsDecorated(True)
+        self._tree.setUniformRowHeights(True)
 
-        # Populate rows
-        for row, (path, value) in enumerate(self._items):
-            # Parameter path (read-only)
-            path_item = QTableWidgetItem(path)
-            path_item.setFlags(path_item.flags() & ~Qt.ItemIsEditable)
-            self._table.setItem(row, 0, path_item)
+        # path -> leaf item, so edits can be traced back to a parameter
+        self._items_by_path = {}
+        self._groups = {}
 
-            # Value (editable)
-            val_item = QTableWidgetItem(repr(value))
-            self._table.setItem(row, 1, val_item)
-
-            # Type (read-only)
+        for path, value in self._items:
+            group = self._group_for(path)
+            leaf = QTreeWidgetItem(group)
+            leaf.setText(0, path.split(".", 1)[-1] if "." in path else path)
+            leaf.setText(1, repr(value))
             type_name, type_colour = _type_label(value)
-            type_item = QTableWidgetItem(type_name)
-            type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable)
-            type_item.setForeground(type_colour)
-            self._table.setItem(row, 2, type_item)
+            leaf.setText(2, type_name)
+            leaf.setForeground(2, type_colour)
+            # Only the value is editable; the path and type are labels
+            leaf.setFlags(leaf.flags() | Qt.ItemIsEditable)
+            leaf.setData(0, Qt.UserRole, path)
+            self._items_by_path[path] = leaf
 
-            if row % 2:
-                for column in range(3):
-                    self._table.item(row, column).setBackground(_STRIPE_COLOUR)
-
-        # Connect edit signal — fires when user finishes editing a cell
-        self._table.cellChanged.connect(self._on_cell_changed)
-
-        layout.addWidget(self._table)
+        self._tree.expandAll()
+        self._tree.itemChanged.connect(self._on_item_changed)
+        layout.addWidget(self._tree)
 
         # Status bar
-        self._status = QLabel(f"{len(self._items)} parameters")
+        self._status = QLabel(
+            f"{len(self._items)} parameters in {len(self._groups)} sections"
+        )
         self._status.setStyleSheet("color: grey; font-size: 11px;")
         layout.addWidget(self._status)
 
-    def _on_cell_changed(self, row, col):
-        """Write edited value back to params when user clicks away."""
-        if col != 1:
+    def _group_for(self, path):
+        """Return the collapsible section a dotted path belongs to."""
+        name = path.split(".", 1)[0] if "." in path else "general"
+        if name not in self._groups:
+            group = QTreeWidgetItem(self._tree)
+            group.setText(0, name)
+            group.setFirstColumnSpanned(True)
+            # Not editable, and not mistakable for a parameter row
+            group.setFlags(Qt.ItemIsEnabled)
+            for column in range(3):
+                group.setBackground(column, _STRIPE_COLOUR)
+            self._groups[name] = group
+        return self._groups[name]
+
+    def _index_of(self, path):
+        for index, (item_path, _) in enumerate(self._items):
+            if item_path == path:
+                return index
+        return -1
+
+    def _on_item_changed(self, item, column):
+        """Write an edited value back to params when the user clicks away."""
+        if column != 1:
+            return
+        path = item.data(0, Qt.UserRole)
+        if path is None:
             return
 
-        path = self._items[row][0]
-        original_value = self._items[row][1]
-        new_text = self._table.item(row, 1).text()
+        index = self._index_of(path)
+        original_value = self._items[index][1]
 
+        self._tree.blockSignals(True)
         try:
-            parsed = _parse_value(new_text, original_value)
+            parsed = _parse_value(item.text(1), original_value)
             self.params[path] = parsed
-            # Update our local cache
-            self._items[row] = (path, parsed)
-            # Update display to show canonical repr
-            self._table.blockSignals(True)
-            self._table.item(row, 1).setText(repr(parsed))
-            self._table.blockSignals(False)
+            self._items[index] = (path, parsed)
+            # Show the canonical repr rather than whatever was typed
+            item.setText(1, repr(parsed))
             self._status.setText(f"Set {path} = {parsed!r}")
             self._status.setStyleSheet("color: green; font-size: 11px;")
         except (ValueError, KeyError) as e:
-            # Revert to original value
-            self._table.blockSignals(True)
-            self._table.item(row, 1).setText(repr(original_value))
-            self._table.blockSignals(False)
+            item.setText(1, repr(original_value))
             self._status.setText(f"Error: {e}")
             self._status.setStyleSheet("color: red; font-size: 11px;")
+        finally:
+            self._tree.blockSignals(False)
 
     def _apply_filter(self, text):
-        """Show/hide rows based on filter text."""
+        """Hide parameters that do not match, and sections left empty."""
         text = text.lower()
-        for row in range(self._table.rowCount()):
-            path = self._items[row][0].lower()
-            self._table.setRowHidden(row, text not in path)
+        for path, leaf in self._items_by_path.items():
+            leaf.setHidden(text not in path.lower())
+
+        for name, group in self._groups.items():
+            visible = any(
+                not group.child(i).isHidden() for i in range(group.childCount())
+            )
+            group.setHidden(not visible)
+            # Matching a section name should reveal what is inside it
+            if visible and text:
+                group.setExpanded(True)
 
     def closeEvent(self, event):
         """Emit closed signal for optional blocking callers."""

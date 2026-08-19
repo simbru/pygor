@@ -204,6 +204,12 @@ def launch(recording, show=True, block=False, title=None):
         population_dock, name="Population", area="right", tabify=True
     )
 
+    # Parameters are wanted often enough to be there from the start, tabbed
+    # with the other right-hand panels rather than opened from the menu.
+    actions_dock.open_param_editor(tabify=True)
+    actions_dock._set_status("Idle")
+    analysis_area.raise_()
+
     from pygor.gui.menus import build_pygor_menu
 
     build_pygor_menu(viewer, actions_dock, plot_dock, population_dock, recording)

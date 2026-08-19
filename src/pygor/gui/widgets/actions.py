@@ -424,7 +424,7 @@ class ActionsDock(QWidget):
 
         return edit_params
 
-    def open_param_editor(self, section=None):
+    def open_param_editor(self, section=None, tabify=False):
         """Dock the parameter editor, or raise it if already open.
 
         ``params.edit(blocking=False)`` returns a top-level widget that the
@@ -447,7 +447,7 @@ class ActionsDock(QWidget):
             title=name,
         )
         self._param_dock = self.viewer.window.add_dock_widget(
-            widget, name=name, area="right"
+            widget, name=name, area="right", tabify=tabify
         )
         self._set_status("Parameter editor opened")
         return self._param_dock
