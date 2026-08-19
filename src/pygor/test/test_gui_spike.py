@@ -45,6 +45,8 @@ class StubRecording:
         self.traces_znorm = rng.normal(size=(n_rois, n_frames)).astype(np.float32)
         self._original_images = None
         self._pre_registration_images = None
+        self.snippets = None
+        self.averages = None
 
         from pygor.params import AnalysisParams
 
@@ -63,6 +65,16 @@ class StubRecording:
         ids = np.unique(labels)
         ids = ids[ids > 0]
         return np.array(scipy.ndimage.center_of_mass(labels, labels, ids))
+
+    def compute_snippets_and_averages(self):
+        """Mirrors the real layout: (n_rois, n_loops, snippet_length)."""
+        rng = np.random.default_rng(1)
+        n_loops, length = 6, 24
+        self.snippets = rng.normal(
+            size=(self.num_rois, n_loops, length)
+        ).astype(np.float32)
+        self.averages = self.snippets.mean(axis=1)
+        return self.snippets, self.averages
 
     def update_ipl_depths(self, depths=None):
         self.ipl_depths = np.asarray(depths, dtype=float)
@@ -850,6 +862,7 @@ def test_pygor_menu_is_built(recording):
         assert [a.text() for a in _submenu(menu, "Analysis").actions()] == [
             "Segment ROIs...",
             "Extract traces",
+            "Compute averages",
             "Correlation projection",
         ]
     finally:
@@ -1031,21 +1044,6 @@ def test_expensive_metrics_wait_for_an_explicit_request(recording):
         viewer.close()
 
 
-def test_plot_dock_hides_a_single_entry_view_selector(recording):
-    from pygor.gui.launch import launch
-
-    viewer = launch(recording, show=False, block=False)
-    try:
-        plot = viewer.window.dock_widgets["Plot"]
-        assert plot.view == plot.TRACE
-        assert plot.mode_box.count() == 1
-        # A selector with one option is noise until a second view exists
-        assert plot.mode_box.isVisibleTo(plot) is False
-        assert "traces_znorm" in plot.status.text()
-    finally:
-        viewer.close()
-
-
 def test_population_histogram_follows_the_metric(recording):
     from pygor.gui.launch import launch
 
@@ -1093,6 +1091,84 @@ def test_population_histogram_can_be_hidden(recording):
         population.histogram_box.setChecked(True)
         assert population.canvas.isVisibleTo(population) is True
         assert len(population.ax.patches) > 0
+    finally:
+        viewer.close()
+
+
+def test_average_view_reports_when_there_is_nothing_to_average(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        plot = viewer.window.dock_widgets["Plot"]
+        assert plot.mode_box.count() == 2
+        # Two views, so the selector earns its place
+        assert plot.mode_box.isVisibleTo(plot) is True
+
+        plot.set_view(plot.AVERAGE)
+        assert "No averages" in plot.status.text()
+        assert len(plot.ax.lines) == 0
+    finally:
+        viewer.close()
+
+
+def test_average_view_draws_trials_behind_the_mean(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        plot = viewer.window.dock_widgets["Plot"]
+        snippets, averages = recording.compute_snippets_and_averages()
+        n_trials = snippets.shape[1]
+
+        plot.set_view(plot.AVERAGE)
+        plot.set_roi(2)
+        assert len(plot.ax.lines) == n_trials + 1
+        np.testing.assert_allclose(plot.ax.lines[-1].get_ydata(), averages[1])
+
+        plot.trials_box.setChecked(False)
+        assert len(plot.ax.lines) == 1
+    finally:
+        viewer.close()
+
+
+def test_average_view_caps_how_many_trials_it_draws(recording):
+    """Thousands of noise loops would be an unreadable smear."""
+    from pygor.gui.launch import launch
+    from pygor.gui.widgets.plot import _MAX_TRIALS_DRAWN
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        plot = viewer.window.dock_widgets["Plot"]
+        rng = np.random.default_rng(0)
+        many = _MAX_TRIALS_DRAWN * 10
+        recording.snippets = rng.normal(
+            size=(recording.num_rois, many, 12)
+        ).astype(np.float32)
+        recording.averages = recording.snippets.mean(axis=1)
+
+        plot.set_view(plot.AVERAGE)
+        plot.set_roi(1)
+        assert len(plot.ax.lines) <= _MAX_TRIALS_DRAWN + 1
+        assert f"of {many} trials shown" in plot.status.text()
+    finally:
+        viewer.close()
+
+
+def test_averaging_action_updates_the_recording(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        actions = viewer.window.dock_widgets["Analysis"]
+        assert recording.averages is None
+
+        worker = actions.run_averaging()
+        worker.await_workers()
+
+        assert recording.averages is not None
+        assert recording.averages.shape[0] == recording.num_rois
+        assert recording.snippets.ndim == 3
     finally:
         viewer.close()
 

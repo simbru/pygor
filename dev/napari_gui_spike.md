@@ -150,6 +150,16 @@ Population-level plots are not here. The metric histogram sits under the
 population table instead, since a distribution is read alongside the
 values it summarises.
 
+The Average view draws the mean across stimulus repetitions with the
+repetitions themselves behind it, capped at `_MAX_TRIALS_DRAWN` and
+reporting how many of how many are shown — a noise recording can carry
+nearly two thousand loops, which would be an unreadable smear.
+
+Note that `compute_snippets_and_averages` returns snippets shaped
+`(n_rois, n_loops, snippet_length)` and averages `(n_rois, snippet_length)`,
+not the `(snippet_length, n_loops, n_rois)` its docstring claims. Confirmed
+by checking which axis of the snippets reduces to the averages.
+
 ## IPL depth
 
 `pygor/gui/ipl.py` puts the two boundary polylines in the main viewer as

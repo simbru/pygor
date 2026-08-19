@@ -67,6 +67,7 @@ class ActionsDock(QWidget):
         return [
             self._segment_widget(),
             self._traces_widget(),
+            self._averaging_widget(),
             self._projection_widget(),
             self._push_rois_widget(),
             self._restore_layer_widget(),
@@ -266,6 +267,47 @@ class ActionsDock(QWidget):
         worker.returned.connect(self._add_projection_layer)
         self._run(worker, "Correlation projection done")
         return worker
+
+    def run_averaging(self):
+        """Split traces into stimulus repetitions and average them."""
+        pushed = self.sync_rois_from_layer()
+        self._set_status(
+            f"Averaging ({self.recording.num_rois} ROIs)..."
+            if pushed
+            else "Averaging trials..."
+        )
+
+        @thread_worker
+        def job():
+            return self.recording.compute_snippets_and_averages()
+
+        worker = job()
+        worker.returned.connect(self._on_averages_ready)
+        worker.errored.connect(
+            lambda exc: self._set_status(f"Averaging failed: {exc}")
+        )
+        worker.start()
+        return worker
+
+    def _on_averages_ready(self, result=None):
+        snippets, averages = result if result is not None else (None, None)
+        if averages is None:
+            self._set_status("Averaging produced nothing")
+            return
+        n_rois, length = np.shape(averages)
+        n_trials = np.shape(snippets)[1] if np.ndim(snippets) == 3 else 0
+        self._set_status(
+            f"Averaged {n_trials} trials for {n_rois} ROIs, {length} samples each"
+        )
+        if self.on_traces_changed is not None:
+            self.on_traces_changed()
+
+    def _averaging_widget(self):
+        @magicgui(call_button="Compute averages", layout="vertical")
+        def average():
+            self.run_averaging()
+
+        return average
 
     def _projection_widget(self):
         @magicgui(call_button="Correlation projection", layout="vertical")

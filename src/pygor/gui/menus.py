@@ -21,6 +21,7 @@ def build_pygor_menu(viewer, actions_dock, plot_dock, population_dock, recording
     analysis = menu.addMenu("Analysis")
     _add(analysis, "Segment ROIs...", lambda: actions_dock.run_segmentation())
     _add(analysis, "Extract traces", lambda: actions_dock.run_extraction())
+    _add(analysis, "Compute averages", lambda: actions_dock.run_averaging())
     _add(
         analysis,
         "Correlation projection",
@@ -41,6 +42,10 @@ def build_pygor_menu(viewer, actions_dock, plot_dock, population_dock, recording
     _add(ipl, "Estimate depths automatically", actions_dock.estimate_ipl_depths)
 
     view = menu.addMenu("View")
+    plot = view.addMenu("Plot shows")
+    for label in (plot_dock.TRACE, plot_dock.AVERAGE):
+        _add(plot, label, lambda name=label: plot_dock.set_view(name))
+    view.addSeparator()
     numbers_action = _add_checkable(
         view,
         "Show ROI numbers",

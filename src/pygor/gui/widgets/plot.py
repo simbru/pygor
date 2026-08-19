@@ -30,6 +30,9 @@ from pygor.gui.roi_bridge import label_to_trace_index
 # Attribute names offered in the source dropdown, in display order
 _TRACE_SOURCES = ("traces_znorm", "traces_raw", "traces_deconvolved", "averages")
 
+# Drawing every repetition of a noise stimulus is slow and unreadable
+_MAX_TRIALS_DRAWN = 40
+
 # Name of the crosshair layer marking the centred ROI, and its size as a
 # fraction of image width so it scales with the field of view
 CENTRE_LAYER_NAME = "Centred ROI"
@@ -55,6 +58,7 @@ class PlotDock(QWidget):
     """Dock widget holding the window's single plot axis."""
 
     TRACE = "Trace"
+    AVERAGE = "Average"
 
     def __init__(self, recording, viewer, labels_layer=None):
         super().__init__()
@@ -65,7 +69,7 @@ class PlotDock(QWidget):
         self._background = None
 
         self.mode_box = QComboBox()
-        self.mode_box.addItems([self.TRACE])
+        self.mode_box.addItems([self.TRACE, self.AVERAGE])
         self.mode_box.setToolTip("Which view this plot shows")
         self.mode_box.currentIndexChanged.connect(self._on_view_changed)
 
@@ -138,8 +142,23 @@ class PlotDock(QWidget):
         trace_row.addWidget(self.follow_box)
         trace_controls.setLayout(trace_row)
 
+        self.trials_box = QCheckBox("Show trials")
+        self.trials_box.setChecked(True)
+        self.trials_box.setToolTip(
+            "Draw the individual repetitions behind the average"
+        )
+        self.trials_box.toggled.connect(lambda _: self.refresh())
+
+        average_controls = QWidget()
+        average_row = QHBoxLayout()
+        average_row.setContentsMargins(0, 0, 0, 0)
+        average_row.addWidget(self.trials_box)
+        average_row.addStretch(1)
+        average_controls.setLayout(average_row)
+
         self.controls_stack = QStackedWidget()
         self.controls_stack.addWidget(trace_controls)
+        self.controls_stack.addWidget(average_controls)
 
         # A one-entry selector is just noise; it appears once a second view
         # is registered.
@@ -486,7 +505,66 @@ class PlotDock(QWidget):
         self._cursor = None
         self._background = None
 
+        if self.view == self.AVERAGE:
+            self._draw_average()
+            return
         self._draw_trace()
+
+    def _draw_average(self):
+        """Mean across stimulus repetitions, with the repetitions behind it.
+
+        ``compute_snippets_and_averages`` returns snippets shaped
+        (n_rois, n_loops, snippet_length) and averages (n_rois, snippet_length),
+        despite what its docstring says.
+        """
+        averages = np.asarray(getattr(self.recording, "averages", None))
+        if averages.ndim != 2:
+            self.status.setText(
+                "No averages — run Analysis, Compute averages, on a "
+                "recording with repeated trials"
+            )
+            self.ax.set_axis_off()
+            self.canvas.draw_idle()
+            return
+
+        index = label_to_trace_index(self.selected_label, self.recording.rois)
+        if index < 0 or index >= averages.shape[0]:
+            self.status.setText(f"No average for label {self.selected_label}")
+            self.ax.set_axis_off()
+            self.canvas.draw_idle()
+            return
+
+        self.ax.set_axis_on()
+        colour = self.roi_color()
+        shown = 0
+
+        snippets = getattr(self.recording, "snippets", None)
+        snippets = None if snippets is None else np.asarray(snippets)
+        if (
+            self.trials_box.isChecked()
+            and snippets is not None
+            and snippets.ndim == 3
+            and index < snippets.shape[0]
+        ):
+            trials = snippets[index]
+            # Thousands of noise loops would be an unreadable smear and slow
+            # to draw, so only a sample of them is shown.
+            step = max(1, int(np.ceil(trials.shape[0] / _MAX_TRIALS_DRAWN)))
+            for trial in trials[::step]:
+                self.ax.plot(trial, lw=0.5, color="0.6", alpha=0.5, zorder=1)
+                shown += 1
+
+        self.ax.plot(averages[index], lw=1.4, color=colour, zorder=2)
+        self.ax.set_xlabel("Sample")
+        self.ax.set_ylabel("Average")
+        self.ax.margins(x=0)
+
+        total = 0 if snippets is None or snippets.ndim != 3 else snippets.shape[1]
+        detail = f", {shown} of {total} trials shown" if shown else ""
+        self.status.setText(
+            f"ROI {self.selected_label} average over {total} trials{detail}"
+        )
+        self.canvas.draw_idle()
 
     def _draw_trace(self):
         """Time course of the selected ROI."""
