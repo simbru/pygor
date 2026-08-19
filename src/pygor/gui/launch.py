@@ -19,6 +19,9 @@ import numpy as np
 
 from pygor.gui.roi_bridge import mask_to_labels
 
+# Layer name the docks resolve the ROI mask by
+ROI_LAYER_NAME = "ROIs"
+
 
 def _import_napari():
     """Import napari, raising a useful message when the extra is missing."""
@@ -68,12 +71,21 @@ def _add_image_layers(viewer, recording):
         )
 
 
-def _add_roi_layer(viewer, recording):
-    """Add the ROI mask as a Labels layer, returning it (or None)."""
+def ensure_roi_layer(viewer, recording):
+    """Return the ROI Labels layer, rebuilding it from the recording if gone.
+
+    napari lets any layer be deleted from the layer list, and a deleted
+    Labels layer takes ROI editing with it while ``recording.rois`` stays
+    intact. Rebuilding from the recording is therefore always possible.
+
+    Returns None only when the recording has no ROI mask at all.
+    """
+    if ROI_LAYER_NAME in viewer.layers:
+        return viewer.layers[ROI_LAYER_NAME]
     if getattr(recording, "rois", None) is None:
         return None
     labels = mask_to_labels(recording.rois)
-    layer = viewer.add_labels(labels, name="ROIs", opacity=0.4)
+    layer = viewer.add_labels(labels, name=ROI_LAYER_NAME, opacity=0.4)
     # Painting should not eat into ROIs already placed, and filling should
     # stay within the region under the cursor.
     layer.preserve_labels = True
@@ -114,7 +126,7 @@ def launch(recording, show=True, block=False, title=None):
     viewer = napari.Viewer(title=title, show=show)
 
     _add_image_layers(viewer, recording)
-    labels_layer = _add_roi_layer(viewer, recording)
+    labels_layer = ensure_roi_layer(viewer, recording)
 
     from pygor.gui.widgets.actions import ActionsDock
     from pygor.gui.widgets.traces import TraceDock
@@ -125,6 +137,7 @@ def launch(recording, show=True, block=False, title=None):
         viewer,
         labels_layer=labels_layer,
         on_traces_changed=trace_dock.refresh,
+        on_layer_restored=trace_dock.rebind,
     )
 
     viewer.window.add_dock_widget(trace_dock, name="Traces", area="bottom")

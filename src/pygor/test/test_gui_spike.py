@@ -426,6 +426,85 @@ def test_navigation_keys_leave_brush_size_alone(recording):
         viewer.close()
 
 
+def test_removing_roi_layer_is_detected_not_silent(recording):
+    """A deleted layer stays alive in Python, so edits would go nowhere."""
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        actions = viewer.window.dock_widgets["Analysis"]
+
+        viewer.layers.remove(viewer.layers["ROIs"])
+        assert dock.labels_layer is None
+        assert actions.labels_layer is None
+        assert "Restore ROI layer" in actions.status.text()
+
+        # Guarded paths must degrade quietly rather than raise
+        assert dock.max_label == 0
+        dock.set_roi(3)
+        dock.refresh()
+        assert actions.sync_rois_from_layer() is False
+    finally:
+        viewer.close()
+
+
+def test_removing_roi_layer_rescues_unpushed_edits(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        labels_layer = viewer.layers["ROIs"]
+        before = recording.num_rois
+
+        dock.new_roi()
+        labels_layer.data[10:12, 10:12] = dock.selected_label
+        labels_layer.refresh()
+
+        viewer.layers.remove(labels_layer)
+        assert recording.num_rois == before + 1
+    finally:
+        viewer.close()
+
+
+def test_restore_rebuilds_layer_and_rebinds_docks(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        actions = viewer.window.dock_widgets["Analysis"]
+        viewer.layers.remove(viewer.layers["ROIs"])
+
+        restored = actions.restore_roi_layer()
+        assert restored is not None
+        assert "ROIs" in viewer.layers
+        assert dock.labels_layer is restored
+        assert restored.preserve_labels is True
+
+        # Rebound events must work again
+        dock.set_roi(2)
+        assert restored.selected_label == 2
+        restored.selected_label = 3
+        assert dock.roi_spin.value() == 3
+    finally:
+        viewer.close()
+
+
+def test_removing_other_layers_leaves_rois_alone(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        actions = viewer.window.dock_widgets["Analysis"]
+        viewer.layers.remove(viewer.layers["Image stack"])
+        assert actions.labels_layer is not None
+        assert "Restore ROI layer" not in actions.status.text()
+    finally:
+        viewer.close()
+
+
 def test_actions_dock_builds_all_buttons(recording):
     from pygor.gui.launch import launch
 

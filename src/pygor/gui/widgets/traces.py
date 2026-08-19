@@ -51,7 +51,7 @@ class TraceDock(QWidget):
         super().__init__()
         self.recording = recording
         self.viewer = viewer
-        self.labels_layer = labels_layer
+        self._labels_layer = labels_layer
         self._cursor = None
         self._background = None
 
@@ -135,17 +135,37 @@ class TraceDock(QWidget):
         self.connect_events()
         self.refresh()
 
+    @property
+    def labels_layer(self):
+        """The ROI layer, or None once it has been removed from the viewer.
+
+        A layer deleted from the layer list stays alive as a Python object,
+        so holding a direct reference would let edits carry on landing on a
+        detached layer where nothing shows them.
+        """
+        layer = self._labels_layer
+        if layer is None or layer not in self.viewer.layers:
+            return None
+        return layer
+
+    def bind_layer(self, layer):
+        """Attach to an ROI layer, subscribing to its editing events."""
+        self._labels_layer = layer
+        if layer is None:
+            return
+        layer.events.selected_label.connect(self._on_label_changed)
+        layer.events.paint.connect(self._on_paint)
+        layer.events.mode.connect(self._on_mode_changed)
+        self.refresh()
+
     def connect_events(self):
         """Subscribe to label-selection and frame-position changes."""
-        if self.labels_layer is not None:
-            self.labels_layer.events.selected_label.connect(self._on_label_changed)
+        if self._labels_layer is not None:
+            self.bind_layer(self._labels_layer)
         self.viewer.dims.events.current_step.connect(self._on_frame_changed)
         self.viewer.bind_key(",", lambda _viewer: self.step_roi(-1))
         self.viewer.bind_key(".", lambda _viewer: self.step_roi(1))
         self.viewer.bind_key("n", lambda _viewer: self.new_roi())
-        if self.labels_layer is not None:
-            self.labels_layer.events.paint.connect(self._on_paint)
-            self.labels_layer.events.mode.connect(self._on_mode_changed)
 
     @property
     def n_rois(self):
@@ -170,11 +190,12 @@ class TraceDock(QWidget):
         auto-new on, the first stroke would otherwise be absorbed into that
         ROI instead of starting a new one.
         """
-        if not self.auto_new_box.isChecked():
+        layer = self.labels_layer
+        if layer is None or not self.auto_new_box.isChecked():
             return
-        if str(self.labels_layer.mode) not in _DRAWING_MODES:
+        if str(layer.mode) not in _DRAWING_MODES:
             return
-        data = np.asarray(self.labels_layer.data)
+        data = np.asarray(layer.data)
         if np.any(data == self.selected_label):
             self.new_roi()
 
@@ -186,9 +207,10 @@ class TraceDock(QWidget):
         than once per mouse move. Erasing is excluded: it removes pixels
         rather than creating an ROI.
         """
-        if not self.auto_new_box.isChecked():
+        layer = self.labels_layer
+        if layer is None or not self.auto_new_box.isChecked():
             return
-        if str(self.labels_layer.mode) == "erase":
+        if str(layer.mode) == "erase":
             return
         self.new_roi()
 
@@ -288,6 +310,10 @@ class TraceDock(QWidget):
         """Scale the crosshair to a thirtieth of the image width."""
         width = np.asarray(self.labels_layer.data).shape[-1]
         return width / 30
+
+    def rebind(self, layer):
+        """Point the dock at a rebuilt ROI layer."""
+        self.bind_layer(layer)
 
     def _remove_centre_marker(self):
         """Hide the crosshair without disturbing the layer selection."""

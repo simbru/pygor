@@ -18,12 +18,22 @@ SEGMENTATION_MODES = ("blob", "watershed", "flood_fill", "cellpose", "cellpose+"
 class ActionsDock(QWidget):
     """Dock widget exposing segmentation, trace extraction and projections."""
 
-    def __init__(self, recording, viewer, labels_layer=None, on_traces_changed=None):
+    def __init__(
+        self,
+        recording,
+        viewer,
+        labels_layer=None,
+        on_traces_changed=None,
+        on_layer_restored=None,
+    ):
         super().__init__()
         self.recording = recording
         self.viewer = viewer
-        self.labels_layer = labels_layer
+        self._labels_layer = labels_layer
         self.on_traces_changed = on_traces_changed
+        self.on_layer_restored = on_layer_restored
+        self.viewer.layers.events.removing.connect(self._on_layer_removing)
+        self.viewer.layers.events.removed.connect(self._on_layer_removed)
 
         self.status = QLabel("Idle")
         self.status.setWordWrap(True)
@@ -41,8 +51,54 @@ class ActionsDock(QWidget):
             self._traces_widget(),
             self._projection_widget(),
             self._push_rois_widget(),
+            self._restore_layer_widget(),
             self._params_widget(),
         ]
+
+    @property
+    def labels_layer(self):
+        """The ROI layer, or None once it has been removed from the viewer."""
+        layer = self._labels_layer
+        if layer is None or layer not in self.viewer.layers:
+            return None
+        return layer
+
+    def _on_layer_removing(self, event=None):
+        """Save the mask before the ROI layer goes.
+
+        Restoring rebuilds from ``recording.rois``, so edits that were never
+        pushed would be lost with the layer. Writing them across first makes
+        deletion recoverable rather than destructive.
+        """
+        layer = self.labels_layer
+        if layer is None:
+            return
+        index = getattr(event, "index", None)
+        if index is not None and self.viewer.layers[index] is not layer:
+            return
+        self.sync_rois_from_layer()
+
+    def _on_layer_removed(self, event=None):
+        """Warn when the ROI layer is deleted, rather than failing quietly."""
+        if self._labels_layer is None or self.labels_layer is not None:
+            return
+        self._set_status(
+            "ROI layer removed. The mask is still on the recording — "
+            "press Restore ROI layer to bring it back."
+        )
+
+    def restore_roi_layer(self):
+        """Rebuild the ROI layer from the recording and rebind the docks."""
+        from pygor.gui.launch import ensure_roi_layer
+
+        layer = ensure_roi_layer(self.viewer, self.recording)
+        if layer is None:
+            self._set_status("Recording has no ROIs to restore")
+            return None
+        self._labels_layer = layer
+        if self.on_layer_restored is not None:
+            self.on_layer_restored(layer)
+        return layer
 
     def _set_status(self, text):
         self.status.setText(text)
@@ -54,9 +110,13 @@ class ActionsDock(QWidget):
         worker.start()
 
     def _refresh_labels(self):
-        if self.labels_layer is None or self.recording.rois is None:
+        if self.recording.rois is None:
             return
-        self.labels_layer.data = mask_to_labels(self.recording.rois)
+        layer = self.labels_layer
+        if layer is None:
+            self.restore_roi_layer()
+            return
+        layer.data = mask_to_labels(self.recording.rois)
 
     def _segment_widget(self):
         @magicgui(
@@ -164,6 +224,21 @@ class ActionsDock(QWidget):
                 self._set_status("ROIs already match the recording")
 
         return push
+
+    def _restore_layer_widget(self):
+        @magicgui(call_button="Restore ROI layer", layout="vertical")
+        def restore():
+            existed = self.labels_layer is not None
+            layer = self.restore_roi_layer()
+            if layer is None:
+                return
+            self._set_status(
+                "ROI layer already present"
+                if existed
+                else f"Restored ROI layer with {self.recording.num_rois} ROIs"
+            )
+
+        return restore
 
     def _params_widget(self):
         @magicgui(call_button="Edit parameters", layout="vertical")
