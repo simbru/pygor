@@ -304,6 +304,15 @@ def test_new_roi_label_survives_refresh(recording):
         viewer.close()
 
 
+def _process_events():
+    """Let queued Qt callbacks run, such as the deferred layer-lock restore."""
+    from qtpy.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if app is not None:
+        app.processEvents()
+
+
 def _stroke(labels_layer, coord):
     """Simulate a completed brush stroke.
 
@@ -464,10 +473,11 @@ def test_removing_roi_layer_is_detected_not_silent(recording):
         dock = viewer.window.dock_widgets["Traces"]
         actions = viewer.window.dock_widgets["Analysis"]
 
+        actions.lock_box.setChecked(False)
         viewer.layers.remove(viewer.layers["ROIs"])
         assert dock.labels_layer is None
         assert actions.labels_layer is None
-        assert "Restore ROI layer" in actions.status.text()
+        assert "Restore default layers" in actions.status.text()
 
         # Guarded paths must degrade quietly rather than raise
         assert dock.max_label == 0
@@ -487,6 +497,8 @@ def test_removing_roi_layer_rescues_unpushed_edits(recording):
         labels_layer = viewer.layers["ROIs"]
         before = recording.num_rois
 
+        actions = viewer.window.dock_widgets["Analysis"]
+        actions.lock_box.setChecked(False)
         dock.new_roi()
         labels_layer.data[10:12, 10:12] = dock.selected_label
         labels_layer.refresh()
@@ -504,6 +516,7 @@ def test_restore_rebuilds_layer_and_rebinds_docks(recording):
     try:
         dock = viewer.window.dock_widgets["Traces"]
         actions = viewer.window.dock_widgets["Analysis"]
+        actions.lock_box.setChecked(False)
         viewer.layers.remove(viewer.layers["ROIs"])
 
         restored = actions.restore_roi_layer()
@@ -521,15 +534,77 @@ def test_restore_rebuilds_layer_and_rebinds_docks(recording):
         viewer.close()
 
 
-def test_removing_other_layers_leaves_rois_alone(recording):
+def test_removing_a_user_layer_is_ignored(recording):
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
     try:
         actions = viewer.window.dock_widgets["Analysis"]
-        viewer.layers.remove(viewer.layers["Image stack"])
+        before = actions.status.text()
+
+        viewer.add_points([[1, 1]], name="scratch")
+        viewer.layers.remove(viewer.layers["scratch"])
+        _process_events()
+
         assert actions.labels_layer is not None
-        assert "Restore ROI layer" not in actions.status.text()
+        assert actions.status.text() == before
+    finally:
+        viewer.close()
+
+
+def test_closing_a_viewer_with_locked_layers_terminates(recording):
+    """viewer.close() empties the layer list; the lock must not refill it."""
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    actions = viewer.window.dock_widgets["Analysis"]
+    assert actions.lock_box.isChecked() is True
+    viewer.close()
+    _process_events()
+    assert len(viewer.layers) == 0
+
+
+def test_locked_default_layers_come_straight_back(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        actions = viewer.window.dock_widgets["Analysis"]
+        dock = viewer.window.dock_widgets["Traces"]
+        assert actions.lock_box.isChecked() is True
+
+        viewer.layers.remove(viewer.layers["Image stack"])
+        _process_events()
+        assert "Image stack" in viewer.layers
+        assert "Restored locked layer" in actions.status.text()
+
+        viewer.layers.remove(viewer.layers["ROIs"])
+        _process_events()
+        assert "ROIs" in viewer.layers
+        assert dock.labels_layer is not None
+
+        # The ROI layer must stay above the image stack to remain visible
+        assert [layer.name for layer in viewer.layers][-1] == "ROIs"
+    finally:
+        viewer.close()
+
+
+def test_restore_defaults_rebuilds_every_missing_layer(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        actions = viewer.window.dock_widgets["Analysis"]
+        actions.lock_box.setChecked(False)
+        expected = list(actions.default_layers)
+
+        for name in expected:
+            viewer.layers.remove(viewer.layers[name])
+        assert sorted(actions.missing_default_layers()) == sorted(expected)
+
+        actions.restore_default_layers()
+        assert actions.missing_default_layers() == []
+        assert sorted(layer.name for layer in viewer.layers) == sorted(expected)
     finally:
         viewer.close()
 

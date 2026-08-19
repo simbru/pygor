@@ -88,14 +88,20 @@ instead, and reports no trace for a label with no row.
 - The Labels layer starts with `preserve_labels` and `contiguous` on, so
   painting does not eat into ROIs already placed and filling stays within
   the region under the cursor.
-- Deleting the ROI layer is recoverable. napari offers no way to make a
-  layer undeletable, so the layer is treated as disposable instead: the
-  docks resolve it by membership in `viewer.layers` rather than holding a
-  reference, unpushed edits are written to the recording on the `removing`
-  event, and "Restore ROI layer" rebuilds it from `recording.rois` and
-  rebinds the docks. Without the membership check a deleted layer still
-  accepted edits, since it stays alive as a Python object — the failure
-  was silent.
+- Deleting a default layer is recoverable. napari offers no way to make a
+  layer undeletable, so the layers are treated as disposable instead: the
+  docks resolve the ROI layer by membership in `viewer.layers` rather than
+  holding a reference, unpushed edits are written to the recording on the
+  `removing` event, and "Restore default layers" rebuilds whatever is
+  missing from the recording and rebinds the docks. Without the membership
+  check a deleted layer still accepted edits, since it stays alive as a
+  Python object — the failure was silent.
+- "Lock default layers", on by default, puts a deleted default layer
+  straight back. The restore is queued with `QTimer.singleShot` rather than
+  run inside the removal event: `viewer.close()` empties the layer list one
+  layer at a time, so an inline restore re-added each layer as it was
+  removed and the close never terminated. A queued callback simply never
+  runs during teardown. Layers the user adds themselves are ignored.
 
 Environment already has everything: napari 0.7.1, magicgui 0.10.2,
 qtpy 2.4.3, matplotlib 3.11.0.

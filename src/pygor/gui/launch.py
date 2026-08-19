@@ -38,12 +38,10 @@ def _import_napari():
     return napari
 
 
-def _add_image_layers(viewer, recording):
-    """Add the main stack plus any stored comparison stacks."""
+def _image_sources(recording):
+    """Yield (name, array, visible) for each image layer launch provides."""
     if getattr(recording, "images", None) is not None:
-        viewer.add_image(
-            np.asarray(recording.images), name="Image stack", colormap="Greys_r"
-        )
+        yield "Image stack", np.asarray(recording.images), True
 
     extras = (
         ("_pre_registration_images", "Pre-registration"),
@@ -52,9 +50,7 @@ def _add_image_layers(viewer, recording):
     for attr, name in extras:
         stack = getattr(recording, attr, None)
         if stack is not None:
-            viewer.add_image(
-                np.asarray(stack), name=name, colormap="Greys_r", visible=False
-            )
+            yield name, np.asarray(stack), False
 
     # Returns None when the recording has no repetitions to average over.
     average = None
@@ -66,9 +62,22 @@ def _add_image_layers(viewer, recording):
                 f"Could not compute average projection: {exc}", stacklevel=2
             )
     if average is not None:
-        viewer.add_image(
-            np.asarray(average), name="Average", colormap="Greys_r", visible=False
-        )
+        yield "Average", np.asarray(average), False
+
+
+def ensure_image_layers(viewer, recording):
+    """Add any missing image layers, leaving existing ones untouched.
+
+    Returns the names of the image layers this recording provides,
+    whether or not they had to be created.
+    """
+    names = []
+    for name, data, visible in _image_sources(recording):
+        names.append(name)
+        if name in viewer.layers:
+            continue
+        viewer.add_image(data, name=name, colormap="Greys_r", visible=visible)
+    return names
 
 
 def ensure_roi_layer(viewer, recording):
@@ -93,6 +102,26 @@ def ensure_roi_layer(viewer, recording):
     if labels.max() > 0:
         layer.selected_label = 1
     return layer
+
+
+def ensure_default_layers(viewer, recording):
+    """Rebuild any of launch's own layers that are missing.
+
+    Returns ``(layer_names, roi_layer)``. Layers the user added themselves
+    are left alone, and existing default layers keep their current
+    settings rather than being replaced.
+    """
+    names = ensure_image_layers(viewer, recording)
+    roi_layer = ensure_roi_layer(viewer, recording)
+    if roi_layer is not None:
+        names.append(ROI_LAYER_NAME)
+        # A rebuilt layer is appended on top, which would put an image
+        # stack over the ROI labels and hide them.
+        index = viewer.layers.index(roi_layer)
+        if index != len(viewer.layers) - 1:
+            # move() inserts before the target index, so the end is len()
+            viewer.layers.move(index, len(viewer.layers))
+    return names, roi_layer
 
 
 def launch(recording, show=True, block=False, title=None):
@@ -125,8 +154,7 @@ def launch(recording, show=True, block=False, title=None):
 
     viewer = napari.Viewer(title=title, show=show)
 
-    _add_image_layers(viewer, recording)
-    labels_layer = ensure_roi_layer(viewer, recording)
+    default_layers, labels_layer = ensure_default_layers(viewer, recording)
 
     from pygor.gui.widgets.actions import ActionsDock
     from pygor.gui.widgets.traces import TraceDock
@@ -138,6 +166,7 @@ def launch(recording, show=True, block=False, title=None):
         labels_layer=labels_layer,
         on_traces_changed=trace_dock.refresh,
         on_layer_restored=trace_dock.rebind,
+        default_layers=default_layers,
     )
 
     viewer.window.add_dock_widget(trace_dock, name="Traces", area="bottom")

@@ -8,7 +8,8 @@ layers are refreshed on the main thread.
 import numpy as np
 from magicgui import magicgui
 from napari.qt.threading import thread_worker
-from qtpy.QtWidgets import QLabel, QVBoxLayout, QWidget
+from qtpy.QtCore import QTimer
+from qtpy.QtWidgets import QCheckBox, QLabel, QVBoxLayout, QWidget
 
 from pygor.gui.roi_bridge import is_igor_style, labels_to_mask, mask_to_labels
 
@@ -25,6 +26,7 @@ class ActionsDock(QWidget):
         labels_layer=None,
         on_traces_changed=None,
         on_layer_restored=None,
+        default_layers=None,
     ):
         super().__init__()
         self.recording = recording
@@ -32,14 +34,26 @@ class ActionsDock(QWidget):
         self._labels_layer = labels_layer
         self.on_traces_changed = on_traces_changed
         self.on_layer_restored = on_layer_restored
-        self.viewer.layers.events.removing.connect(self._on_layer_removing)
-        self.viewer.layers.events.removed.connect(self._on_layer_removed)
+        self.default_layers = list(default_layers or [])
+        # Guards against reacting to the additions a restore itself makes
+        self._restoring = False
 
         self.status = QLabel("Idle")
         self.status.setWordWrap(True)
 
+        self.lock_box = QCheckBox("Lock default layers")
+        self.lock_box.setChecked(True)
+        self.lock_box.setToolTip(
+            "Put back a layer this window created if it is deleted. The "
+            "docks depend on those layers; untick to remove them for good."
+        )
+
+        self.viewer.layers.events.removing.connect(self._on_layer_removing)
+        self.viewer.layers.events.removed.connect(self._on_layer_removed)
+
         layout = QVBoxLayout()
         layout.addWidget(self.status)
+        layout.addWidget(self.lock_box)
         for widget in self._build_widgets():
             layout.addWidget(widget.native)
         layout.addStretch(1)
@@ -79,26 +93,65 @@ class ActionsDock(QWidget):
         self.sync_rois_from_layer()
 
     def _on_layer_removed(self, event=None):
-        """Warn when the ROI layer is deleted, rather than failing quietly."""
-        if self._labels_layer is None or self.labels_layer is not None:
+        """Put back a locked default layer, or say how to get it back."""
+        if self._restoring:
+            return
+        missing = self.missing_default_layers()
+        if not missing:
+            return
+        if self.lock_box.isChecked():
+            # Restoring inline would fight viewer.close(), which empties the
+            # layer list one layer at a time: each re-added layer would be
+            # removed again and the close would never finish. Queueing the
+            # restore means a teardown simply never gets round to it.
+            QTimer.singleShot(0, self._restore_locked_layers)
             return
         self._set_status(
-            "ROI layer removed. The mask is still on the recording — "
-            "press Restore ROI layer to bring it back."
+            f"Removed: {', '.join(missing)}. The data is still on the "
+            "recording — press Restore default layers to bring them back."
         )
 
-    def restore_roi_layer(self):
-        """Rebuild the ROI layer from the recording and rebind the docks."""
-        from pygor.gui.launch import ensure_roi_layer
+    def _restore_locked_layers(self):
+        """Deferred half of the lock. Silent if the viewer has since gone."""
+        if not self.lock_box.isChecked():
+            return
+        try:
+            missing = self.missing_default_layers()
+            if not missing:
+                return
+            self.restore_default_layers()
+        except RuntimeError:
+            # Viewer torn down between the removal and this callback
+            return
+        self._set_status(f"Restored locked layer(s): {', '.join(missing)}")
 
-        layer = ensure_roi_layer(self.viewer, self.recording)
-        if layer is None:
-            self._set_status("Recording has no ROIs to restore")
-            return None
-        self._labels_layer = layer
-        if self.on_layer_restored is not None:
-            self.on_layer_restored(layer)
+    def missing_default_layers(self):
+        """Names of layers this window created that are no longer present."""
+        return [name for name in self.default_layers if name not in self.viewer.layers]
+
+    def restore_default_layers(self):
+        """Rebuild every missing default layer and rebind the docks."""
+        from pygor.gui.launch import ensure_default_layers
+
+        self._restoring = True
+        try:
+            names, layer = ensure_default_layers(self.viewer, self.recording)
+        finally:
+            self._restoring = False
+
+        self.default_layers = names
+        if layer is not None and layer is not self._labels_layer:
+            self._labels_layer = layer
+            if self.on_layer_restored is not None:
+                self.on_layer_restored(layer)
         return layer
+
+    def restore_roi_layer(self):
+        """Rebuild just the ROI layer. Kept for callers that only need it."""
+        self.restore_default_layers()
+        if self.labels_layer is None:
+            self._set_status("Recording has no ROIs to restore")
+        return self.labels_layer
 
     def _set_status(self, text):
         self.status.setText(text)
@@ -226,16 +279,14 @@ class ActionsDock(QWidget):
         return push
 
     def _restore_layer_widget(self):
-        @magicgui(call_button="Restore ROI layer", layout="vertical")
+        @magicgui(call_button="Restore default layers", layout="vertical")
         def restore():
-            existed = self.labels_layer is not None
-            layer = self.restore_roi_layer()
-            if layer is None:
-                return
+            missing = self.missing_default_layers()
+            self.restore_default_layers()
             self._set_status(
-                "ROI layer already present"
-                if existed
-                else f"Restored ROI layer with {self.recording.num_rois} ROIs"
+                f"Restored: {', '.join(missing)}"
+                if missing
+                else "All default layers already present"
             )
 
         return restore
