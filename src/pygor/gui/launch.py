@@ -13,6 +13,8 @@ Usage
 >>> viewer = launch(rec)
 """
 
+import warnings
+
 import numpy as np
 
 from pygor.gui.roi_bridge import mask_to_labels
@@ -51,12 +53,15 @@ def _add_image_layers(viewer, recording):
                 np.asarray(stack), name=name, colormap="Greys_r", visible=False
             )
 
+    # Returns None when the recording has no repetitions to average over.
     average = None
     if hasattr(recording, "calculate_image_average"):
         try:
             average = recording.calculate_image_average()
-        except Exception:
-            average = None
+        except Exception as exc:
+            warnings.warn(
+                f"Could not compute average projection: {exc}", stacklevel=2
+            )
     if average is not None:
         viewer.add_image(
             np.asarray(average), name="Average", colormap="Greys_r", visible=False

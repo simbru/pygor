@@ -121,12 +121,16 @@ def test_actions_dock_builds_all_buttons(recording):
 
 # Real-data smoke test. Skipped unless the demo recording is present, since
 # it is not checked into the repository.
-_DEMO = (
-    pathlib.Path(__file__).parents[3].joinpath("examples/strf_demo_data.h5")
+# Set PYGOR_TEST_H5 to point at any recording on the local machine.
+_DEMO = pathlib.Path(
+    os.environ.get(
+        "PYGOR_TEST_H5",
+        pathlib.Path(__file__).parents[3].joinpath("examples/strf_demo_data.h5"),
+    )
 )
 
 
-@pytest.mark.skipif(not _DEMO.exists(), reason=f"demo recording missing: {_DEMO}")
+@pytest.mark.skipif(not _DEMO.exists(), reason=f"no recording at {_DEMO}")
 def test_launch_against_real_recording():
     import pygor.load
     from pygor.gui.launch import launch

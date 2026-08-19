@@ -55,9 +55,9 @@ deprecated and warns).
 
 ## Open items
 
-- Not tested against a real recording. `examples/strf_demo_data.h5` is not
-  checked in, so `test_launch_against_real_recording` skips here. Run the
-  suite where that file exists before trusting the layer/trace wiring.
+- `calculate_image_average` returns None when a recording has no
+  repetitions, so the Average layer is absent for such recordings. Expected,
+  not a failure.
 - Analysis-type subclasses (STRF, OSDS, moving bars, ...) get no
   type-specific docks yet. STRF in particular wants its own panel reusing
   `pygor/strf/plotting`.
@@ -74,5 +74,17 @@ deprecated and warns).
 ```
 QT_QPA_PLATFORM=offscreen uv run --with pytest --with pytest-qt \
     python -m pytest src/pygor/test/test_gui_spike.py -q
-6 passed, 1 skipped
 ```
+
+`test_launch_against_real_recording` skips unless a recording is available.
+Point it at one with `PYGOR_TEST_H5`:
+
+```
+PYGOR_TEST_H5=/path/to/recording.h5 QT_QPA_PLATFORM=offscreen \
+    uv run --with pytest --with pytest-qt \
+    python -m pytest src/pygor/test/test_gui_spike.py -q
+```
+
+Verified against `raw_h5/control/2023-11-14_0_0_SWN_200_Colours.h5`
+(20684 frames, 64x128, 11 ROIs): layers built, label 1 resolved to its
+`traces_znorm` row. 7 passed.
