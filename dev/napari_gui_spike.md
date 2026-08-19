@@ -125,6 +125,27 @@ object rather than on window close. Private napari attributes are avoided;
 `viewer.window.dock_widgets` is the public accessor (`_dock_widgets` is
 deprecated and warns).
 
+## Menus
+
+`pygor/gui/menus.py` adds a **Pygor** menu to napari's own menu bar:
+
+- **Analysis** — segment, extract traces, correlation projection. Same
+  methods the dock buttons call, so behaviour cannot diverge.
+- **ROIs** — new / next / previous, push to recording, restore layers.
+- **View** — checkable items mirroring the dock checkboxes and the ROI
+  number layer's visibility, in both directions.
+- **Parameters...** and **Save recording as...**
+
+The dock keeps the buttons used constantly; the menu carries the rest so
+the panel does not have to grow. Dock actions were closures inside the
+magicgui factories, so they were lifted to `run_segmentation`,
+`run_extraction` and `run_correlation_projection` for both to share.
+
+The parameter editor is docked rather than opened as a top-level window.
+`params.edit(blocking=False)` returns a widget the caller must keep alive,
+and dropping it let Python collect the window the moment it appeared —
+pressing the button did nothing visible. Docking hands ownership to Qt.
+
 ## napari Labels controls, for reference
 
 - **n edit dim** — how many dimensions a paint or fill stroke reaches

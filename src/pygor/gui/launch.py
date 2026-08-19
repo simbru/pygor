@@ -187,6 +187,10 @@ def launch(recording, show=True, block=False, title=None):
     viewer.window.add_dock_widget(trace_dock, name="Traces", area="bottom")
     viewer.window.add_dock_widget(actions_dock, name="Analysis", area="right")
 
+    from pygor.gui.menus import build_pygor_menu
+
+    build_pygor_menu(viewer, actions_dock, trace_dock, recording)
+
     if block:
         napari.run()
 

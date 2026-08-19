@@ -37,6 +37,7 @@ class ActionsDock(QWidget):
         self.default_layers = list(default_layers or [])
         # Guards against reacting to the additions a restore itself makes
         self._restoring = False
+        self._param_dock = None
 
         self.status = QLabel("Idle")
         self.status.setWordWrap(True)
@@ -186,6 +187,19 @@ class ActionsDock(QWidget):
         layer.data = mask_to_labels(self.recording.rois)
         self.refresh_numbers()
 
+    def run_segmentation(self, mode="blob", overwrite=True):
+        """Segment ROIs off the GUI thread, refreshing the layer when done."""
+        self._set_status(f"Segmenting ({mode})...")
+
+        @thread_worker
+        def job():
+            return self.recording.segment_rois(mode=mode, overwrite=overwrite)
+
+        worker = job()
+        worker.returned.connect(lambda _=None: self._refresh_labels())
+        self._run(worker, f"Segmented: {self.recording.num_rois} ROIs")
+        return worker
+
     def _segment_widget(self):
         @magicgui(
             call_button="Segment ROIs",
@@ -193,40 +207,57 @@ class ActionsDock(QWidget):
             layout="vertical",
         )
         def segment(mode: str = "blob", overwrite: bool = True):
-            self._set_status(f"Segmenting ({mode})...")
-
-            @thread_worker
-            def job():
-                return self.recording.segment_rois(mode=mode, overwrite=overwrite)
-
-            worker = job()
-            worker.returned.connect(lambda _=None: self._refresh_labels())
-            self._run(worker, f"Segmented: {self.recording.num_rois} ROIs")
+            self.run_segmentation(mode=mode, overwrite=overwrite)
 
         return segment
+
+    def run_extraction(self, baseline_dur=10.0):
+        """Extract traces off the GUI thread, syncing hand-drawn ROIs first."""
+        # Extraction reads recording.rois, so ROIs drawn in the layer are
+        # invisible to it until they are written back.
+        pushed = self.sync_rois_from_layer()
+        self._set_status(
+            f"Extracting traces ({self.recording.num_rois} ROIs)..."
+            if pushed
+            else "Extracting traces..."
+        )
+
+        @thread_worker
+        def job():
+            return self.recording.extract_traces_from_rois(baseline_dur=baseline_dur)
+
+        worker = job()
+        if self.on_traces_changed is not None:
+            worker.returned.connect(lambda _=None: self.on_traces_changed())
+        self._run(worker, "Traces extracted")
+        return worker
 
     def _traces_widget(self):
         @magicgui(call_button="Extract traces", layout="vertical")
         def extract(baseline_dur: float = 10.0):
-            # Extraction reads recording.rois, so ROIs drawn in the layer
-            # are invisible to it until they are written back.
-            pushed = self.sync_rois_from_layer()
-            self._set_status(
-                f"Extracting traces ({self.recording.num_rois} ROIs)..."
-                if pushed
-                else "Extracting traces..."
-            )
-
-            @thread_worker
-            def job():
-                return self.recording.extract_traces_from_rois(baseline_dur=baseline_dur)
-
-            worker = job()
-            if self.on_traces_changed is not None:
-                worker.returned.connect(lambda _=None: self.on_traces_changed())
-            self._run(worker, "Traces extracted")
+            self.run_extraction(baseline_dur=baseline_dur)
 
         return extract
+
+    def run_correlation_projection(
+        self, include_diagonals=True, timecompress=1, binpix=1
+    ):
+        """Compute the correlation projection and add it as a layer."""
+        self._set_status("Computing correlation projection...")
+
+        @thread_worker
+        def job():
+            return self.recording.compute_correlation_projection(
+                include_diagonals=include_diagonals,
+                timecompress=timecompress,
+                binpix=binpix,
+                overwrite=True,
+            )
+
+        worker = job()
+        worker.returned.connect(self._add_projection_layer)
+        self._run(worker, "Correlation projection done")
+        return worker
 
     def _projection_widget(self):
         @magicgui(call_button="Correlation projection", layout="vertical")
@@ -235,20 +266,11 @@ class ActionsDock(QWidget):
             timecompress: int = 1,
             binpix: int = 1,
         ):
-            self._set_status("Computing correlation projection...")
-
-            @thread_worker
-            def job():
-                return self.recording.compute_correlation_projection(
-                    include_diagonals=include_diagonals,
-                    timecompress=timecompress,
-                    binpix=binpix,
-                    overwrite=True,
-                )
-
-            worker = job()
-            worker.returned.connect(self._add_projection_layer)
-            self._run(worker, "Correlation projection done")
+            self.run_correlation_projection(
+                include_diagonals=include_diagonals,
+                timecompress=timecompress,
+                binpix=binpix,
+            )
 
         return project
 
@@ -310,7 +332,34 @@ class ActionsDock(QWidget):
     def _params_widget(self):
         @magicgui(call_button="Edit parameters", layout="vertical")
         def edit_params():
-            self.recording.params.edit(blocking=False)
-            self._set_status("Parameter editor opened")
+            self.open_param_editor()
 
         return edit_params
+
+    def open_param_editor(self, section=None):
+        """Dock the parameter editor, or raise it if already open.
+
+        ``params.edit(blocking=False)`` returns a top-level widget that the
+        caller has to keep alive; dropping it let Python collect the window
+        the moment it appeared. Docking hands ownership to Qt instead, and
+        keeps the editor in the same window as everything else.
+        """
+        from pygor.core.gui.param_editor import ParamEditorWidget
+
+        name = "Parameters"
+        if self._param_dock is not None:
+            self._param_dock.show()
+            self._param_dock.raise_()
+            self._set_status("Parameter editor already open")
+            return self._param_dock
+
+        widget = ParamEditorWidget(
+            self.recording.params,
+            section=section,
+            title=name,
+        )
+        self._param_dock = self.viewer.window.add_dock_widget(
+            widget, name=name, area="right"
+        )
+        self._set_status("Parameter editor opened")
+        return self._param_dock

@@ -44,6 +44,10 @@ class StubRecording:
         self._original_images = None
         self._pre_registration_images = None
 
+        from pygor.params import AnalysisParams
+
+        self.params = AnalysisParams.from_config(None, analysis_type="Core")
+
     def calculate_image_average(self):
         return self.images.mean(axis=0)
 
@@ -733,6 +737,97 @@ def test_number_layer_follows_new_rois(recording):
 
         numbers = viewer.layers[NUMBER_LAYER_NAME]
         assert len(numbers.data) == before + 1
+    finally:
+        viewer.close()
+
+
+def _pygor_menu(viewer):
+    from pygor.gui.menus import MENU_TITLE
+
+    for action in viewer.window.main_menu.actions():
+        if action.text() == MENU_TITLE:
+            return action.menu()
+    raise AssertionError("Pygor menu not found")
+
+
+def _submenu(menu, title):
+    for action in menu.actions():
+        if action.text() == title:
+            return action.menu()
+    raise AssertionError(f"submenu {title!r} not found")
+
+
+def test_pygor_menu_is_built(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        menu = _pygor_menu(viewer)
+        titles = [a.text() for a in menu.actions() if not a.isSeparator()]
+        assert {"Analysis", "ROIs", "View", "Parameters...", "Save recording as..."} <= set(
+            titles
+        )
+        assert [a.text() for a in _submenu(menu, "Analysis").actions()] == [
+            "Segment ROIs...",
+            "Extract traces",
+            "Correlation projection",
+        ]
+    finally:
+        viewer.close()
+
+
+def test_menu_toggles_track_the_docks_both_ways(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        view = _submenu(_pygor_menu(viewer), "View")
+        items = {a.text(): a for a in view.actions()}
+
+        items["Follow frame"].setChecked(True)
+        assert dock.follow_box.isChecked() is True
+
+        dock.auto_new_box.setChecked(False)
+        assert items["Auto-new ROI after each stroke"].isChecked() is False
+    finally:
+        viewer.close()
+
+
+def test_menu_tracks_roi_number_visibility(recording):
+    from pygor.gui.launch import launch
+    from pygor.gui.roi_numbers import NUMBER_LAYER_NAME
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        view = _submenu(_pygor_menu(viewer), "View")
+        item = {a.text(): a for a in view.actions()}["Show ROI numbers"]
+
+        viewer.layers[NUMBER_LAYER_NAME].visible = False
+        assert item.isChecked() is False
+
+        item.setChecked(True)
+        assert viewer.layers[NUMBER_LAYER_NAME].visible is True
+    finally:
+        viewer.close()
+
+
+def test_parameter_editor_docks_and_survives(recording):
+    """params.edit(blocking=False) returned a widget nothing kept alive."""
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        actions = viewer.window.dock_widgets["Analysis"]
+        assert "Parameters" not in viewer.window.dock_widgets
+
+        actions.open_param_editor()
+        assert "Parameters" in viewer.window.dock_widgets
+
+        # Reopening must raise the existing dock, not stack up duplicates
+        actions.open_param_editor()
+        names = [n for n in viewer.window.dock_widgets if n == "Parameters"]
+        assert len(names) == 1
     finally:
         viewer.close()
 
