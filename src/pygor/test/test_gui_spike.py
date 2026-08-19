@@ -20,6 +20,8 @@ from pygor.gui.roi_bridge import (  # noqa: E402
     label_to_trace_index,
     labels_to_mask,
     mask_to_labels,
+    roi_ids_in_order,
+    trace_index_to_label,
 )
 
 
@@ -82,6 +84,33 @@ def test_positive_mask_detected_and_preserved():
 def test_label_index_mapping():
     assert label_to_trace_index(1) == 0
     assert label_to_trace_index(3) == 2
+
+
+def test_roi_ids_follow_extraction_order():
+    igor = np.array([[1, -1, -2], [-3, 1, 1]])
+    np.testing.assert_array_equal(roi_ids_in_order(igor), [-1, -2, -3])
+
+    positive = np.array([[0, 1, 2], [3, 0, 0]])
+    np.testing.assert_array_equal(roi_ids_in_order(positive), [1, 2, 3])
+
+
+def test_label_index_accounts_for_erased_rois():
+    """Trace rows are packed, so a gap in the labels shifts later rows."""
+    mask = np.ones((2, 8), dtype=int)
+    for roi in (1, 2, 3, 5, 6):
+        mask[0, roi - 1] = -roi
+
+    # Contiguous up to the gap, then one row lower than the label suggests
+    assert label_to_trace_index(1, mask) == 0
+    assert label_to_trace_index(3, mask) == 2
+    assert label_to_trace_index(5, mask) == 3
+    assert label_to_trace_index(6, mask) == 4
+
+    # Label 4 was erased and has no row
+    assert label_to_trace_index(4, mask) == -1
+
+    assert trace_index_to_label(3, mask) == 5
+    assert trace_index_to_label(99, mask) == 0
 
 
 def test_viewer_builds_with_layers_and_docks(recording, make_napari_viewer=None):
@@ -501,6 +530,39 @@ def test_removing_other_layers_leaves_rois_alone(recording):
         viewer.layers.remove(viewer.layers["Image stack"])
         assert actions.labels_layer is not None
         assert "Restore ROI layer" not in actions.status.text()
+    finally:
+        viewer.close()
+
+
+def test_trace_dock_reads_correct_row_after_erasing_an_roi(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        actions = viewer.window.dock_widgets["Analysis"]
+        labels_layer = viewer.layers["ROIs"]
+
+        # Give each ROI a distinguishable trace before erasing one
+        n = recording.num_rois
+        recording.traces_znorm = np.tile(
+            np.arange(1, n + 1, dtype=np.float32)[:, None],
+            (1, recording.images.shape[0]),
+        )
+
+        data = np.asarray(labels_layer.data)
+        data[data == 2] = 0
+        labels_layer.data = data
+        actions.sync_rois_from_layer()
+        recording.traces_znorm = np.delete(recording.traces_znorm, 1, axis=0)
+
+        labels_layer.selected_label = 3
+        trace, _ = dock.current_trace()
+        # Label 3 is now the second surviving ROI, so row 1
+        np.testing.assert_allclose(trace, recording.traces_znorm[1])
+
+        labels_layer.selected_label = 2
+        assert dock.current_trace()[0] is None
     finally:
         viewer.close()
 

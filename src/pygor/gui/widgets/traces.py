@@ -339,7 +339,10 @@ class TraceDock(QWidget):
         if arr is None:
             return None, source
         arr = np.asarray(arr)
-        index = label_to_trace_index(self.selected_label)
+        # Rows follow the mask the traces were extracted from, not the
+        # label number: erasing an ROI leaves a gap in the labels but not
+        # in the rows.
+        index = label_to_trace_index(self.selected_label, self.recording.rois)
         if index < 0 or index >= arr.shape[0]:
             return None, source
         return arr[index], source

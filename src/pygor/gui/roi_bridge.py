@@ -63,11 +63,49 @@ def labels_to_mask(labels, igor_style=True):
     return mask.astype(np.int32)
 
 
-def label_to_trace_index(label):
-    """Map a napari label value to its row in the trace arrays."""
-    return int(label) - 1
+def roi_ids_in_order(roi_mask):
+    """Return ROI ids in the order ``extract_traces`` emits their rows.
+
+    IGOR-style masks are ordered -1, -2, -3, ...; positive-label masks are
+    ordered 1, 2, 3, ... Either way the position in this list is the row
+    the ROI occupies in the trace arrays.
+    """
+    ids = np.unique(np.asarray(roi_mask))
+    ids = ids[np.isfinite(ids)]
+    if is_igor_style(roi_mask):
+        ids = ids[ids < 0]
+        return np.sort(ids)[::-1]
+    ids = ids[ids > 0]
+    return np.sort(ids)
 
 
-def trace_index_to_label(index):
+def label_to_trace_index(label, roi_mask=None):
+    """Map a napari label to its row in the trace arrays.
+
+    Rows are packed in ROI order with no gaps, so erasing an ROI shifts
+    every later row down by one. Without the mask to compare against, the
+    labels are assumed contiguous and ``label - 1`` is used.
+
+    Returns -1 when the label has no row, which covers a freshly drawn ROI
+    that has not been extracted yet.
+    """
+    label = int(label)
+    if roi_mask is None:
+        return label - 1
+    ids = roi_ids_in_order(roi_mask)
+    target = -label if is_igor_style(roi_mask) else label
+    matches = np.flatnonzero(ids == target)
+    if not matches.size:
+        return -1
+    return int(matches[0])
+
+
+def trace_index_to_label(index, roi_mask=None):
     """Map a trace row index to its napari label value."""
-    return int(index) + 1
+    index = int(index)
+    if roi_mask is None:
+        return index + 1
+    ids = roi_ids_in_order(roi_mask)
+    if index < 0 or index >= len(ids):
+        return 0
+    return int(abs(ids[index]))

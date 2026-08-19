@@ -32,8 +32,24 @@ Confirmed working, headless, against a stub recording:
 
 - One viewer holds the image stack, comparison stacks, average projection
   and ROIs as a Labels layer.
-- Selecting a label redraws the trace plot for that ROI. Label `n` maps to
-  trace row `n - 1` in both mask conventions.
+- Selecting a label redraws the trace plot for that ROI.
+
+### ROI numbering
+
+Three numberings are in play and they do not all line up:
+
+| where | background | first ROI | example with 21 ROIs |
+| --- | --- | --- | --- |
+| IGOR mask (`recording.rois`) | `1` | `-1` | `-1` … `-21` |
+| napari label (ROIs layer, spinbox) | `0` | `1` | `1` … `21` |
+| trace row (`traces_raw`, `traces_znorm`) | n/a | `0` | `0` … `20` |
+
+`extract_traces` emits rows in ROI id order (`-1`, `-2`, ...) and packs
+them with no gaps. Labels can have gaps: erasing an ROI removes its id
+from the mask but every later ROI keeps its label. So `label - 1` is only
+the right row while the labels run contiguously from 1. `roi_bridge`
+resolves the row by position in `roi_ids_in_order(recording.rois)`
+instead, and reports no trace for a label with no row.
 - ROIs are navigated from the trace dock: prev/next buttons, a spinbox, and
   the `,` / `.` keys. A "New ROI" button (`n`) selects the next unused
   label, so painting or polygon-drawing starts a fresh ROI instead of
