@@ -64,6 +64,7 @@ class PopulationDock(QWidget):
 
         self.figure = Figure(figsize=(4, 2), layout="constrained")
         self.canvas = FigureCanvas(self.figure)
+        self.canvas.setMinimumHeight(140)
         self.ax = self.figure.add_subplot(111)
 
         self.table = QTableWidget(0, 2)
@@ -73,6 +74,7 @@ class PopulationDock(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setSortingEnabled(True)
         self.table.itemSelectionChanged.connect(self._on_row_selected)
+        self.table.setMinimumHeight(160)
 
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Metric:"))

@@ -189,15 +189,41 @@ def launch(recording, show=True, block=False, title=None):
         default_layers=default_layers,
     )
 
-    viewer.window.add_dock_widget(trace_dock, name="Traces", area="bottom")
-    viewer.window.add_dock_widget(actions_dock, name="Analysis", area="right")
-    viewer.window.add_dock_widget(population_dock, name="Population", area="left")
+    # napari owns the left dock area with its layer controls and layer
+    # list, so anything put there competes with them for height. Both
+    # pygor panels go right instead, tabbed so only one is visible at a
+    # time, and the trace plot gets the full width along the bottom.
+    trace_area = viewer.window.add_dock_widget(
+        trace_dock, name="Traces", area="bottom"
+    )
+    analysis_area = viewer.window.add_dock_widget(
+        actions_dock, name="Analysis", area="right"
+    )
+    viewer.window.add_dock_widget(
+        population_dock, name="Population", area="right", tabify=True
+    )
 
     from pygor.gui.menus import build_pygor_menu
 
     build_pygor_menu(viewer, actions_dock, trace_dock, recording)
 
+    _size_docks(viewer, trace_area, analysis_area)
+    viewer.reset_view()
+
     if block:
         napari.run()
 
     return viewer
+
+
+def _size_docks(viewer, trace_area, analysis_area):
+    """Give the docks a usable size on open.
+
+    Qt distributes space by size hints, which left the plots a few pixels
+    tall until they were dragged out by hand every session.
+    """
+    from qtpy.QtCore import Qt
+
+    window = viewer.window._qt_window
+    window.resizeDocks([trace_area], [240], Qt.Vertical)
+    window.resizeDocks([analysis_area], [360], Qt.Horizontal)

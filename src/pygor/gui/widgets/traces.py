@@ -109,6 +109,10 @@ class TraceDock(QWidget):
 
         self.figure = Figure(figsize=(5, 2.5), layout="constrained")
         self.canvas = FigureCanvas(self.figure)
+        # Below roughly this height matplotlib cannot fit axes into the
+        # figure and constrained layout gives up, printing a warning over
+        # the canvas.
+        self.canvas.setMinimumHeight(140)
         self.ax = self.figure.add_subplot(111)
 
         controls = QHBoxLayout()
