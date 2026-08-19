@@ -113,6 +113,27 @@ def test_label_index_accounts_for_erased_rois():
     assert trace_index_to_label(99, mask) == 0
 
 
+def test_roi_palette_contains_no_greys():
+    import colorsys
+
+    from pygor.gui.colors import MIN_SATURATION, roi_colors
+
+    colors = roi_colors(48)
+    assert len(colors) == 48
+    for rgba in colors:
+        saturation = colorsys.rgb_to_hsv(*rgba[:3])[1]
+        assert saturation >= MIN_SATURATION
+        # Grey means the channels are equal, so require a real spread
+        assert float(rgba[:3].max() - rgba[:3].min()) > 0.1
+
+
+def test_roi_colormap_keeps_background_transparent():
+    from pygor.gui.colors import roi_colormap
+
+    colormap = roi_colormap(12)
+    np.testing.assert_allclose(colormap.colors[0], [0, 0, 0, 0])
+
+
 def test_viewer_builds_with_layers_and_docks(recording, make_napari_viewer=None):
     from pygor.gui.launch import launch
 
@@ -583,8 +604,10 @@ def test_locked_default_layers_come_straight_back(recording):
         assert "ROIs" in viewer.layers
         assert dock.labels_layer is not None
 
-        # The ROI layer must stay above the image stack to remain visible
-        assert [layer.name for layer in viewer.layers][-1] == "ROIs"
+        # ROIs must stay above the image stack, and numbers above ROIs
+        order = [layer.name for layer in viewer.layers]
+        assert order.index("ROIs") > order.index("Image stack")
+        assert order[-1] == "ROI numbers"
     finally:
         viewer.close()
 
@@ -638,6 +661,78 @@ def test_trace_dock_reads_correct_row_after_erasing_an_roi(recording):
 
         labels_layer.selected_label = 2
         assert dock.current_trace()[0] is None
+    finally:
+        viewer.close()
+
+
+def test_trace_colour_matches_the_roi_colour(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        labels_layer = viewer.layers["ROIs"]
+
+        for label in (1, 2, 3):
+            dock.set_roi(label)
+            line_colour = np.asarray(dock.ax.lines[0].get_color())[:4]
+            np.testing.assert_allclose(
+                line_colour, np.asarray(labels_layer.get_color(label)), atol=1e-6
+            )
+    finally:
+        viewer.close()
+
+
+def test_no_roi_renders_grey(recording):
+    """Grey ROIs vanish against the greyscale image stack."""
+    import colorsys
+
+    from pygor.gui.colors import MIN_SATURATION
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        labels_layer = viewer.layers["ROIs"]
+        for label in range(1, recording.num_rois + 1):
+            rgba = np.asarray(labels_layer.get_color(label))
+            assert colorsys.rgb_to_hsv(*rgba[:3])[1] >= MIN_SATURATION
+    finally:
+        viewer.close()
+
+
+def test_number_layer_labels_each_roi(recording):
+    from pygor.gui.launch import launch
+    from pygor.gui.roi_numbers import NUMBER_LAYER_NAME
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        numbers = viewer.layers[NUMBER_LAYER_NAME]
+        assert numbers.features["label"].tolist() == list(
+            range(1, recording.num_rois + 1)
+        )
+        assert numbers.data.shape == (recording.num_rois, 2)
+        # Numbers must sit above the ROI labels to stay readable
+        assert [layer.name for layer in viewer.layers][-1] == NUMBER_LAYER_NAME
+    finally:
+        viewer.close()
+
+
+def test_number_layer_follows_new_rois(recording):
+    from pygor.gui.launch import launch
+    from pygor.gui.roi_numbers import NUMBER_LAYER_NAME
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        labels_layer = viewer.layers["ROIs"]
+        labels_layer.mode = "paint"
+        before = len(viewer.layers[NUMBER_LAYER_NAME].data)
+
+        dock.new_roi()
+        _stroke(labels_layer, (10, 10))
+
+        numbers = viewer.layers[NUMBER_LAYER_NAME]
+        assert len(numbers.data) == before + 1
     finally:
         viewer.close()
 

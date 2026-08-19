@@ -48,6 +48,7 @@ class ActionsDock(QWidget):
             "docks depend on those layers; untick to remove them for good."
         )
 
+        self._bind_labels_events(labels_layer)
         self.viewer.layers.events.removing.connect(self._on_layer_removing)
         self.viewer.layers.events.removed.connect(self._on_layer_removed)
 
@@ -125,6 +126,18 @@ class ActionsDock(QWidget):
             return
         self._set_status(f"Restored locked layer(s): {', '.join(missing)}")
 
+    def _bind_labels_events(self, layer):
+        """Keep the ROI number layer in step with strokes on this layer."""
+        if layer is None:
+            return
+        layer.events.paint.connect(self.refresh_numbers)
+
+    def refresh_numbers(self, event=None):
+        """Redraw the ROI numbers for the current mask."""
+        from pygor.gui.roi_numbers import ensure_number_layer
+
+        ensure_number_layer(self.viewer, self.labels_layer)
+
     def missing_default_layers(self):
         """Names of layers this window created that are no longer present."""
         return [name for name in self.default_layers if name not in self.viewer.layers]
@@ -142,6 +155,7 @@ class ActionsDock(QWidget):
         self.default_layers = names
         if layer is not None and layer is not self._labels_layer:
             self._labels_layer = layer
+            self._bind_labels_events(layer)
             if self.on_layer_restored is not None:
                 self.on_layer_restored(layer)
         return layer
@@ -170,6 +184,7 @@ class ActionsDock(QWidget):
             self.restore_roi_layer()
             return
         layer.data = mask_to_labels(self.recording.rois)
+        self.refresh_numbers()
 
     def _segment_widget(self):
         @magicgui(
@@ -261,6 +276,7 @@ class ActionsDock(QWidget):
         if current is not None and np.array_equal(mask, np.asarray(current)):
             return False
         self.recording.update_rois(mask)
+        self.refresh_numbers()
         return True
 
     def _push_rois_widget(self):

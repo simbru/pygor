@@ -306,6 +306,13 @@ class TraceDock(QWidget):
         )
         self.viewer.layers.selection = set(selection)
 
+    def roi_color(self):
+        """Colour the selected ROI is drawn in, for matching the trace to it."""
+        layer = self.labels_layer
+        if layer is None or self.selected_label < 1:
+            return "tab:blue"
+        return tuple(float(c) for c in layer.get_color(self.selected_label))
+
     def _marker_size(self):
         """Scale the crosshair to a thirtieth of the image width."""
         width = np.asarray(self.labels_layer.data).shape[-1]
@@ -435,7 +442,7 @@ class TraceDock(QWidget):
             f"ROI {self.selected_label} of {n_rois} — {source}"
         )
         self.ax.set_axis_on()
-        self.ax.plot(trace, lw=0.8, color="tab:blue")
+        self.ax.plot(trace, lw=0.8, color=self.roi_color())
         self.ax.set_xlabel("Frame")
         self.ax.set_ylabel(source.replace("traces_", ""))
         self.ax.margins(x=0)

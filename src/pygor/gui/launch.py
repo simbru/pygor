@@ -17,7 +17,9 @@ import warnings
 
 import numpy as np
 
+from pygor.gui.colors import roi_colormap
 from pygor.gui.roi_bridge import mask_to_labels
+from pygor.gui.roi_numbers import NUMBER_LAYER_NAME, ensure_number_layer
 
 # Layer name the docks resolve the ROI mask by
 ROI_LAYER_NAME = "ROIs"
@@ -95,6 +97,9 @@ def ensure_roi_layer(viewer, recording):
         return None
     labels = mask_to_labels(recording.rois)
     layer = viewer.add_labels(labels, name=ROI_LAYER_NAME, opacity=0.4)
+    # napari's default label colours include greys, which disappear against
+    # the greyscale stack.
+    layer.colormap = roi_colormap()
     # Painting should not eat into ROIs already placed, and filling should
     # stay within the region under the cursor.
     layer.preserve_labels = True
@@ -115,13 +120,23 @@ def ensure_default_layers(viewer, recording):
     roi_layer = ensure_roi_layer(viewer, recording)
     if roi_layer is not None:
         names.append(ROI_LAYER_NAME)
-        # A rebuilt layer is appended on top, which would put an image
-        # stack over the ROI labels and hide them.
-        index = viewer.layers.index(roi_layer)
-        if index != len(viewer.layers) - 1:
-            # move() inserts before the target index, so the end is len()
-            viewer.layers.move(index, len(viewer.layers))
+        if ensure_number_layer(viewer, roi_layer) is not None:
+            names.append(NUMBER_LAYER_NAME)
+        # Rebuilt layers are appended on top, which would put an image
+        # stack over the ROI labels and hide them. Numbers go above both.
+        _move_to_top(viewer, ROI_LAYER_NAME)
+        _move_to_top(viewer, NUMBER_LAYER_NAME)
     return names, roi_layer
+
+
+def _move_to_top(viewer, name):
+    """Move a layer to the top of the layer list, if it is present."""
+    if name not in viewer.layers:
+        return
+    index = viewer.layers.index(viewer.layers[name])
+    if index != len(viewer.layers) - 1:
+        # move() inserts before the target index, so the end is len()
+        viewer.layers.move(index, len(viewer.layers))
 
 
 def launch(recording, show=True, block=False, title=None):

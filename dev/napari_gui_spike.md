@@ -32,7 +32,16 @@ Confirmed working, headless, against a stub recording:
 
 - One viewer holds the image stack, comparison stacks, average projection
   and ROIs as a Labels layer.
-- Selecting a label redraws the trace plot for that ROI.
+- Selecting a label redraws the trace plot for that ROI, in that ROI's own
+  colour, read back from the layer with `get_color`.
+- ROI labels use a palette generated in `pygor/gui/colors.py` rather than
+  napari's default, which includes desaturated entries that read as grey
+  against the greyscale stack. Hues step by the golden ratio for
+  separation and saturation is floored well above zero, so no entry can
+  come out grey.
+- A "ROI numbers" Points layer draws each ROI's number at its centroid in
+  the matching colour, sitting above the labels. It follows strokes,
+  segmentation and pushes, and can be hidden with its visibility toggle.
 
 ### ROI numbering
 
