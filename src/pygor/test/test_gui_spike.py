@@ -904,9 +904,13 @@ def test_pygor_menu_is_built(recording):
     try:
         menu = _pygor_menu(viewer)
         titles = [a.text() for a in menu.actions() if not a.isSeparator()]
-        assert {"Analysis", "ROIs", "View", "Parameters...", "Save recording as..."} <= set(
-            titles
-        )
+        assert {
+            "Analysis",
+            "ROIs",
+            "View",
+            "Parameter table...",
+            "Save recording as...",
+        } <= set(titles)
         assert [a.text() for a in _submenu(menu, "Analysis").actions()] == [
             "Extract traces",
             "Compute averages",
@@ -952,14 +956,18 @@ def test_menu_tracks_roi_number_visibility(recording):
         viewer.close()
 
 
-def test_parameter_editor_is_open_from_the_start(recording):
-    """params.edit(blocking=False) returned a widget nothing kept alive."""
+def test_parameter_table_opens_floating_on_request(recording):
+    """The full table is a fallback, not something to navigate by default."""
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
     try:
         actions = viewer.window.dock_widgets["Analysis"]
+        assert "Parameters" not in viewer.window.dock_widgets
+
+        actions.open_param_editor()
         assert "Parameters" in viewer.window.dock_widgets
+        assert actions._param_dock.isFloating() is True
 
         # Reopening must raise the existing dock, not stack up duplicates
         actions.open_param_editor()
@@ -975,6 +983,7 @@ def test_parameters_are_grouped_into_sections(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
+        viewer.window.dock_widgets["Analysis"].open_param_editor()
         editor = viewer.window.dock_widgets["Parameters"]
         tree = editor._tree
         sections = [
@@ -998,6 +1007,7 @@ def test_filtering_hides_sections_left_empty(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
+        viewer.window.dock_widgets["Analysis"].open_param_editor()
         tree = viewer.window.dock_widgets["Parameters"]._tree
         editor = viewer.window.dock_widgets["Parameters"]
 
@@ -1025,6 +1035,7 @@ def test_editing_a_parameter_writes_it_back(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
+        viewer.window.dock_widgets["Analysis"].open_param_editor()
         editor = viewer.window.dock_widgets["Parameters"]
         path = "preprocessing.artifact_width"
         leaf = editor._items_by_path[path]
@@ -1315,8 +1326,8 @@ def test_segmentation_dock_shows_only_the_chosen_mode(recording):
         viewer.close()
 
 
-def test_only_changed_parameters_are_passed_on(recording):
-    """Sending the whole set would override config changes made elsewhere."""
+def test_tab_edits_reach_the_parameters(recording):
+    """The tab is a view of the config, not a copy taken at construction."""
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
@@ -1325,10 +1336,50 @@ def test_only_changed_parameters_are_passed_on(recording):
         assert dock.current_form.changed() == {}
 
         dock.current_form._widgets["threshold"].setValue(0.2)
-        assert dock.current_form.changed() == {"threshold": pytest.approx(0.2)}
+        assert recording.params["segmentation.blob.threshold"] == pytest.approx(0.2)
 
         dock.current_form.reset()
-        assert dock.current_form.changed() == {}
+        assert recording.params["segmentation.blob.threshold"] == pytest.approx(
+            0.05
+        )
+    finally:
+        viewer.close()
+
+
+def test_table_and_tab_stay_in_step(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        actions = viewer.window.dock_widgets["Analysis"]
+        segmentation = viewer.window.dock_widgets["Segmentation"]
+        actions.open_param_editor()
+        table = viewer.window.dock_widgets["Parameters"]
+        path = "segmentation.blob.threshold"
+
+        # Tab to table
+        segmentation.current_form._widgets["threshold"].setValue(0.2)
+        assert table._items_by_path[path].text(1) == "0.2"
+
+        # Table to tab
+        table._items_by_path[path].setText(1, "0.42")
+        assert recording.params[path] == pytest.approx(0.42)
+        assert segmentation.current_form.value("threshold") == pytest.approx(0.42)
+    finally:
+        viewer.close()
+
+
+def test_preprocessing_form_follows_the_parameters(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        actions = viewer.window.dock_widgets["Analysis"]
+        actions.open_param_editor()
+        table = viewer.window.dock_widgets["Parameters"]
+
+        table._items_by_path["preprocessing.artifact_width"].setText(1, "9")
+        assert recording.params["preprocessing.artifact_width"] == 9
     finally:
         viewer.close()
 

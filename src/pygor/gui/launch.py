@@ -185,6 +185,11 @@ def launch(recording, show=True, block=False, title=None):
 
     default_layers, labels_layer = ensure_default_layers(viewer, recording)
 
+    from pygor.gui.param_bus import ParamBus
+
+    # Every panel edits this rather than its own copy of the config
+    bus = ParamBus(recording.params)
+
     from pygor.gui.widgets.actions import ActionsDock
     from pygor.gui.widgets.preprocessing import PreprocessingDock
     from pygor.gui.widgets.segmentation import SegmentationDock
@@ -210,6 +215,7 @@ def launch(recording, show=True, block=False, title=None):
         on_layer_restored=rebind_all,
         default_layers=default_layers,
         on_depths_updated=lambda: _show_metric(population_dock, "IPL depth"),
+        bus=bus,
     )
 
     # napari owns the left dock area with its layer controls and layer
@@ -219,6 +225,7 @@ def launch(recording, show=True, block=False, title=None):
     segmentation_dock = SegmentationDock(
         recording,
         viewer,
+        bus,
         labels_layer=labels_layer,
         on_rois_changed=lambda: (
             actions_dock.refresh_numbers(),
@@ -231,6 +238,7 @@ def launch(recording, show=True, block=False, title=None):
     preprocessing_dock = PreprocessingDock(
         recording,
         viewer,
+        bus=bus,
         on_images_changed=lambda: refresh_image_layers(viewer, recording),
     )
 
@@ -249,12 +257,6 @@ def launch(recording, show=True, block=False, title=None):
     viewer.window.add_dock_widget(
         segmentation_dock, name="Segmentation", area="right", tabify=True
     )
-
-    # Parameters are wanted often enough to be there from the start, tabbed
-    # with the other right-hand panels rather than opened from the menu.
-    actions_dock.open_param_editor(tabify=True)
-    actions_dock._set_status("Idle")
-    analysis_area.raise_()
 
     from pygor.gui.menus import build_pygor_menu
 

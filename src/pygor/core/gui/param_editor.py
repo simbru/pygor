@@ -119,10 +119,14 @@ class ParamEditorWidget(QWidget):
 
     closed = Signal()
 
-    def __init__(self, params, section=None, title="Parameter Editor"):
+    def __init__(self, params, section=None, title="Parameter Editor", bus=None):
         super().__init__()
         self.params = params
         self.section = section
+        # When a bus is given the table is one view of shared state rather
+        # than an independent editor, so writes go through it and changes
+        # made in other panels arrive here.
+        self.bus = bus
         self.setWindowTitle(title)
         self.setMinimumSize(550, 400)
         self.resize(600, 700)
@@ -176,6 +180,8 @@ class ParamEditorWidget(QWidget):
 
         self._tree.expandAll()
         self._tree.itemChanged.connect(self._on_item_changed)
+        if self.bus is not None:
+            self.bus.changed.connect(self._on_bus_changed)
         layout.addWidget(self._tree)
 
         # Status bar
@@ -219,7 +225,10 @@ class ParamEditorWidget(QWidget):
         self._tree.blockSignals(True)
         try:
             parsed = _parse_value(item.text(1), original_value)
-            self.params[path] = parsed
+            if self.bus is not None:
+                self.bus.set(path, parsed)
+            else:
+                self.params[path] = parsed
             self._items[index] = (path, parsed)
             # Show the canonical repr rather than whatever was typed
             item.setText(1, repr(parsed))
@@ -229,6 +238,21 @@ class ParamEditorWidget(QWidget):
             item.setText(1, repr(original_value))
             self._status.setText(f"Error: {e}")
             self._status.setStyleSheet("color: red; font-size: 11px;")
+        finally:
+            self._tree.blockSignals(False)
+
+    def _on_bus_changed(self, path):
+        """Show a value another panel changed."""
+        leaf = self._items_by_path.get(path)
+        if leaf is None:
+            return
+        value = self.params[path]
+        index = self._index_of(path)
+        if index >= 0:
+            self._items[index] = (path, value)
+        self._tree.blockSignals(True)
+        try:
+            leaf.setText(1, repr(value))
         finally:
             self._tree.blockSignals(False)
 

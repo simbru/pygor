@@ -31,10 +31,11 @@ def _default(recording, section, key, fallback):
 class PreprocessingDock(QWidget):
     """Dock running the steps that alter the image stack itself."""
 
-    def __init__(self, recording, viewer, on_images_changed=None):
+    def __init__(self, recording, viewer, bus=None, on_images_changed=None):
         super().__init__()
         self.recording = recording
         self.viewer = viewer
+        self.bus = bus
         self.on_images_changed = on_images_changed
 
         self.status = QLabel()
@@ -47,15 +48,47 @@ class PreprocessingDock(QWidget):
         )
         self.reset_button.clicked.connect(self.reset_images)
 
+        preprocess_form = self._preprocess_widget()
+        register_form = self._register_widget()
+        self._bind_to_bus(preprocess_form, "preprocessing")
+        self._bind_to_bus(register_form, "registration")
+
         layout = QVBoxLayout()
         layout.addWidget(self.status)
-        layout.addWidget(self._preprocess_widget().native)
-        layout.addWidget(self._register_widget().native)
+        layout.addWidget(preprocess_form.native)
+        layout.addWidget(register_form.native)
         layout.addWidget(self.reset_button)
         layout.addStretch(1)
         self.setLayout(layout)
 
         self.refresh_status()
+
+    def _bind_to_bus(self, form, prefix):
+        """Make a form a view of its config section rather than a copy.
+
+        Only fields the config actually holds are bound; the rest, such
+        as ``force``, are per-run choices with nothing to write back to.
+        """
+        if self.bus is None:
+            return
+        section = self.bus.section(prefix)
+        for name in section:
+            field = getattr(form, name, None)
+            if field is None:
+                continue
+            field.changed.connect(
+                lambda value, path=f"{prefix}.{name}": self.bus.set(path, value)
+            )
+
+        def _follow(path, form=form, prefix=prefix):
+            if not path.startswith(f"{prefix}."):
+                return
+            name = path[len(prefix) + 1 :]
+            field = getattr(form, name, None)
+            if field is not None and field.value != self.bus.get(path):
+                field.value = self.bus.get(path)
+
+        self.bus.changed.connect(_follow)
 
     # ------------------------------------------------------------------
     # State

@@ -25,6 +25,7 @@ class ActionsDock(QWidget):
         on_layer_restored=None,
         default_layers=None,
         on_depths_updated=None,
+        bus=None,
     ):
         super().__init__()
         self.recording = recording
@@ -33,6 +34,7 @@ class ActionsDock(QWidget):
         self.on_traces_changed = on_traces_changed
         self.on_layer_restored = on_layer_restored
         self.on_depths_updated = on_depths_updated
+        self.bus = bus
         self.default_layers = list(default_layers or [])
         # Guards against reacting to the additions a restore itself makes
         self._restoring = False
@@ -380,13 +382,16 @@ class ActionsDock(QWidget):
 
         return edit_params
 
-    def open_param_editor(self, section=None, tabify=False):
+    def open_param_editor(self, section=None, floating=True):
         """Dock the parameter editor, or raise it if already open.
+
+        The table lists every parameter there is, which is more than the
+        per-step tabs ask anyone to read; it opens floating, on request,
+        as the way to see or set something the tabs do not cover.
 
         ``params.edit(blocking=False)`` returns a top-level widget that the
         caller has to keep alive; dropping it let Python collect the window
-        the moment it appeared. Docking hands ownership to Qt instead, and
-        keeps the editor in the same window as everything else.
+        the moment it appeared. Docking hands ownership to Qt instead.
         """
         from pygor.core.gui.param_editor import ParamEditorWidget
 
@@ -401,9 +406,11 @@ class ActionsDock(QWidget):
             self.recording.params,
             section=section,
             title=name,
+            bus=self.bus,
         )
         self._param_dock = self.viewer.window.add_dock_widget(
-            widget, name=name, area="right", tabify=tabify
+            widget, name=name, area="right"
         )
+        self._param_dock.setFloating(floating)
         self._set_status("Parameter editor opened")
         return self._param_dock

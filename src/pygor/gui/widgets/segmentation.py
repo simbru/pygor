@@ -1,10 +1,13 @@
 """Segmentation, with the parameters of the chosen mode and nothing else.
 
 Each mode reads a different set of parameters from the config, so showing
-all of them at once is noise: only the selected mode's section is
-editable. Values are seeded from the config and only those actually
-changed are passed to ``segment_rois``, so an untouched panel behaves
-exactly like calling it with no arguments.
+all of them at once is noise: only the selected mode's section is shown.
+
+The widgets are a view of ``recording.params``, not a copy of it. Editing
+one writes through the parameter bus, so the parameter table shows the
+change, and a change made there updates these widgets. ``segment_rois``
+is then called with no parameter arguments at all: it reads the config
+itself, which is now what the panel has been editing.
 """
 
 import numpy as np
@@ -38,20 +41,73 @@ _SPIN_RANGE = (-1_000_000, 1_000_000)
 
 
 class ParamForm(QWidget):
-    """A form built from a dict of parameter values, typed by value."""
+    """A form over one config section, typed by the value it holds.
 
-    def __init__(self, defaults):
+    Widgets are bound to a dotted path each: editing one writes straight
+    through the bus, and a change arriving from elsewhere updates the
+    widget without echoing back.
+    """
+
+    def __init__(self, bus, prefix, defaults=None):
         super().__init__()
-        self._defaults = dict(defaults)
+        self.bus = bus
+        self.prefix = prefix
+        self._defaults = dict(
+            defaults if defaults is not None else bus.section(prefix)
+        )
         self._widgets = {}
+        self._applying = False
 
         layout = QFormLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         for name, value in self._defaults.items():
-            widget = self._widget_for(value)
+            widget = self._widget_for(self.bus.get(self._path(name), value))
             self._widgets[name] = widget
+            self._connect(name, widget)
             layout.addRow(name.replace("_", " "), widget)
         self.setLayout(layout)
+
+        self.bus.changed.connect(self._on_bus_changed)
+
+    def _path(self, name):
+        return f"{self.prefix}.{name}"
+
+    def _connect(self, name, widget):
+        """Write edits through the bus as they happen."""
+        if isinstance(widget, QCheckBox):
+            signal = widget.toggled
+        elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+            signal = widget.valueChanged
+        else:
+            signal = widget.editingFinished
+        signal.connect(lambda *_: self._push(name))
+
+    def _push(self, name):
+        if self._applying:
+            return
+        self.bus.set(self._path(name), self.value(name))
+
+    def _on_bus_changed(self, path):
+        if not path.startswith(f"{self.prefix}."):
+            return
+        name = path[len(self.prefix) + 1 :]
+        if name not in self._widgets:
+            return
+        self._apply(name, self.bus.get(path))
+
+    def _apply(self, name, value):
+        """Show a value without writing it back out again."""
+        widget = self._widgets[name]
+        self._applying = True
+        try:
+            if isinstance(widget, QCheckBox):
+                widget.setChecked(bool(value))
+            elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+                widget.setValue(value)
+            else:
+                widget.setText(str(value))
+        finally:
+            self._applying = False
 
     @staticmethod
     def _widget_for(value):
@@ -85,11 +141,7 @@ class ParamForm(QWidget):
         return {name: self.value(name) for name in self._widgets}
 
     def changed(self):
-        """Only the parameters that differ from the configured default.
-
-        Passing the whole set would override config changes made
-        elsewhere, and would send values this mode may not accept.
-        """
+        """Parameters that differ from the values the config shipped with."""
         return {
             name: value
             for name, value in self.values().items()
@@ -97,14 +149,10 @@ class ParamForm(QWidget):
         }
 
     def reset(self):
+        """Put the section back to the values the config shipped with."""
         for name, value in self._defaults.items():
-            widget = self._widgets[name]
-            if isinstance(widget, QCheckBox):
-                widget.setChecked(value)
-            elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
-                widget.setValue(value)
-            else:
-                widget.setText(str(value))
+            self.bus.set(self._path(name), value)
+            self._apply(name, value)
 
 
 class SegmentationDock(QWidget):
@@ -114,6 +162,7 @@ class SegmentationDock(QWidget):
         self,
         recording,
         viewer,
+        bus,
         labels_layer=None,
         on_rois_changed=None,
         on_layer_created=None,
@@ -121,6 +170,7 @@ class SegmentationDock(QWidget):
         super().__init__()
         self.recording = recording
         self.viewer = viewer
+        self.bus = bus
         self._labels_layer = labels_layer
         self.on_rois_changed = on_rois_changed
         self.on_layer_created = on_layer_created
@@ -138,7 +188,12 @@ class SegmentationDock(QWidget):
         self._forms_by_mode = {}
         for index in range(self.mode_box.count()):
             mode = self.mode_box.itemText(index)
-            form = ParamForm(sections.get(mode.rstrip("+"), {}))
+            section = mode.rstrip("+")
+            form = ParamForm(
+                self.bus,
+                f"segmentation.{section}",
+                defaults=sections.get(section, {}),
+            )
             self._forms_by_mode[mode] = form
             self.forms.addWidget(form)
 
@@ -244,12 +299,16 @@ class SegmentationDock(QWidget):
     # ------------------------------------------------------------------
 
     def run_segmentation(self, mode=None, overwrite=None, **overrides):
-        """Segment with the current mode and whatever has been changed."""
+        """Segment with the current mode.
+
+        No parameter arguments are passed: the widgets write through to
+        the config, and ``segment_rois`` reads that config itself, so
+        passing them again would only be a chance for the two to disagree.
+        """
         mode = mode or self.mode
         if overwrite is None:
             overwrite = self.overwrite_box.isChecked()
-        params = dict(self.current_form.changed())
-        params.update(overrides)
+        params = dict(overrides)
 
         self.refresh_status(f"Segmenting ({mode})...")
 

@@ -85,7 +85,7 @@ def build_pygor_menu(
         _mirror_checkbox(view, text, box)
 
     menu.addSeparator()
-    _add(menu, "Parameters...", actions_dock.open_param_editor)
+    _add(menu, "Parameter table...", actions_dock.open_param_editor)
     _add(menu, "Save recording as...", lambda: _save_as(viewer, recording))
 
     return menu
