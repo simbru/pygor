@@ -138,6 +138,30 @@ object rather than on window close. Private napari attributes are avoided;
 `viewer.window.dock_widgets` is the public accessor (`_dock_widgets` is
 deprecated and warns).
 
+## Population panel
+
+`pygor/gui/widgets/population.py` shows one metric across every ROI, so a
+cell can be picked out of the population rather than stepped past. The
+selected metric drives three views at once: a histogram, a sortable table,
+and optionally the colour of the ROIs themselves. Table and ROI layer
+selection track each other in both directions.
+
+`pygor/gui/metrics.py` holds the registry. A `MetricSpec` carries a cheap
+`applies` check, a `compute` callable and an `expensive` flag, because
+metrics differ from trace sources in three ways: they are computed rather
+than looked up, their cost ranges from free to a thousand permutations,
+and which exist depends on the analysis class. `compute_metric` drops
+anything that raises or that does not return exactly one value per ROI,
+since a misaligned metric would mislabel every cell silently.
+
+Colouring by metric swaps the identity palette for a `DirectLabelColormap`
+over the value range, drawing non-finite ROIs transparent; unticking
+restores the identity palette.
+
+Still missing, in the order `dev/gui_workflow_map.md` suggests: a per-ROI
+detail panel dispatched on analysis type, persisted QC flags, knobs that
+recompute a metric, and multi-recording context.
+
 ## Menus
 
 `pygor/gui/menus.py` adds a **Pygor** menu to napari's own menu bar:

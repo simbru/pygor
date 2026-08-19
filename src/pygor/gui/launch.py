@@ -172,20 +172,26 @@ def launch(recording, show=True, block=False, title=None):
     default_layers, labels_layer = ensure_default_layers(viewer, recording)
 
     from pygor.gui.widgets.actions import ActionsDock
+    from pygor.gui.widgets.population import PopulationDock
     from pygor.gui.widgets.traces import TraceDock
 
     trace_dock = TraceDock(recording, viewer, labels_layer=labels_layer)
+    population_dock = PopulationDock(recording, viewer, labels_layer=labels_layer)
     actions_dock = ActionsDock(
         recording,
         viewer,
         labels_layer=labels_layer,
         on_traces_changed=trace_dock.refresh,
-        on_layer_restored=trace_dock.rebind,
+        on_layer_restored=lambda layer: (
+            trace_dock.rebind(layer),
+            population_dock.rebind(layer),
+        ),
         default_layers=default_layers,
     )
 
     viewer.window.add_dock_widget(trace_dock, name="Traces", area="bottom")
     viewer.window.add_dock_widget(actions_dock, name="Analysis", area="right")
+    viewer.window.add_dock_widget(population_dock, name="Population", area="left")
 
     from pygor.gui.menus import build_pygor_menu
 

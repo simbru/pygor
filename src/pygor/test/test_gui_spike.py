@@ -12,6 +12,8 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from qtpy.QtCore import Qt  # noqa: E402
+
 napari = pytest.importorskip("napari")
 pytest.importorskip("magicgui")
 
@@ -157,6 +159,47 @@ def test_palette_spreads_over_the_roi_count():
         return min(b - a for a, b in zip(ordered, ordered[1:]))
 
     assert smallest_gap(hues(5)) > smallest_gap(hues(20))
+
+
+def test_available_metrics_skips_what_the_recording_lacks(recording):
+    from pygor.gui.metrics import available_metrics
+
+    keys = [spec.key for spec in available_metrics(recording)]
+    assert "trace_range" in keys
+    assert "roi_area" in keys
+    # No quality criterion on this recording, and no OSDS/STRF methods
+    assert "quality_index" not in keys
+    assert "dsi" not in keys
+
+
+def test_metrics_are_one_value_per_roi(recording):
+    from pygor.gui.metrics import available_metrics, compute_metric
+
+    for spec in available_metrics(recording):
+        values = compute_metric(spec, recording, n_rois=recording.num_rois)
+        assert values is not None, spec.key
+        assert values.shape == (recording.num_rois,), spec.key
+
+
+def test_metric_with_wrong_length_is_rejected(recording):
+    """A misaligned metric would silently mislabel every ROI."""
+    from pygor.gui.metrics import MetricSpec, compute_metric
+
+    bad = MetricSpec(
+        key="bad",
+        label="Bad",
+        compute=lambda rec: np.arange(rec.num_rois + 3),
+    )
+    with pytest.warns(UserWarning, match="values for"):
+        assert compute_metric(bad, recording, n_rois=recording.num_rois) is None
+
+    raises = MetricSpec(
+        key="raises",
+        label="Raises",
+        compute=lambda rec: 1 / 0,
+    )
+    with pytest.warns(UserWarning, match="failed"):
+        assert compute_metric(raises, recording, n_rois=recording.num_rois) is None
 
 
 def test_viewer_builds_with_layers_and_docks(recording, make_napari_viewer=None):
@@ -872,6 +915,103 @@ def test_palette_expands_as_rois_are_added(recording):
 
         assert labels_layer.metadata["pygor_palette_n"] == before + 1
         assert labels_layer.colormap.colors.shape[0] == before + 2
+    finally:
+        viewer.close()
+
+
+def test_population_dock_lists_every_roi(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Population"]
+        assert dock.table.rowCount() == recording.num_rois
+        # Comes up sorted by ROI, not by whatever Qt defaults to
+        assert [dock.table.item(r, 0).data(Qt.DisplayRole) for r in range(3)] == [1, 2, 3]
+        assert dock._values is not None
+    finally:
+        viewer.close()
+
+
+def test_population_selection_is_two_way(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Population"]
+        labels_layer = viewer.layers["ROIs"]
+
+        dock.table.selectRow(2)
+        assert labels_layer.selected_label == 3
+
+        labels_layer.selected_label = 1
+        rows = dock.table.selectionModel().selectedRows()
+        assert dock.table.item(rows[0].row(), 0).data(Qt.DisplayRole) == 1
+    finally:
+        viewer.close()
+
+
+def test_sorting_by_value_finds_the_extreme_roi(recording):
+    """Sorting is how a suspicious cell gets picked out of the population."""
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Population"]
+        dock.table.sortItems(1, Qt.DescendingOrder)
+
+        top_roi = dock.table.item(0, 0).data(Qt.DisplayRole)
+        expected = int(dock._labels[int(np.argmax(dock._values))])
+        assert top_roi == expected
+    finally:
+        viewer.close()
+
+
+def test_colour_by_metric_toggles_and_restores(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Population"]
+        labels_layer = viewer.layers["ROIs"]
+        identity = np.asarray(labels_layer.get_color(1))
+
+        dock.colour_box.setChecked(True)
+        by_metric = np.asarray(labels_layer.get_color(1))
+        assert not np.allclose(identity, by_metric)
+
+        dock.colour_box.setChecked(False)
+        np.testing.assert_allclose(labels_layer.get_color(1), identity)
+    finally:
+        viewer.close()
+
+
+def test_expensive_metrics_wait_for_an_explicit_request(recording):
+    from pygor.gui.launch import launch
+    from pygor.gui.metrics import MetricSpec
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Population"]
+        calls = []
+
+        def _count(rec):
+            calls.append(1)
+            return np.arange(rec.num_rois, dtype=float)
+
+        dock._specs = (
+            MetricSpec(key="slow", label="Slow", compute=_count, expensive=True),
+        )
+        dock.metric_box.clear()
+        dock.metric_box.addItem("Slow")
+
+        # Selecting an expensive metric must not run it
+        assert calls == []
+        assert dock._values is None
+
+        dock.refresh(force=True)
+        assert calls == [1]
+        assert dock._values is not None
     finally:
         viewer.close()
 

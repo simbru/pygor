@@ -60,3 +60,37 @@ def apply_roi_colormap(labels_layer, n_rois=None):
     labels_layer.colormap = roi_colormap(n_rois)
     labels_layer.metadata["pygor_palette_n"] = n_rois
     return labels_layer.colormap
+
+
+def apply_metric_colormap(labels_layer, roi_labels, values, cmap_name="viridis"):
+    """Colour ROIs by a per-ROI metric rather than by identity.
+
+    Values are normalised across the ROIs present. ROIs whose value is not
+    finite are drawn transparent, so a metric that could not be computed
+    for a cell shows as absent rather than as an extreme.
+
+    The identity palette is restored by calling :func:`apply_roi_colormap`;
+    the remembered palette size is cleared so that call rebuilds it.
+    """
+    import matplotlib
+    from napari.utils.colormaps import DirectLabelColormap
+
+    values = np.asarray(values, dtype=float)
+    finite = np.isfinite(values)
+    if finite.any():
+        low, high = float(values[finite].min()), float(values[finite].max())
+    else:
+        low, high = 0.0, 1.0
+    span = (high - low) or 1.0
+
+    cmap = matplotlib.colormaps[cmap_name]
+    color_dict = {None: (0.0, 0.0, 0.0, 0.0), 0: (0.0, 0.0, 0.0, 0.0)}
+    for label, value in zip(roi_labels, values):
+        if np.isfinite(value):
+            color_dict[int(label)] = tuple(float(c) for c in cmap((value - low) / span))
+        else:
+            color_dict[int(label)] = (0.0, 0.0, 0.0, 0.0)
+
+    labels_layer.colormap = DirectLabelColormap(color_dict=color_dict)
+    labels_layer.metadata["pygor_palette_n"] = None
+    return low, high
