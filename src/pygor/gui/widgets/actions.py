@@ -134,10 +134,16 @@ class ActionsDock(QWidget):
         layer.events.paint.connect(self.refresh_numbers)
 
     def refresh_numbers(self, event=None):
-        """Redraw the ROI numbers for the current mask."""
+        """Rescale the palette to the ROI count, then redraw the numbers."""
+        from pygor.gui.colors import apply_roi_colormap
         from pygor.gui.roi_numbers import ensure_number_layer
 
-        ensure_number_layer(self.viewer, self.labels_layer)
+        layer = self.labels_layer
+        apply_roi_colormap(layer)
+        ensure_number_layer(self.viewer, layer)
+        if self.on_traces_changed is not None:
+            # The selected ROI's colour may have moved with the palette
+            self.on_traces_changed()
 
     def missing_default_layers(self):
         """Names of layers this window created that are no longer present."""

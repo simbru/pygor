@@ -34,11 +34,19 @@ Confirmed working, headless, against a stub recording:
   and ROIs as a Labels layer.
 - Selecting a label redraws the trace plot for that ROI, in that ROI's own
   colour, read back from the layer with `get_color`.
-- ROI labels use a palette generated in `pygor/gui/colors.py` rather than
+- ROI labels use a palette built in `pygor/gui/colors.py` rather than
   napari's default, which includes desaturated entries that read as grey
-  against the greyscale stack. Hues step by the golden ratio for
-  separation and saturation is floored well above zero, so no entry can
-  come out grey.
+  against the greyscale stack. `gist_rainbow` is sampled once per ROI and
+  resampled whenever the count changes, so the colours stay as far apart
+  as the ROI count allows and run in a predictable order. Existing ROIs do
+  change colour as the count grows, which is the trade for even spacing.
+  `gist_rainbow` rather than `rainbow`: it is fully saturated across its
+  whole range, where `rainbow` drops to 0.36 saturation in its cyan-green
+  region. napari maps label `i` to `colors[1 + (i - 1) % n]`, so index 0
+  holds the transparent background and the samples line up with the labels.
+  An earlier golden-ratio palette was dropped: its smallest hue gaps land
+  on Fibonacci lags, and lag 8 was both Fibonacci and a multiple of the
+  4-tone cycle, so every pair 8 apart collided at ~20 degrees.
 - A "ROI numbers" Points layer draws each ROI's number at its centroid in
   white, sitting above the labels. It follows strokes, segmentation and
   pushes, and can be hidden with its visibility toggle. napari's text has

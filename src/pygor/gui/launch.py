@@ -17,7 +17,7 @@ import warnings
 
 import numpy as np
 
-from pygor.gui.colors import roi_colormap
+from pygor.gui.colors import apply_roi_colormap
 from pygor.gui.roi_bridge import mask_to_labels
 from pygor.gui.roi_numbers import NUMBER_LAYER_NAME, ensure_number_layer
 
@@ -99,7 +99,7 @@ def ensure_roi_layer(viewer, recording):
     layer = viewer.add_labels(labels, name=ROI_LAYER_NAME, opacity=0.4)
     # napari's default label colours include greys, which disappear against
     # the greyscale stack.
-    layer.colormap = roi_colormap()
+    apply_roi_colormap(layer)
     # Painting should not eat into ROIs already placed, and filling should
     # stay within the region under the cursor.
     layer.preserve_labels = True

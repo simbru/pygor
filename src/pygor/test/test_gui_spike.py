@@ -136,6 +136,27 @@ def test_roi_colormap_keeps_background_transparent():
 
     colormap = roi_colormap(12)
     np.testing.assert_allclose(colormap.colors[0], [0, 0, 0, 0])
+    # One entry per ROI, plus the background
+    assert colormap.colors.shape[0] == 13
+
+
+def test_palette_spreads_over_the_roi_count():
+    """Fewer ROIs means the same rainbow split into wider steps."""
+    import colorsys
+
+    from pygor.gui.colors import roi_colors
+
+    def hues(n):
+        return [colorsys.rgb_to_hsv(*c[:3])[0] * 360 for c in roi_colors(n)]
+
+    assert len(hues(5)) == 5
+    assert len(hues(20)) == 20
+
+    def smallest_gap(values):
+        ordered = sorted(values)
+        return min(b - a for a, b in zip(ordered, ordered[1:]))
+
+    assert smallest_gap(hues(5)) > smallest_gap(hues(20))
 
 
 def test_viewer_builds_with_layers_and_docks(recording, make_napari_viewer=None):
@@ -829,6 +850,28 @@ def test_parameter_editor_docks_and_survives(recording):
         actions.open_param_editor()
         names = [n for n in viewer.window.dock_widgets if n == "Parameters"]
         assert len(names) == 1
+    finally:
+        viewer.close()
+
+
+def test_palette_expands_as_rois_are_added(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        labels_layer = viewer.layers["ROIs"]
+        labels_layer.mode = "paint"
+
+        before = recording.num_rois
+        assert labels_layer.metadata["pygor_palette_n"] == before
+        assert labels_layer.colormap.colors.shape[0] == before + 1
+
+        dock.new_roi()
+        _stroke(labels_layer, (10, 10))
+
+        assert labels_layer.metadata["pygor_palette_n"] == before + 1
+        assert labels_layer.colormap.colors.shape[0] == before + 2
     finally:
         viewer.close()
 

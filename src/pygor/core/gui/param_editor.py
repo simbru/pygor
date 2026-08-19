@@ -35,6 +35,10 @@ _TYPE_INFO = {
 }
 
 
+# Neutral grey at low alpha: lightens a dark theme, darkens a light one
+_STRIPE_COLOUR = QColor(128, 128, 128, 38)
+
+
 def _type_label(value):
     """Return (type_name, colour) for a value."""
     for typ, info in _TYPE_INFO.items():
@@ -154,7 +158,12 @@ class ParamEditorWidget(QWidget):
         )
         self._table.verticalHeader().setVisible(False)
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self._table.setAlternatingRowColors(True)
+        # Qt's own alternating colours come from the widget palette, which
+        # stays light even when the surrounding theme is dark - inside
+        # napari that gave light text on a light band. A translucent grey
+        # set per row composites over whatever base colour the theme uses,
+        # so it works in either.
+        self._table.setAlternatingRowColors(False)
 
         # Populate rows
         for row, (path, value) in enumerate(self._items):
@@ -173,6 +182,10 @@ class ParamEditorWidget(QWidget):
             type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable)
             type_item.setForeground(type_colour)
             self._table.setItem(row, 2, type_item)
+
+            if row % 2:
+                for column in range(3):
+                    self._table.item(row, column).setBackground(_STRIPE_COLOUR)
 
         # Connect edit signal — fires when user finishes editing a cell
         self._table.cellChanged.connect(self._on_cell_changed)

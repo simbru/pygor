@@ -1,39 +1,62 @@
 """Colour palette for ROI labels.
 
-napari's default label colormap includes desaturated entries that read as
-grey against a greyscale image stack. Hues here are stepped by the golden
-ratio for separation and kept at high saturation, so no entry can come out
-grey.
-"""
+The palette spans a rainbow colormap sampled once per ROI, so the colours
+stay as far apart as the ROI count allows and the sequence reads in a
+predictable order. It is resampled whenever ROIs are added, which does
+mean existing ROIs change colour as the count grows.
 
-import colorsys
+``gist_rainbow`` is used rather than ``rainbow``: it is fully saturated
+across its whole range, so no ROI can come out grey against the greyscale
+image stack, whereas ``rainbow`` drops to 0.36 saturation in its
+cyan-green region.
+"""
 
 import numpy as np
 
-# Every colour is generated at one of these (saturation, value) pairs.
-# Saturation is bounded well away from zero, which is what greyness is.
-_TONES = ((0.95, 1.00), (0.95, 0.70), (0.60, 1.00), (0.75, 0.85))
+DEFAULT_CMAP = "gist_rainbow"
 
-# Reciprocal golden ratio: successive hues land far apart on the wheel
-_HUE_STEP = 0.61803398875
-
+# Any sample from the default colormap sits far above this
 MIN_SATURATION = 0.55
 
-
-def roi_colors(n=48):
-    """Return ``n`` distinct, non-grey RGBA colours as a float array."""
-    colors = np.zeros((n, 4), dtype=np.float32)
-    for i in range(n):
-        hue = (i * _HUE_STEP) % 1.0
-        saturation, value = _TONES[i % len(_TONES)]
-        colors[i, :3] = colorsys.hsv_to_rgb(hue, saturation, value)
-        colors[i, 3] = 1.0
-    return colors
+# napari maps label i to colors[1 + (i - 1) % n], so index 0 is background
+_BACKGROUND = np.zeros((1, 4), dtype=np.float32)
 
 
-def roi_colormap(n=48):
-    """Build a cyclic label colormap with a transparent background entry."""
+def roi_colors(n_rois, cmap_name=DEFAULT_CMAP):
+    """Sample a colormap once per ROI, returning an (n, 4) RGBA array."""
+    import matplotlib
+
+    n = max(int(n_rois), 1)
+    positions = np.linspace(0, 1, n)
+    return matplotlib.colormaps[cmap_name](positions).astype(np.float32)
+
+
+def roi_colormap(n_rois, cmap_name=DEFAULT_CMAP):
+    """Build a label colormap covering ``n_rois`` ROIs plus a background."""
     from napari.utils.colormaps import CyclicLabelColormap
 
-    colors = np.vstack([np.zeros((1, 4), dtype=np.float32), roi_colors(n)])
+    colors = np.vstack([_BACKGROUND, roi_colors(n_rois, cmap_name)])
     return CyclicLabelColormap(colors=colors, display_name="pygor_rois")
+
+
+def apply_roi_colormap(labels_layer, n_rois=None):
+    """Resample the palette so it spans exactly the ROIs present.
+
+    Rebuilding the colormap is not free, so this is a no-op when the ROI
+    count has not moved. The count is remembered on the layer's metadata
+    rather than tracked by the caller, so any code path that adds ROIs
+    gets the update by calling this.
+    """
+    if labels_layer is None:
+        return None
+
+    if n_rois is None:
+        n_rois = int(np.asarray(labels_layer.data).max())
+    n_rois = max(int(n_rois), 1)
+
+    if labels_layer.metadata.get("pygor_palette_n") == n_rois:
+        return labels_layer.colormap
+
+    labels_layer.colormap = roi_colormap(n_rois)
+    labels_layer.metadata["pygor_palette_n"] = n_rois
+    return labels_layer.colormap
