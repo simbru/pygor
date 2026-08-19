@@ -23,6 +23,9 @@ from pygor.gui.roi_bridge import label_to_trace_index
 # Attribute names offered in the source dropdown, in display order
 _TRACE_SOURCES = ("traces_znorm", "traces_raw", "traces_deconvolved", "averages")
 
+# Name of the crosshair layer marking the centred ROI
+CENTRE_LAYER_NAME = "Centred ROI"
+
 
 def available_sources(recording):
     """Return trace attributes present and non-empty on the recording."""
@@ -46,13 +49,19 @@ class TraceDock(QWidget):
         self.viewer = viewer
         self.labels_layer = labels_layer
         self._cursor = None
+        self._background = None
 
         self.source_box = QComboBox()
         self.source_box.addItems(available_sources(recording) or ["<no traces>"])
         self.source_box.currentIndexChanged.connect(lambda _: self.refresh())
 
         self.follow_box = QCheckBox("Follow frame")
-        self.follow_box.setChecked(True)
+        self.follow_box.setChecked(False)
+        self.follow_box.setToolTip(
+            "Track the viewer's current frame with a cursor on the trace. "
+            "Costs a blit per frame change."
+        )
+        self.follow_box.toggled.connect(self._on_follow_toggled)
 
         self.status = QLabel("No ROI selected")
 
@@ -69,6 +78,10 @@ class TraceDock(QWidget):
 
         self.centre_box = QCheckBox("Centre view")
         self.centre_box.setChecked(False)
+        self.centre_box.setToolTip(
+            "Move the camera to the selected ROI and mark it with a crosshair."
+        )
+        self.centre_box.toggled.connect(self._on_centre_toggled)
 
         # Guards the spinbox <-> layer selection loop from recursing
         self._syncing = False
@@ -134,13 +147,60 @@ class TraceDock(QWidget):
             self._centre_on_roi(int(label))
 
     def _centre_on_roi(self, label):
-        """Move the camera to the centroid of the given ROI label."""
+        """Move the camera to the centroid of the given ROI and mark it."""
+        centre = self._roi_centre(label)
+        if centre is None:
+            return
+        self.viewer.camera.center = (0, float(centre[0]), float(centre[1]))
+        self._update_centre_marker(centre)
+
+    def _roi_centre(self, label):
+        """Return the (row, col) centroid of a label, or None if absent."""
         data = np.asarray(self.labels_layer.data)
         coords = np.argwhere(data == label)
         if not coords.size:
-            return
+            return None
         centre = coords.mean(axis=0)
-        self.viewer.camera.center = (0, float(centre[-2]), float(centre[-1]))
+        return float(centre[-2]), float(centre[-1])
+
+    def _centre_layer(self):
+        """Return the crosshair layer if it exists, else None."""
+        if CENTRE_LAYER_NAME in self.viewer.layers:
+            return self.viewer.layers[CENTRE_LAYER_NAME]
+        return None
+
+    def _update_centre_marker(self, centre):
+        """Place the crosshair on the centred ROI.
+
+        Adding a layer steals the layer-list selection, which would knock
+        the Labels layer out of picker mode, so the previous selection is
+        restored afterwards.
+        """
+        point = np.array([[centre[0], centre[1]]])
+        layer = self._centre_layer()
+        if layer is not None:
+            layer.data = point
+            layer.visible = True
+            return
+
+        selection = list(self.viewer.layers.selection)
+        self.viewer.add_points(
+            point,
+            name=CENTRE_LAYER_NAME,
+            symbol="cross",
+            size=12,
+            face_color="transparent",
+            border_color="yellow",
+            border_width=0.15,
+            opacity=1.0,
+        )
+        self.viewer.layers.selection = set(selection)
+
+    def _remove_centre_marker(self):
+        """Hide the crosshair without disturbing the layer selection."""
+        layer = self._centre_layer()
+        if layer is not None:
+            layer.visible = False
 
     def _on_spin_changed(self, value):
         if self._syncing:
@@ -182,7 +242,49 @@ class TraceDock(QWidget):
         if frame is None:
             return
         self._cursor.set_xdata([frame, frame])
-        self.canvas.draw_idle()
+        self._blit_cursor()
+
+    def _blit_cursor(self):
+        """Redraw only the cursor over a cached background.
+
+        A full draw re-renders the whole trace, which is tens of thousands
+        of points for a typical recording and far too slow to do on every
+        frame change.
+        """
+        if self._background is None:
+            self.canvas.draw()
+            return
+        self.canvas.restore_region(self._background)
+        self.ax.draw_artist(self._cursor)
+        self.canvas.blit(self.ax.bbox)
+
+    def _capture_background(self):
+        """Cache the axis without the cursor, for blitting to restore."""
+        if self._cursor is None:
+            self._background = None
+            return
+        self._cursor.set_visible(False)
+        self.canvas.draw()
+        self._background = self.canvas.copy_from_bbox(self.ax.bbox)
+        self._cursor.set_visible(True)
+        self.ax.draw_artist(self._cursor)
+        self.canvas.blit(self.ax.bbox)
+
+    def _on_follow_toggled(self, checked):
+        """Create or drop the cursor when the follow toggle changes."""
+        self.refresh()
+
+    def _on_centre_toggled(self, checked):
+        """Show or hide the crosshair, centring immediately when enabled."""
+        if checked:
+            self.set_roi(self.selected_label)
+        else:
+            self._remove_centre_marker()
+
+    def resizeEvent(self, event):
+        """Invalidate the cached background, which is size-dependent."""
+        super().resizeEvent(event)
+        self._background = None
 
     def _current_frame(self):
         step = self.viewer.dims.current_step
@@ -196,6 +298,7 @@ class TraceDock(QWidget):
         self.roi_spin.setMaximum(max(1, self.n_rois))
         self.ax.clear()
         self._cursor = None
+        self._background = None
         trace, source = self.current_trace()
 
         if trace is None:
@@ -216,6 +319,10 @@ class TraceDock(QWidget):
 
         frame = self._current_frame()
         if frame is not None and self.follow_box.isChecked():
-            self._cursor = self.ax.axvline(frame, color="tab:red", lw=0.8)
-
-        self.canvas.draw_idle()
+            self._cursor = self.ax.axvline(
+                frame, color="tab:red", lw=0.8, animated=True
+            )
+            self._capture_background()
+        else:
+            self._background = None
+            self.canvas.draw_idle()

@@ -147,6 +147,65 @@ def test_roi_spinbox_and_layer_stay_in_sync(recording):
         viewer.close()
 
 
+def test_follow_frame_is_off_by_default(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        assert dock.follow_box.isChecked() is False
+        assert dock._cursor is None
+        assert dock._background is None
+    finally:
+        viewer.close()
+
+
+def test_follow_frame_uses_blitting_when_enabled(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        dock.follow_box.setChecked(True)
+        assert dock._cursor is not None
+        # Animated artists are excluded from the cached background
+        assert dock._cursor.get_animated() is True
+        assert dock._background is not None
+
+        viewer.dims.set_current_step(0, 5)
+        assert dock._cursor.get_xdata()[0] == 5
+    finally:
+        viewer.close()
+
+
+def test_centre_view_draws_and_moves_crosshair(recording):
+    from pygor.gui.launch import launch
+    from pygor.gui.widgets.traces import CENTRE_LAYER_NAME
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        assert CENTRE_LAYER_NAME not in viewer.layers
+
+        dock.centre_box.setChecked(True)
+        dock.set_roi(2)
+        marker = viewer.layers[CENTRE_LAYER_NAME]
+        first = np.array(marker.data, copy=True)
+        assert marker.visible is True
+
+        # Adding the marker must not steal the layer-list selection,
+        # which would knock the Labels layer out of picker mode.
+        assert [layer.name for layer in viewer.layers.selection] == ["ROIs"]
+
+        dock.set_roi(3)
+        assert not np.allclose(np.array(marker.data), first)
+
+        dock.centre_box.setChecked(False)
+        assert viewer.layers[CENTRE_LAYER_NAME].visible is False
+    finally:
+        viewer.close()
+
+
 def test_actions_dock_builds_all_buttons(recording):
     from pygor.gui.launch import launch
 

@@ -37,8 +37,14 @@ Confirmed working, headless, against a stub recording:
 - ROIs are navigated from the trace dock: prev/next buttons, a spinbox, and
   the `[` / `]` keys. Selection stays in sync with the Labels layer in both
   directions, so napari's picker mode (`5` or `L`, then click) also drives
-  the trace plot. "Centre view" moves the camera to the selected ROI.
-- The viewer's frame slider drives a cursor on the trace plot.
+  the trace plot. "Centre view" moves the camera to the selected ROI and
+  marks it with a crosshair Points layer, restoring the layer-list
+  selection so the Labels layer stays in picker mode.
+- The viewer's frame slider drives a cursor on the trace plot. Off by
+  default: a full matplotlib redraw of a 20684-point trace costs ~110 ms,
+  so following the frame stuttered badly. The cursor is now an animated
+  artist blitted over a cached background, at ~0.2 ms per update, but the
+  toggle stays off since most inspection does not need it.
 - magicgui builds the action buttons from type annotations; `thread_worker`
   keeps segmentation and projection off the GUI thread.
 - Edited labels convert back to an IGOR-style mask and go through
@@ -67,8 +73,10 @@ deprecated and warns).
   `pygor/strf/plotting`.
 - No progress reporting from long jobs; `thread_worker` supports `yielded`
   for that but the underlying methods do not yield.
-- Trace dock redraws the whole axis on every selection change. Fine at this
-  size, worth revisiting if more panels are added.
+- Trace dock redraws the whole axis on every selection change. That is one
+  ~110 ms draw per ROI change, acceptable when clicking through ROIs but
+  the obvious next target if it starts to feel sluggish. Decimating the
+  trace to roughly the axis width would fix it at the source.
 - Overlap with `view_stack_rois`, `draw_rois` and `view_images_interactive`
   is unresolved. If this direction is kept, those should either delegate to
   `launch` or be dropped.
