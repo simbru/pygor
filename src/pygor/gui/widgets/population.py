@@ -5,12 +5,13 @@ should I be looking at". One metric is selected at a time and drives three
 things together: a sortable table of per-ROI values, optionally the colour
 of the ROIs themselves, and the plot dock's histogram view.
 
-The histogram lives in the plot dock rather than here so that it gets the
-full width of the window, and so the table it is read alongside stays
-visible at the same time.
+The histogram sits under the table it summarises, and can be hidden when
+the table alone is wanted.
 """
 
 import numpy as np
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import (
     QAbstractItemView,
@@ -67,6 +68,18 @@ class PopulationDock(QWidget):
         self.status = QLabel("No metric")
         self.status.setWordWrap(True)
 
+        self.histogram_box = QCheckBox("Show histogram")
+        self.histogram_box.setChecked(True)
+        self.histogram_box.setToolTip(
+            "Distribution of the selected metric, with the selected ROI marked"
+        )
+        self.histogram_box.toggled.connect(self._on_histogram_toggled)
+
+        self.figure = Figure(figsize=(4, 2), layout="constrained")
+        self.canvas = FigureCanvas(self.figure)
+        self.canvas.setMinimumHeight(150)
+        self.ax = self.figure.add_subplot(111)
+
         self.table = QTableWidget(0, 2)
         self.table.setHorizontalHeaderLabels(["ROI", "Value"])
         self.table.verticalHeader().setVisible(False)
@@ -85,7 +98,9 @@ class PopulationDock(QWidget):
         layout.addLayout(controls)
         layout.addWidget(self.colour_box)
         layout.addWidget(self.status)
-        layout.addWidget(self.table, stretch=1)
+        layout.addWidget(self.table, stretch=2)
+        layout.addWidget(self.histogram_box)
+        layout.addWidget(self.canvas, stretch=1)
         self.setLayout(layout)
 
         self.reload_metrics()
@@ -167,6 +182,7 @@ class PopulationDock(QWidget):
 
         self._fill_table()
         self._apply_colouring()
+        self.draw_histogram()
         self.metric_changed.emit()
 
     @staticmethod
@@ -184,6 +200,46 @@ class PopulationDock(QWidget):
     # ------------------------------------------------------------------
     # Views
     # ------------------------------------------------------------------
+
+    def _on_histogram_toggled(self, checked):
+        self.canvas.setVisible(checked)
+        if checked:
+            self.draw_histogram()
+
+    def _roi_color(self):
+        """Colour of the selected ROI, for marking it in the distribution."""
+        layer = self.labels_layer
+        if layer is None or layer.selected_label < 1:
+            return "tab:red"
+        return tuple(float(c) for c in layer.get_color(layer.selected_label))
+
+    def draw_histogram(self):
+        """Redraw the distribution, marking where the selected ROI falls."""
+        if not self.histogram_box.isChecked():
+            return
+
+        self.ax.clear()
+        values = self._values
+        if values is None or not np.isfinite(values).any():
+            self.ax.set_axis_off()
+            self.canvas.draw_idle()
+            return
+
+        finite = values[np.isfinite(values)]
+        self.ax.set_axis_on()
+        self.ax.hist(
+            finite, bins=min(20, max(4, finite.size // 2)), color="0.6"
+        )
+
+        layer = self.labels_layer
+        if layer is not None:
+            selected = self.value_for_label(layer.selected_label)
+            if selected is not None and np.isfinite(selected):
+                self.ax.axvline(selected, color=self._roi_color(), lw=1.5)
+
+        self.ax.set_xlabel(self.current_metric_label)
+        self.ax.set_ylabel("ROIs")
+        self.canvas.draw_idle()
 
     def _fill_table(self):
         self._syncing = True
@@ -268,6 +324,7 @@ class PopulationDock(QWidget):
         if self._syncing:
             return
         self._highlight_selected()
+        self.draw_histogram()
 
     def _on_row_selected(self):
         if self._syncing:

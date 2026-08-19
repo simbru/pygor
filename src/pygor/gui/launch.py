@@ -187,17 +187,13 @@ def launch(recording, show=True, block=False, title=None):
             population_dock.rebind(layer),
         ),
         default_layers=default_layers,
-        on_depths_updated=lambda: _show_metric(
-            population_dock, plot_dock, "IPL depth"
-        ),
+        on_depths_updated=lambda: _show_metric(population_dock, "IPL depth"),
     )
 
     # napari owns the left dock area with its layer controls and layer
     # list, so anything put there competes with them for height. Both
     # pygor panels go right instead, tabbed so only one is visible at a
     # time, and the trace plot gets the full width along the bottom.
-    plot_dock.set_population(population_dock)
-
     plot_area = viewer.window.add_dock_widget(
         plot_dock, name="Plot", area="bottom"
     )
@@ -210,7 +206,7 @@ def launch(recording, show=True, block=False, title=None):
 
     from pygor.gui.menus import build_pygor_menu
 
-    build_pygor_menu(viewer, actions_dock, plot_dock, recording)
+    build_pygor_menu(viewer, actions_dock, plot_dock, population_dock, recording)
 
     _size_docks(viewer, plot_area, analysis_area)
     viewer.reset_view()
@@ -221,19 +217,19 @@ def launch(recording, show=True, block=False, title=None):
     return viewer
 
 
-def _show_metric(population_dock, plot_dock, label):
+def _show_metric(population_dock, label):
     """Bring a metric to the front after something recomputed it.
 
     Freshly computed depths are only useful if they can be seen, so the
-    population panel switches to them and the plot shows the distribution.
+    population panel switches to them and shows the distribution.
     """
     population_dock.reload_metrics()
     index = population_dock.metric_box.findText(label)
     if index < 0:
         return
     population_dock.metric_box.setCurrentIndex(index)
+    population_dock.histogram_box.setChecked(True)
     population_dock.refresh()
-    plot_dock.set_view(plot_dock.HISTOGRAM)
 
 
 def _size_docks(viewer, plot_area, analysis_area):

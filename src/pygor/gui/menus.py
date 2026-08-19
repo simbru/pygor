@@ -14,7 +14,7 @@ from pygor.gui.roi_numbers import NUMBER_LAYER_NAME
 MENU_TITLE = "&Pygor"
 
 
-def build_pygor_menu(viewer, actions_dock, plot_dock, recording):
+def build_pygor_menu(viewer, actions_dock, plot_dock, population_dock, recording):
     """Add the Pygor menu to a viewer, returning the QMenu."""
     menu = viewer.window.main_menu.addMenu(MENU_TITLE)
 
@@ -41,10 +41,6 @@ def build_pygor_menu(viewer, actions_dock, plot_dock, recording):
     _add(ipl, "Estimate depths automatically", actions_dock.estimate_ipl_depths)
 
     view = menu.addMenu("View")
-    plot = view.addMenu("Plot shows")
-    for label in (plot_dock.TRACE, plot_dock.HISTOGRAM):
-        _add(plot, label, lambda name=label: plot_dock.set_view(name))
-    view.addSeparator()
     numbers_action = _add_checkable(
         view,
         "Show ROI numbers",
@@ -53,6 +49,7 @@ def build_pygor_menu(viewer, actions_dock, plot_dock, recording):
     )
     _track_layer_visibility(viewer, NUMBER_LAYER_NAME, numbers_action)
     for text, box in (
+        ("Show histogram", population_dock.histogram_box),
         ("Follow frame", plot_dock.follow_box),
         ("Centre on selected ROI", plot_dock.centre_box),
         ("Auto-new ROI after each stroke", plot_dock.auto_new_box),

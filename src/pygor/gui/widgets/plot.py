@@ -1,13 +1,13 @@
-"""One plot for the whole window, switched between views.
+"""The window's per-ROI plot, and the ROI navigation that drives it.
 
-A trace and a histogram are both a single matplotlib axis and are never
-needed at once: you look at the distribution, then at the cell. Sharing
-one axis between them gives each twice the height and keeps the number of
-docks down. ROI navigation lives here too, since it applies whichever
-view is showing.
+One matplotlib axis showing whatever the selected ROI looks like. The
+view selector carries a single entry for now and hides itself until there
+is a second, which is where the per-ROI detail views in
+`dev/gui_workflow_map.md` belong: RF maps per channel, temporal kernels,
+tuning functions.
 
-New views are added by writing a mode: give it a label, the controls it
-needs, and how to draw itself.
+Population-level plots live with the population table instead, since a
+distribution is read alongside the values it summarises.
 """
 
 import numpy as np
@@ -55,7 +55,6 @@ class PlotDock(QWidget):
     """Dock widget holding the window's single plot axis."""
 
     TRACE = "Trace"
-    HISTOGRAM = "Histogram"
 
     def __init__(self, recording, viewer, labels_layer=None):
         super().__init__()
@@ -65,10 +64,8 @@ class PlotDock(QWidget):
         self._cursor = None
         self._background = None
 
-        self._population = None
-
         self.mode_box = QComboBox()
-        self.mode_box.addItems([self.TRACE, self.HISTOGRAM])
+        self.mode_box.addItems([self.TRACE])
         self.mode_box.setToolTip("Which view this plot shows")
         self.mode_box.currentIndexChanged.connect(self._on_view_changed)
 
@@ -141,19 +138,18 @@ class PlotDock(QWidget):
         trace_row.addWidget(self.follow_box)
         trace_controls.setLayout(trace_row)
 
-        histogram_controls = QWidget()
-        histogram_row = QHBoxLayout()
-        histogram_row.setContentsMargins(0, 0, 0, 0)
-        self.histogram_hint = QLabel("Metric chosen in the Population panel")
-        histogram_row.addWidget(self.histogram_hint, stretch=1)
-        histogram_controls.setLayout(histogram_row)
-
         self.controls_stack = QStackedWidget()
         self.controls_stack.addWidget(trace_controls)
-        self.controls_stack.addWidget(histogram_controls)
+
+        # A one-entry selector is just noise; it appears once a second view
+        # is registered.
+        self.view_label = QLabel("View:")
+        single_view = self.mode_box.count() < 2
+        self.view_label.setVisible(not single_view)
+        self.mode_box.setVisible(not single_view)
 
         controls = QHBoxLayout()
-        controls.addWidget(QLabel("View:"))
+        controls.addWidget(self.view_label)
         controls.addWidget(self.mode_box)
         controls.addWidget(self.controls_stack, stretch=1)
 
@@ -481,16 +477,6 @@ class PlotDock(QWidget):
         self.controls_stack.setCurrentIndex(self.mode_box.currentIndex())
         self.refresh()
 
-    def set_population(self, population_dock):
-        """Attach the panel that owns metric selection, for the histogram."""
-        self._population = population_dock
-        if population_dock is not None:
-            population_dock.metric_changed.connect(self._on_metric_changed)
-
-    def _on_metric_changed(self):
-        if self.view == self.HISTOGRAM:
-            self.refresh()
-
     def refresh(self):
         """Redraw the axis for the current view."""
         # Labels can outrun the trace array: an ROI drawn by hand exists in
@@ -500,47 +486,7 @@ class PlotDock(QWidget):
         self._cursor = None
         self._background = None
 
-        if self.view == self.HISTOGRAM:
-            self._draw_histogram()
-            return
         self._draw_trace()
-
-    def _draw_histogram(self):
-        """Distribution of the metric the population panel has selected."""
-        values = getattr(self._population, "current_values", None)
-        label = getattr(self._population, "current_metric_label", "")
-
-        if values is None or not np.isfinite(values).any():
-            self.status.setText(
-                f"No values to plot for {label}" if label else "No metric selected"
-            )
-            self.ax.set_axis_off()
-            self.canvas.draw_idle()
-            return
-
-        finite = values[np.isfinite(values)]
-        self.ax.set_axis_on()
-        self.ax.hist(
-            finite, bins=min(20, max(4, finite.size // 2)), color="tab:blue"
-        )
-
-        # Mark where the selected ROI sits in the distribution
-        selected = self._population.value_for_label(self.selected_label)
-        if selected is not None and np.isfinite(selected):
-            self.ax.axvline(selected, color=self.roi_color(), lw=1.5)
-            self.status.setText(
-                f"{label}: ROI {self.selected_label} = {selected:.4g}, "
-                f"{finite.size} ROIs from {finite.min():.3g} to {finite.max():.3g}"
-            )
-        else:
-            self.status.setText(
-                f"{label}: {finite.size} ROIs from {finite.min():.3g} to "
-                f"{finite.max():.3g}"
-            )
-
-        self.ax.set_xlabel(label)
-        self.ax.set_ylabel("ROIs")
-        self.canvas.draw_idle()
 
     def _draw_trace(self):
         """Time course of the selected ROI."""

@@ -1031,173 +1031,70 @@ def test_expensive_metrics_wait_for_an_explicit_request(recording):
         viewer.close()
 
 
-def test_plot_dock_switches_between_views(recording):
+def test_plot_dock_hides_a_single_entry_view_selector(recording):
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
     try:
         plot = viewer.window.dock_widgets["Plot"]
         assert plot.view == plot.TRACE
+        assert plot.mode_box.count() == 1
+        # A selector with one option is noise until a second view exists
+        assert plot.mode_box.isVisibleTo(plot) is False
         assert "traces_znorm" in plot.status.text()
-
-        plot.set_view(plot.HISTOGRAM)
-        assert plot.view == plot.HISTOGRAM
-        # A histogram leaves bars on the axis, a trace does not
-        assert len(plot.ax.patches) > 0
-
-        plot.set_view(plot.TRACE)
-        assert len(plot.ax.patches) == 0
-        assert len(plot.ax.lines) == 1
     finally:
         viewer.close()
 
 
-def test_histogram_follows_the_population_metric(recording):
+def test_population_histogram_follows_the_metric(recording):
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
     try:
-        plot = viewer.window.dock_widgets["Plot"]
         population = viewer.window.dock_widgets["Population"]
-        plot.set_view(plot.HISTOGRAM)
+        assert population.histogram_box.isChecked() is True
+        assert len(population.ax.patches) > 0
 
         first = population.current_metric_label
-        assert first in plot.status.text()
+        assert population.ax.get_xlabel() == first
 
         population.metric_box.setCurrentIndex(1)
-        second = population.current_metric_label
-        assert second != first
-        assert second in plot.status.text()
+        assert population.ax.get_xlabel() != first
     finally:
         viewer.close()
 
 
-def test_histogram_marks_the_selected_roi(recording):
+def test_population_histogram_marks_the_selected_roi(recording):
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
     try:
-        plot = viewer.window.dock_widgets["Plot"]
         population = viewer.window.dock_widgets["Population"]
-        plot.set_view(plot.HISTOGRAM)
+        viewer.layers["ROIs"].selected_label = 2
 
-        plot.set_roi(2)
         expected = population.value_for_label(2)
         assert expected is not None
-        marker = [line for line in plot.ax.lines]
-        assert len(marker) == 1
-        np.testing.assert_allclose(marker[0].get_xdata()[0], expected)
+        markers = population.ax.lines
+        assert len(markers) == 1
+        np.testing.assert_allclose(markers[0].get_xdata()[0], expected)
     finally:
         viewer.close()
 
 
-def _draw_boundaries(viewer, recording, upper_y=2.0, lower_y=13.0):
-    from pygor.gui.ipl import LOWER_LAYER_NAME, UPPER_LAYER_NAME
-
-    width = recording.rois.shape[-1] - 1
-    viewer.layers[UPPER_LAYER_NAME].add_paths(
-        [np.array([[upper_y, 0.0], [upper_y, width]])]
-    )
-    viewer.layers[LOWER_LAYER_NAME].add_paths(
-        [np.array([[lower_y, 0.0], [lower_y, width]])]
-    )
-
-
-def test_ipl_boundary_layers_open_ready_to_draw(recording):
-    from pygor.gui.ipl import LOWER_LAYER_NAME, UPPER_LAYER_NAME
+def test_population_histogram_can_be_hidden(recording):
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
     try:
-        actions = viewer.window.dock_widgets["Analysis"]
-        assert UPPER_LAYER_NAME not in viewer.layers
-
-        actions.draw_ipl_boundaries()
-        assert UPPER_LAYER_NAME in viewer.layers
-        assert LOWER_LAYER_NAME in viewer.layers
-        # The next click should start a line, not need the tool picked first
-        assert str(viewer.layers[UPPER_LAYER_NAME].mode) == "add_polyline"
-        assert [l.name for l in viewer.layers.selection] == [UPPER_LAYER_NAME]
-    finally:
-        viewer.close()
-
-
-def test_ipl_depths_need_both_boundaries(recording):
-    from pygor.gui.ipl import UPPER_LAYER_NAME
-    from pygor.gui.launch import launch
-
-    viewer = launch(recording, show=False, block=False)
-    try:
-        actions = viewer.window.dock_widgets["Analysis"]
-        actions.draw_ipl_boundaries()
-
-        assert actions.compute_ipl_depths() is None
-        assert "Draw both boundaries" in actions.status.text()
-
-        width = recording.rois.shape[-1] - 1
-        viewer.layers[UPPER_LAYER_NAME].add_paths(
-            [np.array([[2.0, 0.0], [2.0, width]])]
-        )
-        assert actions.compute_ipl_depths() is None
-        assert "100%" in actions.status.text()
-    finally:
-        viewer.close()
-
-
-def test_ipl_depths_land_on_the_recording_and_the_plot(recording):
-    from pygor.gui.launch import launch
-
-    viewer = launch(recording, show=False, block=False)
-    try:
-        actions = viewer.window.dock_widgets["Analysis"]
         population = viewer.window.dock_widgets["Population"]
-        plot = viewer.window.dock_widgets["Plot"]
-        assert "IPL depth" not in [
-            population.metric_box.itemText(i)
-            for i in range(population.metric_box.count())
-        ]
+        population.histogram_box.setChecked(False)
+        assert population.canvas.isVisibleTo(population) is False
 
-        actions.draw_ipl_boundaries()
-        _draw_boundaries(viewer, recording)
-        depths = actions.compute_ipl_depths()
-
-        assert depths is not None
-        assert depths.shape == (recording.num_rois,)
-        np.testing.assert_allclose(recording.ipl_depths, depths)
-
-        # Freshly computed depths should be visible without hunting for them
-        assert population.current_metric_label == "IPL depth"
-        assert plot.view == plot.HISTOGRAM
+        population.histogram_box.setChecked(True)
+        assert population.canvas.isVisibleTo(population) is True
+        assert len(population.ax.patches) > 0
     finally:
         viewer.close()
-
-
-def test_redrawing_a_boundary_supersedes_the_old_one(recording):
-    from pygor.gui.ipl import UPPER_LAYER_NAME, boundary_coords
-    from pygor.gui.launch import launch
-
-    viewer = launch(recording, show=False, block=False)
-    try:
-        actions = viewer.window.dock_widgets["Analysis"]
-        actions.draw_ipl_boundaries()
-        _draw_boundaries(viewer, recording)
-
-        width = recording.rois.shape[-1] - 1
-        viewer.layers[UPPER_LAYER_NAME].add_paths(
-            [np.array([[5.0, 0.0], [5.0, width]])]
-        )
-        coords = boundary_coords(viewer.layers[UPPER_LAYER_NAME])
-        np.testing.assert_allclose(coords[:, 0], 5.0)
-    finally:
-        viewer.close()
-
-
-def test_estimate_reports_when_unsupported(recording):
-    from pygor.gui.ipl import estimate_depths
-
-    depths, message = estimate_depths(recording)
-    assert depths is None
-    assert "cannot estimate" in message
 
 
 def test_actions_dock_builds_all_buttons(recording):

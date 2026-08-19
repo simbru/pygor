@@ -140,16 +140,15 @@ deprecated and warns).
 
 ## Plot panel
 
-`pygor/gui/widgets/plot.py` owns the window's single matplotlib axis, with
-a View selector switching what it shows. A trace and a histogram are never
-wanted at once — the distribution says which cell, the trace says what it
-does — so sharing one axis gives each the full width and keeps the dock
-count down. ROI navigation lives here since it applies to either view. The
-histogram marks where the selected ROI falls, in that ROI's colour.
+`pygor/gui/widgets/plot.py` owns the window's per-ROI matplotlib axis and
+the ROI navigation that drives it. Its View selector carries one entry for
+now and hides itself until there is a second, which is where the per-ROI
+detail views in `dev/gui_workflow_map.md` belong: RF maps per channel,
+temporal kernels, tuning functions.
 
-New views are added by extending the selector and giving the mode its own
-controls page, which is where the per-ROI detail views in
-`dev/gui_workflow_map.md` should go.
+Population-level plots are not here. The metric histogram sits under the
+population table instead, since a distribution is read alongside the
+values it summarises.
 
 ## IPL depth
 
@@ -161,7 +160,7 @@ the result lands straight on the recording via `update_ipl_depths`.
 
 The last shape drawn on a layer wins, so redrawing a boundary supersedes
 the previous attempt without deleting it first. Once computed, the
-population panel switches to the IPL depth metric and the plot to the
+population panel switches to the IPL depth metric and shows its
 histogram, since a depth you cannot see is not much use. Note that
 `calculate_ipl_depths` returns percentages outside 0–100 for ROIs beyond
 the boundary pair, where `estimate_ipl_depths` clips.
@@ -170,9 +169,11 @@ the boundary pair, where `estimate_ipl_depths` clips.
 
 `pygor/gui/widgets/population.py` shows one metric across every ROI, so a
 cell can be picked out of the population rather than stepped past. The
-selected metric drives three views at once: a histogram, a sortable table,
-and optionally the colour of the ROIs themselves. Table and ROI layer
-selection track each other in both directions.
+selected metric drives three things at once: a sortable table, a
+histogram under it marking where the selected ROI falls in that ROI's
+colour, and optionally the colour of the ROIs themselves. Table and ROI
+layer selection track each other in both directions, and the histogram can
+be hidden when the table alone is wanted.
 
 `pygor/gui/metrics.py` holds the registry. A `MetricSpec` carries a cheap
 `applies` check, a `compute` callable and an `expensive` flag, because
