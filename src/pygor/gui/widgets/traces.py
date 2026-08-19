@@ -23,7 +23,8 @@ from pygor.gui.roi_bridge import label_to_trace_index
 # Attribute names offered in the source dropdown, in display order
 _TRACE_SOURCES = ("traces_znorm", "traces_raw", "traces_deconvolved", "averages")
 
-# Name of the crosshair layer marking the centred ROI
+# Name of the crosshair layer marking the centred ROI, and its size as a
+# fraction of image width so it scales with the field of view
 CENTRE_LAYER_NAME = "Centred ROI"
 
 
@@ -177,9 +178,11 @@ class TraceDock(QWidget):
         restored afterwards.
         """
         point = np.array([[centre[0], centre[1]]])
+        size = self._marker_size()
         layer = self._centre_layer()
         if layer is not None:
             layer.data = point
+            layer.size = size
             layer.visible = True
             return
 
@@ -188,13 +191,17 @@ class TraceDock(QWidget):
             point,
             name=CENTRE_LAYER_NAME,
             symbol="cross",
-            size=12,
-            face_color="transparent",
-            border_color="yellow",
-            border_width=0.15,
+            size=size,
+            face_color="white",
+            border_color="transparent",
             opacity=1.0,
         )
         self.viewer.layers.selection = set(selection)
+
+    def _marker_size(self):
+        """Scale the crosshair to a thirtieth of the image width."""
+        width = np.asarray(self.labels_layer.data).shape[-1]
+        return width / 30
 
     def _remove_centre_marker(self):
         """Hide the crosshair without disturbing the layer selection."""

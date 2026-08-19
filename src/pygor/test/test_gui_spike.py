@@ -206,6 +206,25 @@ def test_centre_view_draws_and_moves_crosshair(recording):
         viewer.close()
 
 
+def test_crosshair_scales_with_image_width(recording):
+    from pygor.gui.launch import launch
+    from pygor.gui.widgets.traces import CENTRE_LAYER_NAME
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Traces"]
+        dock.centre_box.setChecked(True)
+        dock.set_roi(1)
+
+        marker = viewer.layers[CENTRE_LAYER_NAME]
+        expected = recording.rois.shape[-1] / 30
+        np.testing.assert_allclose(np.asarray(marker.size).ravel(), expected)
+        np.testing.assert_allclose(np.asarray(marker.face_color)[0], [1, 1, 1, 1])
+        np.testing.assert_allclose(np.asarray(marker.border_color)[0], [0, 0, 0, 0])
+    finally:
+        viewer.close()
+
+
 def test_actions_dock_builds_all_buttons(recording):
     from pygor.gui.launch import launch
 
