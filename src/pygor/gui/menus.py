@@ -35,6 +35,11 @@ def build_pygor_menu(viewer, actions_dock, plot_dock, recording):
     _add(rois, "Push ROIs to recording", lambda: _push(actions_dock))
     _add(rois, "Restore default layers", lambda: _restore(actions_dock))
 
+    ipl = menu.addMenu("IPL depth")
+    _add(ipl, "Draw boundaries", actions_dock.draw_ipl_boundaries)
+    _add(ipl, "Compute depths from boundaries", actions_dock.compute_ipl_depths)
+    _add(ipl, "Estimate depths automatically", actions_dock.estimate_ipl_depths)
+
     view = menu.addMenu("View")
     plot = view.addMenu("Plot shows")
     for label in (plot_dock.TRACE, plot_dock.HISTOGRAM):

@@ -138,6 +138,34 @@ object rather than on window close. Private napari attributes are avoided;
 `viewer.window.dock_widgets` is the public accessor (`_dock_widgets` is
 deprecated and warns).
 
+## Plot panel
+
+`pygor/gui/widgets/plot.py` owns the window's single matplotlib axis, with
+a View selector switching what it shows. A trace and a histogram are never
+wanted at once — the distribution says which cell, the trace says what it
+does — so sharing one axis gives each the full width and keeps the dock
+count down. ROI navigation lives here since it applies to either view. The
+histogram marks where the selected ROI falls, in that ROI's colour.
+
+New views are added by extending the selector and giving the mode its own
+controls page, which is where the per-ROI detail views in
+`dev/gui_workflow_map.md` should go.
+
+## IPL depth
+
+`pygor/gui/ipl.py` puts the two boundary polylines in the main viewer as
+Shapes layers, rather than in the separate viewer `NapariDepthPrompt`
+opens. Depths are computed on request instead of on window close, so the
+boundaries can be adjusted and recomputed without reopening anything, and
+the result lands straight on the recording via `update_ipl_depths`.
+
+The last shape drawn on a layer wins, so redrawing a boundary supersedes
+the previous attempt without deleting it first. Once computed, the
+population panel switches to the IPL depth metric and the plot to the
+histogram, since a depth you cannot see is not much use. Note that
+`calculate_ipl_depths` returns percentages outside 0–100 for ROIs beyond
+the boundary pair, where `estimate_ipl_depths` clips.
+
 ## Population panel
 
 `pygor/gui/widgets/population.py` shows one metric across every ROI, so a

@@ -27,6 +27,7 @@ class ActionsDock(QWidget):
         on_traces_changed=None,
         on_layer_restored=None,
         default_layers=None,
+        on_depths_updated=None,
     ):
         super().__init__()
         self.recording = recording
@@ -34,6 +35,7 @@ class ActionsDock(QWidget):
         self._labels_layer = labels_layer
         self.on_traces_changed = on_traces_changed
         self.on_layer_restored = on_layer_restored
+        self.on_depths_updated = on_depths_updated
         self.default_layers = list(default_layers or [])
         # Guards against reacting to the additions a restore itself makes
         self._restoring = False
@@ -334,6 +336,44 @@ class ActionsDock(QWidget):
             )
 
         return restore
+
+    # ------------------------------------------------------------------
+    # IPL depth
+    # ------------------------------------------------------------------
+
+    def draw_ipl_boundaries(self):
+        """Add the boundary layers and put the outer one in drawing mode."""
+        from pygor.gui.ipl import ensure_boundary_layers
+
+        ensure_boundary_layers(self.viewer)
+        self._set_status(
+            "Draw the 0% boundary, then the 100% boundary, then compute depths"
+        )
+
+    def compute_ipl_depths(self):
+        """Measure ROI depths between the two drawn boundaries."""
+        from pygor.gui.ipl import compute_depths
+
+        depths, message = compute_depths(self.recording, self.viewer)
+        self._set_status(message)
+        if depths is not None:
+            self._store_depths(depths)
+        return depths
+
+    def estimate_ipl_depths(self):
+        """Estimate depths from ROI positions, without drawing boundaries."""
+        from pygor.gui.ipl import estimate_depths
+
+        depths, message = estimate_depths(self.recording)
+        self._set_status(message)
+        if depths is not None:
+            self._store_depths(depths)
+        return depths
+
+    def _store_depths(self, depths):
+        self.recording.update_ipl_depths(depths)
+        if self.on_depths_updated is not None:
+            self.on_depths_updated()
 
     def _params_widget(self):
         @magicgui(call_button="Edit parameters", layout="vertical")

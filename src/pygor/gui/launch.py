@@ -187,6 +187,9 @@ def launch(recording, show=True, block=False, title=None):
             population_dock.rebind(layer),
         ),
         default_layers=default_layers,
+        on_depths_updated=lambda: _show_metric(
+            population_dock, plot_dock, "IPL depth"
+        ),
     )
 
     # napari owns the left dock area with its layer controls and layer
@@ -216,6 +219,21 @@ def launch(recording, show=True, block=False, title=None):
         napari.run()
 
     return viewer
+
+
+def _show_metric(population_dock, plot_dock, label):
+    """Bring a metric to the front after something recomputed it.
+
+    Freshly computed depths are only useful if they can be seen, so the
+    population panel switches to them and the plot shows the distribution.
+    """
+    population_dock.reload_metrics()
+    index = population_dock.metric_box.findText(label)
+    if index < 0:
+        return
+    population_dock.metric_box.setCurrentIndex(index)
+    population_dock.refresh()
+    plot_dock.set_view(plot_dock.HISTOGRAM)
 
 
 def _size_docks(viewer, plot_area, analysis_area):

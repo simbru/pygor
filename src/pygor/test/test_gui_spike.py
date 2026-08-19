@@ -53,6 +53,21 @@ class StubRecording:
     def calculate_image_average(self):
         return self.images.mean(axis=0)
 
+    @property
+    def roi_centroids(self):
+        import scipy.ndimage
+
+        from pygor.gui.roi_bridge import mask_to_labels
+
+        labels = mask_to_labels(self.rois)
+        ids = np.unique(labels)
+        ids = ids[ids > 0]
+        return np.array(scipy.ndimage.center_of_mass(labels, labels, ids))
+
+    def update_ipl_depths(self, depths=None):
+        self.ipl_depths = np.asarray(depths, dtype=float)
+        return True
+
     def update_rois(self, roi_mask):
         self.rois = np.asarray(roi_mask)
         self.num_rois = int((np.unique(self.rois) < 0).sum())
@@ -1074,6 +1089,115 @@ def test_histogram_marks_the_selected_roi(recording):
         np.testing.assert_allclose(marker[0].get_xdata()[0], expected)
     finally:
         viewer.close()
+
+
+def _draw_boundaries(viewer, recording, upper_y=2.0, lower_y=13.0):
+    from pygor.gui.ipl import LOWER_LAYER_NAME, UPPER_LAYER_NAME
+
+    width = recording.rois.shape[-1] - 1
+    viewer.layers[UPPER_LAYER_NAME].add_paths(
+        [np.array([[upper_y, 0.0], [upper_y, width]])]
+    )
+    viewer.layers[LOWER_LAYER_NAME].add_paths(
+        [np.array([[lower_y, 0.0], [lower_y, width]])]
+    )
+
+
+def test_ipl_boundary_layers_open_ready_to_draw(recording):
+    from pygor.gui.ipl import LOWER_LAYER_NAME, UPPER_LAYER_NAME
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        actions = viewer.window.dock_widgets["Analysis"]
+        assert UPPER_LAYER_NAME not in viewer.layers
+
+        actions.draw_ipl_boundaries()
+        assert UPPER_LAYER_NAME in viewer.layers
+        assert LOWER_LAYER_NAME in viewer.layers
+        # The next click should start a line, not need the tool picked first
+        assert str(viewer.layers[UPPER_LAYER_NAME].mode) == "add_polyline"
+        assert [l.name for l in viewer.layers.selection] == [UPPER_LAYER_NAME]
+    finally:
+        viewer.close()
+
+
+def test_ipl_depths_need_both_boundaries(recording):
+    from pygor.gui.ipl import UPPER_LAYER_NAME
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        actions = viewer.window.dock_widgets["Analysis"]
+        actions.draw_ipl_boundaries()
+
+        assert actions.compute_ipl_depths() is None
+        assert "Draw both boundaries" in actions.status.text()
+
+        width = recording.rois.shape[-1] - 1
+        viewer.layers[UPPER_LAYER_NAME].add_paths(
+            [np.array([[2.0, 0.0], [2.0, width]])]
+        )
+        assert actions.compute_ipl_depths() is None
+        assert "100%" in actions.status.text()
+    finally:
+        viewer.close()
+
+
+def test_ipl_depths_land_on_the_recording_and_the_plot(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        actions = viewer.window.dock_widgets["Analysis"]
+        population = viewer.window.dock_widgets["Population"]
+        plot = viewer.window.dock_widgets["Plot"]
+        assert "IPL depth" not in [
+            population.metric_box.itemText(i)
+            for i in range(population.metric_box.count())
+        ]
+
+        actions.draw_ipl_boundaries()
+        _draw_boundaries(viewer, recording)
+        depths = actions.compute_ipl_depths()
+
+        assert depths is not None
+        assert depths.shape == (recording.num_rois,)
+        np.testing.assert_allclose(recording.ipl_depths, depths)
+
+        # Freshly computed depths should be visible without hunting for them
+        assert population.current_metric_label == "IPL depth"
+        assert plot.view == plot.HISTOGRAM
+    finally:
+        viewer.close()
+
+
+def test_redrawing_a_boundary_supersedes_the_old_one(recording):
+    from pygor.gui.ipl import UPPER_LAYER_NAME, boundary_coords
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        actions = viewer.window.dock_widgets["Analysis"]
+        actions.draw_ipl_boundaries()
+        _draw_boundaries(viewer, recording)
+
+        width = recording.rois.shape[-1] - 1
+        viewer.layers[UPPER_LAYER_NAME].add_paths(
+            [np.array([[5.0, 0.0], [5.0, width]])]
+        )
+        coords = boundary_coords(viewer.layers[UPPER_LAYER_NAME])
+        np.testing.assert_allclose(coords[:, 0], 5.0)
+    finally:
+        viewer.close()
+
+
+def test_estimate_reports_when_unsupported(recording):
+    from pygor.gui.ipl import estimate_depths
+
+    depths, message = estimate_depths(recording)
+    assert depths is None
+    assert "cannot estimate" in message
 
 
 def test_actions_dock_builds_all_buttons(recording):
