@@ -66,6 +66,13 @@ class StubRecording:
         ids = ids[ids > 0]
         return np.array(scipy.ndimage.center_of_mass(labels, labels, ids))
 
+    def segment_rois(self, mode=None, overwrite=True, **kwargs):
+        """Add one ROI, so the reported count must be read after the run."""
+        mask = np.array(self.rois, copy=True)
+        mask[-3:-1, -4:-2] = -(self.num_rois + 1)
+        self.update_rois(mask)
+        return mask
+
     def preprocess(self, force=False, **kwargs):
         if self.params.preprocessed and not force:
             return
@@ -451,6 +458,23 @@ def _process_events():
     app = QApplication.instance()
     if app is not None:
         app.processEvents()
+
+
+def _wait_for(predicate, timeout=10.0):
+    """Pump the Qt event loop until a predicate holds.
+
+    Worker callbacks run on the main thread, so a worker finishing is not
+    the same as its `returned` handler having run.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        _process_events()
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return False
 
 
 def _stroke(labels_layer, coord):
@@ -1270,6 +1294,25 @@ def test_averaging_action_updates_the_recording(recording):
         assert recording.averages is not None
         assert recording.averages.shape[0] == recording.num_rois
         assert recording.snippets.ndim == 3
+    finally:
+        viewer.close()
+
+
+def test_segmentation_status_counts_after_the_run(recording):
+    """An f-string built at call time reports the count from before."""
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        actions = viewer.window.dock_widgets["Analysis"]
+        before = recording.num_rois
+
+        actions.run_segmentation()
+        # A worker finishing is not the same as its callback having run
+        assert _wait_for(lambda: actions.status.text().startswith("Segmented"))
+
+        assert recording.num_rois == before + 1
+        assert actions.status.text() == f"Segmented: {before + 1} ROIs"
     finally:
         viewer.close()
 

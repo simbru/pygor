@@ -181,8 +181,19 @@ class ActionsDock(QWidget):
         self.status.setText(text)
 
     def _run(self, worker, done_message):
-        """Start a worker, wiring status updates and error reporting."""
-        worker.returned.connect(lambda _=None: self._set_status(done_message))
+        """Start a worker, wiring status updates and error reporting.
+
+        ``done_message`` may be a callable, for messages that report on
+        what the job produced: an f-string built at call time reads the
+        state from before the job ran.
+        """
+
+        def _done(_=None):
+            self._set_status(
+                done_message() if callable(done_message) else done_message
+            )
+
+        worker.returned.connect(_done)
         worker.errored.connect(lambda exc: self._set_status(f"Failed: {exc}"))
         worker.start()
 
@@ -206,7 +217,7 @@ class ActionsDock(QWidget):
 
         worker = job()
         worker.returned.connect(lambda _=None: self._refresh_labels())
-        self._run(worker, f"Segmented: {self.recording.num_rois} ROIs")
+        self._run(worker, lambda: f"Segmented: {self.recording.num_rois} ROIs")
         return worker
 
     def _segment_widget(self):

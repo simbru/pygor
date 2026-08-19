@@ -191,11 +191,18 @@ stacks, which only exist once something destructive has run.
 The config stores `normalization` as the string `"None"`, while `register`
 wants a real `None`; the panel converts it.
 
-Preprocessing runs on H5 recordings and the mechanism is verified there,
-but H5 exports are already preprocessed by IGOR, so it is semantically a
-second application. Registration is wired but has not been run against a
-real recording — the local stacks are 20684 frames and too slow for a
-check. Both want raw `.smp`/`.smh` data to be exercised properly.
+Both verified against raw ScanM data
+(`0_0_gratings200_R_0.smp`, 4015 frames): preprocessing takes about 4s and
+converts the stack from uint16 to float32, registration about 1s. Contrast
+limits are left alone across that dtype change because the value range
+barely moves, so the image stays readable.
+
+The full pipeline runs end to end on that recording through the docks:
+preprocess, register, segment (59 ROIs by blob detection), extract traces,
+average. Averaging gave snippets `(59, 25, 7872)` and averages
+`(59, 7872)` from 25 triggers, confirming the
+`(n_rois, n_loops, snippet_length)` layout on a stimulus where trials
+actually mean something.
 
 ## Population panel
 
