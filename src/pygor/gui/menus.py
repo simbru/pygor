@@ -15,13 +15,18 @@ MENU_TITLE = "&Pygor"
 
 
 def build_pygor_menu(
-    viewer, actions_dock, plot_dock, population_dock, preprocessing_dock, recording
+    viewer,
+    actions_dock,
+    plot_dock,
+    population_dock,
+    preprocessing_dock,
+    segmentation_dock,
+    recording,
 ):
     """Add the Pygor menu to a viewer, returning the QMenu."""
     menu = viewer.window.main_menu.addMenu(MENU_TITLE)
 
     analysis = menu.addMenu("Analysis")
-    _add(analysis, "Segment ROIs...", lambda: actions_dock.run_segmentation())
     _add(analysis, "Extract traces", lambda: actions_dock.run_extraction())
     _add(analysis, "Compute averages", lambda: actions_dock.run_averaging())
     _add(
@@ -35,7 +40,8 @@ def build_pygor_menu(
     _add(rois, "Next ROI", lambda: plot_dock.step_roi(1), ".")
     _add(rois, "Previous ROI", lambda: plot_dock.step_roi(-1), ",")
     rois.addSeparator()
-    _add(rois, "Push ROIs to recording", lambda: _push(actions_dock))
+    _add(rois, "Segment ROIs", lambda: segmentation_dock.run_segmentation())
+    _add(rois, "Push ROIs to recording", segmentation_dock.push_rois)
     _add(rois, "Restore default layers", lambda: _restore(actions_dock))
 
     preprocessing = menu.addMenu("Preprocessing")
@@ -130,13 +136,6 @@ def _layer_visible(viewer, name):
 def _set_layer_visible(viewer, name, visible):
     if name in viewer.layers:
         viewer.layers[name].visible = visible
-
-
-def _push(actions_dock):
-    if actions_dock.sync_rois_from_layer():
-        actions_dock._set_status("Pushed ROIs to recording")
-    else:
-        actions_dock._set_status("ROIs already match the recording")
 
 
 def _restore(actions_dock):

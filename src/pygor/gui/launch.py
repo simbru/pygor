@@ -187,20 +187,27 @@ def launch(recording, show=True, block=False, title=None):
 
     from pygor.gui.widgets.actions import ActionsDock
     from pygor.gui.widgets.preprocessing import PreprocessingDock
+    from pygor.gui.widgets.segmentation import SegmentationDock
     from pygor.gui.widgets.population import PopulationDock
     from pygor.gui.widgets.plot import PlotDock
 
     plot_dock = PlotDock(recording, viewer, labels_layer=labels_layer)
     population_dock = PopulationDock(recording, viewer, labels_layer=labels_layer)
+
+    def rebind_all(layer):
+        """Point every dock at an ROI layer that was rebuilt or created."""
+        plot_dock.rebind(layer)
+        population_dock.rebind(layer)
+        segmentation_dock.rebind(layer)
+        actions_dock._labels_layer = layer
+        actions_dock._bind_labels_events(layer)
+
     actions_dock = ActionsDock(
         recording,
         viewer,
         labels_layer=labels_layer,
         on_traces_changed=plot_dock.refresh,
-        on_layer_restored=lambda layer: (
-            plot_dock.rebind(layer),
-            population_dock.rebind(layer),
-        ),
+        on_layer_restored=rebind_all,
         default_layers=default_layers,
         on_depths_updated=lambda: _show_metric(population_dock, "IPL depth"),
     )
@@ -209,6 +216,18 @@ def launch(recording, show=True, block=False, title=None):
     # list, so anything put there competes with them for height. Both
     # pygor panels go right instead, tabbed so only one is visible at a
     # time, and the trace plot gets the full width along the bottom.
+    segmentation_dock = SegmentationDock(
+        recording,
+        viewer,
+        labels_layer=labels_layer,
+        on_rois_changed=lambda: (
+            actions_dock.refresh_numbers(),
+            population_dock.refresh(),
+            plot_dock.refresh(),
+        ),
+        on_layer_created=rebind_all,
+    )
+
     preprocessing_dock = PreprocessingDock(
         recording,
         viewer,
@@ -227,6 +246,9 @@ def launch(recording, show=True, block=False, title=None):
     viewer.window.add_dock_widget(
         preprocessing_dock, name="Preprocessing", area="right", tabify=True
     )
+    viewer.window.add_dock_widget(
+        segmentation_dock, name="Segmentation", area="right", tabify=True
+    )
 
     # Parameters are wanted often enough to be there from the start, tabbed
     # with the other right-hand panels rather than opened from the menu.
@@ -242,6 +264,7 @@ def launch(recording, show=True, block=False, title=None):
         plot_dock,
         population_dock,
         preprocessing_dock,
+        segmentation_dock,
         recording,
     )
 

@@ -109,3 +109,21 @@ def trace_index_to_label(index, roi_mask=None):
     if index < 0 or index >= len(ids):
         return 0
     return int(abs(ids[index]))
+
+
+def sync_rois_from_layer(recording, labels_layer):
+    """Write layer edits back to the recording, if there are any.
+
+    Returns True when the recording's mask was updated. Analysis reads
+    ``recording.rois``, not the layer, so anything drawn by hand has to be
+    pushed across before it can be measured.
+    """
+    if labels_layer is None:
+        return False
+    current = getattr(recording, "rois", None)
+    igor = True if current is None else is_igor_style(current)
+    mask = labels_to_mask(labels_layer.data, igor_style=igor)
+    if current is not None and np.array_equal(mask, np.asarray(current)):
+        return False
+    recording.update_rois(mask)
+    return True

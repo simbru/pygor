@@ -175,6 +175,22 @@ histogram, since a depth you cannot see is not much use. Note that
 `calculate_ipl_depths` returns percentages outside 0–100 for ROIs beyond
 the boundary pair, where `estimate_ipl_depths` clips.
 
+## Segmentation panel
+
+`pygor/gui/widgets/segmentation.py` holds mode selection, that mode's
+parameters, and pushing hand-drawn ROIs to the recording. Each mode reads
+a different config section, so showing them all at once is noise: only
+the selected mode's section is editable, built from the config by value
+type rather than hardcoded.
+
+Only parameters actually changed are passed to `segment_rois`, so an
+untouched panel behaves exactly like calling it with no arguments and
+config changes made elsewhere are not overridden. "Reset to config"
+restores the section.
+
+A recording opened without ROIs has no ROI layer, so the first
+segmentation creates one and rebinds every dock to it.
+
 ## Preprocessing panel
 
 `pygor/gui/widgets/preprocessing.py` runs the steps that alter the stack

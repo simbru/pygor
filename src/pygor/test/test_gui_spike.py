@@ -908,7 +908,6 @@ def test_pygor_menu_is_built(recording):
             titles
         )
         assert [a.text() for a in _submenu(menu, "Analysis").actions()] == [
-            "Segment ROIs...",
             "Extract traces",
             "Compute averages",
             "Correlation projection",
@@ -1298,21 +1297,84 @@ def test_averaging_action_updates_the_recording(recording):
         viewer.close()
 
 
-def test_segmentation_status_counts_after_the_run(recording):
+def test_segmentation_dock_shows_only_the_chosen_mode(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Segmentation"]
+        blob = set(dock.current_form._widgets)
+        assert "unsharp_radius" in blob
+
+        dock.mode_box.setCurrentIndex(dock.mode_box.findText("watershed"))
+        watershed = set(dock.current_form._widgets)
+        assert dock.mode == "watershed"
+        assert "unsharp_radius" not in watershed
+        assert "gap_pixels" in watershed
+    finally:
+        viewer.close()
+
+
+def test_only_changed_parameters_are_passed_on(recording):
+    """Sending the whole set would override config changes made elsewhere."""
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Segmentation"]
+        assert dock.current_form.changed() == {}
+
+        dock.current_form._widgets["threshold"].setValue(0.2)
+        assert dock.current_form.changed() == {"threshold": pytest.approx(0.2)}
+
+        dock.current_form.reset()
+        assert dock.current_form.changed() == {}
+    finally:
+        viewer.close()
+
+
+def test_segmentation_reports_the_count_it_produced(recording):
     """An f-string built at call time reports the count from before."""
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
     try:
-        actions = viewer.window.dock_widgets["Analysis"]
+        dock = viewer.window.dock_widgets["Segmentation"]
         before = recording.num_rois
 
-        actions.run_segmentation()
+        dock.run_segmentation()
         # A worker finishing is not the same as its callback having run
-        assert _wait_for(lambda: actions.status.text().startswith("Segmented"))
+        assert _wait_for(lambda: "Segmented with" in dock.status.text())
 
         assert recording.num_rois == before + 1
-        assert actions.status.text() == f"Segmented: {before + 1} ROIs"
+        assert f"{before + 1} ROIs on the recording" in dock.status.text()
+    finally:
+        viewer.close()
+
+
+def test_first_segmentation_creates_the_roi_layer(recording):
+    """A recording opened without ROIs has no layer to update."""
+    from pygor.gui.launch import launch
+
+    recording.rois = None
+    recording.num_rois = 0
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Segmentation"]
+        plot = viewer.window.dock_widgets["Plot"]
+        assert "ROIs" not in viewer.layers
+        assert dock.labels_layer is None
+
+        # Segmenting has to build the mask the layer is made from
+        recording.rois = np.where(
+            np.arange(recording.images.shape[1])[:, None] < 2, -1, 1
+        ).astype(np.int32)
+        recording.num_rois = 1
+        dock._roi_data_changed("done")
+
+        assert "ROIs" in viewer.layers
+        assert dock.labels_layer is not None
+        assert plot.labels_layer is not None
     finally:
         viewer.close()
 
