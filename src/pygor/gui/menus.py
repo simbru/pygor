@@ -77,6 +77,7 @@ def build_pygor_menu(
     _track_layer_visibility(viewer, NUMBER_LAYER_NAME, numbers_action)
     for text, box in (
         ("Show histogram", metrics_dock.histogram_box),
+        ("Show stimulus triggers", plot_dock.trigger_box),
         ("Follow frame", plot_dock.follow_box),
         ("Centre on selected ROI", plot_dock.centre_box),
         ("Auto-new ROI after each stroke", plot_dock.auto_new_box),

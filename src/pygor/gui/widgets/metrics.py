@@ -22,6 +22,7 @@ from qtpy.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -29,6 +30,7 @@ from qtpy.QtWidgets import (
 from pygor.gui.colors import apply_metric_colormap, apply_roi_colormap
 from pygor.gui.metrics import available_metrics, compute_metric
 from pygor.gui.roi_bridge import roi_ids_in_order
+from pygor.gui import triggers
 
 
 class MetricsDock(QWidget):
@@ -89,24 +91,110 @@ class MetricsDock(QWidget):
         self.table.itemSelectionChanged.connect(self._on_row_selected)
         self.table.setMinimumHeight(160)
 
+        self.trigger_status = QLabel()
+        self.trigger_status.setWordWrap(True)
+
+        self.trigger_table = QTableWidget(0, 5)
+        self.trigger_table.setHorizontalHeaderLabels(
+            ["#", "Time (s)", "Interval (s)", "Frame", "Loop"]
+        )
+        self.trigger_table.verticalHeader().setVisible(False)
+        self.trigger_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.trigger_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.trigger_table.setSortingEnabled(True)
+        self.trigger_table.itemSelectionChanged.connect(self._on_trigger_selected)
+
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Metric:"))
         controls.addWidget(self.metric_box, stretch=1)
         controls.addWidget(self.compute_button)
 
+        roi_layout = QVBoxLayout()
+        roi_layout.addLayout(controls)
+        roi_layout.addWidget(self.colour_box)
+        roi_layout.addWidget(self.status)
+        roi_layout.addWidget(self.table, stretch=2)
+        roi_layout.addWidget(self.histogram_box)
+        roi_layout.addWidget(self.canvas, stretch=1)
+        roi_page = QWidget()
+        roi_page.setLayout(roi_layout)
+
+        trigger_layout = QVBoxLayout()
+        trigger_layout.addWidget(self.trigger_status)
+        trigger_layout.addWidget(self.trigger_table, stretch=1)
+        trigger_page = QWidget()
+        trigger_page.setLayout(trigger_layout)
+
+        # Triggers are a property of the recording rather than of any one
+        # ROI, so they get their own page rather than a column in a
+        # per-ROI table that would repeat the same value all the way down.
+        self.tabs = QTabWidget()
+        self.tabs.addTab(roi_page, "ROIs")
+        self.tabs.addTab(trigger_page, "Triggers")
+
         layout = QVBoxLayout()
-        layout.addLayout(controls)
-        layout.addWidget(self.colour_box)
-        layout.addWidget(self.status)
-        layout.addWidget(self.table, stretch=2)
-        layout.addWidget(self.histogram_box)
-        layout.addWidget(self.canvas, stretch=1)
+        layout.addWidget(self.tabs)
         self.setLayout(layout)
 
+        self.reload_triggers()
         self.reload_metrics()
         self.bind_layer(labels_layer)
-        # Without an explicit initial sort the table comes up descending
+        # Without an explicit initial sort the tables come up descending
         self.table.sortByColumn(0, Qt.AscendingOrder)
+        self.trigger_table.sortByColumn(0, Qt.AscendingOrder)
+
+    # ------------------------------------------------------------------
+    # Triggers
+    # ------------------------------------------------------------------
+
+    def reload_triggers(self):
+        """Fill the trigger page from the recording's trigger train."""
+        rows = triggers.trigger_table(self.recording)
+        self.trigger_status.setText(triggers.summary(self.recording))
+
+        table = self.trigger_table
+        # Sorting reorders rows as they are inserted, which scrambles a
+        # half-filled table
+        table.setSortingEnabled(False)
+        table.setRowCount(len(rows))
+        for row, entry in enumerate(rows):
+            values = (
+                entry["index"],
+                round(entry["time_s"], 4),
+                None if np.isnan(entry["interval_s"]) else round(entry["interval_s"], 4),
+                entry["frame"],
+                entry["loop"],
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem()
+                if value is None:
+                    item.setText("—")
+                else:
+                    item.setData(Qt.DisplayRole, value)
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                if not entry["used"]:
+                    # Skipped triggers stay visible: knowing which ones an
+                    # average left out is the point of the table
+                    item.setForeground(Qt.gray)
+                    item.setToolTip("Not included in the average")
+                table.setItem(row, column, item)
+        table.setSortingEnabled(True)
+
+    def _on_trigger_selected(self):
+        """Jump the viewer to the frame a trigger fired on."""
+        rows = self.trigger_table.selectionModel().selectedRows()
+        if not rows:
+            return
+        item = self.trigger_table.item(rows[0].row(), 3)
+        if item is None:
+            return
+        frame = item.data(Qt.DisplayRole)
+        if not isinstance(frame, int):
+            return
+        try:
+            self.viewer.dims.set_current_step(0, frame)
+        except (IndexError, ValueError):
+            pass
 
     # ------------------------------------------------------------------
     # Layer plumbing
@@ -185,6 +273,9 @@ class MetricsDock(QWidget):
     def refresh(self, force=False):
         """Recompute the selected metric and update everything it drives."""
         self.reload_metrics()
+        # trigger_mode is editable from the Analysis panel, so which
+        # triggers count as used can change under this table
+        self.reload_triggers()
         spec = self.current_spec
         self._labels = self.roi_labels
 

@@ -39,6 +39,14 @@ class StubRecording:
         self.frame_hz = 10.0
         self.linedur_s = 1 / (shape[0] * 10.0)
 
+        # Eight triggers over the stub's two seconds, two per loop, with
+        # the last one skipped so "used" has something to exclude
+        self.triggertimes = np.arange(1, 9) * 0.2
+        self.triggertimes_frame = (self.triggertimes * self.frame_hz).astype(int)
+        self.trigger_mode = 2
+        self._Core__skip_first_frames = 0
+        self._Core__skip_last_frames = -1
+
         mask = np.ones(shape, dtype=np.int32)
         for roi in range(1, n_rois + 1):
             mask[roi * 2 : roi * 2 + 2, :4] = -roi
@@ -395,6 +403,88 @@ def test_axes_fall_back_to_indices_without_timing():
     try:
         dock = viewer.window.dock_widgets["Plot"]
         assert dock.ax.get_xlabel() == "Frame"
+    finally:
+        viewer.close()
+
+
+def test_triggers_are_drawn_on_the_trace_only_when_asked(recording):
+    """Trigger marks are opt-in; a dense train would bury the trace."""
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Plot"]
+        assert len(dock.ax.collections) == 0
+
+        dock.trigger_box.setChecked(True)
+        marks = [c for c in dock.ax.collections if c.get_segments()]
+        assert len(marks) == 1
+        drawn = [seg[0][0] for seg in marks[0].get_segments()]
+        assert drawn == pytest.approx(list(recording.triggertimes))
+    finally:
+        viewer.close()
+
+
+def test_average_view_marks_triggers_within_the_loop(recording):
+    """An averaged snippet restarts at zero, so absolute times would miss."""
+    from pygor.gui.launch import launch
+
+    recording.compute_snippets_and_averages()
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Plot"]
+        dock.mode_box.setCurrentText(dock.AVERAGE)
+        dock.trigger_box.setChecked(True)
+
+        marks = [c for c in dock.ax.collections if c.get_segments()]
+        drawn = [seg[0][0] for seg in marks[0].get_segments()]
+        assert drawn[0] == pytest.approx(0.0)
+        assert len(drawn) == recording.trigger_mode
+        assert max(drawn) < max(recording.triggertimes)
+    finally:
+        viewer.close()
+
+
+def test_trigger_table_lists_every_trigger_and_flags_the_unused(recording):
+    """Which triggers an average left out is the point of the table."""
+    from pygor.gui.launch import launch
+    from pygor.gui import triggers as trigger_helpers
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Metrics"]
+        table = dock.trigger_table
+        assert table.rowCount() == len(recording.triggertimes)
+
+        expected = trigger_helpers.loop_count(recording)
+        assert f"{expected} complete loops" in dock.trigger_status.text()
+
+        # The stub skips one trigger at the end, leaving two unused
+        loops = [table.item(r, 4).text() for r in range(table.rowCount())]
+        assert loops.count("\u2014") == 2
+    finally:
+        viewer.close()
+
+
+def test_triggers_per_loop_control_sets_trigger_mode(recording):
+    """Averaging the wrong number of triggers fails silently otherwise."""
+    from pygor.gui.launch import launch
+    from pygor.gui import triggers as trigger_helpers
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Analysis"]
+        form = dock._averaging_form
+        assert form.triggers_per_loop.value == recording.trigger_mode
+
+        form.triggers_per_loop.value = 4
+        assert f"{trigger_helpers.loop_count(recording, 4)} loops" in (
+            form.call_button.text
+        )
+
+        form()
+        _process_events()
+        assert recording.trigger_mode == 4
     finally:
         viewer.close()
 

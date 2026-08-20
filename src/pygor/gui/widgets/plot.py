@@ -27,6 +27,7 @@ from qtpy.QtWidgets import (
 
 from pygor.gui.roi_bridge import label_to_trace_index
 from pygor.gui.timebase import average_axis, frame_to_seconds, trace_axis
+from pygor.gui.triggers import trigger_times, within_loop_times
 
 # Attribute names offered in the source dropdown, in display order
 _TRACE_SOURCES = ("traces_znorm", "traces_raw", "traces_deconvolved", "averages")
@@ -85,6 +86,15 @@ class PlotDock(QWidget):
             "Costs a blit per frame change."
         )
         self.follow_box.toggled.connect(self._on_follow_toggled)
+
+        self.trigger_box = QCheckBox("Triggers")
+        self.trigger_box.setChecked(False)
+        self.trigger_box.setToolTip(
+            "Mark the stimulus triggers. On a trace these are their times "
+            "in the recording; on an average they are their offsets within "
+            "one loop."
+        )
+        self.trigger_box.toggled.connect(lambda _: self.refresh())
 
         self.status = QLabel("No ROI selected")
 
@@ -172,6 +182,8 @@ class PlotDock(QWidget):
         controls.addWidget(self.view_label)
         controls.addWidget(self.mode_box)
         controls.addWidget(self.controls_stack, stretch=1)
+        # Applies to both views, so it sits outside the swapped pages
+        controls.addWidget(self.trigger_box)
 
         navigation = QHBoxLayout()
         navigation.addWidget(self.prev_button)
@@ -538,6 +550,26 @@ class PlotDock(QWidget):
             return
         self._draw_trace()
 
+    def _draw_triggers(self, times):
+        """Mark stimulus triggers, if the view is showing them.
+
+        Drawn as one LineCollection rather than an axvline apiece: a long
+        recording can carry thousands of triggers, and that many artists
+        makes every redraw crawl.
+        """
+        if not self.trigger_box.isChecked() or times is None or not len(times):
+            return
+        self.ax.vlines(
+            times,
+            0,
+            1,
+            transform=self.ax.get_xaxis_transform(),
+            color="tab:orange",
+            lw=0.6,
+            alpha=0.7,
+            zorder=0,
+        )
+
     def _draw_average(self):
         """Mean across stimulus repetitions, with the repetitions behind it.
 
@@ -586,6 +618,7 @@ class PlotDock(QWidget):
         mean = averages[index]
         x, xlabel = average_axis(self.recording, mean.shape[0])
         self.ax.plot(x, mean, lw=1.4, color=colour, zorder=2)
+        self._draw_triggers(within_loop_times(self.recording))
         self.ax.set_xlabel(xlabel)
         self.ax.set_ylabel("Average")
         self.ax.margins(x=0)
@@ -614,6 +647,7 @@ class PlotDock(QWidget):
         self.ax.set_axis_on()
         x, xlabel = trace_axis(self.recording, np.asarray(trace).shape[0])
         self.ax.plot(x, trace, lw=0.8, color=self.roi_color())
+        self._draw_triggers(trigger_times(self.recording))
         self.ax.set_xlabel(xlabel)
         self.ax.set_ylabel(source.replace("traces_", ""))
         self.ax.margins(x=0)

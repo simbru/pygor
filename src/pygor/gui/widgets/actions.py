@@ -11,6 +11,8 @@ from napari.qt.threading import thread_worker
 from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import QCheckBox, QLabel, QVBoxLayout, QWidget
 
+from pygor.gui.triggers import loop_count, summary, triggers_per_loop
+
 from pygor.gui.roi_bridge import mask_to_labels, sync_rois_from_layer
 
 class ActionsDock(QWidget):
@@ -287,9 +289,40 @@ class ActionsDock(QWidget):
             self.on_traces_changed()
 
     def _averaging_widget(self):
-        @magicgui(call_button="Compute averages", layout="vertical")
-        def average():
+        default = triggers_per_loop(self.recording)
+
+        @magicgui(
+            call_button="Compute averages",
+            layout="vertical",
+            triggers_per_loop={
+                "min": 1,
+                "max": 1000,
+                "label": "Triggers per loop",
+            },
+        )
+        def average(triggers_per_loop: int = default):
+            # compute_snippets_and_averages reads trigger_mode off the
+            # recording rather than taking it as an argument
+            self.recording.trigger_mode = int(triggers_per_loop)
             self.run_averaging()
+
+        def describe(_=None):
+            """Say up front how many repetitions this setting would average.
+
+            Getting it wrong is silent otherwise: a stimulus whose loop is
+            four triggers long averages four unrelated epochs together and
+            still returns a perfectly plausible-looking array.
+            """
+            mode = average.triggers_per_loop.value
+            text = summary(self.recording, mode)
+            average.triggers_per_loop.tooltip = text
+            average.call_button.text = (
+                f"Compute averages ({loop_count(self.recording, mode)} loops)"
+            )
+
+        average.triggers_per_loop.changed.connect(describe)
+        describe()
+        self._averaging_form = average
 
         return average
 
