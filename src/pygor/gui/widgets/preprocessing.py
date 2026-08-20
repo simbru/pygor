@@ -11,6 +11,11 @@ from magicgui import magicgui
 from napari.qt.threading import thread_worker
 from qtpy.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
+from pygor.gui.timebase import frames_as_seconds
+
+#: Parameters pygor takes as a number of frames, annotated in seconds
+_FRAME_COUNT_FIELDS = ("time_bin", "n_reference_frames", "batch_size")
+
 # Edge handling when shifting frames, from register()'s docstring
 SHIFT_MODES = ("reflect", "constant", "nearest", "mirror", "wrap")
 
@@ -52,6 +57,8 @@ class PreprocessingDock(QWidget):
         register_form = self._register_widget()
         self._bind_to_bus(preprocess_form, "preprocessing")
         self._bind_to_bus(register_form, "registration")
+        self._annotate_frame_counts(preprocess_form)
+        self._annotate_frame_counts(register_form)
 
         layout = QVBoxLayout()
         layout.addWidget(self.status)
@@ -62,6 +69,30 @@ class PreprocessingDock(QWidget):
         self.setLayout(layout)
 
         self.refresh_status()
+
+    def _annotate_frame_counts(self, form):
+        """Say in the tooltip what a frame count comes to in seconds.
+
+        These parameters are frame counts because that is what pygor
+        takes, and the value written to the bus stays a frame count —
+        converting it would put the panel and the parameter table into
+        different units. Only the tooltip talks in seconds.
+        """
+        for name in _FRAME_COUNT_FIELDS:
+            widget = getattr(form, name, None)
+            if widget is None:
+                continue
+
+            def describe(_=None, widget=widget):
+                seconds = frames_as_seconds(self.recording, widget.value)
+                widget.tooltip = (
+                    f"{widget.value} frames"
+                    if seconds is None
+                    else f"{widget.value} frames = {seconds}"
+                )
+
+            describe()
+            widget.changed.connect(describe)
 
     def _bind_to_bus(self, form, prefix):
         """Make a form a view of its config section rather than a copy.

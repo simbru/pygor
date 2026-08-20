@@ -26,6 +26,7 @@ from qtpy.QtWidgets import (
 )
 
 from pygor.gui.roi_bridge import label_to_trace_index
+from pygor.gui.timebase import average_axis, frame_to_seconds, trace_axis
 
 # Attribute names offered in the source dropdown, in display order
 _TRACE_SOURCES = ("traces_znorm", "traces_raw", "traces_deconvolved", "averages")
@@ -426,7 +427,9 @@ class PlotDock(QWidget):
         frame = self._current_frame()
         if frame is None:
             return
-        self._cursor.set_xdata([frame, frame])
+        # The trace axis is in seconds, so the cursor has to be too
+        position = frame_to_seconds(self.recording, frame)
+        self._cursor.set_xdata([position, position])
         self._blit_cursor()
 
     def _blit_cursor(self):
@@ -575,12 +578,15 @@ class PlotDock(QWidget):
             # Thousands of noise loops would be an unreadable smear and slow
             # to draw, so only a sample of them is shown.
             step = max(1, int(np.ceil(trials.shape[0] / _MAX_TRIALS_DRAWN)))
+            trial_x, _ = average_axis(self.recording, trials.shape[1])
             for trial in trials[::step]:
-                self.ax.plot(trial, lw=0.5, color="0.6", alpha=0.5, zorder=1)
+                self.ax.plot(trial_x, trial, lw=0.5, color="0.6", alpha=0.5, zorder=1)
                 shown += 1
 
-        self.ax.plot(averages[index], lw=1.4, color=colour, zorder=2)
-        self.ax.set_xlabel("Sample")
+        mean = averages[index]
+        x, xlabel = average_axis(self.recording, mean.shape[0])
+        self.ax.plot(x, mean, lw=1.4, color=colour, zorder=2)
+        self.ax.set_xlabel(xlabel)
         self.ax.set_ylabel("Average")
         self.ax.margins(x=0)
 
@@ -606,15 +612,19 @@ class PlotDock(QWidget):
             f"ROI {self.selected_label} of {n_rois} — {source}"
         )
         self.ax.set_axis_on()
-        self.ax.plot(trace, lw=0.8, color=self.roi_color())
-        self.ax.set_xlabel("Frame")
+        x, xlabel = trace_axis(self.recording, np.asarray(trace).shape[0])
+        self.ax.plot(x, trace, lw=0.8, color=self.roi_color())
+        self.ax.set_xlabel(xlabel)
         self.ax.set_ylabel(source.replace("traces_", ""))
         self.ax.margins(x=0)
 
         frame = self._current_frame()
         if frame is not None and self.follow_box.isChecked():
             self._cursor = self.ax.axvline(
-                frame, color="tab:red", lw=0.8, animated=True
+                frame_to_seconds(self.recording, frame),
+                color="tab:red",
+                lw=0.8,
+                animated=True,
             )
             self._capture_background()
         else:

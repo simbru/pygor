@@ -47,7 +47,7 @@ work *before* analysis — getting ROIs onto a recording.
 
 ## What it does not
 
-1. **No population view.** Nothing shows per-ROI metrics across the
+1. **No metrics view.** Nothing shows per-ROI metrics across the
    recording, so there is no way to pick which ROI to look at. Both
    inspectors spend their first half on exactly this. Biggest gap: it is
    how a person decides to type `ROI = 15`.
@@ -92,7 +92,7 @@ effect, which is why the ordering below puts it fourth.
 
 ## Suggested order
 
-1. **Population panel** — a per-ROI table or scatter of whatever metrics
+1. **Metrics panel** — a per-ROI table or scatter of whatever metrics
    the analysis type provides, selection wired to the viewer both ways.
    Turns the viewer into an inspector and is the prerequisite for the rest.
 2. **Per-ROI detail panel**, dispatched on analysis type. STRF: channel RF

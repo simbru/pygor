@@ -35,6 +35,9 @@ class StubRecording:
         self.filename = "stub.h5"
         self.images = rng.normal(size=(n_frames, *shape)).astype(np.float32)
         self.num_rois = n_rois
+        # Timing the GUI converts every axis with, as a Core carries it
+        self.frame_hz = 10.0
+        self.linedur_s = 1 / (shape[0] * 10.0)
 
         mask = np.ones(shape, dtype=np.int32)
         for roi in range(1, n_rois + 1):
@@ -347,6 +350,55 @@ def test_follow_frame_is_off_by_default(recording):
         viewer.close()
 
 
+def test_trace_axis_is_in_seconds(recording):
+    """A frame number means nothing without the frame rate."""
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Plot"]
+        assert dock.ax.get_xlabel() == "Time (s)"
+        line = dock.ax.lines[0]
+        n = recording.traces_znorm.shape[1]
+        assert line.get_xdata()[-1] == pytest.approx((n - 1) / recording.frame_hz)
+    finally:
+        viewer.close()
+
+
+def test_average_axis_uses_the_line_duration(recording):
+    """Averages are upsampled per scan line, not per frame."""
+    from pygor.gui.launch import launch
+
+    recording.compute_snippets_and_averages()
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Plot"]
+        dock.mode_box.setCurrentText(dock.AVERAGE)
+        dock.refresh()
+        assert dock.ax.get_xlabel() == "Time (s)"
+        n = np.asarray(recording.averages).shape[1]
+        span = dock.ax.lines[-1].get_xdata()[-1]
+        assert span == pytest.approx((n - 1) * recording.linedur_s)
+    finally:
+        viewer.close()
+
+
+def test_axes_fall_back_to_indices_without_timing():
+    """An honest 'Frame' beats a made-up second."""
+    from pygor.gui.launch import launch
+
+    stub = StubRecording()
+    del stub.frame_hz
+    del stub.linedur_s
+
+    viewer = launch(stub, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Plot"]
+        assert dock.ax.get_xlabel() == "Frame"
+    finally:
+        viewer.close()
+
+
 def test_follow_frame_uses_blitting_when_enabled(recording):
     from pygor.gui.launch import launch
 
@@ -360,7 +412,8 @@ def test_follow_frame_uses_blitting_when_enabled(recording):
         assert dock._background is not None
 
         viewer.dims.set_current_step(0, 5)
-        assert dock._cursor.get_xdata()[0] == 5
+        # The axis is in seconds, so the cursor is placed in seconds too
+        assert dock._cursor.get_xdata()[0] == 5 / recording.frame_hz
     finally:
         viewer.close()
 
