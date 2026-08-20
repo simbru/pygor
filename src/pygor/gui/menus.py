@@ -9,6 +9,7 @@ import pathlib
 
 from qtpy.QtWidgets import QFileDialog, QMessageBox
 
+from pygor.gui.launch import PANEL_NAMES, panel_docks, restore_panels
 from pygor.gui.roi_numbers import NUMBER_LAYER_NAME
 
 MENU_TITLE = "&Pygor"
@@ -85,11 +86,30 @@ def build_pygor_menu(
     ):
         _mirror_checkbox(view, text, box)
 
+    panels = menu.addMenu("Panels")
+    _add_panel_toggles(panels, viewer)
+    panels.addSeparator()
+    _add(panels, "Restore all panels", lambda: restore_panels(viewer))
+
     menu.addSeparator()
     _add(menu, "Parameter table...", actions_dock.open_param_editor)
     _add(menu, "Save recording as...", lambda: _save_as(viewer, recording))
 
     return menu
+
+
+def _add_panel_toggles(menu, viewer):
+    """One checkable entry per panel, driven by Qt's own dock action.
+
+    A closed dock is only hidden, so its toggleViewAction already knows
+    how to bring it back and stays in step when the panel is closed by
+    its title-bar button instead.
+    """
+    docks = panel_docks(viewer)
+    for name in PANEL_NAMES:
+        dock = docks.get(name)
+        if dock is not None:
+            menu.addAction(dock.toggleViewAction())
 
 
 def _add(menu, text, callback, shortcut=None):

@@ -1227,6 +1227,49 @@ def test_palette_expands_as_rois_are_added(recording):
         viewer.close()
 
 
+def test_a_closed_panel_can_be_restored(recording):
+    """Closing a dock hides it; napari's Window menu never lists it again."""
+    from pygor.gui.launch import launch, panel_docks, restore_panels
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        plot = panel_docks(viewer)["Plot"]
+        plot.close()
+        assert plot.isHidden() is True
+
+        assert restore_panels(viewer) == ["Plot"]
+        assert plot.isHidden() is False
+
+        # Nothing to do when every panel is already open
+        assert restore_panels(viewer) == []
+    finally:
+        viewer.close()
+
+
+def test_panels_menu_lists_every_panel(recording):
+    """The way back has to be somewhere a person would look."""
+    from pygor.gui.launch import PANEL_NAMES, launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        menu = next(
+            action.menu()
+            for action in viewer.window.main_menu.actions()
+            if action.text() == "&Pygor"
+        )
+        panels = next(
+            action.menu()
+            for action in menu.actions()
+            if action.text() == "Panels"
+        )
+        entries = [action.text() for action in panels.actions()]
+        for name in PANEL_NAMES:
+            assert name in entries
+        assert "Restore all panels" in entries
+    finally:
+        viewer.close()
+
+
 def test_right_docks_read_in_workflow_order(recording):
     """Tabs are the workflow, so their order is the order of the work."""
     from pygor.gui.launch import launch

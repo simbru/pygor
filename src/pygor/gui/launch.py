@@ -24,6 +24,15 @@ from pygor.gui.roi_numbers import NUMBER_LAYER_NAME, ensure_number_layer
 # Layer name the docks resolve the ROI mask by
 ROI_LAYER_NAME = "ROIs"
 
+#: The plot dock, along the bottom
+PLOT_PANEL = "Plot"
+
+#: The tabbed docks on the right, in the order the work is done
+RIGHT_PANELS = ("Preprocessing", "Segmentation", "Analysis", "Metrics")
+
+#: Every panel the GUI creates
+PANEL_NAMES = (PLOT_PANEL, *RIGHT_PANELS)
+
 
 def _import_napari():
     """Import napari, raising a useful message when the extra is missing."""
@@ -243,27 +252,25 @@ def launch(recording, show=True, block=False, title=None):
         on_images_changed=lambda: refresh_image_layers(viewer, recording),
     )
 
-    plot_area = viewer.window.add_dock_widget(
-        plot_dock, name="Plot", area="bottom"
-    )
+    viewer.window.add_dock_widget(plot_dock, name=PLOT_PANEL, area="bottom")
     # Tabs read left to right in the order they are added, so they are
     # added in the order the work is done: clean the images, find the
     # ROIs, run the analysis, then look at what came out.
-    right_area = viewer.window.add_dock_widget(
-        preprocessing_dock, name="Preprocessing", area="right"
+    panels = dict(
+        zip(
+            RIGHT_PANELS,
+            (preprocessing_dock, segmentation_dock, actions_dock, metrics_dock),
+        )
     )
-    viewer.window.add_dock_widget(
-        segmentation_dock, name="Segmentation", area="right", tabify=True
-    )
-    viewer.window.add_dock_widget(
-        actions_dock, name="Analysis", area="right", tabify=True
-    )
-    viewer.window.add_dock_widget(
-        metrics_dock, name="Metrics", area="right", tabify=True
-    )
+    first = None
+    for name, dock in panels.items():
+        area = viewer.window.add_dock_widget(
+            dock, name=name, area="right", tabify=first is not None
+        )
+        first = first or area
     # tabify raises whatever was added last; the first step of the
     # workflow should be the one on show when the window opens
-    right_area.raise_()
+    first.raise_()
 
     from pygor.gui.menus import build_pygor_menu
 
@@ -277,7 +284,7 @@ def launch(recording, show=True, block=False, title=None):
         recording,
     )
 
-    _size_docks(viewer, plot_area, right_area)
+    _size_docks(viewer)
     viewer.reset_view()
 
     if block:
@@ -301,7 +308,24 @@ def _show_metric(metrics_dock, label):
     metrics_dock.refresh()
 
 
-def _size_docks(viewer, plot_area, right_area):
+def panel_docks(viewer):
+    """The QDockWidget for each pygor panel, keyed by name.
+
+    ``window.dock_widgets`` hands back the inner widget; the dock wrapper
+    that knows how to hide and show itself is its parent. Reaching for
+    the private ``_dock_widgets`` gets the wrapper directly but napari
+    warns on every access.
+    """
+    inner = getattr(viewer.window, "dock_widgets", {})
+    docks = {}
+    for name in PANEL_NAMES:
+        widget = inner.get(name)
+        if widget is not None and widget.parent() is not None:
+            docks[name] = widget.parent()
+    return docks
+
+
+def _size_docks(viewer):
     """Give the docks a usable size on open.
 
     Qt distributes space by size hints, which left the plots a few pixels
@@ -309,6 +333,34 @@ def _size_docks(viewer, plot_area, right_area):
     """
     from qtpy.QtCore import Qt
 
+    docks = panel_docks(viewer)
     window = viewer.window._qt_window
-    window.resizeDocks([plot_area], [260], Qt.Vertical)
-    window.resizeDocks([right_area], [360], Qt.Horizontal)
+    plot = docks.get(PLOT_PANEL)
+    right = docks.get(RIGHT_PANELS[0])
+    if plot is not None:
+        window.resizeDocks([plot], [260], Qt.Vertical)
+    if right is not None:
+        window.resizeDocks([right], [360], Qt.Horizontal)
+
+
+def restore_panels(viewer):
+    """Reopen any pygor panel that was closed, and re-apply the sizing.
+
+    Closing a dock only hides it — the widget and everything it holds
+    survive — so this is a matter of showing it again. It needs saying
+    because napari's Window menu lists only napari's own docks: without
+    this the way back is Qt's dock context menu, which nothing advertises.
+
+    Returns the names it reopened.
+    """
+    docks = panel_docks(viewer)
+    restored = [
+        name
+        for name in PANEL_NAMES
+        if name in docks and docks[name].isHidden()
+    ]
+    for name in restored:
+        docks[name].show()
+    if restored:
+        _size_docks(viewer)
+    return restored
