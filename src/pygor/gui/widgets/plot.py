@@ -88,7 +88,7 @@ class PlotDock(QWidget):
         self.follow_box.toggled.connect(self._on_follow_toggled)
 
         self.trigger_box = QCheckBox("Triggers")
-        self.trigger_box.setChecked(False)
+        self.trigger_box.setChecked(True)
         self.trigger_box.setToolTip(
             "Mark the stimulus triggers. On a trace these are their times "
             "in the recording; on an average they are their offsets within "
@@ -551,7 +551,7 @@ class PlotDock(QWidget):
         self._draw_trace()
 
     def _draw_triggers(self, times):
-        """Mark stimulus triggers, if the view is showing them.
+        """Mark stimulus triggers, unless the view has them turned off.
 
         Drawn as one LineCollection rather than an axvline apiece: a long
         recording can carry thousands of triggers, and that many artists
@@ -564,7 +564,7 @@ class PlotDock(QWidget):
             0,
             1,
             transform=self.ax.get_xaxis_transform(),
-            color="tab:orange",
+            color="black",
             lw=0.6,
             alpha=0.7,
             zorder=0,

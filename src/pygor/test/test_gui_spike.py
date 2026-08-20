@@ -407,20 +407,22 @@ def test_axes_fall_back_to_indices_without_timing():
         viewer.close()
 
 
-def test_triggers_are_drawn_on_the_trace_only_when_asked(recording):
-    """Trigger marks are opt-in; a dense train would bury the trace."""
+def test_triggers_are_drawn_on_the_trace_and_can_be_turned_off(recording):
+    """Shown by default, since where the stimulus fired is always wanted."""
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
     try:
         dock = viewer.window.dock_widgets["Plot"]
-        assert len(dock.ax.collections) == 0
+        assert dock.trigger_box.isChecked() is True
 
-        dock.trigger_box.setChecked(True)
         marks = [c for c in dock.ax.collections if c.get_segments()]
         assert len(marks) == 1
         drawn = [seg[0][0] for seg in marks[0].get_segments()]
         assert drawn == pytest.approx(list(recording.triggertimes))
+
+        dock.trigger_box.setChecked(False)
+        assert len(dock.ax.collections) == 0
     finally:
         viewer.close()
 
