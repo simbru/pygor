@@ -1,4 +1,4 @@
-"""Per-ROI metrics the population panel can plot.
+"""Per-ROI metrics the metrics panel can plot.
 
 Each metric reduces a recording to one number per ROI. Where the trace
 dock picks one array for one ROI, this picks one scalar for every ROI, so

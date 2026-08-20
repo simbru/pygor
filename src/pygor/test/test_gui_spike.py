@@ -1082,12 +1082,29 @@ def test_palette_expands_as_rois_are_added(recording):
         viewer.close()
 
 
-def test_population_dock_lists_every_roi(recording):
+def test_right_docks_read_in_workflow_order(recording):
+    """Tabs are the workflow, so their order is the order of the work."""
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Population"]
+        names = list(viewer.window.dock_widgets)
+        ordered = [
+            n
+            for n in names
+            if n in ("Preprocessing", "Segmentation", "Analysis", "Metrics")
+        ]
+        assert ordered == ["Preprocessing", "Segmentation", "Analysis", "Metrics"]
+    finally:
+        viewer.close()
+
+
+def test_metrics_dock_lists_every_roi(recording):
+    from pygor.gui.launch import launch
+
+    viewer = launch(recording, show=False, block=False)
+    try:
+        dock = viewer.window.dock_widgets["Metrics"]
         assert dock.table.rowCount() == recording.num_rois
         # Comes up sorted by ROI, not by whatever Qt defaults to
         assert [dock.table.item(r, 0).data(Qt.DisplayRole) for r in range(3)] == [1, 2, 3]
@@ -1096,12 +1113,12 @@ def test_population_dock_lists_every_roi(recording):
         viewer.close()
 
 
-def test_population_selection_is_two_way(recording):
+def test_metrics_selection_is_two_way(recording):
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Population"]
+        dock = viewer.window.dock_widgets["Metrics"]
         labels_layer = viewer.layers["ROIs"]
 
         dock.table.selectRow(2)
@@ -1115,12 +1132,12 @@ def test_population_selection_is_two_way(recording):
 
 
 def test_sorting_by_value_finds_the_extreme_roi(recording):
-    """Sorting is how a suspicious cell gets picked out of the population."""
+    """Sorting the table is how an outlier gets picked out of the distribution."""
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Population"]
+        dock = viewer.window.dock_widgets["Metrics"]
         dock.table.sortItems(1, Qt.DescendingOrder)
 
         top_roi = dock.table.item(0, 0).data(Qt.DisplayRole)
@@ -1135,7 +1152,7 @@ def test_colour_by_metric_toggles_and_restores(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Population"]
+        dock = viewer.window.dock_widgets["Metrics"]
         labels_layer = viewer.layers["ROIs"]
         identity = np.asarray(labels_layer.get_color(1))
 
@@ -1161,12 +1178,12 @@ def test_expensive_metrics_wait_for_an_explicit_request(recording, monkeypatch):
 
     slow = MetricSpec(key="slow", label="Slow", compute=_count, expensive=True)
     monkeypatch.setattr(
-        "pygor.gui.widgets.population.available_metrics", lambda rec: (slow,)
+        "pygor.gui.widgets.metrics.available_metrics", lambda rec: (slow,)
     )
 
     viewer = launch(recording, show=False, block=False)
     try:
-        dock = viewer.window.dock_widgets["Population"]
+        dock = viewer.window.dock_widgets["Metrics"]
         # Selecting an expensive metric must not run it
         assert calls == []
         assert dock._values is None
@@ -1179,53 +1196,53 @@ def test_expensive_metrics_wait_for_an_explicit_request(recording, monkeypatch):
         viewer.close()
 
 
-def test_population_histogram_follows_the_metric(recording):
+def test_metrics_histogram_follows_the_metric(recording):
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
     try:
-        population = viewer.window.dock_widgets["Population"]
-        assert population.histogram_box.isChecked() is True
-        assert len(population.ax.patches) > 0
+        metrics = viewer.window.dock_widgets["Metrics"]
+        assert metrics.histogram_box.isChecked() is True
+        assert len(metrics.ax.patches) > 0
 
-        first = population.current_metric_label
-        assert population.ax.get_xlabel() == first
+        first = metrics.current_metric_label
+        assert metrics.ax.get_xlabel() == first
 
-        population.metric_box.setCurrentIndex(1)
-        assert population.ax.get_xlabel() != first
+        metrics.metric_box.setCurrentIndex(1)
+        assert metrics.ax.get_xlabel() != first
     finally:
         viewer.close()
 
 
-def test_population_histogram_marks_the_selected_roi(recording):
+def test_metrics_histogram_marks_the_selected_roi(recording):
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
     try:
-        population = viewer.window.dock_widgets["Population"]
+        metrics = viewer.window.dock_widgets["Metrics"]
         viewer.layers["ROIs"].selected_label = 2
 
-        expected = population.value_for_label(2)
+        expected = metrics.value_for_label(2)
         assert expected is not None
-        markers = population.ax.lines
+        markers = metrics.ax.lines
         assert len(markers) == 1
         np.testing.assert_allclose(markers[0].get_xdata()[0], expected)
     finally:
         viewer.close()
 
 
-def test_population_histogram_can_be_hidden(recording):
+def test_metrics_histogram_can_be_hidden(recording):
     from pygor.gui.launch import launch
 
     viewer = launch(recording, show=False, block=False)
     try:
-        population = viewer.window.dock_widgets["Population"]
-        population.histogram_box.setChecked(False)
-        assert population.canvas.isVisibleTo(population) is False
+        metrics = viewer.window.dock_widgets["Metrics"]
+        metrics.histogram_box.setChecked(False)
+        assert metrics.canvas.isVisibleTo(metrics) is False
 
-        population.histogram_box.setChecked(True)
-        assert population.canvas.isVisibleTo(population) is True
-        assert len(population.ax.patches) > 0
+        metrics.histogram_box.setChecked(True)
+        assert metrics.canvas.isVisibleTo(metrics) is True
+        assert len(metrics.ax.patches) > 0
     finally:
         viewer.close()
 
@@ -1554,13 +1571,13 @@ def test_metrics_appear_once_traces_are_extracted(recording):
     recording.traces_znorm = None
     viewer = launch(recording, show=False, block=False)
     try:
-        population = viewer.window.dock_widgets["Population"]
-        assert "trace_range" not in [s.key for s in population._specs]
+        metrics = viewer.window.dock_widgets["Metrics"]
+        assert "trace_range" not in [s.key for s in metrics._specs]
 
         recording.extract_traces_from_rois()
-        population.refresh()
+        metrics.refresh()
 
-        assert "trace_range" in [s.key for s in population._specs]
+        assert "trace_range" in [s.key for s in metrics._specs]
     finally:
         viewer.close()
 
@@ -1570,12 +1587,12 @@ def test_reloading_keeps_the_selected_metric(recording):
 
     viewer = launch(recording, show=False, block=False)
     try:
-        population = viewer.window.dock_widgets["Population"]
-        population.metric_box.setCurrentIndex(2)
-        chosen = population.current_metric_label
+        metrics = viewer.window.dock_widgets["Metrics"]
+        metrics.metric_box.setCurrentIndex(2)
+        chosen = metrics.current_metric_label
 
-        population.refresh()
-        assert population.current_metric_label == chosen
+        metrics.refresh()
+        assert metrics.current_metric_label == chosen
     finally:
         viewer.close()
 

@@ -6,7 +6,7 @@ is a second, which is where the per-ROI detail views in
 `dev/gui_workflow_map.md` belong: RF maps per channel, temporal kernels,
 tuning functions.
 
-Population-level plots live with the population table instead, since a
+Distribution plots live with the metrics table instead, since a
 distribution is read alongside the values it summarises.
 """
 

@@ -193,16 +193,16 @@ def launch(recording, show=True, block=False, title=None):
     from pygor.gui.widgets.actions import ActionsDock
     from pygor.gui.widgets.preprocessing import PreprocessingDock
     from pygor.gui.widgets.segmentation import SegmentationDock
-    from pygor.gui.widgets.population import PopulationDock
+    from pygor.gui.widgets.metrics import MetricsDock
     from pygor.gui.widgets.plot import PlotDock
 
     plot_dock = PlotDock(recording, viewer, labels_layer=labels_layer)
-    population_dock = PopulationDock(recording, viewer, labels_layer=labels_layer)
+    metrics_dock = MetricsDock(recording, viewer, labels_layer=labels_layer)
 
     def rebind_all(layer):
         """Point every dock at an ROI layer that was rebuilt or created."""
         plot_dock.rebind(layer)
-        population_dock.rebind(layer)
+        metrics_dock.rebind(layer)
         segmentation_dock.rebind(layer)
         actions_dock._labels_layer = layer
         actions_dock._bind_labels_events(layer)
@@ -212,10 +212,10 @@ def launch(recording, show=True, block=False, title=None):
         viewer,
         labels_layer=labels_layer,
         # Extraction changes which metrics exist, not just the plot
-        on_traces_changed=lambda: (plot_dock.refresh(), population_dock.refresh()),
+        on_traces_changed=lambda: (plot_dock.refresh(), metrics_dock.refresh()),
         on_layer_restored=rebind_all,
         default_layers=default_layers,
-        on_depths_updated=lambda: _show_metric(population_dock, "IPL depth"),
+        on_depths_updated=lambda: _show_metric(metrics_dock, "IPL depth"),
         bus=bus,
     )
 
@@ -230,7 +230,7 @@ def launch(recording, show=True, block=False, title=None):
         labels_layer=labels_layer,
         on_rois_changed=lambda: (
             actions_dock.refresh_numbers(),
-            population_dock.refresh(),
+            metrics_dock.refresh(),
             plot_dock.refresh(),
         ),
         on_layer_created=rebind_all,
@@ -246,18 +246,24 @@ def launch(recording, show=True, block=False, title=None):
     plot_area = viewer.window.add_dock_widget(
         plot_dock, name="Plot", area="bottom"
     )
-    analysis_area = viewer.window.add_dock_widget(
-        actions_dock, name="Analysis", area="right"
-    )
-    viewer.window.add_dock_widget(
-        population_dock, name="Population", area="right", tabify=True
-    )
-    viewer.window.add_dock_widget(
-        preprocessing_dock, name="Preprocessing", area="right", tabify=True
+    # Tabs read left to right in the order they are added, so they are
+    # added in the order the work is done: clean the images, find the
+    # ROIs, run the analysis, then look at what came out.
+    right_area = viewer.window.add_dock_widget(
+        preprocessing_dock, name="Preprocessing", area="right"
     )
     viewer.window.add_dock_widget(
         segmentation_dock, name="Segmentation", area="right", tabify=True
     )
+    viewer.window.add_dock_widget(
+        actions_dock, name="Analysis", area="right", tabify=True
+    )
+    viewer.window.add_dock_widget(
+        metrics_dock, name="Metrics", area="right", tabify=True
+    )
+    # tabify raises whatever was added last; the first step of the
+    # workflow should be the one on show when the window opens
+    right_area.raise_()
 
     from pygor.gui.menus import build_pygor_menu
 
@@ -265,13 +271,13 @@ def launch(recording, show=True, block=False, title=None):
         viewer,
         actions_dock,
         plot_dock,
-        population_dock,
+        metrics_dock,
         preprocessing_dock,
         segmentation_dock,
         recording,
     )
 
-    _size_docks(viewer, plot_area, analysis_area)
+    _size_docks(viewer, plot_area, right_area)
     viewer.reset_view()
 
     if block:
@@ -280,22 +286,22 @@ def launch(recording, show=True, block=False, title=None):
     return viewer
 
 
-def _show_metric(population_dock, label):
+def _show_metric(metrics_dock, label):
     """Bring a metric to the front after something recomputed it.
 
     Freshly computed depths are only useful if they can be seen, so the
-    population panel switches to them and shows the distribution.
+    metrics panel switches to them and shows the distribution.
     """
-    population_dock.reload_metrics()
-    index = population_dock.metric_box.findText(label)
+    metrics_dock.reload_metrics()
+    index = metrics_dock.metric_box.findText(label)
     if index < 0:
         return
-    population_dock.metric_box.setCurrentIndex(index)
-    population_dock.histogram_box.setChecked(True)
-    population_dock.refresh()
+    metrics_dock.metric_box.setCurrentIndex(index)
+    metrics_dock.histogram_box.setChecked(True)
+    metrics_dock.refresh()
 
 
-def _size_docks(viewer, plot_area, analysis_area):
+def _size_docks(viewer, plot_area, right_area):
     """Give the docks a usable size on open.
 
     Qt distributes space by size hints, which left the plots a few pixels
@@ -305,4 +311,4 @@ def _size_docks(viewer, plot_area, analysis_area):
 
     window = viewer.window._qt_window
     window.resizeDocks([plot_area], [260], Qt.Vertical)
-    window.resizeDocks([analysis_area], [360], Qt.Horizontal)
+    window.resizeDocks([right_area], [360], Qt.Horizontal)

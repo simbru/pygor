@@ -1,9 +1,9 @@
-"""Whole-recording view of the ROIs, for choosing which one to inspect.
+"""Whole-recording view of the ROIs, one metric at a time.
 
-The plot dock answers "what does this ROI do"; this answers "which ROI
-should I be looking at". One metric is selected at a time and drives three
-things together: a sortable table of per-ROI values, optionally the colour
-of the ROIs themselves, and the plot dock's histogram view.
+The plot dock answers "what does this ROI do"; this answers "how is this
+metric distributed across the recording". One metric is selected at a time
+and drives three things together: a sortable table of per-ROI values,
+optionally the colour of the ROIs themselves, and a histogram.
 
 The histogram sits under the table it summarises, and can be hidden when
 the table alone is wanted.
@@ -31,7 +31,7 @@ from pygor.gui.metrics import available_metrics, compute_metric
 from pygor.gui.roi_bridge import roi_ids_in_order
 
 
-class PopulationDock(QWidget):
+class MetricsDock(QWidget):
     """Dock showing one metric across every ROI."""
 
     #: Emitted whenever the selected metric or its values change
