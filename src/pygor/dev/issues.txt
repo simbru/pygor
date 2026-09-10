@@ -24,3 +24,6 @@ fix: lazy calculation
 
 - in defaults.toml normalization = "none", but this breaks the call in the registration fails because it is expecting None or "phase" on the skimage API side
 fix: either handle "none" into --> None or similar, unfortunately 'None' in defaults.toml causes error in toml file think. It also breaks html repr if its 'None' instead of '"none"'
+
+- the argument spelled `roi` on STRF methods is really the flat STRF index (roi * n_colours + colour), not an ROI. collapse_times, calc_pca_rf_shape_analysis, spatial_polarity_index and friends all work this way, so `roi=1` on a 4-colour recording returns one colour of ROI 0's neighbour rather than ROI 1's four channels. calc_gaussian_fit_index is the first method to split them: `idx` = flat index, `roi` = a real ROI returning all its colours.
+fix: give the older methods an `idx` argument with the current flat meaning, then deprecate `roi`-means-flat and switch it to the ROI meaning. Mechanical but wide (~40 methods), and the auto-generated _by_channel wrappers plus the reflective smoke tests in test_STRF.py both assume the flat return, so do it in one pass.
