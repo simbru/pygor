@@ -1305,12 +1305,12 @@ class Core:
         **not** need to override this — any attribute in ``self.__dict__`` that
         is not in the skip-list is serialised automatically.
         """
-        from pygor.persistence import SKIP_ATTRS, write_value
+        from pygor.persistence import should_skip, write_value
 
         group.attrs["__class_name__"] = type(self).__name__
 
         for attr_name, value in self.__dict__.items():
-            if attr_name in SKIP_ATTRS:
+            if should_skip(attr_name):
                 continue
             try:
                 write_value(group, attr_name, value)

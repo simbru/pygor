@@ -35,6 +35,25 @@ SKIP_ATTRS = frozenset({
     "config",
 })
 
+# Trailing suffixes that mark an attribute as a derived cache.
+SKIP_SUFFIXES = ("_cache",)
+
+
+def should_skip(attr_name):
+    """Whether an attribute is left out of a saved recording.
+
+    Caches are matched on their trailing ``_cache`` rather than listed one by
+    one, because they are created lazily and every new one would otherwise
+    silently start being written into the file. They are all rebuilt on demand
+    from what *is* saved, so persisting them only inflates it: a populated
+    collapse_times cache adds ~20% to a 500 MB recording (497.7 -> 605.1 MB
+    measured), and touching any method that collapses is enough to fill it.
+
+    Everything that reads a cache guards with ``hasattr`` (or a None sentinel),
+    so an absent one costs a recompute, not an error.
+    """
+    return attr_name in SKIP_ATTRS or attr_name.endswith(SKIP_SUFFIXES)
+
 
 # ── JSON helpers ─────────────────────────────────────────────────────────
 
