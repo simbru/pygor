@@ -138,3 +138,16 @@ n_clusters = 3
 amplitude_ratio_threshold = 3.0
 indices_around_peak = 2
 abs_criteria = 3
+
+[strf.gaussian_fit]
+# Size of the analysis ellipse, in sigmas of the data-derived footprint. 2 sigma looks
+# generous but holds only ~76% of the suprathreshold pixels, because real RFs have
+# heavier shoulders than a Gaussian; 2.5 holds 95% and leaves the ranking alone
+# (spearman 0.993). 3 dilutes the index with near-noise pixels.
+n_sigma = 2.5
+# Noise sigmas a pixel must clear to count as signal, for both the footprint and the
+# analysis region.
+threshold_sd = 3.0
+# Radius, in footprint sigmas, beyond which the residual is taken to be noise and used
+# to calibrate it.
+noise_sigma = 3.0

@@ -34,6 +34,7 @@ import pygor.strf.calculate_strf
 import pygor.strf.centsurr
 import pygor.strf.contouring
 import pygor.strf.extrema_timing
+import pygor.strf.gaussian_fit
 import pygor.strf.guesstimate
 import pygor.strf.plotting.advanced
 import pygor.strf.plotting.simple
@@ -713,6 +714,7 @@ class STRF(Core):
             "_latency_vectors_cache",
             "_temporal_span_cache",
             "_latency_plane_fit_cache",
+            "_gaussian_fit_cache",
             "_cs_seg_results_maps",
             "_cs_seg_results_times",
         ):
@@ -2163,6 +2165,136 @@ class STRF(Core):
         else:
             raise NotImplementedError
 
+    def _flat_strf_indices(self, roi=None, idx=None):
+        """Flat STRF indices for a selection, and the shape results should take.
+
+        Two different things, deliberately named apart:
+
+        ``idx``
+            The flat STRF index, ``roi * n_colours + colour`` -- what the rest of this
+            class unfortunately spells ``roi``.
+        ``roi``
+            An actual ROI, which expands to all of its colours. ``roi=1`` on a 4-colour
+            recording gives flat ``[4, 5, 6, 7]`` and a 4-element result.
+
+        Returns ``(None, None)`` when neither is given, meaning "everything, flat".
+
+        See also :meth:`unravel_strf_indices`, which does the same arithmetic one index
+        at a time.
+        """
+        if roi is not None and idx is not None:
+            raise ValueError(
+                "give either roi (an ROI, returns all its colours) or idx (a flat STRF "
+                "index), not both"
+            )
+        if roi is None and idx is None:
+            return None, None
+
+        n_colours = int(getattr(self, "n_colours", 1) or 1)
+        if idx is not None:
+            flat = np.atleast_1d(np.asarray(idx, dtype=int))
+            # A scalar idx gives a scalar back, matching plain array indexing.
+            shape = () if np.ndim(idx) == 0 else (flat.size,)
+            return flat, shape
+
+        rois = np.atleast_1d(np.asarray(roi, dtype=int))
+        flat = (rois[:, None] * n_colours + np.arange(n_colours)[None, :]).ravel()
+        shape = (n_colours,) if np.ndim(roi) == 0 else (rois.size, n_colours)
+        return flat, shape
+
+    def calc_gaussian_fit_index(
+        self,
+        roi=None,
+        idx=None,
+        n_sigma=None,
+        threshold_sd=None,
+        noise_sigma=None,
+        force_recompute=False,
+    ):
+        """How far each RF departs from the best-fitting single Gaussian.
+
+        An elliptical Gaussian is fitted by least squares to ``|collapse_times()|``, the
+        rectified time-collapsed map, and scored over a footprint taken from the data's
+        own second moments rather than from the fit -- a fit that missed a lobe would
+        otherwise exclude that lobe from its own exam. Fitting the rectified map makes
+        the whole thing polarity-blind, so what is left in the residual is the spatial
+        nonlinearity itself.
+
+        Parameters
+        ----------
+        roi : int, iterable of int, or None
+            An ROI. Returns one value per colour, so ``roi=1`` on a 4-colour recording
+            gives 4 numbers. **Unlike the rest of this class, this is not the flat STRF
+            index** -- pass ``idx`` for that.
+        idx : int, iterable of int, or None
+            Flat STRF index, ``roi * n_colours + colour``. Mutually exclusive with
+            ``roi``. Both left as None means every STRF, flat.
+        n_sigma : float, optional
+            Size of the analysis ellipse in footprint sigmas. Falls back to
+            ``[strf.gaussian_fit] n_sigma`` in the config, then to 2.5.
+        threshold_sd : float, optional
+            Noise sigmas a pixel must clear to count as signal. Config, then 3.0.
+        noise_sigma : float, optional
+            Radius in footprint sigmas beyond which the residual is treated as noise and
+            used to calibrate it. Config, then 3.0.
+        force_recompute : bool, optional
+            Refit even if a cached result for these settings exists.
+
+        Returns
+        -------
+        dict
+            Arrays shaped by the selector (see :meth:`_flat_strf_indices`):
+
+            index
+                Noise-corrected ``RMS(|data| - fit) / RMS(|data|)``. 0 when a Gaussian
+                explains the RF to within noise, ~1 when it explains nothing. This is
+                the number to rank on.
+            chi2
+                The same misfit over what noise alone predicts; 1 is the null. Says
+                whether a departure is real, not how big it is.
+            snr
+                Fitted amplitude over the noise. ``index`` does not depend on it
+                (spearman -0.07), so it is free to use as a quality filter.
+            n_px
+                Pixels in the analysis region; 0 where the fit failed.
+            amp, x0, y0, sx, sy, theta, offset
+                The fitted Gaussian. ``sx`` is the major axis, ``theta`` is in
+                **radians** counter-clockwise from +x (note
+                :meth:`get_pca_orientations` reports degrees).
+            footprint_x0, footprint_y0, footprint_sx, footprint_sy, footprint_theta
+                The data-derived ellipse the score was measured over.
+
+            An RF that cannot be fitted comes back all-NaN with ``n_px`` 0 rather than
+            raising.
+
+        Examples
+        --------
+        >>> obj.get_gaussian_fit_index()          # every STRF, flat
+        >>> obj.calc_gaussian_fit_index(roi=1)    # ROI 1, one value per colour
+        >>> obj.calc_gaussian_fit_index(idx=6)    # one STRF by flat index
+        """
+        n_sigma, threshold_sd, noise_sigma = pygor.strf.gaussian_fit._resolve(
+            self, n_sigma, threshold_sd, noise_sigma
+        )
+        if not hasattr(self, "_gaussian_fit_cache"):
+            self._gaussian_fit_cache = {}
+        cache_key = (n_sigma, threshold_sd, noise_sigma)
+        if force_recompute or cache_key not in self._gaussian_fit_cache:
+            self._gaussian_fit_cache[cache_key] = (
+                pygor.strf.gaussian_fit.gaussian_fit_index_wrapper(
+                    self,
+                    n_sigma=n_sigma,
+                    threshold_sd=threshold_sd,
+                    noise_sigma=noise_sigma,
+                )
+            )
+        full = self._gaussian_fit_cache[cache_key]
+
+        flat, shape = self._flat_strf_indices(roi=roi, idx=idx)
+        if flat is None:
+            return dict(full)
+        return {key: value[flat].reshape(shape) for key, value in full.items()}
+
     def calc_pca_rf_shape_analysis(
         self, roi=None, threshold_sd=1, plot=False, force_recompute=False, debug=False
     ):
@@ -3354,6 +3486,44 @@ class STRF(Core):
         """Get centroid coordinates from PCA analysis"""
         results = self.calc_pca_rf_shape_analysis(roi=roi, **kwargs)
         return results["centroid_y"]
+
+    # Gaussian-fit index. Note these take `roi` to mean an ROI (returning one value per
+    # colour) and `idx` to mean the flat STRF index, which is the opposite way round
+    # from the getters above -- see calc_gaussian_fit_index.
+    def get_gaussian_fit_index(self, roi=None, idx=None, **kwargs: Any):
+        """Departure from a single Gaussian; 0 = Gaussian to within noise.
+
+        The number to rank RFs on. `roi` is an ROI and returns one value per colour;
+        `idx` is the flat STRF index. Called bare, returns every STRF, flat.
+        """
+        return self.calc_gaussian_fit_index(roi=roi, idx=idx, **kwargs)["index"]
+
+    def get_gaussian_fit_chi2(self, roi=None, idx=None, **kwargs: Any):
+        """Gaussian-fit misfit over what noise alone predicts; 1 is the null.
+
+        Says whether a departure from a Gaussian is real, not how big it is.
+        """
+        return self.calc_gaussian_fit_index(roi=roi, idx=idx, **kwargs)["chi2"]
+
+    def get_gaussian_fit_snr(self, roi=None, idx=None, **kwargs: Any):
+        """Fitted Gaussian amplitude over the noise. Use as a quality filter."""
+        return self.calc_gaussian_fit_index(roi=roi, idx=idx, **kwargs)["snr"]
+
+    def get_gaussian_fit_sigma_major(self, roi=None, idx=None, **kwargs: Any):
+        """Fitted Gaussian sigma along the major axis, in pixels."""
+        return self.calc_gaussian_fit_index(roi=roi, idx=idx, **kwargs)["sx"]
+
+    def get_gaussian_fit_sigma_minor(self, roi=None, idx=None, **kwargs: Any):
+        """Fitted Gaussian sigma along the minor axis, in pixels."""
+        return self.calc_gaussian_fit_index(roi=roi, idx=idx, **kwargs)["sy"]
+
+    def get_gaussian_fit_angle(self, roi=None, idx=None, **kwargs: Any):
+        """Major-axis angle of the fitted Gaussian, in **radians** from +x.
+
+        Counter-clockwise, wrapped to [-pi/2, pi/2). Note get_pca_orientations()
+        reports degrees instead.
+        """
+        return self.calc_gaussian_fit_index(roi=roi, idx=idx, **kwargs)["theta"]
 
     def pca_rf_shape_analysis(
         self, roi, threshold_sd=3.0, plot=True, force_recompute=False
