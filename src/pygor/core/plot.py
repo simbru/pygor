@@ -114,8 +114,13 @@ def plot_averages(
             # Get figure from provided axis
             fig = axs.flat[0].figure
             if independent_scale:
+                # get_shared_y_axes() is read-only from matplotlib 3.8 on, so go
+                # through the underlying Grouper to actually break the link
                 for ax in axs.flat:
-                    ax.get_shared_y_axes().remove(ax)
+                    grouper = ax._shared_axes["y"]
+                    if len(grouper.get_siblings(ax)) > 1:
+                        grouper.remove(ax)
+                    ax.set_autoscaley_on(True)
             
         # Handle single ROI case for internally created axes
         if not provided_axs and len(rois) == 1:
