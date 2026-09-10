@@ -60,10 +60,32 @@ def _build_grid_image(array, max_x):
     return image, num_rows, num_slices
 
 
-def _normalize_max_x(max_x):
-    if isinstance(max_x, (int, np.integer)) and max_x > 0:
-        return int(max_x)
-    raise ValueError("max_x must be a positive int")
+def _grid_figsize(image, num_cols, min_side=2.0):
+    """Figure size that matches the mosaic's own aspect ratio.
+
+    imshow keeps pixels square, so sizing the figure from the row count alone
+    leaves dead space above and below whenever the panels are not square. Small
+    grids are scaled up along both axes rather than padded, so a one-ROI plot
+    stays as legible as a full one.
+    """
+    img_h, img_w = image.shape[-2], image.shape[-1]
+    if img_h == 0 or img_w == 0:
+        return (min_side, min_side)
+    fig_w = float(num_cols)
+    fig_h = fig_w * img_h / img_w
+    scale = max(1.0, min_side / min(fig_w, fig_h))
+    return (fig_w * scale, fig_h * scale)
+
+
+def _normalize_max_x(max_x, n_panels=None):
+    if not (isinstance(max_x, (int, np.integer)) and max_x > 0):
+        raise ValueError("max_x must be a positive int")
+    max_x = int(max_x)
+    # Fewer panels than the row width: narrow the grid instead of padding it
+    # out with blanks, which would strand a single panel in a wide strip.
+    if n_panels is not None and n_panels > 0:
+        max_x = min(max_x, int(n_panels))
+    return max_x
 
 
 def _symmetric_cval(image, cval):
@@ -807,13 +829,13 @@ def plot_collapsed_strfs(
         array = self.collapse_times(roi=roi_indices)
 
     # Grid layout
-    max_x = _normalize_max_x(max_x)
+    max_x = _normalize_max_x(max_x, len(roi_indices))
     image, num_rows, num_slices = _build_grid_image(array, max_x)
 
     cval = _symmetric_cval(image, cval)
 
     # Display
-    fig, ax = plt.subplots(figsize=(max_x, max(2, num_rows)))
+    fig, ax = plt.subplots(figsize=_grid_figsize(image, max_x))
     im = ax.imshow(
         image, cmap=cmap, interpolation="none", clim=(-cval, cval), origin=origin
     )
@@ -958,6 +980,8 @@ def plot_peaktime_strfs(
     if not roi_indices:
         raise ValueError("roi selection is empty")
     array = array[roi_indices]
+    # Fixed before the alpha grid is built: both mosaics must use the same width.
+    max_x = _normalize_max_x(max_x, len(roi_indices))
 
     if use_segmentation:
         seg_kwargs = {} if seg_kwargs is None else seg_kwargs
@@ -994,7 +1018,6 @@ def plot_peaktime_strfs(
                     alpha, _, _ = _build_grid_image(alpha_array, max_x)
 
     # Grid layout
-    max_x = _normalize_max_x(max_x)
     image, num_rows, num_slices = _build_grid_image(array, max_x)
 
     # Color limits
@@ -1004,7 +1027,7 @@ def plot_peaktime_strfs(
         vmin, vmax = _masked_minmax(image)
 
     # Display
-    fig, ax = plt.subplots(figsize=(max_x, max(2, num_rows)))
+    fig, ax = plt.subplots(figsize=_grid_figsize(image, max_x))
     if np.ma.isMaskedArray(image):
         cmap_obj = plt.cm.get_cmap(cmap).copy()
         cmap_obj.set_bad(color=bad_color)
@@ -1193,6 +1216,8 @@ def plot_deltatime_strfs(
     roi_indices = _normalize_roi_indices(roi, all_weights.shape[0])
     if not roi_indices:
         raise ValueError("roi selection is empty")
+    # Fixed before the alpha grid is built: both mosaics must use the same width.
+    max_x = _normalize_max_x(max_x, len(roi_indices))
 
     # Compute alpha weights for display
     alpha = None
@@ -1235,7 +1260,6 @@ def plot_deltatime_strfs(
         per_roi_mads = np.array(per_roi_mads)
 
     # Grid layout
-    max_x = _normalize_max_x(max_x)
     image, num_rows, num_slices = _build_grid_image(array, max_x)
 
     # Determine color limits
@@ -1273,7 +1297,7 @@ def plot_deltatime_strfs(
             vmin, vmax = -max_abs, max_abs
 
     # Display
-    fig, ax = plt.subplots(figsize=(max_x, max(2, num_rows)))
+    fig, ax = plt.subplots(figsize=_grid_figsize(image, max_x))
     if np.ma.isMaskedArray(image):
         cmap_obj = plt.cm.get_cmap(cmap).copy()
         cmap_obj.set_bad(color=bad_color)

@@ -232,7 +232,25 @@ def chroma_overview(
     else:
         if figsize is None:
             figsize = (max(mosaic_fig_w, 2), mosaic_fig_h + 0.5)
-        fig, ax_mosaic = plt.subplots(1, 1, figsize=figsize)
+        fig = plt.figure(figsize=figsize)
+        # Axes placed by hand rather than via plt.subplots: the default subplot
+        # margins are *fractions* of the figure, so on a whole-recording figure
+        # (~83 inches tall) they leave ten inches of blank canvas above the
+        # mosaic and nine below it. Reserve inches instead -- a strip at the
+        # bottom for the scalebar and its label, a strip at the left for the
+        # ROI labels when there are any, and hairlines elsewhere.
+        pad_in = 0.05
+        bottom_in = 0.4 if scalebar else pad_in
+        left_in = 0.4 if labels is not None else pad_in
+        fig_w, fig_h = figsize
+        ax_mosaic = fig.add_axes(
+            [
+                left_in / fig_w,
+                bottom_in / fig_h,
+                1 - (left_in + pad_in) / fig_w,
+                1 - (bottom_in + pad_in) / fig_h,
+            ]
+        )
         ax_time = None
 
     ax_mosaic.imshow(mosaic, aspect="auto", interpolation="nearest", origin="lower")
