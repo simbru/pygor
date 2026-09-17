@@ -191,10 +191,26 @@ class STRF(Core):
             self.strf_keys = []
             self.num_strfs = 0
             self.strf_dur_ms = None  # Will be set when STRFs are calculated
+            # Bootstrap settings gate fit_contours and the pvals; a ScanM-loaded
+            # object needs them as much as an H5 one, and without them every
+            # contour call raises AttributeError once STRFs are calculated.
+            self.set_bootstrap_settings_default()
         # __setattr__ keeps params["strf.general.n_colours"] in sync
         # automatically, but only after params exists. Re-assign to trigger
         # sync now that __post_init__ has created params.
         self.n_colours = self.n_colours
+
+    def _reconstruct_internals(self):
+        """Restore bootstrap settings, which the saved objects predate.
+
+        Every recording saved before ``set_bootstrap_settings_default`` was
+        called on the ScanM path has no ``bs_settings`` in its ``.recording.h5``,
+        so restoring the defaults here is what keeps ``fit_contours`` and the
+        pvals working on those files without reprocessing them.
+        """
+        super()._reconstruct_internals()
+        if not hasattr(self, "bs_settings"):
+            self.set_bootstrap_settings_default()
 
     def _validate_data_consistency(self):
         """
