@@ -21,6 +21,8 @@ from pygor.review.bundle import (
     master_roi_index,
 )
 from pygor.review.index import RecordingRef, attach_status, read_arrays, scan_processed, scan_recording
+from pygor.review.panels import PANELS, PanelSpec, panel, panels_for, render
+from pygor.review.rasterise import PanelCache, PanelImage, PanelKey
 from pygor.review.verdicts import Verdict, VerdictStore
 
 __all__ = [
@@ -28,13 +30,21 @@ __all__ = [
     "BundleCache",
     "FovBundle",
     "MissingPartner",
+    "PANELS",
+    "PanelCache",
+    "PanelImage",
+    "PanelKey",
+    "PanelSpec",
     "RecordingRef",
     "Verdict",
     "VerdictStore",
     "attach_status",
     "group_refs",
     "master_roi_index",
+    "panel",
+    "panels_for",
     "read_arrays",
+    "render",
     "scan_processed",
     "scan_recording",
 ]

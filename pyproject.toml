@@ -41,6 +41,13 @@ gui = [
     "napari>=0.5.6",
     "pyqt5>=5.15.11",
 ]
+# Terminal proofreading cockpit. Deliberately independent of [gui]: it is the
+# interface that works over a plain SSH connection, where napari cannot run.
+tui = [
+    "textual>=8.0,<9",
+    "textual-image[textual]>=0.14",
+    "pillow>=10.3",
+]
 cellpose = [
     "cellpose[gui]>=4.0.8",
 ]
@@ -50,6 +57,9 @@ notebook = [
     "notebook>=7.3.2",
     "jupyter>=1.1.1",
 ]
+
+[project.scripts]
+pygor-proofread = "pygor.tui.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/simbru/pygor"

@@ -184,6 +184,10 @@ class BundleCache:
             self.evictions += 1
             gc.collect()
 
+    def loaded(self, ref: RecordingRef) -> bool:
+        """Whether this recording is in memory, without putting it there."""
+        return ref.path in self._items
+
     def discard(self, ref: RecordingRef) -> None:
         self._items.pop(ref.path, None)
         self._sizes.pop(ref.path, None)
@@ -236,6 +240,19 @@ class FovBundle:
     def n_cells(self) -> int:
         """ROI count of the master, which defines the field of view's numbering."""
         return self.master.num_rois
+
+    @property
+    def strf_role(self) -> str:
+        """The recording that actually holds receptive fields.
+
+        Not the master: on a paired field of view the master is the direction
+        recording, which has no STRFs at all. A panel asking the master for a
+        receptive field gets an AttributeError.
+        """
+        for role, ref in self.refs.items():
+            if ref.num_strfs:
+                return role
+        return "swn" if "swn" in self.refs else self.master_role
 
     def peek(self, role) -> RecordingRef:
         try:
@@ -305,21 +322,34 @@ class FovBundle:
         """
         return self.cache.get(self.peek(role))
 
-    def warm(self, role="swn") -> None:
-        """Prime the collapsed-STRF cache so the first cell is not the slow one.
+    #: Derived quantities that compute for every cell on first touch and cache.
+    #: Measured on a 167-cell recording: 1.8 s and 4.7 s respectively, after
+    #: which a receptive-field panel renders in about 20 ms instead of 5 s.
+    WARM_CALLS = (
+        ("collapse_times_chroma", {"roi": 0}),
+        ("get_timecourses", {}),
+    )
 
-        The first ``collapse_times_chroma`` call on a recording computes and
-        caches for all of them, so paying it once up front makes every
-        subsequent cell effectively free.
+    def warm(self, role="swn") -> None:
+        """Pay the per-recording derived costs once, before walking its cells.
+
+        Both caches are whole-recording: touching one cell computes them for all
+        of them. Priming up front turns the first cell from the slowest into the
+        same speed as the rest, which matters because the first cell is the one a
+        reviewer waits on before deciding whether to stay in this field of view.
         """
         recording = self.full(role)
-        collapse = getattr(recording, "collapse_times_chroma", None)
-        if collapse is None:
-            return
-        try:
-            collapse(roi=0)
-        except Exception as error:  # a recording with no usable STRFs is a finding
-            warnings.warn(f"could not warm {self.fov_uid} {role}: {error}", stacklevel=2)
+        for name, kwargs in self.WARM_CALLS:
+            call = getattr(recording, name, None)
+            if call is None:
+                continue
+            try:
+                call(**kwargs)
+            except Exception as error:  # no usable STRFs is itself a finding
+                warnings.warn(
+                    f"could not warm {self.fov_uid} {role} via {name}: {error}",
+                    stacklevel=2,
+                )
 
     def release(self) -> None:
         for ref in self.refs.values():
