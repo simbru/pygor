@@ -126,6 +126,34 @@ class TestIndex:
         scored = gaussian_fit.fit_and_score(image)
         assert set(scored) == set(gaussian_fit.FIELDS)
 
+    def test_a_map_with_no_localised_rf_is_refused(self):
+        """The failure the far-region guard exists for.
+
+        When suprathreshold pixels are spread across the whole field rather than
+        gathered in one place, the data ellipse swallows the map and the
+        noise-calibration annulus collapses to an edge rim. sd estimated there
+        comes out several-fold too small, which inflates chi2 AND snr together --
+        so an SNR filter cannot catch it, and such maps took 8 of the top 25
+        places in a pooled ranking before this guard existed.
+
+        Note plain synthetic noise does NOT reproduce this: its suprathreshold
+        pixels are too few to spread the ellipse (measured far-fraction 0.71-0.81
+        against the 0.07-0.18 of the real cases). Scattered blobs are what
+        recreates the geometry.
+        """
+        scattered = with_noise(sum(
+            oriented_gaussian(6.0, x, y, 2.0, 2.0, 0.0)
+            for x, y in ((5, 5), (35, 6), (6, 34), (36, 35), (20, 20))
+        ))
+        scored = gaussian_fit.fit_and_score(scattered)
+        assert np.isnan(scored["index"]), (
+            "a map with no localised RF was scored instead of refused"
+        )
+
+    def test_a_real_rf_survives_the_far_region_guard(self, clean_gaussian):
+        """The same guard must not reject a localised RF."""
+        assert np.isfinite(gaussian_fit.fit_and_score(clean_gaussian)["index"])
+
     def test_every_field_is_present_even_on_failure(self):
         scored = gaussian_fit.fit_and_score(np.zeros((SIZE, SIZE)))
         assert set(scored) == set(gaussian_fit.FIELDS)

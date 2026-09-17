@@ -151,3 +151,8 @@ threshold_sd = 3.0
 # Radius, in footprint sigmas, beyond which the residual is taken to be noise and used
 # to calibrate it.
 noise_sigma = 3.0
+# Smallest the noise-calibration region may be, as a fraction of the valid map. A map
+# with no real RF gets a footprint that swallows it, leaving only an edge rim to
+# estimate noise from, which underestimates sd and inflates chi2 and snr together,
+# so an SNR filter cannot catch it.
+min_far_frac = 0.25

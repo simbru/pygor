@@ -35,6 +35,17 @@ N_SIGMA = 2.5
 THRESHOLD_SD = 3.0
 # Radius, in footprint sigmas, beyond which the residual is taken to be noise.
 NOISE_SIGMA = 3.0
+# Smallest the noise-calibration region may be, as a fraction of the valid map.
+# On a map with no real RF the >k sigma pixels are scattered everywhere, so the
+# data ellipse swallows most of it and the "far" annulus collapses to a thin rim
+# at the edge -- 30-50 px out of 612 in the cases this was calibrated on. sd
+# estimated there comes out 3-6x too small, which inflates BOTH chi2 and snr, so
+# an SNR filter cannot catch it: amp and sd are each tiny and their ratio looks
+# healthy. Such maps landed 8 of the top 25 of a pooled ranking. A fraction
+# rather than a pixel count, so it holds for any map size. 0.25 sits in a clean
+# empirical gap: the pathological maps measured 0.05-0.18, visually-confirmed
+# real RFs 0.49-0.93, with one large-amplitude borderline at 0.37 that is kept.
+MIN_FAR_FRAC = 0.25
 
 # Every key :func:`fit_and_score` returns, and so every array the wrapper returns.
 FIELDS = (
@@ -213,6 +224,7 @@ def gaussianity_index(
     n_sigma=N_SIGMA,
     noise_sigma=NOISE_SIGMA,
     k=THRESHOLD_SD,
+    min_far_frac=MIN_FAR_FRAC,
 ):
     """Departure from a single Gaussian, one number for every ROI. 0 = Gaussian.
 
@@ -250,7 +262,10 @@ def gaussianity_index(
     region = footprint(space, fit, k)
     ellipse, rad2 = ellipse_mask(space, region, n_sigma)
     far = (rad2 > noise_sigma**2) & valid
-    if far.sum() < 20:
+    # Both floors: the fraction is what catches a footprint that has swallowed
+    # the map, the absolute count guards tiny maps where 25% is still too few
+    # pixels to estimate a variance from.
+    if far.sum() < max(20, min_far_frac * valid.sum()):
         return empty
 
     # Noise calibrated on the residual itself, out where the fit predicts nothing. MAD
@@ -281,6 +296,7 @@ def fit_and_score(
     n_sigma=N_SIGMA,
     threshold_sd=THRESHOLD_SD,
     noise_sigma=NOISE_SIGMA,
+    min_far_frac=MIN_FAR_FRAC,
 ):
     """Fit one Gaussian to a single collapsed map and score it.
 
@@ -297,7 +313,8 @@ def fit_and_score(
         return blank
 
     scored = gaussianity_index(
-        space, fit, n_sigma=n_sigma, noise_sigma=noise_sigma, k=threshold_sd
+        space, fit, n_sigma=n_sigma, noise_sigma=noise_sigma, k=threshold_sd,
+        min_far_frac=min_far_frac,
     )
     region = footprint(space, fit, threshold_sd)
     out = dict(blank)
@@ -309,7 +326,7 @@ def fit_and_score(
     return out
 
 
-def _resolve(strf_obj, n_sigma, threshold_sd, noise_sigma):
+def _resolve(strf_obj, n_sigma, threshold_sd, noise_sigma, min_far_frac=None):
     """Argument -> [strf.gaussian_fit] config -> module literal, per value.
 
     Mirrors the chain calculate_strf uses. Objects with no ``params`` (test stubs) fall
@@ -334,11 +351,16 @@ def _resolve(strf_obj, n_sigma, threshold_sd, noise_sigma):
             if noise_sigma is not None
             else defaults.get("noise_sigma", NOISE_SIGMA)
         ),
+        float(
+            min_far_frac
+            if min_far_frac is not None
+            else defaults.get("min_far_frac", MIN_FAR_FRAC)
+        ),
     )
 
 
 def gaussian_fit_index_wrapper(
-    strf_obj, n_sigma=None, threshold_sd=None, noise_sigma=None
+    strf_obj, n_sigma=None, threshold_sd=None, noise_sigma=None, min_far_frac=None
 ):
     """Fit and score every STRF on `strf_obj`.
 
@@ -346,8 +368,8 @@ def gaussian_fit_index_wrapper(
     class caches this result and slices it. Returns a dict of 1D arrays, each of length
     ``len(strf_obj.strfs)`` in flat STRF order, with the keys in :data:`FIELDS`.
     """
-    n_sigma, threshold_sd, noise_sigma = _resolve(
-        strf_obj, n_sigma, threshold_sd, noise_sigma
+    n_sigma, threshold_sd, noise_sigma, min_far_frac = _resolve(
+        strf_obj, n_sigma, threshold_sd, noise_sigma, min_far_frac
     )
     collapsed = strf_obj.collapse_times()
     records = [
@@ -356,6 +378,7 @@ def gaussian_fit_index_wrapper(
             n_sigma=n_sigma,
             threshold_sd=threshold_sd,
             noise_sigma=noise_sigma,
+            min_far_frac=min_far_frac,
         )
         for i in range(len(collapsed))
     ]

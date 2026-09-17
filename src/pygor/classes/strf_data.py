@@ -2225,6 +2225,7 @@ class STRF(Core):
         n_sigma=None,
         threshold_sd=None,
         noise_sigma=None,
+        min_far_frac=None,
         force_recompute=False,
     ):
         """How far each RF departs from the best-fitting single Gaussian.
@@ -2253,6 +2254,10 @@ class STRF(Core):
         noise_sigma : float, optional
             Radius in footprint sigmas beyond which the residual is treated as noise and
             used to calibrate it. Config, then 3.0.
+        min_far_frac : float, optional
+            Smallest the noise-calibration region may be, as a fraction of the valid
+            map. Below it the STRF scores all-NaN rather than returning numbers built
+            on an edge-rim noise estimate. Config, then 0.25.
         force_recompute : bool, optional
             Refit even if a cached result for these settings exists.
 
@@ -2289,12 +2294,14 @@ class STRF(Core):
         >>> obj.calc_gaussian_fit_index(roi=1)    # ROI 1, one value per colour
         >>> obj.calc_gaussian_fit_index(idx=6)    # one STRF by flat index
         """
-        n_sigma, threshold_sd, noise_sigma = pygor.strf.gaussian_fit._resolve(
-            self, n_sigma, threshold_sd, noise_sigma
+        n_sigma, threshold_sd, noise_sigma, min_far_frac = (
+            pygor.strf.gaussian_fit._resolve(
+                self, n_sigma, threshold_sd, noise_sigma, min_far_frac
+            )
         )
         if not hasattr(self, "_gaussian_fit_cache"):
             self._gaussian_fit_cache = {}
-        cache_key = (n_sigma, threshold_sd, noise_sigma)
+        cache_key = (n_sigma, threshold_sd, noise_sigma, min_far_frac)
         if force_recompute or cache_key not in self._gaussian_fit_cache:
             self._gaussian_fit_cache[cache_key] = (
                 pygor.strf.gaussian_fit.gaussian_fit_index_wrapper(
@@ -2302,6 +2309,7 @@ class STRF(Core):
                     n_sigma=n_sigma,
                     threshold_sd=threshold_sd,
                     noise_sigma=noise_sigma,
+                    min_far_frac=min_far_frac,
                 )
             )
         full = self._gaussian_fit_cache[cache_key]
