@@ -822,7 +822,7 @@ class STRF(Core):
 
             __contours = [
                 pygor.strf.contouring.bipolar_contour(arr)
-                for count, arr in enumerate(self.collapse_times())
+                for count, arr in enumerate(self.collapse_times(roi))
             ]
         __contours = np.array(__contours, dtype="object")
         return __contours
