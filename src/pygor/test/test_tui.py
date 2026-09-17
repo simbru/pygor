@@ -230,6 +230,34 @@ class TestApp:
         assert stored[0].verdict == "keep"
         assert stored[0].subject_type == "fov"
 
+    def test_verdict_shows_on_the_row_immediately(self, app):
+        """Marking a list only works if the mark appears when you make it."""
+        from textual.coordinate import Coordinate
+        from textual.widgets import DataTable
+
+        seen = {}
+
+        def capture(a):
+            table = a.screen.query_one("#fovs", DataTable)
+            seen["glyph"] = table.get_cell_at(Coordinate(0, 0))
+
+        drive(app, "a", after=capture)
+        assert seen["glyph"] == "OK"
+
+    def test_verdict_from_the_fov_screen_shows_on_return(self, app):
+        """A decision made one level down has to be visible coming back up."""
+        from textual.coordinate import Coordinate
+        from textual.widgets import DataTable
+
+        seen = {}
+
+        def capture(a):
+            table = a.screen.query_one("#fovs", DataTable)
+            seen["glyph"] = table.get_cell_at(Coordinate(0, 0))
+
+        drive(app, "enter", "a", "escape", after=capture)
+        assert seen["glyph"] == "OK"
+
     def test_reject_asks_for_a_reason(self, app):
         """A reject with no reason is unusable when read back months later."""
         from pygor.tui.app import ReasonPrompt

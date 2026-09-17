@@ -221,6 +221,8 @@ class IndexScreen(ReviewScreen):
 
     COLUMNS = ("", "fov_uid", "roles", "cells", "shift", "corr", "lost", "bad")
 
+    GLYPHS = {"keep": "OK", "reject": "NO", "flag": "!!", "uncertain": "??", "": ""}
+
     def compose(self) -> ComposeResult:
         yield Header()
         yield Horizontal(
@@ -248,15 +250,39 @@ class IndexScreen(ReviewScreen):
         table = self.query_one("#fovs", DataTable)
         table.clear()
         self.frame = self.app.session.overview()
-        glyphs = {"keep": "OK", "reject": "NO", "flag": "!!", "uncertain": "??", "": ""}
         for row in self.frame.itertuples():
             corr = "" if row.worst_correlation != row.worst_correlation else f"{row.worst_correlation:.2f}"
             shift = "" if row.max_shift_px != row.max_shift_px else f"{row.max_shift_px:.1f}"
             table.add_row(
-                glyphs.get(row.verdict, ""), row.fov_uid, row.roles, str(row.n_cells),
-                shift, corr, str(row.n_lost), str(row.bad_status + row.unusable),
+                self.GLYPHS.get(row.verdict, ""), row.fov_uid, row.roles,
+                str(row.n_cells), shift, corr, str(row.n_lost),
+                str(row.bad_status + row.unusable),
             )
         self.refresh_status()
+
+    def refresh_glyphs(self) -> None:
+        """Repaint the verdict column from the store.
+
+        Judging is meant to feel like marking a list, so a decision has to show
+        up on the row that was decided rather than at the next reload. Cheap
+        enough to do wholesale: the store answers from memory.
+        """
+        from textual.coordinate import Coordinate
+
+        table = self.query_one("#fovs", DataTable)
+        if not table.row_count or self.frame.empty:
+            return
+        for index, row in enumerate(self.frame.itertuples()):
+            decided = self.app.session.store.get(
+                "fov", row.fov_uid, "alignment", condition=row.condition
+            )
+            glyph = self.GLYPHS.get(decided.verdict if decided else "", "")
+            if table.get_cell_at(Coordinate(index, 0)) != glyph:
+                table.update_cell_at(Coordinate(index, 0), glyph)
+
+    def on_screen_resume(self) -> None:
+        """Coming back from a field of view: show what was decided in there."""
+        self.refresh_glyphs()
 
     def current_bundle(self):
         table = self.query_one("#fovs", DataTable)
@@ -297,6 +323,7 @@ class IndexScreen(ReviewScreen):
         self.load_strfs()
 
     def refresh_status(self) -> None:
+        self.refresh_glyphs()
         progress = self.app.session.progress()
         bundle = self.current_bundle()
         target = f"  target: FOV {bundle.fov_uid}" if bundle else ""
