@@ -77,6 +77,17 @@ def _deep_merge(base: dict, override: dict) -> dict:
     for key, value in override.items():
         if key in result and isinstance(result[key], dict) and isinstance(value, dict):
             result[key] = _deep_merge(result[key], value)
+        elif (
+            key in result
+            and isinstance(result[key], float)
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+        ):
+            # A config file writing "max_sigma = 2" over a default of 2.0 is a
+            # float quantity without a decimal point, not a request for an int.
+            # Keep the default's type, or every editor downstream labels and
+            # parses the value as an integer.
+            result[key] = float(value)
         else:
             result[key] = value
     return result

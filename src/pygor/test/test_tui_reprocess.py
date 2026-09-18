@@ -338,3 +338,22 @@ class TestStandaloneKwargs:
 
     def test_standalone_imports_without_textual_at_module_level(self):
         import pygor.tui.standalone  # noqa: F401
+
+
+class TestConfigMergeTypes:
+    def test_int_in_config_over_float_default_stays_float(self):
+        """swn.toml writes max_sigma = 2 over pygor's 2.0; the table labelled
+        it int and the parser then treated edits as ints."""
+        from pygor.config import _deep_merge
+
+        merged = _deep_merge({"blob": {"max_sigma": 2.0, "n": 3, "flag": True}},
+                             {"blob": {"max_sigma": 2, "n": 4, "flag": False}})
+        assert merged["blob"]["max_sigma"] == 2.0
+        assert isinstance(merged["blob"]["max_sigma"], float)
+        assert merged["blob"]["n"] == 4 and isinstance(merged["blob"]["n"], int)
+        assert merged["blob"]["flag"] is False  # a bool is not promoted
+
+    def test_recipe_values_carry_float_for_max_sigma(self):
+        binding = pytest.importorskip("analyses.review_datasets.chromatic_swn")
+        blob = binding.recipe_values()["segmentation"]["blob"]
+        assert isinstance(blob["max_sigma"], float)
