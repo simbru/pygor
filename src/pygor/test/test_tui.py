@@ -105,6 +105,34 @@ class TestImaging:
         assert make_widget(image, caps) is None
         assert "no graphics" in describe_panel(image)
 
+    def test_show_degrades_off_a_terminal(self, capsys):
+        """show() is the remote substitute for a matplotlib window; with no
+        graphics it must still say something rather than raise."""
+        import numpy as np
+        from matplotlib.figure import Figure
+
+        from pygor.tui.capabilities import Capabilities
+        from pygor.tui.imaging import show
+
+        caps = Capabilities(mode="none", cell_width=10, cell_height=20, is_tty=False)
+        show(np.zeros((4, 8)), caps)
+        figure = Figure()
+        figure.add_subplot(111).plot([0, 1])
+        show(figure, caps)
+        show((figure, None), caps)  # the (fig, ax) tuple pygor returns
+        out = capsys.readouterr().out
+        assert out.count("no terminal graphics") == 3
+
+    def test_show_rejects_a_1d_array(self):
+        import numpy as np
+
+        from pygor.tui.capabilities import Capabilities
+        from pygor.tui.imaging import show
+
+        caps = Capabilities(mode="none", cell_width=10, cell_height=20, is_tty=False)
+        with pytest.raises(TypeError):
+            show(np.zeros(5), caps)
+
     def test_clear_terminal_images_is_safe_off_a_terminal(self):
         from pygor.tui.imaging import clear_terminal_images
 

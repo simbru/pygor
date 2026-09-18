@@ -75,6 +75,20 @@ class ReviewSession:
                 self._cells = pd.DataFrame()
         return self._cells
 
+    def rescan(self) -> None:
+        """Forget everything read from disk and read it again.
+
+        For after a recording has been reprocessed: the index cache notices
+        the changed file on its own, but the bundles, the loaded objects and
+        the CSV rows were all read at startup and would otherwise keep
+        describing the old one.
+        """
+        self._refs = None
+        self._bundles = None
+        self._cells = None
+        self.bundle_cache.clear()
+        self.panel_cache.clear()
+
     def missing_recordings(self) -> pd.DataFrame:
         """Ledger rows with no file, which a scan of Processed/ cannot see."""
         return missing_from_disk(self.refs, self.binding.STATUS)

@@ -86,6 +86,63 @@ def describe_panel(panel_image) -> str:
     )
 
 
+def show(obj, caps, *, width=900, dpi=100, cmap="Greys_r") -> None:
+    """Print a figure, an image array or a PNG inline, in the terminal.
+
+    This is what makes pygor's matplotlib API usable over SSH. Every
+    ``view_*`` and ``plot_*`` method returns a figure that would normally need
+    a window; here it is rasterised and drawn as terminal cells instead, so
+    the interactive loop -- segment, look, adjust, look again -- works from
+    the REPL without a display.
+
+    Accepts a Figure, a (fig, ax) tuple as pygor returns, a 2-D array, or PNG
+    bytes.
+    """
+    import io
+
+    import numpy as np
+    from matplotlib.figure import Figure
+
+    from pygor.review.rasterise import figure_to_png
+
+    if isinstance(obj, tuple) and obj and isinstance(obj[0], Figure):
+        obj = obj[0]
+    if isinstance(obj, Figure):
+        height = int(width * obj.get_figheight() / obj.get_figwidth())
+        png = figure_to_png(obj, width=width, height=height, dpi=dpi)
+    elif isinstance(obj, (bytes, bytearray)):
+        png = bytes(obj)
+    else:
+        array = np.asarray(obj)
+        if array.ndim not in (2, 3):
+            raise TypeError(f"cannot show an array of shape {array.shape}")
+        figure = Figure(figsize=(width / dpi, width * array.shape[0] / array.shape[1] / dpi),
+                        dpi=dpi)
+        axis = figure.add_axes([0, 0, 1, 1])
+        axis.imshow(array, cmap=cmap if array.ndim == 2 else None, origin="lower")
+        axis.set_axis_off()
+        png = figure_to_png(figure, dpi=dpi)
+
+    renderable_class = _renderable_class(caps.mode)
+    if renderable_class is None:
+        import sys
+
+        sys.stdout.write(f"[image {len(png) // 1024} KiB; no terminal graphics]\n")
+        return
+    from rich.console import Console
+
+    Console().print(renderable_class(io.BytesIO(png)))
+
+
+def _renderable_class(mode):
+    if mode == "none":
+        return None
+    from textual_image.renderable import HalfcellImage, SixelImage, TGPImage, UnicodeImage
+
+    return {"tgp": TGPImage, "sixel": SixelImage, "halfcell": HalfcellImage,
+            "unicode": UnicodeImage}.get(mode)
+
+
 def clear_terminal_images() -> None:
     """Delete every image this process put on the screen.
 

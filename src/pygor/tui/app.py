@@ -338,7 +338,10 @@ class IndexScreen(ReviewScreen):
             self.app.push_screen(FovScreen(bundle))
 
     def action_reload(self) -> None:
+        """Re-read the dataset from disk, for after a reprocess."""
+        self.app.session.rescan()
         self.load_rows()
+        self.app.notify("rescanned")
 
 
 class FovScreen(ReviewScreen):
@@ -602,18 +605,31 @@ class ProofreadApp(App):
         """Drop to IPython with the current objects bound, then come back."""
         screen = self.screen
         bundle = screen.current_bundle() if isinstance(screen, ReviewScreen) else None
+        from functools import partial
+
+        from pygor.tui.imaging import show
+
         namespace = {
             "session": self.session,
             "bundle": bundle,
             "store": self.session.store,
             "app": self,
             "binding": self.binding,
+            # show() is what makes pygor's matplotlib API usable over SSH:
+            # any figure it returns is drawn inline instead of needing a window.
+            "show": partial(show, caps=self.caps),
         }
         lines = [
             "pygor review.  Ctrl-D returns to the cockpit.",
             "  session  ReviewSession      bundle  this field of view",
             "  store    verdicts           binding dataset rules",
+            "  show(x)  draw a figure / (fig, ax) / 2-D array inline",
         ]
+        if hasattr(self.binding, "reprocess"):
+            namespace["reprocess"] = self.binding.reprocess
+            lines.append(
+                "  reprocess(fov_uid, {'segmentation.blob': {'threshold': .02}}, save=False)"
+            )
         if bundle is not None:
             # Bind the recording only when it is already in memory. Loading one
             # here would stall for seconds on a keypress that is supposed to be
