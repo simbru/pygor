@@ -101,6 +101,15 @@ class ReprocessScreen(Screen):
         overrides = self.query_one("#params", ParamTable).nested_overrides()
         self.running = True
         self.set_status("running…")
+        # Replace the picture, not just the status line: over a remote
+        # connection the status line is the easiest thing to miss, and an
+        # unchanged image reads as "nothing happened".
+        from pygor.tui.app import PanelView
+
+        self.query_one("#reprocess-preview", PanelView).show_message(
+            f"running with {overrides or 'the recipe as-is'} …\n"
+            "the result replaces this when it finishes"
+        )
         self.run_worker_thread(overrides)
 
     @work(thread=True, exclusive=True, group="reprocess")

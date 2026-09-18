@@ -222,7 +222,7 @@ def preview_image(mask, projection, which, width, height, *, name="",
                       key=key, meta={"panel": f"preview:{which}"})
 
 
-def recording_preview(recording, which, width, height):
+def recording_preview(recording, which, width, height, name=None):
     """A picture of an in-memory recording, for the reprocess screen."""
     import numpy as np
 
@@ -235,7 +235,8 @@ def recording_preview(recording, which, width, height):
             note = f"correlation failed: {type(error).__name__}"
     return preview_image(
         recording.rois, np.mean(recording.images, axis=0), which, width, height,
-        name=getattr(recording, "name", ""), correlation=correlation, note=note,
+        name=name if name is not None else getattr(recording, "name", ""),
+        correlation=correlation, note=note,
     )
 
 

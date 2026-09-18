@@ -444,17 +444,21 @@ class FovScreen(ReviewScreen):
 
         def preview(result, which, width, height):
             if result is None:
-                # Nothing re-run yet: draw what is on disk, from the small
-                # datasets, so every view works before a load is paid for.
+                # Nothing re-run yet: draw what is on disk. The small datasets
+                # cover the mean and the mask; a correlation projection is not
+                # saved, so that view loads the recording and computes one.
                 arrays = bundle.light(master)
+                correlation = arrays.get("correlation_projection")
+                if which == "correlation" and correlation is None:
+                    correlation = bundle.full(master).compute_correlation_projection()
                 return preview_image(
                     arrays["rois"], arrays["average_stack"], which, width, height,
-                    name=f"{bundle.peek(master).stem} (on disk)",
-                    correlation=arrays.get("correlation_projection"),
-                    note="none saved; re-run to compute",
+                    name=f"ON DISK  {bundle.peek(master).stem}",
+                    correlation=correlation,
                 )
             recording = result.get(master) or next(iter(result.values()))
-            return recording_preview(recording, which, width, height)
+            return recording_preview(recording, which, width, height,
+                                     name=f"RE-RUN, UNSAVED  {recording.name}")
 
         def save(result, overrides):
             binding.save_reprocessed(bundle.fov_uid, result, overrides)
