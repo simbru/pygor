@@ -466,16 +466,20 @@ class FovScreen(ReviewScreen):
 
         values = binding.recipe_values()
         choices, gates = segmentation_gating(values)
+        # Say what a re-run touches: the master is re-segmented and its ROIs
+        # transferred onto every partner, so all of them are recomputed.
+        partners = [r for r in bundle.roles if r != master]
+        scope = f"{master} → {', '.join(partners)}" if partners else master
         self.app.push_screen(
             ReprocessScreen(
-                title=f"reprocess {bundle.fov_uid}",
+                title=f"reprocess {bundle.fov_uid}   [{scope}]",
                 values=values,
                 sections=getattr(binding, "REPROCESS_SECTIONS", ("segmentation",)),
                 run=run, preview=preview, save=save, caps=self.app.caps,
                 previews=PREVIEWS, choices=choices, gates=gates,
-                save_text=(f"Overwrite {bundle.fov_uid}'s processed recordings and its "
-                           "rows in the aggregate CSV? The old files are kept as "
-                           ".prereprocess."),
+                save_text=(f"Overwrite {len(bundle.roles)} processed recording(s) for "
+                           f"{bundle.fov_uid} ({', '.join(bundle.roles)}) and its rows in "
+                           "the aggregate CSV? The old files are kept as .prereprocess."),
             ),
             self._after_reprocess,
         )

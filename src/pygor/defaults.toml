@@ -63,9 +63,10 @@ eliminate_overlap = 1.0
 merge_overlap = 0.33
 # Columns beside the masked artefact in which blobs are discarded. The mask
 # edge is a hard step and DoG responds to it like a cell, so false ROIs line
-# up just inside it; widening artifact_width only moves them. About 2 x
-# max_sigma clears it. 0 keeps the historical behaviour.
-edge_margin = 0
+# up just inside it -- 15 of 72 on one field of view -- and widening
+# artifact_width only moves them. 5 clears it at max_sigma 2; set to 0 to
+# recover the historical behaviour.
+edge_margin = 5
 anatomy_threshold = "none"
 anatomy_thresh_mult = 0.0
 erode_iterations = 0
