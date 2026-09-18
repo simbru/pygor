@@ -24,6 +24,8 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt, Signal, QEventLoop
 from qtpy.QtGui import QColor
 
+from pygor.core.gui.param_values import parse_value
+
 
 # Type display names and colours for the type column
 _TYPE_INFO = {
@@ -44,52 +46,8 @@ def _type_label(value):
 
 
 def _parse_value(text, original_value):
-    """Parse edited text back to the original type.
-
-    Parameters
-    ----------
-    text : str
-        The edited string from the table cell.
-    original_value
-        The original value, used to infer the target type.
-
-    Returns
-    -------
-    parsed_value
-        The text parsed to the original type.
-
-    Raises
-    ------
-    ValueError
-        If the text cannot be parsed to the expected type.
-    """
-    if isinstance(original_value, bool):
-        lower = text.strip().lower()
-        if lower in ("true", "1", "yes"):
-            return True
-        elif lower in ("false", "0", "no"):
-            return False
-        raise ValueError(f"Cannot parse '{text}' as bool")
-
-    if isinstance(original_value, int):
-        # Allow float-like strings that are whole numbers
-        f = float(text)
-        if f == int(f):
-            return int(f)
-        return int(f)
-
-    if isinstance(original_value, float):
-        return float(text)
-
-    if isinstance(original_value, list):
-        import ast
-        parsed = ast.literal_eval(text)
-        if not isinstance(parsed, list):
-            raise ValueError(f"Expected a list, got {type(parsed).__name__}")
-        return parsed
-
-    # str or unknown — return as-is
-    return text
+    """Parse edited text back to the original type. See param_values.parse_value."""
+    return parse_value(text, original_value)
 
 
 class ParamEditorWidget(QWidget):

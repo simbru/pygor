@@ -134,9 +134,9 @@ def show(obj, caps, *, width=900, dpi=100, cmap="Greys_r") -> None:
     Console().print(renderable_class(io.BytesIO(png)))
 
 
-def show_rois(recording, caps, *, width=1000, labels=False, low=1, high=99,
-              image=None) -> None:
-    """Draw a recording's ROI outlines over its projection, inline.
+def roi_figure(recording, *, width=1000, labels=False, low=1, high=99, image=None,
+               title=None):
+    """A recording's ROI outlines over its projection, as a Figure.
 
     The stand-in for ``view_stack_rois`` on a remote connection. That method
     hands the raw average to imshow with min-max scaling, so the bright
@@ -170,9 +170,46 @@ def show_rois(recording, caps, *, width=1000, labels=False, low=1, high=99,
             axis.text(xs.mean(), ys.mean(), str(abs(int(roi_id)) - 1), color="white",
                       fontsize=5, ha="center", va="center")
     n_rois = int((np.unique(mask) < 0).sum())
-    axis.text(0.01, 0.98, f"{getattr(recording, 'name', '')}  ·  {n_rois} ROIs",
+    label = title if title is not None else getattr(recording, "name", "")
+    axis.text(0.01, 0.98, f"{label}  ·  {n_rois} ROIs",
               transform=axis.transAxes, color="white", fontsize=8, va="top")
-    show(figure, caps, width=width)
+    return figure
+
+
+def show_rois(recording, caps, **kwargs) -> None:
+    """Draw :func:`roi_figure` inline."""
+    show(roi_figure(recording, **kwargs), caps, width=kwargs.get("width", 1000))
+
+
+PREVIEWS = ("rois", "correlation", "labels")
+
+
+def recording_preview(recording, which, width, height):
+    """A picture of an in-memory recording, for the reprocess screen.
+
+    ``which`` is one of :data:`PREVIEWS`. Returns a PanelImage so it can be
+    shown through the same path as any other panel.
+    """
+    from pygor.review.rasterise import PanelImage, PanelKey, figure_to_png, png_size
+
+    if which == "correlation":
+        image = getattr(recording, "correlation_projection", None)
+        if image is None:
+            try:
+                image = recording.compute_correlation_projection()
+            except Exception:
+                image = None
+        figure = roi_figure(recording, width=width, image=image,
+                            title=f"{getattr(recording, 'name', '')} (correlation)")
+    else:
+        figure = roi_figure(recording, width=width, labels=(which == "labels"))
+    png = figure_to_png(figure, dpi=100)
+    actual = png_size(png)
+    key = PanelKey(panel=f"preview:{which}", fov_uid=getattr(recording, "name", ""),
+                   condition="", role="", roi=None, channel=-1, width=width,
+                   height=height, dpi=100, params_hash="", sources=())
+    return PanelImage(png=png, width=actual[0] or width, height=actual[1] or height,
+                      key=key, meta={"panel": f"preview:{which}"})
 
 
 def _renderable_class(mode):

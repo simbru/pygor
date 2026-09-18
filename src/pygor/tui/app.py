@@ -352,6 +352,7 @@ class FovScreen(ReviewScreen):
         Binding("p", "next_panel", "panel"),
         Binding("greater_than_sign", "next_role", "partner"),
         Binding("enter", "cells", "cells"),
+        Binding("R", "reprocess", "reprocess"),
         Binding("v", "napari", "napari"),
     ]
 
@@ -425,6 +426,52 @@ class FovScreen(ReviewScreen):
 
     def action_napari(self) -> None:
         self.app.open_napari(self.bundle, self.role)
+
+    def action_reprocess(self) -> None:
+        """Edit the recipe for this field of view, re-run it, keep or discard."""
+        binding = self.app.binding
+        if not hasattr(binding, "run_reprocess"):
+            self.app.notify("this dataset binding has no reprocess()", severity="warning")
+            return
+        from pygor.tui.imaging import PREVIEWS, recording_preview
+        from pygor.tui.reprocess_screen import ReprocessScreen
+
+        bundle = self.bundle
+        master = bundle.master_role
+
+        def run(overrides):
+            return binding.run_reprocess(bundle.fov_uid, overrides)
+
+        def preview(result, which, width, height):
+            if result is None:
+                # Nothing re-run yet: show what is on disk.
+                return self.app.session.render("rec_segmentation", bundle,
+                                               width=width, height=height, role=master)
+            recording = result.get(master) or next(iter(result.values()))
+            return recording_preview(recording, which, width, height)
+
+        def save(result, overrides):
+            binding.save_reprocessed(bundle.fov_uid, result, overrides)
+            self.app.session.rescan()
+
+        self.app.push_screen(
+            ReprocessScreen(
+                title=f"reprocess {bundle.fov_uid}",
+                values=binding.recipe_values(),
+                sections=getattr(binding, "REPROCESS_SECTIONS", ("segmentation",)),
+                run=run, preview=preview, save=save, caps=self.app.caps,
+                previews=PREVIEWS,
+                save_text=(f"Overwrite {bundle.fov_uid}'s processed recordings and its "
+                           "rows in the aggregate CSV? The old files are kept as "
+                           ".prereprocess."),
+            ),
+            self._after_reprocess,
+        )
+
+    def _after_reprocess(self, outcome) -> None:
+        if outcome == "saved":
+            # This screen's bundle describes the files that were just replaced.
+            self.dismiss()
 
 
 class CellScreen(ReviewScreen):
@@ -518,6 +565,10 @@ class ProofreadApp(App):
     #detail { height: auto; padding: 0 1; color: $text-muted; }
     #status { height: 1; padding: 0 1; background: $panel; }
     #reason-box { padding: 1 2; width: 60%; height: auto; background: $panel; }
+    #value-box, #confirm-box { padding: 1 2; width: 70%; height: auto; background: $panel; }
+    #params { width: 2fr; }
+    ReprocessScreen #preview { width: 3fr; padding: 0 1; }
+    .error { color: $error; }
     .dim { color: $text-muted; }
     """
 

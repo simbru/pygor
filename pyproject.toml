@@ -60,6 +60,7 @@ notebook = [
 
 [project.scripts]
 pygor-proofread = "pygor.tui.__main__:main"
+pygor-tui = "pygor.tui.standalone:main"
 
 [project.urls]
 Homepage = "https://github.com/simbru/pygor"
