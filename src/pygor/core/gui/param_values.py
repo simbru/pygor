@@ -37,8 +37,13 @@ def parse_value(text, original_value):
         raise ValueError(f"Cannot parse '{text}' as bool")
 
     if isinstance(original_value, int):
-        # Allow float-like strings that are whole numbers
-        return int(float(text))
+        # An int in a TOML file is usually a float quantity that happened to be
+        # written without a decimal point (max_sigma = 2), so a fractional edit
+        # promotes to float rather than being truncated to the nearest int --
+        # which is what this used to do, silently, turning 2.5 into 2. A
+        # parameter that is genuinely integer fails loudly downstream instead.
+        number = float(text)
+        return int(number) if number == int(number) else number
 
     if isinstance(original_value, float):
         return float(text)

@@ -23,6 +23,18 @@ class TestParamValues:
         assert parse_value("[1, 2]", [0]) == [1, 2]
         assert parse_value("blob", "watershed") == "blob"
 
+    def test_fractional_edit_of_an_int_promotes_rather_than_truncates(self):
+        """max_sigma = 2 in a TOML is a float quantity written without a point.
+
+        The parser used to do int(float("2.5")) and hand back 2 -- an edit the
+        user made, silently thrown away. Now it becomes 2.5; a whole number
+        stays an int.
+        """
+        assert parse_value("2.5", 2) == 2.5
+        assert isinstance(parse_value("2.5", 2), float)
+        assert parse_value("3", 2) == 3 and isinstance(parse_value("3", 2), int)
+        assert parse_value("3.0", 2) == 3 and isinstance(parse_value("3.0", 2), int)
+
     def test_bad_text_raises_not_coerces(self):
         with pytest.raises(ValueError):
             parse_value("maybe", True)
