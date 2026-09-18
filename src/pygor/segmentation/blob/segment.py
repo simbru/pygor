@@ -18,11 +18,17 @@ from pygor.segmentation.preprocessing import (
 )
 
 
-def _detect_blobs(img, min_sigma, max_sigma, threshold, overlap, artifact_width=0):
+def _detect_blobs(img, min_sigma, max_sigma, threshold, overlap, artifact_width=0,
+                  edge_margin=0):
     """
     Detect blobs using DoG and convert sigma to radius.
 
     Returns array of (y, x, radius) for each blob.
+
+    edge_margin drops blobs within that many columns of the masked artefact.
+    The mask is a hard step from zero to signal, and a difference of Gaussians
+    responds to a step as strongly as to a cell, so a column of false blobs
+    forms just inside the boundary -- and widening the mask only moves it.
     """
     blobs = blob_dog(img, min_sigma=min_sigma, max_sigma=max_sigma,
                      threshold=threshold, overlap=overlap)
@@ -34,9 +40,10 @@ def _detect_blobs(img, min_sigma, max_sigma, threshold, overlap, artifact_width=
     blobs = blobs.copy()
     blobs[:, 2] *= np.sqrt(2)
 
-    # Filter out blobs in artifact region
-    if artifact_width > 0:
-        blobs = blobs[blobs[:, 1] >= artifact_width]
+    # Filter out blobs in the artifact region and the edge response beside it
+    cutoff = artifact_width + (edge_margin if artifact_width > 0 else 0)
+    if cutoff > 0:
+        blobs = blobs[blobs[:, 1] >= cutoff]
 
     return blobs
 
@@ -118,6 +125,7 @@ def segment(
     threshold=0.01,
     eliminate_overlap=1.0,
     merge_overlap=0.6,
+    edge_margin=0,
     # Anatomy mask (exclude border regions)
     anatomy_threshold='otsu',
     anatomy_thresh_mult=0.2,
@@ -169,6 +177,11 @@ def segment(
         Fraction overlap before DoG merges blobs (1.0 = no merging in DoG)
     merge_overlap : float
         Merge blobs if overlap > this fraction of smaller blob (1.0 to disable)
+    edge_margin : int
+        Drop blobs within this many columns of the masked artefact. The mask
+        edge is a hard step and DoG responds to it as if it were a cell, so a
+        column of false blobs forms just inside it; widening the mask only
+        moves them. A margin of about 2 x max_sigma clears it (0 to disable).
 
     Anatomy Mask Parameters
     -----------------------
@@ -209,10 +222,18 @@ def segment(
     is_data_object = hasattr(image_or_data, 'params') and hasattr(image_or_data, 'images')
 
     if is_data_object:
-        # Extract and prepare image from data object
+        # Extract and prepare image from data object. An explicit artifact_width
+        # overrides the recording's preprocessing value: the blanking artefact
+        # is sometimes wider than the columns preprocessing corrected, and the
+        # hard edge of the masked region is exactly where DoG finds spurious
+        # blobs, so a caller needs to be able to push the exclusion outward.
         if verbose:
             print(f"Preparing image (mode={input_mode})...")
-        img, artifact_fill_width = prepare_image(image_or_data, input_mode=input_mode)
+        img, artifact_fill_width = prepare_image(
+            image_or_data,
+            input_mode=input_mode,
+            artifact_width=kwargs.pop("artifact_width", None),
+        )
         if verbose:
             print(f"  Masked artifact region: columns 0-{artifact_fill_width - 1}")
     else:
@@ -255,7 +276,8 @@ def segment(
         max_sigma=max_sigma,
         threshold=threshold,
         overlap=eliminate_overlap,
-        artifact_width=artifact_fill_width
+        artifact_width=artifact_fill_width,
+        edge_margin=edge_margin,
     )
 
     # Filter by anatomy mask (if enabled)
