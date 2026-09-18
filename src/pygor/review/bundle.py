@@ -291,6 +291,38 @@ class FovBundle:
         rows = np.flatnonzero(self.roi_map(role) == master_index)
         return int(rows[0]) if rows.size else None
 
+    def row_in(self, role, master_index, n_rows) -> int | None:
+        """Where master cell ``master_index`` sits in an array of ``n_rows`` rows.
+
+        A transferred recording holds arrays in two index spaces at once. The
+        ROI mask and the averages are renumbered to the cells that survived;
+        the traces and the STRFs are NaN-padded to the master's count, so the
+        lost cells are still there as empty rows. Which one an array is in can
+        only be told from its length, so the caller passes it.
+
+        ``None`` for a lost cell in either space: in the survivor space it has
+        no row, and in the master space its row is padding.
+        """
+        ref = self.peek(role)
+        if role == self.master_role or not ref.roi_origin.get("method") == "transferred":
+            return master_index if master_index < n_rows else None
+        lost = {abs(int(i)) - 1 for i in ref.lost_roi_ids}
+        if master_index in lost:
+            return None
+        expected = len(ref.roi_origin.get("expected_roi_ids", []))
+        if n_rows == expected:
+            return master_index
+        if n_rows == ref.num_rois:
+            return self.master_to_row(role, master_index)
+        raise RuntimeError(
+            f"{role} has {n_rows} rows, which is neither the master's "
+            f"{expected} nor the surviving {ref.num_rois}"
+        )
+
+    def surviving_master_indices(self, role) -> np.ndarray:
+        """Master cell indices that are present in ``role``, in order."""
+        return self.roi_map(role)
+
     def projection(self, role) -> np.ndarray:
         """The anatomy image, read without loading the recording."""
         arrays = read_arrays(self.peek(role).path, keys=("average_stack",))

@@ -438,9 +438,12 @@ def cell_rf_chroma(bundle, *, width, height, dpi=DEFAULT_DPI, role="swn", roi=No
 
     if roi is None:
         raise ValueError("cell_rf_chroma needs a roi")
-    name = role or "swn"
+    name = role or bundle.strf_role
     recording = bundle.full(name)
-    row = bundle.master_to_row(name, roi)
+    n_colours = int(recording.n_colours or 1)
+    # STRFs live in whichever index space the pipeline left them in; on a
+    # transferred recording that is the master's, NaN-padded for lost cells.
+    row = bundle.row_in(name, roi, recording.num_strfs // n_colours)
     if row is None:
         return message_figure(
             f"cell {roi} is not present in the {name} recording\n"
@@ -475,7 +478,8 @@ def cell_rf(bundle, *, width, height, dpi=DEFAULT_DPI, role=None, roi=None,
         raise ValueError("cell_rf needs a roi")
     name = role or bundle.strf_role
     recording = bundle.full(name)
-    row = bundle.master_to_row(name, roi)
+    n_colours = int(recording.n_colours or 1)
+    row = bundle.row_in(name, roi, recording.num_strfs // n_colours)
     if row is None:
         return message_figure(
             f"cell {roi} is not in the {name} recording\n(dropped in ROI transfer)",
@@ -485,6 +489,11 @@ def cell_rf(bundle, *, width, height, dpi=DEFAULT_DPI, role=None, roi=None,
     spatial = np.asarray(recording.collapse_times_chroma(roi=row))
     n_colours = spatial.shape[0]
     timecourses = np.asarray(recording.get_timecourses())
+    if np.all(np.isnan(spatial)):
+        return message_figure(
+            f"cell {roi}: STRF is empty in the {name} recording",
+            width, height, dpi,
+        )
 
     from pygor.plotting.custom import fish_palette, maps_concat
 
@@ -558,12 +567,24 @@ def fov_strf_sheet(bundle, *, width, height, dpi=DEFAULT_DPI, role="swn", roi=No
     per_page = int(params.get("per_page", 12))
     page = int(params.get("page", 0))
 
-    n_cells = getattr(recording, "num_rois", 0)
-    if not n_cells or getattr(recording, "strfs", None) is None:
+    if getattr(recording, "strfs", None) is None or not recording.num_strfs:
         return message_figure(f"{name} has no calculated STRFs", width, height, dpi)
 
-    start = (page * per_page) % max(n_cells, 1)
-    rois = list(range(start, min(start + per_page, n_cells)))
+    # Page over the cells that are really there. A transferred recording's
+    # STRF array is NaN-padded for the cells it lost, and a fully masked row
+    # makes the colour scaling refuse the whole page.
+    n_colours = int(recording.n_colours or 1)
+    n_rows = recording.num_strfs // n_colours
+    present = [
+        row
+        for master in range(bundle.n_cells)
+        if (row := bundle.row_in(name, master, n_rows)) is not None
+    ]
+    if not present:
+        return message_figure(f"{name}: every cell was lost in transfer", width, height, dpi)
+    n_cells = len(present)
+    start = (page * per_page) % n_cells
+    rois = present[start : start + per_page]
     result = recording.plot_strfs_space(
         roi=rois,
         channel=None if channel < 0 else channel,
@@ -574,8 +595,8 @@ def fov_strf_sheet(bundle, *, width, height, dpi=DEFAULT_DPI, role="swn", roi=No
     figure.set_facecolor("black")
     for axis in figure.axes:
         axis.set_title(axis.get_title(), color="white", fontsize=7)
-    figure.suptitle(f"cells {rois[0]}–{rois[-1]} of {n_cells}", color="white",
-                    fontsize=8)
+    figure.suptitle(f"{n_cells} cells · page {page % max(-(-n_cells // per_page), 1) + 1}",
+                    color="white", fontsize=8)
     square_pixels(figure)
     return figure
 

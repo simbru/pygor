@@ -206,6 +206,34 @@ class TestFovBundle:
         """The case a positional join would get silently wrong."""
         assert fov.master_to_row("swn", 2) is None
 
+    def test_row_in_survivor_space(self, fov):
+        """An array with num_rois rows was renumbered to the survivors."""
+        n_rows = fov.peek("swn").num_rois  # 4 survivors of 5
+        assert fov.row_in("swn", 0, n_rows) == 0
+        assert fov.row_in("swn", 3, n_rows) == 2
+        assert fov.row_in("swn", 2, n_rows) is None  # lost
+
+    def test_row_in_master_space(self, fov):
+        """An array with the master's row count is NaN-padded, not renumbered.
+
+        This is how the pipeline leaves traces and STRFs on a transferred
+        recording. Translating into survivor space here would show the wrong
+        cell's receptive field under the right cell's number.
+        """
+        n_rows = fov.n_cells  # 5, the master's count
+        assert fov.row_in("swn", 0, n_rows) == 0
+        assert fov.row_in("swn", 3, n_rows) == 3  # not 2
+        assert fov.row_in("swn", 2, n_rows) is None  # lost: its row is padding
+
+    def test_row_in_master_role_is_identity(self, fov):
+        assert fov.row_in("osds", 4, fov.n_cells) == 4
+        assert fov.row_in("osds", 99, fov.n_cells) is None
+
+    def test_row_in_refuses_an_unrecognised_length(self, fov):
+        """Neither space fits, so guessing would silently mis-index."""
+        with pytest.raises(RuntimeError, match="neither"):
+            fov.row_in("swn", 0, 17)
+
     def test_light_tier_reads_without_loading(self, fov):
         assert fov.projection("osds").shape == (8, 8)
         assert fov.roi_mask("osds").shape == (8, 8)
