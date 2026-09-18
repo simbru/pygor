@@ -134,6 +134,47 @@ def show(obj, caps, *, width=900, dpi=100, cmap="Greys_r") -> None:
     Console().print(renderable_class(io.BytesIO(png)))
 
 
+def show_rois(recording, caps, *, width=1000, labels=False, low=1, high=99,
+              image=None) -> None:
+    """Draw a recording's ROI outlines over its projection, inline.
+
+    The stand-in for ``view_stack_rois`` on a remote connection. That method
+    hands the raw average to imshow with min-max scaling, so the bright
+    blanking stripe compresses the tissue into a band of grey; this one
+    stretches between the 1st and 99th percentiles first, and draws outlines
+    rather than a filled overlay so the cells underneath stay visible.
+
+    Pass ``image=`` to draw the mask over something else -- a correlation
+    projection, a std projection -- when the mean does not show what the
+    segmenter saw.
+    """
+    import numpy as np
+    from matplotlib.figure import Figure
+
+    from pygor.review.panels import _stretch, draw_outlines
+
+    projection = image if image is not None else np.mean(recording.images, axis=0)
+    mask = recording.rois
+    rows, cols = projection.shape
+    figure = Figure(figsize=(width / 100, width * rows / cols / 100), dpi=100)
+    figure.set_facecolor("black")
+    axis = figure.add_axes([0, 0, 1, 1])
+    axis.set_axis_off()
+    axis.imshow(_stretch(projection, low, high), cmap="Greys_r", origin="lower")
+    draw_outlines(axis, mask, colour="yellow", linewidth=0.8)
+    if labels:
+        for roi_id in np.unique(mask):
+            if roi_id >= 0:
+                continue
+            ys, xs = np.nonzero(mask == roi_id)
+            axis.text(xs.mean(), ys.mean(), str(abs(int(roi_id)) - 1), color="white",
+                      fontsize=5, ha="center", va="center")
+    n_rois = int((np.unique(mask) < 0).sum())
+    axis.text(0.01, 0.98, f"{getattr(recording, 'name', '')}  ·  {n_rois} ROIs",
+              transform=axis.transAxes, color="white", fontsize=8, va="top")
+    show(figure, caps, width=width)
+
+
 def _renderable_class(mode):
     if mode == "none":
         return None

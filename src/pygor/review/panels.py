@@ -510,13 +510,21 @@ def cell_rf(bundle, *, width, height, dpi=DEFAULT_DPI, role=None, roi=None,
     grid = figure.add_gridspec(2, n_colours,
                                height_ratios=[image_height, kernel_height],
                                hspace=0.12, wspace=0.04)
-    limit = np.nanmax(np.abs(spatial)) or 1.0
+    # Per channel, and robust. One scale for all four hides the weaker
+    # channels in the middle grey of the colour map, and a single hot pixel
+    # does the same to the channel it sits in. The reviewer needs to see
+    # structure in each map; relative amplitude is in the kernels below.
+    scale = params.get("scale", "channel")
+    clip = float(params.get("clip_percentile", 99.5))
+    shared = np.nanpercentile(np.abs(spatial), clip) if scale == "global" else None
 
     for colour in range(n_colours):
         axis = figure.add_subplot(grid[0, colour])
         axis.set_facecolor("black")
         _bare(axis)
         cmap = maps_concat[colour] if colour < len(maps_concat) else "bwr"
+        limit = shared if shared else np.nanpercentile(np.abs(spatial[colour]), clip)
+        limit = float(limit) if np.isfinite(limit) and limit > 0 else 1.0
         axis.imshow(spatial[colour], cmap=cmap, vmin=-limit, vmax=limit,
                     origin="lower", aspect="equal", interpolation="nearest")
         pass_col = f"strf_pass_bool_ch{colour}"

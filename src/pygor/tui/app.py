@@ -607,7 +607,7 @@ class ProofreadApp(App):
         bundle = screen.current_bundle() if isinstance(screen, ReviewScreen) else None
         from functools import partial
 
-        from pygor.tui.imaging import show
+        from pygor.tui.imaging import show, show_rois
 
         namespace = {
             "session": self.session,
@@ -618,12 +618,14 @@ class ProofreadApp(App):
             # show() is what makes pygor's matplotlib API usable over SSH:
             # any figure it returns is drawn inline instead of needing a window.
             "show": partial(show, caps=self.caps),
+            "show_rois": partial(show_rois, caps=self.caps),
         }
         lines = [
             "pygor review.  Ctrl-D returns to the cockpit.",
             "  session  ReviewSession      bundle  this field of view",
             "  store    verdicts           binding dataset rules",
             "  show(x)  draw a figure / (fig, ax) / 2-D array inline",
+            "  show_rois(rec, labels=False)  ROI outlines over a stretched projection",
         ]
         if hasattr(self.binding, "reprocess"):
             namespace["reprocess"] = self.binding.reprocess
