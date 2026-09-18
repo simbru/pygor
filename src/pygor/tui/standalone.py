@@ -55,6 +55,31 @@ def segmentation_kwargs(recording, overrides):
     return mode, kwargs
 
 
+def effective_values(recording) -> dict:
+    """The recording's saved parameters over today's package defaults.
+
+    A saved object carries the defaults of the pygor that processed it. A
+    parameter added since is in effect at its default when the object is
+    re-segmented now, so it belongs in the table; the saved values win
+    wherever both exist.
+    """
+    from pygor.params import AnalysisParams
+
+    current = AnalysisParams.from_config(None).to_dict().get("_defaults", {})
+    saved = recording.params.to_dict().get("_defaults", {})
+
+    def merge(base, over):
+        out = dict(base)
+        for key, value in over.items():
+            if isinstance(value, dict) and isinstance(out.get(key), dict):
+                out[key] = merge(out[key], value)
+            else:
+                out[key] = value
+        return out
+
+    return merge(current, saved)
+
+
 def main(argv=None) -> int:
     os.environ["MPLBACKEND"] = "Agg"
     parser = argparse.ArgumentParser(prog="pygor-tui", description=__doc__.splitlines()[0])
@@ -80,7 +105,7 @@ def main(argv=None) -> int:
 
     recording = load_recording(args.recording, args.n_colours)
     source = pathlib.Path(args.recording)
-    values = recording.params.to_dict().get("_defaults", {})
+    values = effective_values(recording)
 
     def run(overrides):
         mode, kwargs = segmentation_kwargs(recording, overrides)

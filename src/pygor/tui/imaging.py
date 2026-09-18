@@ -134,9 +134,9 @@ def show(obj, caps, *, width=900, dpi=100, cmap="Greys_r") -> None:
     Console().print(renderable_class(io.BytesIO(png)))
 
 
-def roi_figure(recording, *, width=1000, labels=False, low=1, high=99, image=None,
-               title=None):
-    """A recording's ROI outlines over its projection, as a Figure.
+def roi_figure(recording=None, *, mask=None, projection=None, width=1000, labels=False,
+               low=1, high=99, image=None, title=None, cmap="Greys_r"):
+    """ROI outlines over a projection, as a Figure.
 
     The stand-in for ``view_stack_rois`` on a remote connection. That method
     hands the raw average to imshow with min-max scaling, so the bright
@@ -144,23 +144,27 @@ def roi_figure(recording, *, width=1000, labels=False, low=1, high=99, image=Non
     stretches between the 1st and 99th percentiles first, and draws outlines
     rather than a filled overlay so the cells underneath stay visible.
 
-    Pass ``image=`` to draw the mask over something else -- a correlation
-    projection, a std projection -- when the mean does not show what the
-    segmenter saw.
+    Takes either a recording or bare arrays (``mask``, ``projection``), so the
+    same picture can be drawn from a loaded object or from the small datasets
+    read straight off disk. ``image=`` overrides the projection.
     """
     import numpy as np
     from matplotlib.figure import Figure
 
     from pygor.review.panels import _stretch, draw_outlines
 
-    projection = image if image is not None else np.mean(recording.images, axis=0)
-    mask = recording.rois
+    if mask is None:
+        mask = recording.rois
+    if image is not None:
+        projection = image
+    elif projection is None:
+        projection = np.mean(recording.images, axis=0)
     rows, cols = projection.shape
     figure = Figure(figsize=(width / 100, width * rows / cols / 100), dpi=100)
     figure.set_facecolor("black")
     axis = figure.add_axes([0, 0, 1, 1])
     axis.set_axis_off()
-    axis.imshow(_stretch(projection, low, high), cmap="Greys_r", origin="lower")
+    axis.imshow(_stretch(projection, low, high), cmap=cmap, origin="lower")
     draw_outlines(axis, mask, colour="yellow", linewidth=0.8)
     if labels:
         for roi_id in np.unique(mask):
@@ -183,33 +187,56 @@ def show_rois(recording, caps, **kwargs) -> None:
 
 PREVIEWS = ("rois", "correlation", "labels")
 
+# The correlation view gets its own colour map so it cannot be mistaken for
+# the mean when the two happen to look alike.
+CORRELATION_CMAP = "magma"
 
-def recording_preview(recording, which, width, height):
-    """A picture of an in-memory recording, for the reprocess screen.
 
-    ``which`` is one of :data:`PREVIEWS`. Returns a PanelImage so it can be
-    shown through the same path as any other panel.
+def preview_image(mask, projection, which, width, height, *, name="",
+                  correlation=None, note=""):
+    """One of :data:`PREVIEWS` drawn from arrays, as a PanelImage.
+
+    ``correlation`` is the correlation projection or None. Asking for that view
+    without one draws the mean and says so in the title -- never a silently
+    substituted picture under the wrong label.
     """
     from pygor.review.rasterise import PanelImage, PanelKey, figure_to_png, png_size
 
     if which == "correlation":
-        image = getattr(recording, "correlation_projection", None)
-        if image is None:
-            try:
-                image = recording.compute_correlation_projection()
-            except Exception:
-                image = None
-        figure = roi_figure(recording, width=width, image=image,
-                            title=f"{getattr(recording, 'name', '')} (correlation)")
+        if correlation is not None:
+            figure = roi_figure(mask=mask, projection=correlation, width=width,
+                                title=f"{name} (correlation)", cmap=CORRELATION_CMAP)
+        else:
+            figure = roi_figure(mask=mask, projection=projection, width=width,
+                                title=f"{name} (mean — {note or 'no correlation projection'})")
     else:
-        figure = roi_figure(recording, width=width, labels=(which == "labels"))
+        figure = roi_figure(mask=mask, projection=projection, width=width,
+                            labels=(which == "labels"),
+                            title=f"{name} ({'numbered' if which == 'labels' else 'mean'})")
     png = figure_to_png(figure, dpi=100)
     actual = png_size(png)
-    key = PanelKey(panel=f"preview:{which}", fov_uid=getattr(recording, "name", ""),
-                   condition="", role="", roi=None, channel=-1, width=width,
-                   height=height, dpi=100, params_hash="", sources=())
+    key = PanelKey(panel=f"preview:{which}", fov_uid=name, condition="", role="",
+                   roi=None, channel=-1, width=width, height=height, dpi=100,
+                   params_hash="", sources=())
     return PanelImage(png=png, width=actual[0] or width, height=actual[1] or height,
                       key=key, meta={"panel": f"preview:{which}"})
+
+
+def recording_preview(recording, which, width, height):
+    """A picture of an in-memory recording, for the reprocess screen."""
+    import numpy as np
+
+    correlation = getattr(recording, "correlation_projection", None)
+    note = ""
+    if which == "correlation" and correlation is None:
+        try:
+            correlation = recording.compute_correlation_projection()
+        except Exception as error:  # reported in the title, not hidden
+            note = f"correlation failed: {type(error).__name__}"
+    return preview_image(
+        recording.rois, np.mean(recording.images, axis=0), which, width, height,
+        name=getattr(recording, "name", ""), correlation=correlation, note=note,
+    )
 
 
 def _renderable_class(mode):

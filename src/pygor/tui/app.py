@@ -433,7 +433,7 @@ class FovScreen(ReviewScreen):
         if not hasattr(binding, "run_reprocess"):
             self.app.notify("this dataset binding has no reprocess()", severity="warning")
             return
-        from pygor.tui.imaging import PREVIEWS, recording_preview
+        from pygor.tui.imaging import PREVIEWS, preview_image, recording_preview
         from pygor.tui.reprocess_screen import ReprocessScreen
 
         bundle = self.bundle
@@ -444,9 +444,15 @@ class FovScreen(ReviewScreen):
 
         def preview(result, which, width, height):
             if result is None:
-                # Nothing re-run yet: show what is on disk.
-                return self.app.session.render("rec_segmentation", bundle,
-                                               width=width, height=height, role=master)
+                # Nothing re-run yet: draw what is on disk, from the small
+                # datasets, so every view works before a load is paid for.
+                arrays = bundle.light(master)
+                return preview_image(
+                    arrays["rois"], arrays["average_stack"], which, width, height,
+                    name=f"{bundle.peek(master).stem} (on disk)",
+                    correlation=arrays.get("correlation_projection"),
+                    note="none saved; re-run to compute",
+                )
             recording = result.get(master) or next(iter(result.values()))
             return recording_preview(recording, which, width, height)
 
