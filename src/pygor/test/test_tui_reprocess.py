@@ -181,6 +181,27 @@ class TestReprocessScreen:
         drive(app, "R", "S", "n")
         assert calls["save"] == []
 
+    def test_preview_stays_inside_the_screen(self, harness):
+        """The preview pane once inherited another screen's 2fr height rule
+        through a shared id and ran to twice the screen; the image was centred
+        in it and half of it was below the footer."""
+        app, _, _ = harness
+        seen = {}
+
+        def measure(a):
+            screen = a.screen
+            pane = screen.query_one("#reprocess-preview")
+            seen["screen_h"] = screen.size.height
+            seen["pane"] = pane.region
+            seen["children"] = [c.region for c in pane.children]
+
+        drive(app, after=measure)
+        pane = seen["pane"]
+        assert pane.y + pane.height <= seen["screen_h"]
+        for child in seen["children"]:
+            assert child.y >= pane.y
+            assert child.y + child.height <= pane.y + pane.height
+
     @pytest.mark.parametrize("keys,outcome", [
         (("escape",), "unchanged"),
         (("R", "escape"), "discarded"),

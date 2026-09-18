@@ -566,8 +566,10 @@ class ProofreadApp(App):
     #status { height: 1; padding: 0 1; background: $panel; }
     #reason-box { padding: 1 2; width: 60%; height: auto; background: $panel; }
     #value-box, #confirm-box { padding: 1 2; width: 70%; height: auto; background: $panel; }
-    #params { width: 2fr; }
-    ReprocessScreen #preview { width: 3fr; padding: 0 1; }
+    /* Its own id: #preview belongs to the index screen, whose 2fr height rule
+       would otherwise make this pane twice the screen and push the image off it. */
+    #params { width: 2fr; height: 1fr; }
+    #reprocess-preview { width: 3fr; height: 1fr; padding: 0 1; }
     .error { color: $error; }
     .dim { color: $text-muted; }
     """

@@ -103,8 +103,8 @@ def main(argv=None) -> int:
     class StandaloneApp(App):
         CSS = """
         Screen { background: $surface; }
-        #params { width: 2fr; }
-        #preview { width: 3fr; padding: 0 1; height: 1fr; overflow: hidden; align: center middle; }
+        #params { width: 2fr; height: 1fr; }
+        #reprocess-preview { width: 3fr; padding: 0 1; height: 1fr; overflow: hidden; align: center middle; }
         #status { height: 1; padding: 0 1; background: $panel; }
         #value-box, #confirm-box { padding: 1 2; width: 70%; height: auto; background: $panel; }
         .error { color: $error; }

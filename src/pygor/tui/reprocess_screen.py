@@ -73,7 +73,7 @@ class ReprocessScreen(Screen):
         yield Header()
         yield Horizontal(
             ParamTable(self.values, sections=self.sections, id="params"),
-            PanelView(self.caps, id="preview"),
+            PanelView(self.caps, id="reprocess-preview"),
         )
         yield Static("", id="status")
         yield Footer()
@@ -164,7 +164,7 @@ class ReprocessScreen(Screen):
     def render_preview(self, which):
         from pygor.tui.app import PanelView
 
-        view = self.query_one("#preview", PanelView)
+        view = self.query_one("#reprocess-preview", PanelView)
         width, height = view.size_px()
         try:
             image = self.preview_fn(self.result, which, width, height)
