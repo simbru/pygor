@@ -213,6 +213,81 @@ class TestReprocessScreen:
         assert outcomes == [outcome]
 
 
+class TestModeGating:
+    def _table_app(self):
+        from textual.app import App
+
+        from pygor.tui.params_table import ParamTable
+        from pygor.tui.reprocess_screen import segmentation_gating
+
+        values = {"segmentation": {"general": {"mode": "blob", "roi_order": "LR"},
+                                   "blob": {"threshold": 0.02},
+                                   "watershed": {"threshold": 0.05, "min_distance": 1},
+                                   "cellpose": {"diameter": 0},
+                                   "cellpose_postprocess": {"split_large": True}}}
+        choices, gates = segmentation_gating(values)
+
+        class Harness(App):
+            def compose(self):
+                yield ParamTable(values, choices=choices, gates=gates, id="params")
+
+        return Harness(), choices
+
+    def test_choices_are_derived_from_the_sections(self):
+        _, choices = self._table_app()
+        assert choices == {"segmentation.general.mode": ("blob", "cellpose", "watershed")}
+
+    def test_only_the_chosen_modes_parameters_show(self):
+        from pygor.tui.params_table import ParamTable
+
+        app, _ = self._table_app()
+        seen = {}
+        drive(app, after=lambda a: seen.update(rows=[p for p, _ in a.query_one(ParamTable)._rows]))
+        assert "segmentation.blob.threshold" in seen["rows"]
+        assert "segmentation.watershed.threshold" not in seen["rows"]
+        assert "segmentation.cellpose.diameter" not in seen["rows"]
+
+    def test_picking_a_mode_swaps_the_rows_and_records_it(self):
+        from pygor.tui.params_table import ChoicePrompt, ParamTable
+
+        app, _ = self._table_app()
+        seen = {}
+
+        def go_to_mode(a):
+            table = a.query_one(ParamTable)
+            table.move_cursor(row=[p for p, _ in table._rows].index("segmentation.general.mode"))
+
+        def pick_cellpose(a):
+            assert isinstance(a.screen, ChoicePrompt)
+            a.screen.query_one("#choices").highlighted = 1  # cellpose
+
+        drive(app, go_to_mode, "enter", pick_cellpose, "enter",
+              after=lambda a: seen.update(rows=[p for p, _ in a.query_one(ParamTable)._rows],
+                                          overrides=a.query_one(ParamTable).overrides))
+        assert seen["overrides"] == {"segmentation.general.mode": "cellpose"}
+        assert "segmentation.cellpose.diameter" in seen["rows"]
+        assert "segmentation.cellpose_postprocess.split_large" in seen["rows"]  # travels with it
+        assert "segmentation.blob.threshold" not in seen["rows"]
+
+    def test_reverting_the_mode_restores_the_rows(self):
+        from pygor.tui.params_table import ParamTable
+
+        app, _ = self._table_app()
+        seen = {}
+
+        def go_to_mode(a):
+            table = a.query_one(ParamTable)
+            table.move_cursor(row=[p for p, _ in table._rows].index("segmentation.general.mode"))
+
+        def pick_watershed(a):
+            a.screen.query_one("#choices").highlighted = 2
+
+        drive(app, go_to_mode, "enter", pick_watershed, "enter", "u",
+              after=lambda a: seen.update(rows=[p for p, _ in a.query_one(ParamTable)._rows]))
+        assert "segmentation.blob.threshold" in seen["rows"]
+        assert "segmentation.watershed.threshold" not in seen["rows"]
+
+
 class TestStandaloneKwargs:
     def test_recipe_shape_becomes_segment_rois_arguments(self):
         from pygor.tui.standalone import segmentation_kwargs

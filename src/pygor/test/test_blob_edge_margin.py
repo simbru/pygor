@@ -83,3 +83,29 @@ class TestEdgeMargin:
                                      threshold=0.05, artifact_width=8,
                                      anatomy_threshold=None, verbose=False)
         assert min(centroid_columns(masks)) >= 9
+
+
+class TestCorrelationOnDemand:
+    def test_prepare_image_computes_a_missing_correlation_projection(self):
+        """A mode that needs the projection used to raise on a fresh recording."""
+        from pygor.segmentation.preprocessing import prepare_image
+
+        rng = np.random.default_rng(1)
+        stack = rng.random((6, 8, 8)).astype(np.float32)
+
+        class Rec:
+            images = stack
+            average_stack = None
+            correlation_projection = None
+
+            class params:
+                artifact_width = 0
+
+            def compute_correlation_projection(self):
+                self.correlation_projection = self.images.mean(axis=0)
+                return self.correlation_projection
+
+        rec = Rec()
+        image, _ = prepare_image(rec, input_mode="correlation")
+        assert rec.correlation_projection is not None
+        assert image.shape == (8, 8)

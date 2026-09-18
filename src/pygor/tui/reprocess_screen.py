@@ -21,6 +21,24 @@ from textual.widgets import Footer, Header, Static
 from pygor.tui.params_table import ParamTable
 
 
+def segmentation_gating(values):
+    """Choices and gates that make the segmentation mode a drop-down.
+
+    The mode row picks from the segmentation sub-sections present in
+    ``values``, and every other mode's parameters are hidden. Derived from the
+    dict rather than listed, so a mode pygor gains later appears by itself.
+    """
+    section = values.get("segmentation", {})
+    modes = tuple(sorted(
+        key for key in section
+        if isinstance(section[key], dict) and key != "general"
+        and not key.endswith("_postprocess")
+    ))
+    if not modes:
+        return {}, {}
+    return {"segmentation.general.mode": modes}, {"segmentation.general.mode": "segmentation"}
+
+
 class ConfirmSave(Screen):
     BINDINGS = [Binding("y", "yes", "yes"), Binding("n,escape", "no", "no")]
 
@@ -50,11 +68,13 @@ class ReprocessScreen(Screen):
     ]
 
     def __init__(self, *, title, values, sections, run, preview, save, caps,
-                 previews=("rois",), save_text=None):
+                 previews=("rois",), save_text=None, choices=None, gates=None):
         super().__init__()
         self.title_text = title
         self.values = values
         self.sections = sections
+        self.choices = choices
+        self.gates = gates
         self.run_fn = run
         self.preview_fn = preview
         self.save_fn = save
@@ -72,7 +92,8 @@ class ReprocessScreen(Screen):
 
         yield Header()
         yield Horizontal(
-            ParamTable(self.values, sections=self.sections, id="params"),
+            ParamTable(self.values, sections=self.sections, choices=self.choices,
+                       gates=self.gates, id="params"),
             PanelView(self.caps, id="reprocess-preview"),
         )
         yield Static("", id="status")

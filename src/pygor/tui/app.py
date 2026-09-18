@@ -434,7 +434,7 @@ class FovScreen(ReviewScreen):
             self.app.notify("this dataset binding has no reprocess()", severity="warning")
             return
         from pygor.tui.imaging import PREVIEWS, preview_image, recording_preview
-        from pygor.tui.reprocess_screen import ReprocessScreen
+        from pygor.tui.reprocess_screen import ReprocessScreen, segmentation_gating
 
         bundle = self.bundle
         master = bundle.master_role
@@ -464,13 +464,15 @@ class FovScreen(ReviewScreen):
             binding.save_reprocessed(bundle.fov_uid, result, overrides)
             self.app.session.rescan()
 
+        values = binding.recipe_values()
+        choices, gates = segmentation_gating(values)
         self.app.push_screen(
             ReprocessScreen(
                 title=f"reprocess {bundle.fov_uid}",
-                values=binding.recipe_values(),
+                values=values,
                 sections=getattr(binding, "REPROCESS_SECTIONS", ("segmentation",)),
                 run=run, preview=preview, save=save, caps=self.app.caps,
-                previews=PREVIEWS,
+                previews=PREVIEWS, choices=choices, gates=gates,
                 save_text=(f"Overwrite {bundle.fov_uid}'s processed recordings and its "
                            "rows in the aggregate CSV? The old files are kept as "
                            ".prereprocess."),

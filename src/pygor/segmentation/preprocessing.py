@@ -191,7 +191,17 @@ def prepare_image(data, input_mode="combined", artifact_width=None):
     needs_average = input_mode in ("average", "combined")
 
     if needs_correlation and not has_correlation:
-        raise ValueError("correlation_projection not available. Call compute_correlation_projection() first.")
+        # A freshly registered recording has none yet. Computing it here is
+        # what the caller would have to do anyway, and refusing turns a
+        # segmentation-mode choice into an error at the wrong layer.
+        if has_images and hasattr(data, "compute_correlation_projection"):
+            data.compute_correlation_projection()
+            has_correlation = data.correlation_projection is not None
+        if not has_correlation:
+            raise ValueError(
+                "correlation_projection not available and cannot be computed "
+                "without the image stack."
+            )
     if needs_images_stack and not has_images:
         raise ValueError("Images stack required for 'std' mode but not available.")
     if needs_average and not (has_images or has_average_stack):

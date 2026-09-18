@@ -97,7 +97,7 @@ def main(argv=None) -> int:
         from textual.app import App
 
         from pygor.tui.imaging import PREVIEWS, recording_preview
-        from pygor.tui.reprocess_screen import ReprocessScreen
+        from pygor.tui.reprocess_screen import ReprocessScreen, segmentation_gating
     except ImportError as error:
         raise SystemExit(
             "pygor-tui needs the [tui] extra:  uv pip install 'pygor[tui]'\n" f"({error})"
@@ -106,6 +106,7 @@ def main(argv=None) -> int:
     recording = load_recording(args.recording, args.n_colours)
     source = pathlib.Path(args.recording)
     values = effective_values(recording)
+    choices, gates = segmentation_gating(values)
 
     def run(overrides):
         mode, kwargs = segmentation_kwargs(recording, overrides)
@@ -142,7 +143,7 @@ def main(argv=None) -> int:
                 ReprocessScreen(
                     title=f"{recording.name}  ({recording.num_rois} ROIs on disk)",
                     values=values, sections=SECTIONS, run=run, preview=preview,
-                    save=save, caps=caps, previews=PREVIEWS,
+                    save=save, caps=caps, previews=PREVIEWS, choices=choices, gates=gates,
                     save_text=f"Overwrite {source.name}? The old file is kept as .presegment.",
                 ),
                 lambda outcome: self.exit(),

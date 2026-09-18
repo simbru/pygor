@@ -13,7 +13,8 @@ from textual.binding import Binding
 from textual.containers import Vertical
 from textual.coordinate import Coordinate
 from textual.screen import Screen
-from textual.widgets import DataTable, Input, Static
+from textual.widgets import DataTable, Input, OptionList, Static
+from textual.widgets.option_list import Option
 
 from pygor.core.gui.param_values import flatten, nest, parse_value, type_name
 
@@ -56,6 +57,35 @@ class ValuePrompt(Screen):
         self.dismiss(None)
 
 
+class ChoicePrompt(Screen):
+    """Pick one of a fixed set: the terminal's drop-down."""
+
+    BINDINGS = [Binding("escape", "cancel", "cancel")]
+
+    def __init__(self, path, current, choices):
+        super().__init__()
+        self.path = path
+        self.current = current
+        self.choices = list(choices)
+
+    def compose(self):
+        options = OptionList(*[Option(str(c), id=str(c)) for c in self.choices], id="choices")
+        yield Vertical(Static(f"[b]{self.path}[/b]  (currently {self.current!r})"), options,
+                       id="value-box")
+
+    def on_mount(self):
+        options = self.query_one("#choices", OptionList)
+        options.focus()
+        if str(self.current) in [str(c) for c in self.choices]:
+            options.highlighted = [str(c) for c in self.choices].index(str(self.current))
+
+    def on_option_list_option_selected(self, event):
+        self.dismiss((self.path, event.option.id))
+
+    def action_cancel(self):
+        self.dismiss(None)
+
+
 class ParamTable(DataTable):
     """(parameter, value, type) rows over a nested dict, with edits as overrides.
 
@@ -71,10 +101,16 @@ class ParamTable(DataTable):
         Binding("u", "revert_all", "revert all"),
     ]
 
-    def __init__(self, values: dict, *, sections=None, **kwargs):
+    def __init__(self, values: dict, *, sections=None, choices=None, gates=None, **kwargs):
         super().__init__(**kwargs)
         self.source = values
         self.sections = tuple(sections or ())
+        # path -> allowed values; such a row edits through a picker, not free text.
+        self.choices: dict[str, tuple] = dict(choices or {})
+        # selector path -> section it gates. Rows under <section>.<X>.* show only
+        # when X is the selector's current value (or X is "general"), so choosing
+        # a segmentation mode hides every other mode's parameters.
+        self.gates: dict[str, str] = dict(gates or {})
         self.overrides: dict[str, object] = {}
         self._rows: list[tuple[str, object]] = []
         self.cursor_type = "row"
@@ -86,13 +122,27 @@ class ParamTable(DataTable):
         self.add_column("type", key="type")
         self.reload()
 
+    def current_value(self, path):
+        return self.overrides.get(path, dict(flatten(self.source)).get(path))
+
+    def _visible(self, path) -> bool:
+        if self.sections and not any(path.startswith(s) for s in self.sections):
+            return False
+        for selector, section in self.gates.items():
+            prefix = section + "."
+            if not path.startswith(prefix) or path == selector:
+                continue
+            sub = path[len(prefix):].split(".", 1)[0]
+            chosen = str(self.current_value(selector))
+            # startswith, so a mode's helper section (cellpose_postprocess)
+            # travels with it.
+            if sub != "general" and not sub.startswith(chosen):
+                return False
+        return True
+
     def reload(self):
         self.clear()
-        self._rows = [
-            (path, value)
-            for path, value in flatten(self.source)
-            if not self.sections or any(path.startswith(s) for s in self.sections)
-        ]
+        self._rows = [(path, value) for path, value in flatten(self.source) if self._visible(path)]
         for path, value in self._rows:
             self.add_row(path, self._shown(path, value), type_name(value), key=path)
 
@@ -117,7 +167,10 @@ class ParamTable(DataTable):
             return
         original = dict(self._rows)[path]
         current = self.overrides.get(path, original)
-        self.app.push_screen(ValuePrompt(path, current), self._apply)
+        if path in self.choices:
+            self.app.push_screen(ChoicePrompt(path, current, self.choices[path]), self._apply)
+        else:
+            self.app.push_screen(ValuePrompt(path, current), self._apply)
 
     def _apply(self, result):
         if result is None:
@@ -128,7 +181,7 @@ class ParamTable(DataTable):
             self.overrides.pop(path, None)
         else:
             self.overrides[path] = value
-        self._repaint(path)
+        self._after_change(path)
 
     def _repaint(self, path):
         index = next(i for i, (p, _) in enumerate(self._rows) if p == path)
@@ -138,9 +191,20 @@ class ParamTable(DataTable):
         path = self.current_path
         if path in self.overrides:
             del self.overrides[path]
-            self._repaint(path)
+            self._after_change(path)
 
     def action_revert_all(self):
-        for path in list(self.overrides):
-            del self.overrides[path]
+        paths = list(self.overrides)
+        self.overrides.clear()
+        if any(p in self.gates for p in paths):
+            self.reload()
+        else:
+            for path in paths:
+                self._repaint(path)
+
+    def _after_change(self, path):
+        if path in self.gates:
+            self.reload()
+            self.move_cursor(row=next(i for i, (p, _) in enumerate(self._rows) if p == path))
+        else:
             self._repaint(path)
