@@ -68,7 +68,18 @@ def main(argv=None) -> int:
 
     session = ReviewSession(binding, reviewer=args.reviewer)
     app = ProofreadApp(session, binding, caps, goto=args.goto)
-    app.run()
+    # Restore the terminal on every exit path, not only the clean one, and
+    # again at interpreter exit in case something after us leaves it dirty.
+    import atexit
+
+    from pygor.tui.imaging import clear_terminal_images, restore_terminal
+
+    atexit.register(restore_terminal)
+    try:
+        app.run()
+    finally:
+        clear_terminal_images()
+        restore_terminal()
     return 0
 
 

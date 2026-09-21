@@ -357,3 +357,88 @@ class TestConfigMergeTypes:
         binding = pytest.importorskip("analyses.review_datasets.chromatic_swn")
         blob = binding.recipe_values()["segmentation"]["blob"]
         assert isinstance(blob["max_sigma"], float)
+
+
+class TestReplaceFovRows:
+    """The ghost-row bug: a re-run that finds fewer cells left the rest behind."""
+
+    def _csv(self, tmp_path):
+        import pandas as pd
+
+        rows = []
+        for fov, cond, n in (("s::control::0_0", "control", 176), ("s::control::0_1", "control", 40),
+                             ("s::acblock::0_0", "acblock", 20)):  # same prefix, other condition
+            rows += [{"cell_uid": f"{fov}#{i}", "fov_uid": fov, "condition": cond,
+                      "roi_id": i, "value": 1.0} for i in range(n)]
+        path = tmp_path / "rois.csv"
+        pd.DataFrame(rows).to_csv(path, index=False)
+        return path
+
+    def test_fewer_cells_leaves_no_ghosts(self, tmp_path):
+        import pandas as pd
+
+        binding = pytest.importorskip("analyses.review_datasets.chromatic_swn")
+        path = self._csv(tmp_path)
+        new = [{"cell_uid": f"s::control::0_0#{i}", "fov_uid": "s::control::0_0",
+                "condition": "control", "roi_id": i, "value": 2.0} for i in range(117)]
+        dropped, written = binding.replace_fov_rows(path, "s::control::0_0", "control", new)
+        assert (dropped, written) == (176, 117)
+        frame = pd.read_csv(path)
+        mine = frame[(frame.fov_uid == "s::control::0_0") & (frame.condition == "control")]
+        assert len(mine) == 117
+        assert (mine.value == 2.0).all()
+        assert len(frame[frame.fov_uid == "s::control::0_1"]) == 40  # untouched
+        assert len(frame[frame.condition == "acblock"]) == 20  # colliding uid, other condition
+
+    def test_missing_csv_just_writes(self, tmp_path):
+        binding = pytest.importorskip("analyses.review_datasets.chromatic_swn")
+        path = tmp_path / "new.csv"
+        dropped, written = binding.replace_fov_rows(
+            path, "f", "c", [{"cell_uid": "f#0", "fov_uid": "f", "condition": "c"}])
+        assert (dropped, written) == (0, 1) and path.exists()
+
+
+class TestRestoreTerminal:
+    def test_off_a_tty_it_is_a_no_op(self):
+        from pygor.tui.imaging import restore_terminal
+
+        restore_terminal()  # must not raise or write
+
+    def test_main_restores_even_when_run_raises(self, monkeypatch, tmp_path):
+        """An exit through an exception used to leave the next session's keys broken."""
+        import io
+        import sys
+
+        import pygor.tui.__main__ as entry
+
+        written = io.StringIO()
+
+        class FakeStdout(io.StringIO):
+            def isatty(self):
+                return True
+
+        fake = FakeStdout()
+        monkeypatch.setattr(sys, "__stdout__", fake)
+        monkeypatch.setattr(sys, "__stdin__", io.StringIO())  # termios path fails safely
+
+        class Boom(Exception):
+            pass
+
+        class FakeApp:
+            def __init__(self, *a, **k):
+                pass
+
+            def run(self):
+                raise Boom()
+
+        import types
+        monkeypatch.setitem(sys.modules, "pygor.tui.app", types.SimpleNamespace(ProofreadApp=FakeApp))
+        monkeypatch.setitem(sys.modules, "analyses.review_datasets.fake",
+                            types.SimpleNamespace(ROOT=tmp_path, DATASET="x", CSV=tmp_path / "c",
+                                                  STATUS=tmp_path / "s", classify=lambda s: None,
+                                                  prefix_of=lambda s: None, fov_uid_of=lambda *a: "",
+                                                  PANEL_SETS={}))
+        with pytest.raises(Boom):
+            entry.main(["--binding", "analyses.review_datasets.fake", "--graphics", "none"])
+        assert "\x1b[<u" in fake.getvalue()
+        assert "\x1b[?1049l" in fake.getvalue()

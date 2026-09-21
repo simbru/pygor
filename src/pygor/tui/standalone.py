@@ -149,7 +149,18 @@ def main(argv=None) -> int:
                 lambda outcome: self.exit(),
             )
 
-    StandaloneApp().run()
+    # Restore the terminal on every exit path, not only the clean one, and
+    # again at interpreter exit in case something after us leaves it dirty.
+    import atexit
+
+    from pygor.tui.imaging import clear_terminal_images, restore_terminal
+
+    atexit.register(restore_terminal)
+    try:
+        StandaloneApp().run()
+    finally:
+        clear_terminal_images()
+        restore_terminal()
     return 0
 
 

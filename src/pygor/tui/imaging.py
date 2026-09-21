@@ -249,6 +249,43 @@ def _renderable_class(mode):
             "unicode": UnicodeImage}.get(mode)
 
 
+def restore_terminal() -> None:
+    """Undo everything the interface does to the terminal, whatever happened.
+
+    Textual switches the terminal into the kitty keyboard protocol, the
+    alternate screen and a hidden cursor, and undoes them on a clean exit. An
+    exit through an exception or a signal while a worker is running skips
+    that, and the next program in the same terminal then receives keys in the
+    enhanced encoding -- "t, r and q stopped working until I opened a new
+    tab". Safe to call more than once, and on a non-terminal it does nothing.
+    """
+    import sys
+
+    stream = sys.__stdout__
+    if stream is None or not stream.isatty():
+        return
+    try:
+        stream.write(
+            "\x1b[<u"        # pop kitty keyboard protocol flags
+            "\x1b[?1049l"    # leave the alternate screen
+            "\x1b[?25h"      # show the cursor
+            "\x1b[?1000l\x1b[?1003l\x1b[?1006l"  # mouse tracking off
+            "\x1b[?2004l"    # bracketed paste off
+        )
+        stream.flush()
+    except Exception:
+        pass
+    try:
+        import termios
+
+        fd = sys.__stdin__.fileno()
+        attrs = termios.tcgetattr(fd)
+        attrs[3] |= termios.ECHO | termios.ICANON | termios.ISIG  # lflag: cooked, echoing
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    except Exception:
+        pass
+
+
 def clear_terminal_images() -> None:
     """Delete every image this process put on the screen.
 

@@ -35,6 +35,15 @@ from pygor.tui.imaging import (
 )
 
 
+def _accepts_fov(binding) -> bool:
+    import inspect
+
+    try:
+        return "fov_uid" in inspect.signature(binding.recipe_values).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 def embed_shell(header, namespace) -> None:
     """Open IPython on the terminal the interface just released.
 
@@ -335,7 +344,22 @@ class IndexScreen(ReviewScreen):
     def action_open(self) -> None:
         bundle = self.current_bundle()
         if bundle is not None:
-            self.app.push_screen(FovScreen(bundle))
+            self.app.push_screen(FovScreen(bundle), self._after_fov)
+
+    def _after_fov(self, outcome) -> None:
+        """Coming back from a field of view whose files were replaced.
+
+        The session was rescanned on save, but this screen's table and both
+        previews were built from the old scan and would go on showing it.
+        """
+        if outcome != "saved":
+            return
+        table = self.query_one("#fovs", DataTable)
+        row = table.cursor_row
+        self.load_rows()
+        table.move_cursor(row=min(row, max(table.row_count - 1, 0)))
+        self.preview(None)
+        self.app.notify("table and previews refreshed from disk")
 
     def action_reload(self) -> None:
         """Re-read the dataset from disk, for after a reprocess."""
@@ -419,7 +443,7 @@ class FovScreen(ReviewScreen):
         self.redraw()
 
     def action_back(self) -> None:
-        self.dismiss()
+        self.dismiss("unchanged")
 
     def action_cells(self) -> None:
         self.app.push_screen(CellScreen(self.bundle))
@@ -464,7 +488,7 @@ class FovScreen(ReviewScreen):
             binding.save_reprocessed(bundle.fov_uid, result, overrides)
             self.app.session.rescan()
 
-        values = binding.recipe_values()
+        values = binding.recipe_values(bundle.fov_uid) if _accepts_fov(binding) else binding.recipe_values()
         choices, gates = segmentation_gating(values)
         # Say what a re-run touches: the master is re-segmented and its ROIs
         # transferred onto every partner, so all of them are recomputed.
@@ -486,8 +510,9 @@ class FovScreen(ReviewScreen):
 
     def _after_reprocess(self, outcome) -> None:
         if outcome == "saved":
-            # This screen's bundle describes the files that were just replaced.
-            self.dismiss()
+            # This screen's bundle describes the files that were just replaced;
+            # hand the outcome up so the index refreshes too.
+            self.dismiss("saved")
 
 
 class CellScreen(ReviewScreen):

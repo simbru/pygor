@@ -222,7 +222,10 @@ def drive(app, *keys, after=None):
         async with app.run_test() as pilot:
             await pilot.pause()
             for key in keys:
-                await pilot.press(key)
+                if callable(key):  # a step that acts on the app directly
+                    key(app)
+                else:
+                    await pilot.press(key)
                 await pilot.pause()
             if after is not None:
                 after(app)
@@ -398,6 +401,29 @@ class TestApp:
         assert len(stored) == 1
         assert stored[0].subject_uid.endswith("#0")
         assert stored[0].check == "rf_quality"
+
+    def test_index_refreshes_after_a_saved_reprocess(self, app):
+        """The table and previews were built before the save and kept showing it."""
+        from textual.widgets import DataTable
+
+        calls = []
+        original = app.session.overview
+
+        def counting_overview():
+            calls.append(1)
+            return original()
+
+        app.session.overview = counting_overview
+        seen = {}
+
+        def simulate_saved_return(a):
+            # What FovScreen does when the reprocess screen reports "saved".
+            a.screen.dismiss("saved")
+
+        drive(app, "enter", simulate_saved_return,
+              after=lambda a: seen.update(screen=type(a.screen).__name__, loads=len(calls)))
+        assert seen["screen"] == "IndexScreen"
+        assert seen["loads"] >= 2  # once at mount, again after the save
 
     def test_napari_without_a_display_notifies_rather_than_hangs(self, app, monkeypatch):
         monkeypatch.delenv("DISPLAY", raising=False)
