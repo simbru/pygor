@@ -379,3 +379,95 @@ class TestStale:
         store = _store(tmp_path)
         store.append(_cell(store))
         assert store.stale([]).empty
+
+
+
+class TestExclusions:
+    """Verdicts become a vetted export, never an edit of the aggregate table."""
+
+    def _cells(self):
+        rows = []
+        for fov, cond, n in (("s::control::0_0", "control", 3), ("s::control::0_1", "control", 2),
+                             ("s::acblock::0_0", "acblock", 2), ("s::control::0_2", "control", 1)):
+            rows += [{"cell_uid": f"{fov}#{i}", "fov_uid": fov, "condition": cond, "roi_id": i}
+                     for i in range(n)]
+        return pd.DataFrame(rows)
+
+    def _store(self, tmp_path):
+        store = _store_for(tmp_path)
+        for fov, cond, verdict in (("s::control::0_0", "control", "keep"),
+                                   ("s::control::0_1", "control", "reject"),
+                                   ("s::acblock::0_0", "acblock", "uncertain")):
+            store.append(store.make(subject_type="fov", subject_uid=fov, check="alignment",
+                                    verdict=verdict, condition=cond, fov_uid=fov,
+                                    reason="because"))
+        # s::control::0_2 is never judged
+        store.append(store.make(subject_type="cell", subject_uid="s::control::0_0#1",
+                                check="rf_quality", verdict="reject", condition="control",
+                                fov_uid="s::control::0_0", role="swn"))
+        return store
+
+    def test_vetted_keeps_only_kept_fovs(self, tmp_path):
+        from pygor.review import exclusions
+
+        table = exclusions.vetted(self._store(tmp_path), self._cells())
+        assert set(table.fov_uid) == {"s::control::0_0"}
+        assert len(table) == 3
+        assert (table.qc_fov_verdict == "keep").all()
+
+    def test_unjudged_fovs_are_left_out(self, tmp_path):
+        """A vetted pool is one where every recording was looked at."""
+        from pygor.review import exclusions
+
+        table = exclusions.vetted(self._store(tmp_path), self._cells())
+        assert "s::control::0_2" not in set(table.fov_uid)
+
+    def test_include_uncertain(self, tmp_path):
+        from pygor.review import exclusions
+
+        table = exclusions.vetted(self._store(tmp_path), self._cells(),
+                                  include=("keep", "uncertain"))
+        assert set(table.fov_uid) == {"s::control::0_0", "s::acblock::0_0"}
+
+    def test_cell_verdicts_are_a_column_not_a_filter(self, tmp_path):
+        from pygor.review import exclusions
+
+        table = exclusions.vetted(self._store(tmp_path), self._cells())
+        assert len(table) == 3  # the rejected cell is still there
+        assert dict(zip(table.cell_uid, table.qc_cell_verdict))["s::control::0_0#1"] == "reject"
+
+    def test_excluded_pairs_carry_condition(self, tmp_path):
+        from pygor.review import exclusions
+
+        assert exclusions.excluded_fovs(self._store(tmp_path)) == {("control", "s::control::0_1")}
+
+    def test_export_writes_beside_the_csv(self, tmp_path):
+        from pygor.review import exclusions
+
+        csv = tmp_path / "data" / "rois.csv"
+        csv.parent.mkdir()
+        self._cells().to_csv(csv, index=False)
+        paths = exclusions.export(self._store(tmp_path), self._cells(), csv)
+        assert paths["vetted"] == csv.with_name("rois_qc_keep.csv")
+        assert paths["vetted"].exists() and paths["excluded"].exists()
+        assert not list(csv.parent.glob("*.tmp"))
+        excluded = pd.read_csv(paths["excluded"])
+        assert set(excluded.verdict) == {"reject", "uncertain"}
+
+    def test_literal_is_valid_python(self, tmp_path):
+        from pygor.review import exclusions
+
+        namespace = {}
+        exec(exclusions.exclude_literal(self._store(tmp_path)), namespace)
+        assert namespace["EXCLUDE"] == {("control", "s::control::0_1")}
+
+    def test_empty_store(self, tmp_path):
+        from pygor.review import exclusions
+
+        store = _store_for(tmp_path)
+        assert exclusions.vetted(store, self._cells()).empty
+        assert exclusions.excluded_fovs(store) == set()
+
+
+def _store_for(root):
+    return VerdictStore(root, DATASET, reviewer="tester")
