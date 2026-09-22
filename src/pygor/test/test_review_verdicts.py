@@ -359,26 +359,48 @@ class TestCoverage:
 
 
 class TestStale:
-    def test_flags_verdicts_whose_source_changed(self, tmp_path):
-        class Ref:
-            def __init__(self, uid, mtime, size):
-                self.recording_uid = uid
-                self.mtime = mtime
-                self.size = size
+    """Digests are keyed by role, because that is how a verdict records them."""
 
+    def test_flags_verdicts_whose_source_changed(self, tmp_path):
         store = _store(tmp_path)
-        store.append(
-            _cell(store, source_digest={"swn": "100.0:500"})
-        )
-        assert store.stale([Ref("s::0_0_SWN", 100.0, 500)]).empty
-        stale = store.stale([Ref("s::0_0_SWN", 999.0, 500)])
+        store.append(_cell(store, source_digest={"swn": "100.0:500"}))
+        current = {("s::0_0", "control", "swn"): "100.0:500"}
+        assert store.stale(current).empty
+        stale = store.stale({("s::0_0", "control", "swn"): "999.0:500"})
         assert len(stale) == 1
         assert stale.iloc[0].stale_role == "swn"
+
+    def test_a_fov_verdict_names_no_recording_and_is_still_checked(self, tmp_path):
+        """A field-of-view verdict has recording_uid='', so looking its sources
+        up by that reported every verdict as current -- including ones whose
+        recording had just been re-segmented."""
+        store = _store(tmp_path)
+        store.append(store.make(
+            subject_type="fov", subject_uid="s::0_0", check="alignment",
+            verdict="keep", condition="control", fov_uid="s::0_0",
+            source_digest={"swn": "100.0:500", "osds": "200.0:600"}))
+        assert store.latest().iloc[0].recording_uid == ""
+        stale = store.stale({("s::0_0", "control", "swn"): "999.0:500",
+                             ("s::0_0", "control", "osds"): "200.0:600"})
+        assert len(stale) == 1
+        assert stale.iloc[0].stale_role == "swn"
+
+    def test_condition_separates_colliding_fovs(self, tmp_path):
+        store = _store(tmp_path)
+        for condition in ("control", "acblock"):
+            store.append(store.make(
+                subject_type="fov", subject_uid="s::0_0", check="alignment",
+                verdict="keep", condition=condition, fov_uid="s::0_0",
+                source_digest={"swn": "100.0:500"}))
+        stale = store.stale({("s::0_0", "control", "swn"): "999.0:500",
+                             ("s::0_0", "acblock", "swn"): "100.0:500"})
+        assert len(stale) == 1
+        assert stale.iloc[0].condition == "control"
 
     def test_verdict_without_digest_is_never_stale(self, tmp_path):
         store = _store(tmp_path)
         store.append(_cell(store))
-        assert store.stale([]).empty
+        assert store.stale({}).empty
 
 
 

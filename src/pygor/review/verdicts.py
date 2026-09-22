@@ -333,20 +333,25 @@ class VerdictStore:
             how="left",
         )
 
-    def stale(self, refs) -> pd.DataFrame:
-        """Verdicts whose source recording changed since the judgement.
+    def stale(self, digests) -> pd.DataFrame:
+        """Verdicts whose source recordings changed since the judgement.
 
-        Reprocessing a recording invalidates what a human concluded from it, and
-        without this nothing would say so -- the verdict would sit beside data it
-        was never about.
+        Reprocessing invalidates what a human concluded from a recording, and
+        without this nothing would say so -- the verdict would sit beside data
+        it was never about, and a re-segmented field of view's cell numbers
+        would mean different cells.
+
+        ``digests`` maps ``(fov_uid, condition, role)`` to the recording's
+        current ``"mtime:size"``. Keyed by role because that is how a verdict
+        records what it was made from: a field-of-view verdict names no single
+        recording, so an earlier version that looked its sources up by
+        recording_uid silently matched nothing and reported every verdict as
+        current.
         """
-        digests = {
-            ref.recording_uid: f"{ref.mtime}:{ref.size}" for ref in refs
-        }
         rows = []
         for verdict in self._load().values():
             for role, digest in (verdict.source_digest or {}).items():
-                current = digests.get(verdict.recording_uid)
+                current = digests.get((verdict.fov_uid, verdict.condition, role))
                 if current is not None and current != digest:
                     rows.append(
                         {

@@ -89,6 +89,18 @@ class ReviewSession:
         self.bundle_cache.clear()
         self.panel_cache.clear()
 
+    def source_digests(self) -> dict:
+        """(fov_uid, condition, role) -> the recording's current mtime:size."""
+        return {
+            (bundle.fov_uid, bundle.condition, role): f"{ref.mtime}:{ref.size}"
+            for bundle in self.bundles
+            for role, ref in bundle.refs.items()
+        }
+
+    def stale_verdicts(self) -> pd.DataFrame:
+        """Verdicts made against recordings that have since been reprocessed."""
+        return self.store.stale(self.source_digests())
+
     def missing_recordings(self) -> pd.DataFrame:
         """Ledger rows with no file, which a scan of Processed/ cannot see."""
         return missing_from_disk(self.refs, self.binding.STATUS)
