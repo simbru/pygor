@@ -442,3 +442,32 @@ class TestRestoreTerminal:
             entry.main(["--binding", "analyses.review_datasets.fake", "--graphics", "none"])
         assert "\x1b[<u" in fake.getvalue()
         assert "\x1b[?1049l" in fake.getvalue()
+
+
+
+class TestBindings:
+    """Both SWN datasets bind through one base; a module and its object agree."""
+
+    @pytest.mark.parametrize("name", ["chromatic_swn", "achromatic_swn"])
+    def test_binding_exposes_the_contract(self, name):
+        module = pytest.importorskip(f"analyses.review_datasets.{name}")
+        from analyses.review_datasets._base import DatasetBinding, resolve
+
+        binding = resolve(module)
+        assert isinstance(binding, DatasetBinding)
+        for attr in ("DATASET", "ROOT", "CSV", "STATUS", "PANEL_SETS", "CHANNELS",
+                     "classify", "prefix_of", "fov_uid_of", "pick", "recipe_values",
+                     "run_reprocess", "save_reprocessed", "rows_from_disk", "replace_fov_rows"):
+            assert getattr(module, attr) is getattr(binding, attr) or callable(getattr(module, attr))
+
+    def test_achromatic_is_single_channel(self):
+        module = pytest.importorskip("analyses.review_datasets.achromatic_swn")
+        assert module.CHANNELS == ("white",)
+        assert module.classify("0_0_SWN_200_White") == "swn"
+        assert module.classify("0_0_ColourSWN_200") is None  # chromatic is not this dataset
+        assert module.classify("0_0_OSDS_2x_vel") == "osds"
+
+    def test_chromatic_rejects_white(self):
+        module = pytest.importorskip("analyses.review_datasets.chromatic_swn")
+        assert module.classify("0_0_SWN_200_White") is None
+        assert module.classify("0_0_ColourSWN_200") == "swn"

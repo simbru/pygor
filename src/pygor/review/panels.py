@@ -209,6 +209,8 @@ def message_figure(text, width, height, dpi=DEFAULT_DPI, colour="#ff6b6b") -> Fi
     _bare(axis)
     axis.text(0.5, 0.5, text, ha="center", va="center", color=colour, fontsize=9,
               wrap=True, transform=axis.transAxes)
+    # A line of text on black would trim to a sliver; keep the pane filled.
+    figure._pygor_no_trim = True
     return figure
 
 
@@ -518,18 +520,24 @@ def cell_rf(bundle, *, width, height, dpi=DEFAULT_DPI, role=None, roi=None,
     clip = float(params.get("clip_percentile", 99.5))
     shared = np.nanpercentile(np.abs(spatial), clip) if scale == "global" else None
 
+    # White noise is one channel; drawing it in the red channel's colour map
+    # would suggest a wavelength it does not have.
+    single = n_colours == 1
     for colour in range(n_colours):
         axis = figure.add_subplot(grid[0, colour])
         axis.set_facecolor("black")
         _bare(axis)
-        cmap = maps_concat[colour] if colour < len(maps_concat) else "bwr"
+        if single:
+            cmap = "RdGy_r"
+        else:
+            cmap = maps_concat[colour] if colour < len(maps_concat) else "bwr"
         limit = shared if shared else np.nanpercentile(np.abs(spatial[colour]), clip)
         limit = float(limit) if np.isfinite(limit) and limit > 0 else 1.0
         axis.imshow(spatial[colour], cmap=cmap, vmin=-limit, vmax=limit,
                     origin="lower", aspect="equal", interpolation="nearest")
         pass_col = f"strf_pass_bool_ch{colour}"
         cell_row = bundle.cell_row(roi)
-        label = f"ch{colour}"
+        label = "white" if single else f"ch{colour}"
         colour_ok = None
         if cell_row is not None and pass_col in cell_row.index:
             colour_ok = bool(cell_row[pass_col])
@@ -548,7 +556,7 @@ def cell_rf(bundle, *, width, height, dpi=DEFAULT_DPI, role=None, roi=None,
         if flat >= len(timecourses):
             continue
         pair = timecourses[flat]
-        shade = fish_palette[colour] if colour < len(fish_palette) else "white"
+        shade = "white" if single else (fish_palette[colour] if colour < len(fish_palette) else "white")
         # Negative and positive lobes are stored separately; both belong on the
         # same axis or a biphasic kernel reads as two different cells.
         for lobe in np.atleast_2d(pair):
@@ -711,7 +719,8 @@ def render(name, bundle, *, width=1000, height=600, dpi=DEFAULT_DPI, roi=None,
         # No size forced here: the panel was given the target and may have
         # chosen a shorter figure to suit its content. Overriding that would
         # stretch the layout back out and undo the choice.
-        return figure_to_png(figure, dpi=dpi, trim=spec.trim)
+        return figure_to_png(figure, dpi=dpi,
+                             trim=spec.trim and not getattr(figure, "_pygor_no_trim", False))
 
     png = rasterise(width, height)
 
