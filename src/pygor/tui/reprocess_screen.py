@@ -68,13 +68,15 @@ class ReprocessScreen(Screen):
     ]
 
     def __init__(self, *, title, values, sections, run, preview, save, caps,
-                 previews=("rois",), save_text=None, choices=None, gates=None):
+                 previews=("rois",), save_text=None, choices=None, gates=None,
+                 default_master=None):
         super().__init__()
         self.title_text = title
         self.values = values
         self.sections = sections
         self.choices = choices
         self.gates = gates
+        self.default_master = default_master
         self.run_fn = run
         self.preview_fn = preview
         self.save_fn = save
@@ -99,6 +101,21 @@ class ReprocessScreen(Screen):
         yield Static("", id="status")
         yield Footer()
 
+    def chosen_master(self):
+        """The role the table currently names as master, or the default.
+
+        The preview asks for this rather than the field of view's saved
+        master: choosing a different recording to segment should change the
+        picture straight away, not only once the re-run finishes.
+        """
+        table = self.query_one("#params", ParamTable)
+        for path in table.choices:
+            if path.endswith("master_role"):
+                value = table.current_value(path)
+                if value:
+                    return str(value)
+        return self.default_master
+
     def on_mount(self):
         self.sub_title = self.title_text
         self.query_one("#params", ParamTable).focus()
@@ -109,8 +126,10 @@ class ReprocessScreen(Screen):
         table = self.query_one("#params", ParamTable)
         edits = len(table.overrides)
         state = "result: unsaved re-run" if self.result is not None else "result: on disk"
+        master = self.chosen_master()
+        scope = f"master: {master}  ·  " if master else ""
         self.query_one("#status", Static).update(
-            f"{edits} edit{'s' if edits != 1 else ''}  ·  {state}  ·  {text}"
+            f"{scope}{edits} edit{'s' if edits != 1 else ''}  ·  {state}  ·  {text}"
         )
 
     # -- actions ----------------------------------------------------------
@@ -171,6 +190,11 @@ class ReprocessScreen(Screen):
         self.result = None
         self.saved = True
         self.set_status("saved; esc to go back")
+
+    def on_param_table_changed(self, event=None):
+        """A parameter changed; the master may have, so redraw."""
+        self.refresh_preview()
+        self.set_status("edit values with enter, then R to re-run")
 
     def action_next_preview(self):
         self.preview_index += 1

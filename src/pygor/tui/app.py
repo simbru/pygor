@@ -467,20 +467,24 @@ class FovScreen(ReviewScreen):
             return binding.run_reprocess(bundle.fov_uid, overrides)
 
         def preview(result, which, width, height):
+            # Follow the table, not the saved master: picking a different
+            # recording to segment should change what you are looking at
+            # before the re-run, not after it.
+            role = self.screen.chosen_master() if hasattr(self, "screen") else master
             if result is None:
                 # Nothing re-run yet: draw what is on disk. The small datasets
                 # cover the mean and the mask; a correlation projection is not
                 # saved, so that view loads the recording and computes one.
-                arrays = bundle.light(master)
+                arrays = bundle.light(role)
                 correlation = arrays.get("correlation_projection")
                 if which == "correlation" and correlation is None:
-                    correlation = bundle.full(master).compute_correlation_projection()
+                    correlation = bundle.full(role).compute_correlation_projection()
                 return preview_image(
                     arrays["rois"], arrays["average_stack"], which, width, height,
-                    name=f"ON DISK  {bundle.peek(master).stem}",
+                    name=f"ON DISK  {bundle.peek(role).stem}",
                     correlation=correlation,
                 )
-            recording = result.get(master) or next(iter(result.values()))
+            recording = result.get(role) or next(iter(result.values()))
             return recording_preview(recording, which, width, height,
                                      name=f"RE-RUN, UNSAVED  {recording.name}")
 
@@ -510,6 +514,7 @@ class FovScreen(ReviewScreen):
                 sections=sections,
                 run=run, preview=preview, save=save, caps=self.app.caps,
                 previews=PREVIEWS, choices=choices, gates=gates,
+                default_master=master,
                 save_text=(f"Overwrite {len(bundle.roles)} processed recording(s) for "
                            f"{bundle.fov_uid} ({', '.join(bundle.roles)}) and its rows in "
                            "the aggregate CSV? The old files are kept as .prereprocess."),

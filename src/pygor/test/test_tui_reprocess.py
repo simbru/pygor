@@ -499,6 +499,57 @@ class TestMasterOverride:
         rest, master = binding._split_master({"review": {"master_role": "swn", "other": 1}})
         assert master == "swn" and rest == {"review": {"other": 1}}
 
+    def test_preview_follows_the_chosen_master(self):
+        """Picking a recording to segment must change the picture straight away.
+
+        The preview used to be pinned to the field of view's saved master, so
+        choosing another showed the old one's ROIs until after the re-run.
+        """
+        from textual.app import App
+
+        from pygor.tui.capabilities import probe
+        from pygor.tui.params_table import ParamTable
+        from pygor.tui.reprocess_screen import ReprocessScreen
+
+        asked = []
+
+        def preview(result, which, width, height):
+            from pygor.review.rasterise import PanelImage, PanelKey
+
+            asked.append(screen_holder[0].chosen_master())
+            key = PanelKey(panel="p", fov_uid="f", condition="", role="", roi=None,
+                           channel=-1, width=10, height=10, dpi=100, params_hash="",
+                           sources=())
+            return PanelImage(png=b"\x89PNG\r\n\x1a\n" + b"\0" * 16, width=10,
+                              height=10, key=key)
+
+        values = {"segmentation": {"general": {"mode": "blob"}, "blob": {"threshold": 0.02}},
+                  "review": {"master_role": "osds"}}
+        screen_holder = [None]
+
+        class Harness(App):
+            def on_mount(self):
+                screen = ReprocessScreen(
+                    title="t", values=values, sections=("segmentation", "review"),
+                    run=lambda o: {}, preview=preview, save=lambda r, o: None,
+                    caps=probe("none"), choices={"review.master_role": ("osds", "swn")},
+                    default_master="osds")
+                screen_holder[0] = screen
+                self.push_screen(screen)
+
+        app = Harness()
+
+        def pick_swn(a):
+            a.screen.query_one("#choices").highlighted = 1
+
+        def go_to_master(a):
+            table = screen_holder[0].query_one("#params", ParamTable)
+            table.move_cursor(row=[p for p, _ in table._rows].index("review.master_role"))
+
+        drive(app, go_to_master, "enter", pick_swn, "enter")
+        assert asked[0] == "osds"      # at open
+        assert asked[-1] == "swn"      # after the pick, without a re-run
+
     def test_choices_come_from_the_fovs_roles(self):
         binding = self._binding()
         assert binding.reprocess_choices(("osds", "swn")) == {

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from textual import on
 from textual.binding import Binding
+from textual.message import Message
 from textual.containers import Vertical
 from textual.coordinate import Coordinate
 from textual.screen import Screen
@@ -94,6 +95,13 @@ class ParamTable(DataTable):
     than shown greyed, because a table of two hundred parameters is not
     something anyone edits in a terminal.
     """
+
+    class Changed(Message):
+        """An override was set or reverted. Carries the path that changed."""
+
+        def __init__(self, path):
+            super().__init__()
+            self.path = path
 
     BINDINGS = [
         Binding("enter", "edit", "edit value"),
@@ -203,6 +211,7 @@ class ParamTable(DataTable):
                 self._repaint(path)
 
     def _after_change(self, path):
+        self.post_message(self.Changed(path))
         if path in self.gates:
             self.reload()
             self.move_cursor(row=next(i for i, (p, _) in enumerate(self._rows) if p == path))
