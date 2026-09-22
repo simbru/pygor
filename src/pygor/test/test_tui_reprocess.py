@@ -550,6 +550,54 @@ class TestMasterOverride:
         assert asked[0] == "osds"      # at open
         assert asked[-1] == "swn"      # after the pick, without a re-run
 
+    def test_preview_taking_a_role_is_given_one(self):
+        """The cockpit's preview takes role=; the standalone's does not.
+
+        Passing it blindly raised TypeError for the latter, and reading it off
+        the wrong object raised AttributeError for the former -- both surfaced
+        only as "preview failed" in the pane.
+        """
+        from textual.app import App
+
+        from pygor.tui.capabilities import probe
+        from pygor.tui.reprocess_screen import ReprocessScreen
+        from pygor.review.rasterise import PanelImage, PanelKey
+
+        key = PanelKey(panel="p", fov_uid="f", condition="", role="", roi=None,
+                       channel=-1, width=10, height=10, dpi=100, params_hash="",
+                       sources=())
+        blank = PanelImage(png=b"\x89PNG\r\n\x1a\n" + b"\0" * 16, width=10,
+                           height=10, key=key)
+        got = {}
+
+        def with_role(result, which, width, height, role=None):
+            got["role"] = role
+            return blank
+
+        def without_role(result, which, width, height):
+            got["called"] = True
+            return blank
+
+        for fn, expect in ((with_role, "role"), (without_role, "called")):
+            holder = []
+
+            class Harness(App):
+                def on_mount(self):
+                    screen = ReprocessScreen(
+                        title="t", values={"review": {"master_role": "osds"}},
+                        sections=("review",), run=lambda o: {}, preview=fn,
+                        save=lambda r, o: None, caps=probe("none"),
+                        choices={"review.master_role": ("osds", "swn")},
+                        default_master="osds")
+                    holder.append(screen)
+                    self.push_screen(screen)
+
+            got.clear()
+            app = Harness()
+            drive(app, after=lambda a: holder[0]._call_preview(None, "rois", 10, 10))
+            assert expect in got
+        assert got.get("called") is True
+
     def test_choices_come_from_the_fovs_roles(self):
         binding = self._binding()
         assert binding.reprocess_choices(("osds", "swn")) == {

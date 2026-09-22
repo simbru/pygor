@@ -221,8 +221,30 @@ class ReprocessScreen(Screen):
         view = self.query_one("#reprocess-preview", PanelView)
         width, height = view.size_px()
         try:
-            image = self.preview_fn(self.result, which, width, height)
+            image = self._call_preview(self.result, which, width, height)
         except Exception as error:
-            self.app.call_from_thread(view.show_message, f"preview failed: {error}")
+            import traceback
+
+            self.log(traceback.format_exc())
+            self.app.call_from_thread(
+                view.show_message,
+                f"preview failed: {type(error).__name__}: {error}")
             return
         self.app.call_from_thread(view.show, image)
+
+    def _call_preview(self, result, which, width, height):
+        """Hand the chosen master to previews that take one.
+
+        A preview that does not accept ``role`` is still valid -- the
+        standalone tool has a single recording and nothing to choose.
+        """
+        import inspect
+
+        try:
+            takes_role = "role" in inspect.signature(self.preview_fn).parameters
+        except (TypeError, ValueError):
+            takes_role = False
+        if takes_role:
+            return self.preview_fn(result, which, width, height,
+                                   role=self.chosen_master())
+        return self.preview_fn(result, which, width, height)

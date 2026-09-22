@@ -466,11 +466,14 @@ class FovScreen(ReviewScreen):
         def run(overrides):
             return binding.run_reprocess(bundle.fov_uid, overrides)
 
-        def preview(result, which, width, height):
-            # Follow the table, not the saved master: picking a different
-            # recording to segment should change what you are looking at
-            # before the re-run, not after it.
-            role = self.screen.chosen_master() if hasattr(self, "screen") else master
+        def preview(result, which, width, height, role=None):
+            # The role comes from the reprocess screen, which knows what its
+            # table currently names as master; picking a different recording
+            # to segment should change what you are looking at before the
+            # re-run, not after it.
+            role = role or master
+            if role not in bundle.roles:
+                role = master
             if result is None:
                 # Nothing re-run yet: draw what is on disk. The small datasets
                 # cover the mean and the mask; a correlation projection is not
