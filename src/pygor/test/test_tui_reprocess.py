@@ -471,3 +471,53 @@ class TestBindings:
         module = pytest.importorskip("analyses.review_datasets.chromatic_swn")
         assert module.classify("0_0_SWN_200_White") is None
         assert module.classify("0_0_ColourSWN_200") == "swn"
+
+
+class TestMasterOverride:
+    """Which recording is segmented, the rest inheriting its ROIs."""
+
+    def _binding(self):
+        return pytest.importorskip("analyses.review_datasets.chromatic_swn").BINDING
+
+    def test_master_is_split_out_of_the_overrides(self):
+        """It is not a recipe value, so it must not reach the derived recipe."""
+        binding = self._binding()
+        rest, master = binding._split_master(
+            {"review": {"master_role": "swn"}, "segmentation": {"blob": {"threshold": 0.02}}})
+        assert master == "swn"
+        assert rest == {"segmentation": {"blob": {"threshold": 0.02}}}
+        assert "review" not in rest
+
+    def test_no_master_in_overrides_is_none(self):
+        binding = self._binding()
+        rest, master = binding._split_master({"segmentation": {"blob": {"threshold": 0.02}}})
+        assert master is None and rest == {"segmentation": {"blob": {"threshold": 0.02}}}
+        assert binding._split_master(None) == (None, None)
+
+    def test_other_review_keys_survive_the_split(self):
+        binding = self._binding()
+        rest, master = binding._split_master({"review": {"master_role": "swn", "other": 1}})
+        assert master == "swn" and rest == {"review": {"other": 1}}
+
+    def test_choices_come_from_the_fovs_roles(self):
+        binding = self._binding()
+        assert binding.reprocess_choices(("osds", "swn")) == {
+            "review.master_role": ("osds", "swn")}
+        assert binding.reprocess_choices(()) == {}
+
+    def test_pipeline_orders_roles_by_master(self):
+        """The master is processed first, so it has ROIs to give away."""
+        pipeline = pytest.importorskip("analyses.datasets.chromatic_swn")
+        members = {"osds": 1, "swn": 2, "fff": 3}
+        for master in ("osds", "swn", "fff"):
+            order = [master] + [r for r in pipeline.ROLE_ORDER
+                                if r in members and r != master]
+            assert order[0] == master
+            assert sorted(order) == sorted(members)
+
+    @pytest.mark.parametrize("module", ["chromatic_swn", "achromatic_swn_unified"])
+    def test_process_fov_refuses_a_master_it_does_not_have(self, module):
+        pipeline = pytest.importorskip(f"analyses.datasets.{module}")
+        cfg = {"members": {"swn": "x"}, "master_role": "osds"}
+        with pytest.raises(RuntimeError, match="master_role"):
+            pipeline.process_fov(cfg)

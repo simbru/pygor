@@ -488,8 +488,17 @@ class FovScreen(ReviewScreen):
             binding.save_reprocessed(bundle.fov_uid, result, overrides)
             self.app.session.rescan()
 
-        values = binding.recipe_values(bundle.fov_uid) if _accepts_fov(binding) else binding.recipe_values()
+        roles = tuple(bundle.roles)
+        if hasattr(binding, "reprocess_values"):
+            # The master row is a review-only choice, not a recipe value.
+            values = binding.reprocess_values(bundle.fov_uid, roles=roles)
+            extra_choices = binding.reprocess_choices(roles)
+            sections = tuple(getattr(binding, "REPROCESS_SECTIONS", ("segmentation",))) + ("review",)
+        else:
+            values = binding.recipe_values(bundle.fov_uid) if _accepts_fov(binding) else binding.recipe_values()
+            extra_choices, sections = {}, getattr(binding, "REPROCESS_SECTIONS", ("segmentation",))
         choices, gates = segmentation_gating(values)
+        choices = {**choices, **extra_choices}
         # Say what a re-run touches: the master is re-segmented and its ROIs
         # transferred onto every partner, so all of them are recomputed.
         partners = [r for r in bundle.roles if r != master]
@@ -498,7 +507,7 @@ class FovScreen(ReviewScreen):
             ReprocessScreen(
                 title=f"reprocess {bundle.fov_uid}   [{scope}]",
                 values=values,
-                sections=getattr(binding, "REPROCESS_SECTIONS", ("segmentation",)),
+                sections=sections,
                 run=run, preview=preview, save=save, caps=self.app.caps,
                 previews=PREVIEWS, choices=choices, gates=gates,
                 save_text=(f"Overwrite {len(bundle.roles)} processed recording(s) for "
