@@ -134,8 +134,27 @@ def show(obj, caps, *, width=900, dpi=100, cmap="Greys_r") -> None:
     Console().print(renderable_class(io.BytesIO(png)))
 
 
+def draw_marker(axis, marker, shape, colour="cyan") -> None:
+    """A crosshair at ``(row, col)``, drawn as gapped lines around the point.
+
+    Gapped so the pixel being probed is never hidden by the thing pointing at
+    it, which is the one pixel the reader is looking at.
+    """
+    row, col = marker
+    rows, cols = shape
+    gap = max(2, min(rows, cols) // 24)
+    style = {"color": colour, "linewidth": 0.7, "alpha": 0.9}
+    axis.plot([col, col], [-0.5, row - gap], **style)
+    axis.plot([col, col], [row + gap, rows - 0.5], **style)
+    axis.plot([-0.5, col - gap], [row, row], **style)
+    axis.plot([col + gap, cols - 0.5], [row, row], **style)
+    axis.set_xlim(-0.5, cols - 0.5)
+    axis.set_ylim(-0.5, rows - 0.5)
+
+
 def roi_figure(recording=None, *, mask=None, projection=None, width=1000, labels=False,
-               low=1, high=99, image=None, title=None, cmap="Greys_r"):
+               low=1, high=99, image=None, title=None, cmap="Greys_r", marker=None,
+               marker_colour="cyan"):
     """ROI outlines over a projection, as a Figure.
 
     The stand-in for ``view_stack_rois`` on a remote connection. That method
@@ -147,13 +166,17 @@ def roi_figure(recording=None, *, mask=None, projection=None, width=1000, labels
     Takes either a recording or bare arrays (``mask``, ``projection``), so the
     same picture can be drawn from a loaded object or from the small datasets
     read straight off disk. ``image=`` overrides the projection.
+
+    A recording with no ROIs draws the projection on its own. Inspecting one
+    before it has been segmented is a normal thing to do, and the alternative
+    is a pane reading "preview failed" where a perfectly good picture belongs.
     """
     import numpy as np
     from matplotlib.figure import Figure
 
     from pygor.review.panels import _stretch, draw_outlines
 
-    if mask is None:
+    if mask is None and recording is not None:
         mask = recording.rois
     if image is not None:
         projection = image
@@ -165,15 +188,18 @@ def roi_figure(recording=None, *, mask=None, projection=None, width=1000, labels
     axis = figure.add_axes([0, 0, 1, 1])
     axis.set_axis_off()
     axis.imshow(_stretch(projection, low, high), cmap=cmap, origin="lower")
-    draw_outlines(axis, mask, colour="yellow", linewidth=0.8)
-    if labels:
+    if mask is not None:
+        draw_outlines(axis, mask, colour="yellow", linewidth=0.8)
+    if labels and mask is not None:
         for roi_id in np.unique(mask):
             if roi_id >= 0:
                 continue
             ys, xs = np.nonzero(mask == roi_id)
             axis.text(xs.mean(), ys.mean(), str(abs(int(roi_id)) - 1), color="white",
                       fontsize=5, ha="center", va="center")
-    n_rois = int((np.unique(mask) < 0).sum())
+    if marker is not None:
+        draw_marker(axis, marker, projection.shape, colour=marker_colour)
+    n_rois = 0 if mask is None else int((np.unique(mask) < 0).sum())
     label = title if title is not None else getattr(recording, "name", "")
     axis.text(0.01, 0.98, f"{label}  ·  {n_rois} ROIs",
               transform=axis.transAxes, color="white", fontsize=8, va="top")
@@ -193,7 +219,7 @@ CORRELATION_CMAP = "magma"
 
 
 def preview_image(mask, projection, which, width, height, *, name="",
-                  correlation=None, note=""):
+                  correlation=None, note="", marker=None, marker_colour="cyan"):
     """One of :data:`PREVIEWS` drawn from arrays, as a PanelImage.
 
     ``correlation`` is the correlation projection or None. Asking for that view
@@ -205,13 +231,16 @@ def preview_image(mask, projection, which, width, height, *, name="",
     if which == "correlation":
         if correlation is not None:
             figure = roi_figure(mask=mask, projection=correlation, width=width,
-                                title=f"{name} (correlation)", cmap=CORRELATION_CMAP)
+                                title=f"{name} (correlation)", cmap=CORRELATION_CMAP,
+                                marker=marker, marker_colour=marker_colour)
         else:
             figure = roi_figure(mask=mask, projection=projection, width=width,
-                                title=f"{name} (mean — {note or 'no correlation projection'})")
+                                title=f"{name} (mean — {note or 'no correlation projection'})",
+                                marker=marker, marker_colour=marker_colour)
     else:
         figure = roi_figure(mask=mask, projection=projection, width=width,
-                            labels=(which == "labels"),
+                            labels=(which == "labels"), marker=marker,
+                            marker_colour=marker_colour,
                             title=f"{name} ({'numbered' if which == 'labels' else 'mean'})")
     png = figure_to_png(figure, dpi=100)
     actual = png_size(png)
@@ -222,8 +251,15 @@ def preview_image(mask, projection, which, width, height, *, name="",
                       key=key, meta={"panel": f"preview:{which}"})
 
 
-def recording_preview(recording, which, width, height, name=None):
-    """A picture of an in-memory recording, for the reprocess screen."""
+def recording_preview(recording, which, width, height, name=None, marker=None,
+                      projection=None, marker_colour="cyan"):
+    """A picture of an in-memory recording, for the reprocess screen.
+
+    ``projection`` skips the mean, which a caller that redraws this repeatedly
+    -- a crosshair following the pointer -- will already be holding. Averaging
+    a 50,000-frame stack costs more than everything else in this function put
+    together.
+    """
     import numpy as np
 
     correlation = getattr(recording, "correlation_projection", None)
@@ -233,11 +269,204 @@ def recording_preview(recording, which, width, height, name=None):
             correlation = recording.compute_correlation_projection()
         except Exception as error:  # reported in the title, not hidden
             note = f"correlation failed: {type(error).__name__}"
+    if projection is None:
+        projection = np.mean(recording.images, axis=0)
     return preview_image(
-        recording.rois, np.mean(recording.images, axis=0), which, width, height,
+        recording.rois, projection, which, width, height,
         name=name if name is not None else getattr(recording, "name", ""),
-        correlation=correlation, note=note,
+        correlation=correlation, note=note, marker=marker,
+        marker_colour=marker_colour,
     )
+
+
+def frame_preview(images, index, width, height, limits, *, marker=None, name="",
+                  mask=None, marker_colour="cyan"):
+    """One frame of the stack, rasterised through PIL rather than matplotlib.
+
+    Scrubbing is the one thing here that redraws on every keypress, and a
+    matplotlib figure costs tens of milliseconds before the PNG is even
+    encoded. This path is a normalise, a nearest-neighbour resize and an
+    encode, which keeps a held-down arrow key feeling like a scrub rather than
+    like a slideshow.
+
+    ``limits`` is the (low, high) display range for the whole stack -- see
+    :func:`pygor.tui.probe.display_range` for why it is not per frame.
+    """
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    low, high = limits
+    frame = np.asarray(images[index], dtype=np.float32)
+    scaled = np.clip((frame - low) / (high - low), 0, 1)
+    picture = Image.fromarray((scaled * 255).astype(np.uint8), mode="L").convert("RGB")
+    # Every other view draws with origin="lower"; the array's first row is the
+    # bottom one, and a stack view that disagreed would put the crosshair in a
+    # different place than the ROI view for the same pixel.
+    picture = picture.transpose(Image.FLIP_TOP_BOTTOM)
+
+    rows, cols = frame.shape
+    scale = max(1, min(int(width / cols) or 1, int(height / rows) or 1))
+    picture = picture.resize((cols * scale, rows * scale), Image.NEAREST)
+
+    if marker is not None:
+        ink = (255, 0, 255) if marker_colour == "magenta" else (0, 255, 255)
+        _crosshair(ImageDraw.Draw(picture), marker, rows, scale, picture.size, ink)
+    return _pil_panel(picture, f"frame:{index}", name, width, height)
+
+
+def _crosshair(draw, marker, rows, scale, size, ink):
+    """A gapped crosshair at ``marker`` on a picture of ``rows`` rows scaled by
+    ``scale``, drawn upside down to match ``origin="lower"``."""
+    row, col = marker
+    x = int((col + 0.5) * scale)
+    y = int((rows - 1 - row + 0.5) * scale)
+    gap = max(2 * scale, 4)
+    draw.line([(x, 0), (x, y - gap)], fill=ink)
+    draw.line([(x, y + gap), (x, size[1])], fill=ink)
+    draw.line([(0, y), (x - gap, y)], fill=ink)
+    draw.line([(x + gap, y), (size[0], y)], fill=ink)
+
+
+def _pil_panel(picture, panel, name, width, height):
+    from pygor.review.rasterise import PanelImage, PanelKey, png_size
+
+    buffer = io.BytesIO()
+    picture.save(buffer, format="PNG")
+    png = buffer.getvalue()
+    actual = png_size(png)
+    key = PanelKey(panel=panel, fov_uid=name, condition="", role="",
+                   roi=None, channel=-1, width=width, height=height, dpi=100,
+                   params_hash="", sources=())
+    return PanelImage(png=png, width=actual[0] or width, height=actual[1] or height,
+                      key=key, meta={"panel": panel})
+
+
+# Overlay colours for the draw screen, as RGB.
+FREE_INK = (0, 255, 120)
+BLOCKED_INK = (255, 40, 40)
+OUTLINE_INK = (255, 220, 0)
+HOVER_INK = (255, 140, 0)
+PATH_INK = (255, 0, 255)
+
+
+def edit_preview(projection, limits, rois, width, height, *, pending=None, path=(),
+                 marker=None, name=""):
+    """The draw screen's picture, one block per pixel.
+
+    Through PIL like :func:`frame_preview`, and for a second reason besides
+    speed: drawing an ROI is a decision about individual pixels, and a
+    matplotlib contour smooths over exactly the thing being decided. Here an
+    outline runs along pixel edges and the shape about to be added is tinted
+    pixel by pixel -- green where it will land, red where an existing ROI
+    already owns the pixel and keeps it.
+
+    ``path`` is the lasso so far, as (row, col) vertices. The ROI under
+    ``marker`` is tinted, since that is the one ``x`` would delete.
+    """
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    low, high = limits
+    grey = np.clip((np.asarray(projection, dtype=np.float32) - low) / (high - low), 0, 1)
+    rgb = np.repeat((grey * 255)[..., None], 3, axis=2)
+
+    def tint(where, ink, amount):
+        rgb[where] = rgb[where] * (1 - amount) + np.array(ink) * amount
+
+    if marker is not None and rois[marker] < 0:
+        tint(rois == rois[marker], HOVER_INK, 0.3)
+    if pending is not None:
+        tint(pending & (rois >= 0), FREE_INK, 0.55)
+        tint(pending & (rois < 0), BLOCKED_INK, 0.55)
+
+    rows, cols = grey.shape
+    scale = max(1, min(int(width / cols) or 1, int(height / rows) or 1))
+    # Flipped for origin="lower", like every other view.
+    big = np.repeat(np.repeat(rgb[::-1], scale, 0), scale, 1)
+    labels = np.repeat(np.repeat(rois[::-1], scale, 0), scale, 1)
+    # An edge wherever two neighbouring pixels differ and at least one of them
+    # is an ROI: that outlines each ROI, including two that touch.
+    edge = np.zeros(labels.shape, dtype=bool)
+    down = (labels[1:] != labels[:-1]) & ((labels[1:] < 0) | (labels[:-1] < 0))
+    across = (labels[:, 1:] != labels[:, :-1]) & ((labels[:, 1:] < 0) | (labels[:, :-1] < 0))
+    edge[1:] |= down
+    edge[:, 1:] |= across
+    big[edge] = OUTLINE_INK
+
+    picture = Image.fromarray(big.astype(np.uint8), mode="RGB")
+    draw = ImageDraw.Draw(picture)
+    if path:
+        points = [((c + 0.5) * scale, (rows - 1 - r + 0.5) * scale) for r, c in path]
+        if len(points) > 1:
+            draw.line(points, fill=PATH_INK, width=max(1, scale // 4))
+        for x, y in points:
+            reach = max(1, scale // 3)
+            draw.rectangle([x - reach, y - reach, x + reach, y + reach], fill=PATH_INK)
+    if marker is not None:
+        _crosshair(draw, marker, rows, scale, picture.size, (0, 255, 255))
+    return _pil_panel(picture, "edit", name, width, height)
+
+
+# Past this many triggers, drawing one line each is a filled rectangle: the
+# figure gets a density band and the count in words instead.
+TRIGGER_TICK_LIMIT = 250
+
+
+def trace_figure(trace, width=900, height=260, triggers=None, note="", offset=0.0):
+    """A probed trace as a matplotlib panel, for reading rather than for tracking.
+
+    The braille pane is what follows the cursor; this is what you switch to
+    once you have found the thing you want to look at properly. ``offset`` is
+    where ``trace`` starts, in seconds, when it is a zoomed slice of a longer
+    one.
+    """
+    import numpy as np
+    from matplotlib.figure import Figure
+
+    from pygor.review.rasterise import PanelImage, PanelKey, figure_to_png, png_size
+
+    values = np.asarray(trace.values, dtype=float)
+    figure = Figure(figsize=(width / 100, height / 100), dpi=100)
+    figure.set_facecolor("black")
+    axis = figure.add_axes([0.1, 0.18, 0.88, 0.7])
+    axis.set_facecolor("black")
+    x = offset + (np.arange(len(values)) / len(values) * trace.seconds
+                  if trace.seconds and len(values) else np.arange(len(values)))
+    axis.plot(x, values, color="#7fdfff", linewidth=0.8)
+    if len(values) > 1:
+        axis.set_xlim(x[0], x[-1])
+
+    if triggers is not None and trace.seconds and len(values):
+        end = offset + trace.seconds
+        times = np.asarray(triggers, dtype=float)
+        times = times[(times >= offset) & (times <= end)]
+        if 0 < times.size <= TRIGGER_TICK_LIMIT:
+            for time in times:
+                axis.axvline(time, color="#ff8c42", linewidth=0.4, alpha=0.55)
+        elif times.size:
+            # A histogram rather than 15,000 lines: same information at this
+            # width, a hundredth of the drawing.
+            counts, edges = np.histogram(times, bins=min(200, len(values)),
+                                         range=(offset, end))
+            band = axis.twinx()
+            band.fill_between(edges[:-1], counts, step="post",
+                              color="#ff8c42", alpha=0.18, linewidth=0)
+            band.set_ylim(0, max(counts.max() * 4, 1))
+            band.axis("off")
+
+    axis.set_title(trace.label, color="white", fontsize=8, loc="left")
+    axis.set_xlabel(note or ("seconds" if trace.seconds else "frames"),
+                    color="white", fontsize=7)
+    for spine in axis.spines.values():
+        spine.set_color("#666666")
+    axis.tick_params(colors="#bbbbbb", labelsize=6)
+    png = figure_to_png(figure, dpi=100)
+    actual = png_size(png)
+    key = PanelKey(panel="trace", fov_uid=trace.label, condition="", role="",
+                   roi=None, channel=-1, width=width, height=height, dpi=100,
+                   params_hash="", sources=())
+    return PanelImage(png=png, width=actual[0] or width, height=actual[1] or height,
+                      key=key, meta={"panel": "trace"})
 
 
 def _renderable_class(mode):

@@ -42,12 +42,13 @@ def segmentation_gating(values):
 class ConfirmSave(Screen):
     BINDINGS = [Binding("y", "yes", "yes"), Binding("n,escape", "no", "no")]
 
-    def __init__(self, text):
+    def __init__(self, text, yes="save"):
         super().__init__()
         self.text = text
+        self.yes = yes
 
     def compose(self):
-        yield Vertical(Static(self.text), Static("[b]y[/b] save   [b]n[/b] cancel"),
+        yield Vertical(Static(self.text), Static(f"[b]y[/b] {self.yes}   [b]n[/b] cancel"),
                        id="confirm-box")
 
     def action_yes(self):
