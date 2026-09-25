@@ -248,17 +248,28 @@ class VerdictStore:
                 out.append(Verdict.from_line(line))
         return out
 
+    def _key(self, verdict: Verdict) -> tuple:
+        """A verdict's key within this store.
+
+        One file holds one dataset's verdicts, so the dataset is the store's, not
+        whatever name an old line was written under. Keying on the line's own name
+        would lose every verdict the moment a dataset is renamed; the history keeps
+        the old name, and lookups still find it.
+        """
+        return (self.dataset,) + verdict.key[1:]
+
     def _apply(self, verdict: Verdict) -> None:
         assert self._latest is not None
+        key = self._key(verdict)
         if verdict.retracts:
             self._retracted.add(verdict.retracts)
-            previous = self._latest.get(verdict.key)
+            previous = self._latest.get(key)
             if previous is not None and previous.verdict_id == verdict.retracts:
-                del self._latest[verdict.key]
+                del self._latest[key]
             return
         if verdict.verdict_id in self._retracted:
             return
-        self._latest[verdict.key] = verdict
+        self._latest[key] = verdict
 
     def _load(self) -> dict[tuple, Verdict]:
         if self._latest is None:

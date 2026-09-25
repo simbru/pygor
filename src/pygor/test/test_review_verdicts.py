@@ -259,6 +259,30 @@ class TestRetract:
         assert _store(tmp_path).latest().empty
 
 
+class TestRename:
+    """Renaming a dataset must not orphan the verdicts written under its old name."""
+
+    def test_verdicts_survive_a_rename(self, tmp_path):
+        old = _store(tmp_path)
+        verdict = _cell(old, verdict="keep")
+        old.append(verdict)
+
+        renamed = VerdictStore(tmp_path, "Renamed Dataset", reviewer="tester")
+        found = renamed.get("cell", verdict.subject_uid, verdict.check,
+                            condition="control", role="swn")
+        assert found is not None and found.verdict == "keep"
+        # History is not rewritten: the old line still carries the old name.
+        assert renamed.read_raw()[0].dataset == DATASET
+
+    def test_a_new_verdict_supersedes_one_made_under_the_old_name(self, tmp_path):
+        old = _store(tmp_path)
+        old.append(_cell(old, verdict="keep"))
+
+        renamed = VerdictStore(tmp_path, "Renamed Dataset", reviewer="tester")
+        renamed.append(_cell(renamed, verdict="reject"))
+        assert list(renamed.latest()["verdict"]) == ["reject"]
+
+
 class TestDurability:
     def test_concurrent_appends_do_not_interleave(self, tmp_path):
         """Two reviewers on one dataset must not corrupt each other's lines."""
