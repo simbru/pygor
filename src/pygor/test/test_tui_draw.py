@@ -110,6 +110,147 @@ class TestMaskRules:
         assert compact(rois).tolist() == [[-1, -2, 1, -3]]
 
 
+class TestReconcile:
+    def old(self):
+        rois = empty((1, 6))
+        rois[0] = [-1, -2, -3, -4, 1, 1]
+        return rois
+
+    def test_untouched_mask_keeps_every_row(self):
+        from pygor.tui.roi_edit import reconcile
+
+        layout = reconcile(self.old(), self.old())
+        assert layout.kept == [0, 1, 2, 3] and layout.added == 0
+        assert layout.rois.tolist() == self.old().tolist()
+
+    def test_a_deletion_drops_its_row_and_closes_the_gap(self):
+        from pygor.tui.roi_edit import reconcile
+
+        edited = self.old()
+        edited[0, 1] = 1
+        layout = reconcile(self.old(), edited)
+        assert layout.kept == [0, 2, 3]
+        assert layout.rois.tolist() == [[-1, 1, -2, -3, 1, 1]]
+
+    def test_new_rois_come_after_the_kept_ones(self):
+        from pygor.tui.roi_edit import reconcile
+
+        edited = self.old()
+        edited[0, 0] = 1  # delete the first
+        edited[0, 5] = -9  # add one
+        layout = reconcile(self.old(), edited)
+        assert layout.kept == [1, 2, 3]
+        assert layout.added == 1
+        assert layout.rois.tolist() == [[1, -1, -2, -3, 1, -4]]
+
+    def test_a_reshaped_roi_is_not_a_survivor(self):
+        """Its STRF was computed over other pixels."""
+        from pygor.tui.roi_edit import reconcile
+
+        edited = self.old()
+        edited[0, 4] = -2  # ROI -2 grows by a pixel
+        layout = reconcile(self.old(), edited)
+        assert 1 not in layout.kept
+        assert layout.added == 1
+
+    def test_gaps_in_the_old_ids_are_positional(self):
+        from pygor.tui.roi_edit import reconcile
+
+        old = self.old()
+        old[0] = [-1, -3, -4, -7, 1, 1]  # rows 0..3
+        edited = old.copy()
+        edited[0, 1] = 1  # delete -3, which is row 1
+        assert reconcile(old, edited).kept == [0, 2, 3]
+
+
+class TestApplyMask:
+    """STRF recordings keep strfs row-aligned with ROIs through an edit."""
+
+    def recording(self, recording_path):
+        from pygor.tui import reader
+
+        recording = reader.load_recording(recording_path, None)
+        rois = np.ones((8, 8), dtype=np.int16)
+        for n in range(4):
+            rois[n * 2, 0] = -(n + 1)
+        recording.rois = rois
+        recording.num_rois = 4
+        recording.n_colours = 2
+        # Each STRF filled with its own row number, so rows can be followed.
+        recording.strfs = np.repeat(np.arange(8.0), 3 * 2 * 2).reshape(8, 3, 2, 2)
+        recording.strf_keys = [f"STRF{c}_{r}" for r in range(4) for c in range(2)]
+        recording.num_strfs = 8
+        recording.ipl_depths = np.array([10.0, 20.0, 30.0, 40.0])
+        return recording
+
+    def test_deleting_and_adding_keeps_strfs_aligned(self, recording_path):
+        from pygor.tui.standalone import apply_mask
+
+        recording = self.recording(recording_path)
+        mask = recording.rois.copy()
+        mask[2, 0] = 1  # delete ROI -2, row 1
+        mask[7, 7] = -9  # draw a new one
+        apply_mask(recording, mask)
+
+        assert recording.num_rois == 4
+        assert recording.num_strfs == 8
+        firsts = recording.strfs[:, 0, 0, 0]
+        assert firsts[:6].tolist() == [0.0, 1.0, 4.0, 5.0, 6.0, 7.0]
+        assert np.isnan(firsts[6:]).all()
+        assert recording.ipl_depths[:3].tolist() == [10.0, 30.0, 40.0]
+        assert np.isnan(recording.ipl_depths[3])
+        assert len(recording.strf_keys) == 8
+        assert recording.rois[7, 7] == -4
+        assert recording.traces_raw.shape[0] == 4
+
+    def test_an_unset_n_colours_is_read_off_the_strf_count(self, recording_path):
+        """Saved objects can reload with n_colours None; keep_rois multiplies by it."""
+        from pygor.tui.standalone import apply_mask
+
+        recording = self.recording(recording_path)
+        recording.n_colours = None
+        mask = recording.rois.copy()
+        mask[2, 0] = 1
+        mask[7, 7] = -9
+        apply_mask(recording, mask)
+        assert recording.num_strfs == 8
+        assert np.isnan(recording.strfs[6:, 0, 0, 0]).all()
+
+    def test_strfs_already_out_of_step_are_refused_untouched(self, recording_path):
+        from pygor.tui.standalone import apply_mask
+
+        recording = self.recording(recording_path)
+        recording.strfs = recording.strfs[:7]
+        before = recording.rois.copy()
+        mask = before.copy()
+        mask[2, 0] = 1
+        with pytest.raises(ValueError, match="misaligned"):
+            apply_mask(recording, mask)
+        assert (recording.rois == before).all()
+
+    def test_an_edit_that_only_adds_leaves_existing_strfs_alone(self, recording_path):
+        from pygor.tui.standalone import apply_mask
+
+        recording = self.recording(recording_path)
+        mask = recording.rois.copy()
+        mask[7, 7] = -5
+        apply_mask(recording, mask)
+        assert recording.strfs[:8, 0, 0, 0].tolist() == list(np.arange(8.0))
+        assert recording.num_strfs == 10
+
+
+class TestBackup:
+    def test_the_backup_is_the_original_however_many_saves_follow(self, recording_path):
+        from pygor.tui import reader
+        from pygor.tui.standalone import backup_path, save_recording
+
+        original = recording_path.read_bytes()
+        recording = reader.load_recording(recording_path, None)
+        save_recording(recording, recording_path)
+        save_recording(recording, recording_path)
+        assert backup_path(recording_path).read_bytes() == original
+
+
 class TestEditPreview:
     def picture(self, **kwargs):
         import io
@@ -193,6 +334,14 @@ def draw_app(path):
     caps = Capabilities(mode="halfcell", cell_width=10, cell_height=20,
                         is_tty=True, tmux=False, term="xterm-256color")
     return build_app(path, caps)
+
+
+async def drag(pilot, widget, offset):
+    """A move with the left button held. ``pilot.hover`` sends button 0, which
+    is a move with nothing held and ends a stroke."""
+    from textual.events import MouseMove
+
+    await pilot._post_mouse_events([MouseMove], widget, offset=offset, button=1)
 
 
 async def live(pilot, screen):
@@ -281,8 +430,8 @@ class TestDrawScreen:
             # again for each event rather than held: a stale one reports a
             # zero region and the pilot's event lands on the header.
             await pilot.mouse_down(await live(pilot, screen), offset=(1, 1))
-            await pilot.hover(await live(pilot, screen), offset=(w // 2, 1))
-            await pilot.hover(await live(pilot, screen), offset=(w // 2, h // 2))
+            await drag(pilot, await live(pilot, screen), (w // 2, 1))
+            await drag(pilot, await live(pilot, screen), (w // 2, h // 2))
             await pilot.mouse_up(await live(pilot, screen), offset=(w // 2, h // 2))
             await settle(pilot, lambda: screen._stroke is None)
             seen["path"] = list(screen.path)
@@ -291,6 +440,34 @@ class TestDrawScreen:
         assert len(seen["path"]) == 3
         # Top-left of the picture is the last row: origin="lower".
         assert seen["path"][0] == (7, 0)
+
+    def test_a_release_the_screen_never_saw_still_ends_the_stroke(self, recording_path):
+        """Let go outside the window and no mouse-up arrives; the next move,
+        with no button held, has to end the stroke instead."""
+        pytest.importorskip("textual_image")
+        app = draw_app(recording_path)
+        seen = {}
+
+        async def steps(pilot):
+            screen = await open_draw(pilot, app)
+            await pilot.press("l")
+            widget = await live(pilot, screen)
+            w, h = widget.size.width, widget.size.height
+            await pilot.mouse_down(await live(pilot, screen), offset=(1, 1))
+            await drag(pilot, await live(pilot, screen), (w // 2, 1))
+            await pilot.hover(await live(pilot, screen), offset=(w // 2, h // 2))
+            await settle(pilot, lambda: screen._stroke is None)
+            seen["stroke"] = screen._stroke
+            seen["path"] = list(screen.path)
+            await pilot.hover(await live(pilot, screen), offset=(w - 2, h - 2))
+            for _ in range(5):
+                await pilot.pause()
+            seen["path_after"] = list(screen.path)
+
+        run_app(app, steps)
+        assert seen["stroke"] is None
+        assert len(seen["path"]) == 2
+        assert seen["path_after"] == seen["path"]
 
     def test_clicks_add_vertices_one_at_a_time(self, recording_path):
         pytest.importorskip("textual_image")
@@ -323,6 +500,25 @@ class TestDrawScreen:
 
         run_app(app, steps)
         assert seen["count"] == 0
+
+    def test_edits_are_refused_while_a_save_runs(self, recording_path):
+        """The save ends by reloading the mask it wrote; an edit made meanwhile
+        would be silently dropped."""
+        from pygor.tui.roi_edit import count
+
+        app = draw_app(recording_path)
+        seen = {}
+
+        async def steps(pilot):
+            screen = await open_draw(pilot, app)
+            screen.saving = True
+            await pilot.press("enter")
+            seen["count"] = count(screen.rois)
+            seen["history"] = len(screen.history)
+
+        run_app(app, steps)
+        assert seen["count"] == 0
+        assert seen["history"] == 0
 
     def test_escape_with_edits_asks_before_discarding(self, recording_path):
         from pygor.tui.draw_screen import DrawScreen

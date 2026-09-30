@@ -28,8 +28,6 @@ class Added:
 
 def background_value(rois) -> int:
     """The value the mask already uses for "no ROI"."""
-    import numpy as np
-
     free = rois[rois >= 0]
     return int(free.flat[0]) if free.size else 1
 
@@ -65,9 +63,10 @@ def polygon(shape, vertices):
         rs = np.array([v[0] for v in vertices], dtype=float)
         cs = np.array([v[1] for v in vertices], dtype=float)
         region[fill(rs, cs, shape=shape)] = True
-    # The outline segment by segment, closing back to the start.
+    # The outline segment by segment, closing back to the start. A single
+    # vertex is a segment from itself to itself: one pixel.
     closed = [*vertices, vertices[0]] if len(vertices) > 2 else list(vertices)
-    for (r0, c0), (r1, c1) in zip(closed, closed[1:] or closed):
+    for (r0, c0), (r1, c1) in zip(closed, closed[1:] or closed, strict=False):
         rr, cc = line(int(r0), int(c0), int(r1), int(c1))
         keep = (rr >= 0) & (rr < shape[0]) & (cc >= 0) & (cc < shape[1])
         region[rr[keep], cc[keep]] = True
@@ -115,6 +114,48 @@ def compact(rois):
     for new, old in enumerate(ids, start=1):
         out[rois == old] = -new
     return out
+
+
+@dataclass(frozen=True)
+class Reconciled:
+    """An edited mask laid out against the one it was edited from."""
+
+    rois: object  # np.ndarray, ids -1..-n
+    kept: list  # row indices into the old mask's ROIs, in order
+    added: int  # ROIs after the kept ones that are new
+
+
+def reconcile(old, edited) -> Reconciled:
+    """Lay ``edited`` out so every per-ROI array of ``old`` can follow it.
+
+    An old ROI survives if exactly its pixels are one ROI in ``edited``;
+    anything else -- a deleted cell, a new one, an old one reshaped -- is not a
+    survivor. Survivors take rows 0..k-1 in their old order, so an array
+    indexed like ``old`` follows by keeping rows ``kept``; everything else
+    comes after, and has no row to inherit.
+
+    Rows of ``old`` are positional (see ``probe.roi_ids``), so a mask with
+    gaps in its ids is handled; the result never has gaps.
+    """
+    import numpy as np
+
+    old_ids = sorted(np.unique(old[old < 0]).tolist(), reverse=True) if old is not None else []
+    edited_ids = sorted(np.unique(edited[edited < 0]).tolist(), reverse=True)
+
+    survivor_of = {}  # edited id -> old row
+    for row, old_id in enumerate(old_ids):
+        pixels = old == old_id
+        values = np.unique(edited[pixels])
+        if (values.size == 1 and values[0] < 0
+                and int((edited == values[0]).sum()) == int(pixels.sum())):
+            survivor_of[int(values[0])] = row
+
+    kept_ids = sorted(survivor_of, key=survivor_of.get)
+    order = kept_ids + [i for i in edited_ids if i not in survivor_of]
+    out = np.full(edited.shape, background_value(edited), dtype=edited.dtype)
+    for n, roi_id in enumerate(order):
+        out[edited == roi_id] = -(n + 1)
+    return Reconciled(out, [survivor_of[i] for i in kept_ids], len(order) - len(kept_ids))
 
 
 def count(rois) -> int:

@@ -15,6 +15,7 @@ from __future__ import annotations
 from textual import work
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.markup import escape
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
@@ -165,8 +166,8 @@ class ReprocessScreen(Screen):
     def finished(self, result, overrides, error):
         self.running = False
         if error:
-            self.set_status(f"failed: {error}")
-            self.app.notify(error, severity="error", timeout=12)
+            self.set_status(f"failed: {escape(error)}")
+            self.app.notify(error, severity="error", timeout=12, markup=False)
             return
         self.result = result
         self.result_overrides = overrides
@@ -185,7 +186,8 @@ class ReprocessScreen(Screen):
         try:
             self.save_fn(self.result, self.result_overrides)
         except Exception as error:
-            self.app.notify(f"save failed: {error}", severity="error", timeout=12)
+            self.app.notify(f"save failed: {error}", severity="error", timeout=12,
+                            markup=False)
             return
         self.app.notify("saved")
         self.result = None

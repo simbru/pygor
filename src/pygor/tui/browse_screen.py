@@ -14,10 +14,29 @@ import pathlib
 from textual import work
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.markup import escape
 from textual.screen import Screen
 from textual.widgets import DirectoryTree, Footer, Header, Static
 
 from pygor.tui import reader
+
+
+def post_if_current(app, callback, *args) -> bool:
+    """Hand a thread worker's result to the interface, unless it is stale.
+
+    ``exclusive=True`` only marks the superseded worker cancelled: a thread
+    cannot be stopped, so it runs on and posts its result anyway. Two renders
+    in flight -- a held arrow key, a zoom pressed twice while a figure draws --
+    can then finish out of order, and the older one lands last and stays: a
+    crosshair or trace for a place the status line says you have left.
+    Checked here, the older one drops its result instead.
+    """
+    from textual.worker import get_current_worker
+
+    if get_current_worker().is_cancelled:
+        return False
+    app.call_from_thread(callback, *args)
+    return True
 
 
 class RecordingTree(DirectoryTree):
@@ -40,17 +59,20 @@ class RecordingTree(DirectoryTree):
 def _file_facts(path: pathlib.Path) -> str:
     import datetime
 
+    # File names are escaped: a "[copy]" in one is otherwise read as a style
+    # and silently vanishes, and a "[/" raises.
+    name = escape(path.name)
     try:
         stat = path.stat()
     except OSError as error:
-        return f"{path.name}\n\n[red]{error}[/red]"
+        return f"{name}\n\n[red]{escape(str(error))}[/red]"
     when = datetime.datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
     return (
-        f"[b]{path.name}[/b]\n\n"
+        f"[b]{name}[/b]\n\n"
         f"{reader.KINDS.get(reader.kind(path), 'directory')}\n"
         f"{stat.st_size / 1e6:.1f} MB\n"
         f"modified {when}\n\n"
-        f"[dim]{path.parent}[/dim]\n\n"
+        f"[dim]{escape(str(path.parent))}[/dim]\n\n"
         "enter to open"
     )
 
@@ -124,7 +146,8 @@ class TracePane(Vertical):
         # in, and two widgets sharing an id wedge the message pump rather than
         # raising anywhere visible.
         self.remove_children()
-        self.mount(Static(text, classes="trace-text"))
+        # Never markup: this is a plot, an ROI label or an exception message.
+        self.mount(Static(text, classes="trace-text", markup=False))
 
     def show_panel(self, panel_image) -> None:
         from pygor.tui.imaging import describe_panel, fit_cells, make_widget
@@ -318,7 +341,8 @@ class InspectScreen(ImagePointer, Screen):
     def load_failed(self, message):
         from pygor.tui.app import PanelView
 
-        self.query_one("#meta", Static).update(f"[red]could not open[/red]\n\n{message}")
+        self.query_one("#meta", Static).update(
+            f"[red]could not open[/red]\n\n{escape(message)}")
         self.query_one("#inspect-preview", PanelView).show_message(
             "nothing to draw: the recording did not load"
         )
@@ -328,7 +352,8 @@ class InspectScreen(ImagePointer, Screen):
         rows = reader.summarise(self.recording)
         width = max(len(label) for label, _ in rows)
         self.query_one("#meta", Static).update(
-            "\n".join(f"[dim]{label.rjust(width)}[/dim]  {value}" for label, value in rows)
+            "\n".join(f"[dim]{label.rjust(width)}[/dim]  {escape(value)}"
+                      for label, value in rows)
         )
 
     def loaded(self, recording):
@@ -560,7 +585,8 @@ class InspectScreen(ImagePointer, Screen):
 
     @work(thread=True, exclusive=True, group="preview")
     def render_preview(self, which, frame, marker):
-        """Render the current view. Exclusive, so a scrub abandons stale frames."""
+        """Render the current view; a frame superseded mid-render is dropped
+        (see :func:`post_if_current`)."""
         from pygor.tui.app import PanelView
         from pygor.tui.imaging import frame_preview, recording_preview
         from pygor.tui.probe import display_range
@@ -585,10 +611,10 @@ class InspectScreen(ImagePointer, Screen):
             import traceback
 
             self.log(traceback.format_exc())
-            self.app.call_from_thread(
-                view.show_message, f"preview failed: {type(error).__name__}: {error}")
+            post_if_current(self.app, view.show_message,
+                            escape(f"preview failed: {type(error).__name__}: {error}"))
             return
-        self.app.call_from_thread(view.show, image)
+        post_if_current(self.app, view.show, image)
 
     # -- trace ------------------------------------------------------------
 
@@ -631,17 +657,28 @@ class InspectScreen(ImagePointer, Screen):
                 body = framed(part.values, cols=cols, rows=rows, x_min=start, x_max=end,
                               x_unit=unit, events=events, event_note=note)
                 first = body.splitlines()[0]
-                self._trace_view = (part, start, end, first.index("│") + 1, cols)
-                self.app.call_from_thread(pane.show_text, f"{label}\n{body}")
+                view = (part, start, end, first.index("│") + 1, cols)
+                post_if_current(self.app, self._trace_ready, view,
+                                pane.show_text, f"{label}\n{body}")
             else:
                 width, height = pane.size_px()
                 panel = trace_figure(replace(part, label=label), width=width, height=height,
                                      triggers=events, note=note, offset=start)
-                self._trace_view = (part, start, end, 0, cols)
-                self.app.call_from_thread(pane.show_panel, panel)
+                post_if_current(self.app, self._trace_ready, (part, start, end, 0, cols),
+                                pane.show_panel, panel)
         except Exception as error:
             import traceback
 
             self.log(traceback.format_exc())
-            self.app.call_from_thread(
-                pane.show_text, f"trace failed: {type(error).__name__}: {error}")
+            post_if_current(self.app, self._trace_ready, None, pane.show_text,
+                            f"trace failed: {type(error).__name__}: {error}")
+
+    def _trace_ready(self, view, show, content):
+        """Show a rendered trace and record its geometry, together.
+
+        On the main thread, so the pointer readout never maps a position with
+        one trace's geometry onto a pane showing another -- and after a
+        failure it has nothing to map, rather than the last good trace's.
+        """
+        self._trace_view = view
+        show(content)

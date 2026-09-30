@@ -66,6 +66,20 @@ def _shape(array) -> str:
     return "x".join(str(n) for n in array.shape)
 
 
+def _count(value) -> int | None:
+    """How many of something, or None for nothing, for a value that may be an
+    array, a NaN placeholder, or an H5 scalar ``try_fetch`` passed through
+    unconverted -- ``len()`` raises on the last two."""
+    import numpy as np
+
+    if value is None:
+        return None
+    array = np.asarray(value)
+    if array.ndim == 0:
+        return None if array.dtype.kind == "f" and np.isnan(array) else 1
+    return len(array)
+
+
 def summarise(recording) -> list[tuple[str, str]]:
     """Label/value rows describing a loaded recording.
 
@@ -101,8 +115,8 @@ def summarise(recording) -> list[tuple[str, str]]:
     else:
         rows.append(("ROIs", f"{n_rois} on {_shape(rois)}"))
 
-    triggers = getattr(recording, "triggertimes", None)
-    rows.append(("triggers", "none" if triggers is None else str(len(triggers))))
+    triggers = _count(getattr(recording, "triggertimes", None))
+    rows.append(("triggers", "none" if triggers is None else str(triggers)))
     rows.append(("trigger mode", str(getattr(recording, "trigger_mode", "?"))))
 
     try:
@@ -110,8 +124,9 @@ def summarise(recording) -> list[tuple[str, str]]:
     except Exception:
         rows.append(("registered", "unknown"))
 
-    depths = getattr(recording, "ipl_depths", None)
-    rows.append(("IPL depths", "none" if depths is None else f"{len(depths)} values"))
+    depths = _count(getattr(recording, "ipl_depths", None))
+    rows.append(("IPL depths", "none" if depths is None
+                 else f"{depths} value{'s' if depths != 1 else ''}"))
 
     # np.nan is the "not computed" sentinel on Core for these, so a bare
     # `is None` check reports an absent average as present.

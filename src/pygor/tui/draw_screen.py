@@ -16,11 +16,12 @@ from __future__ import annotations
 from textual import work
 from textual.binding import Binding
 from textual.containers import Horizontal
+from textual.markup import escape
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
 from pygor.tui import roi_edit
-from pygor.tui.browse_screen import ImagePointer
+from pygor.tui.browse_screen import ImagePointer, post_if_current
 from pygor.tui.reprocess_screen import ConfirmSave
 
 HELP = """[b]draw ROIs[/b]
@@ -110,6 +111,10 @@ class DrawScreen(ImagePointer, Screen):
         self._redraw_timer = None
         self._panel_region = None
         self.saved = False
+        # True while a save runs in its worker. Edits are refused meanwhile:
+        # the save ends by reloading the mask it wrote, which would silently
+        # discard anything drawn in the few seconds trace extraction takes.
+        self.saving = False
 
     # -- layout -------------------------------------------------------------
 
@@ -208,10 +213,10 @@ class DrawScreen(ImagePointer, Screen):
             import traceback
 
             self.log(traceback.format_exc())
-            self.app.call_from_thread(
-                view.show_message, f"preview failed: {type(error).__name__}: {error}")
+            post_if_current(self.app, view.show_message,
+                            escape(f"preview failed: {type(error).__name__}: {error}"))
             return
-        self.app.call_from_thread(view.show, panel)
+        post_if_current(self.app, view.show, panel)
 
     def changed(self, text=None, *, now=False):
         self.set_status(text)
@@ -273,6 +278,14 @@ class DrawScreen(ImagePointer, Screen):
     def on_mouse_move(self, event):
         if self._stroke is None:
             return
+        # Textual runs the terminal in any-motion mode, where a move reports
+        # the button held and 0 when none is. A move with nothing held means
+        # the release happened where this screen could not see it -- outside
+        # the window, or on another widget that kept it -- so the stroke ends
+        # here rather than following a pointer that is no longer dragging.
+        if not event.button:
+            self.end_stroke()
+            return
         found = self.pixel_under(event.screen_x, event.screen_y)
         if found is None or found == self._stroke[-1]:
             return
@@ -284,6 +297,9 @@ class DrawScreen(ImagePointer, Screen):
         self.changed()
 
     def on_mouse_up(self, event):
+        self.end_stroke()
+
+    def end_stroke(self):
         stroke, self._stroke = self._stroke, None
         if stroke is None:
             return
@@ -297,7 +313,14 @@ class DrawScreen(ImagePointer, Screen):
 
     # -- edits --------------------------------------------------------------
 
+    def busy(self):
+        if self.saving:
+            self.app.notify("still saving", severity="warning")
+        return self.saving
+
     def action_commit(self):
+        if self.busy():
+            return
         region = self.pending()
         if region is None:
             self.app.notify("a lasso needs at least three vertices", severity="warning")
@@ -316,6 +339,8 @@ class DrawScreen(ImagePointer, Screen):
         self.changed(note, now=True)
 
     def action_delete(self):
+        if self.busy():
+            return
         roi_id = int(self.rois[self.cursor])
         if roi_id >= 0:
             self.app.notify("the cursor is not on an ROI", severity="warning")
@@ -325,6 +350,8 @@ class DrawScreen(ImagePointer, Screen):
         self.changed(f"deleted ROI {roi_id}", now=True)
 
     def action_undo(self):
+        if self.busy():
+            return
         if not self.history:
             self.app.notify("nothing to undo", severity="warning")
             return
@@ -334,6 +361,8 @@ class DrawScreen(ImagePointer, Screen):
     # -- leaving ------------------------------------------------------------
 
     def action_save(self):
+        if self.busy():
+            return
         if not self.dirty:
             self.app.notify("no edits to save", severity="warning")
             return
@@ -341,6 +370,7 @@ class DrawScreen(ImagePointer, Screen):
 
     def _save_confirmed(self, yes):
         if yes:
+            self.saving = True
             self.set_status("saving: re-extracting traces…")
             self.save_worker(self.rois)
 
@@ -352,20 +382,28 @@ class DrawScreen(ImagePointer, Screen):
             import traceback
 
             self.log(traceback.format_exc())
-            self.app.call_from_thread(self.app.notify, f"save failed: {error}",
-                                      severity="error", timeout=12)
+            self.app.call_from_thread(self._save_failed, f"{type(error).__name__}: {error}")
             return
         self.app.call_from_thread(self._saved)
+
+    def _save_failed(self, message):
+        self.saving = False
+        self.app.notify(f"save failed: {message}", severity="error", timeout=12,
+                        markup=False)
+        self.set_status("save failed; edits kept")
 
     def _saved(self):
         # Ids were compacted on the way out; show what is on disk now.
         self.rois = self.recording.rois.copy()
         self.history = []
+        self.saving = False
         self.saved = True
         self.app.notify("saved")
         self.changed("saved; esc to go back", now=True)
 
     def action_back(self):
+        if self.busy():
+            return
         if self.path or self._stroke:
             self.path, self._stroke = [], None
             self.changed("lasso cleared", now=True)

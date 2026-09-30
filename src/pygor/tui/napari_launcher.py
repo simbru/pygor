@@ -34,12 +34,14 @@ def spawn(args, *, label):
     if not ok:
         return None, why
     log = pathlib.Path(tempfile.gettempdir()) / f"pygor-napari-{label}.log"
-    handle = log.open("w")
-    process = subprocess.Popen(
-        [sys.executable, "-m", "pygor.tui.napari_launcher", *args],
-        stdin=subprocess.DEVNULL, stdout=handle, stderr=handle,
-        start_new_session=True,
-    )
+    # The child gets its own copy of the descriptor; ours is closed at once
+    # rather than held for the life of the TUI, one per launch.
+    with log.open("w") as handle:
+        process = subprocess.Popen(
+            [sys.executable, "-m", "pygor.tui.napari_launcher", *args],
+            stdin=subprocess.DEVNULL, stdout=handle, stderr=handle,
+            start_new_session=True,
+        )
     return process, f"napari starting (log: {log})"
 
 

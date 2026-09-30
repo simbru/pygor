@@ -134,6 +134,16 @@ class TestSummarise:
         assert rows["registered"] == "unknown"
         assert rows["ROIs"] == "4 on 8x8"
 
+    def test_scalar_placeholders_are_counted_not_len_d(self):
+        """try_fetch can hand back a scalar, and len() of one raises."""
+        class Scalars(Fake):
+            triggertimes = np.nan
+            ipl_depths = np.float64(3.0)
+
+        rows = summary_of(Scalars())
+        assert rows["triggers"] == "none"
+        assert rows["IPL depths"] == "1 value"
+
 
 class TestTreeFilter:
     @pytest.fixture
@@ -392,6 +402,70 @@ class TestScreens:
 
         run_app(app, steps)
         assert "could not open" in seen["meta"]
+
+    def test_an_error_with_brackets_is_shown_as_written(self, tmp_path):
+        """Markup in an exception message used to vanish or raise MarkupError."""
+        pytest.importorskip("textual")
+        from textual.widgets import Static
+
+        from pygor.tui.browse_screen import InspectScreen
+
+        broken = tmp_path / "broken.recording.h5"
+        broken.write_bytes(b"not an h5 file")
+        app = self._app(broken)
+        seen = {}
+
+        async def steps(pilot):
+            await settle(pilot, app, lambda: isinstance(app.screen, InspectScreen)
+                         and "could not open" in text_of(app.screen, "#meta"))
+            app.screen.load_failed("KeyError: '[/]' in [copy]")
+            await pilot.pause()
+            seen["meta"] = str(app.screen.query_one("#meta", Static).render())
+
+        run_app(app, steps)
+        assert "KeyError: '[/]' in [copy]" in seen["meta"]
+
+
+class TestMarkupSafety:
+    def test_file_facts_keep_brackets_in_names(self, tmp_path):
+        pytest.importorskip("textual")
+        from textual.content import Content
+
+        from pygor.tui.browse_screen import _file_facts
+
+        path = tmp_path / "cell [copy].recording.h5"
+        path.touch()
+        assert "cell [copy].recording.h5" in Content.from_markup(_file_facts(path)).plain
+
+    def test_a_stale_render_does_not_overwrite_a_newer_one(self):
+        """exclusive=True only marks a thread worker cancelled; it still runs."""
+        pytest.importorskip("textual")
+        import time
+
+        from textual import work
+        from textual.app import App
+
+        from pygor.tui.browse_screen import post_if_current
+
+        shown = []
+
+        class Racer(App):
+            @work(thread=True, exclusive=True, group="g")
+            def render(self, tag, delay):
+                time.sleep(delay)
+                post_if_current(self, shown.append, tag)
+
+        async def body():
+            app = Racer()
+            async with app.run_test() as pilot:
+                app.render("old", 0.4)
+                await asyncio.sleep(0.05)
+                app.render("new", 0.0)
+                await asyncio.sleep(0.6)
+                await pilot.pause()
+
+        asyncio.run(body())
+        assert shown == ["new"]
 
 
 class TestUnsegmentedPreview:

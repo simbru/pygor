@@ -28,7 +28,7 @@ cannot, with the count, period and any gaps stated underneath.
 this recording's own ``segment_rois``. ``d`` opens a screen for drawing ROIs by
 hand -- a disk or a lasso, added where no existing ROI already is, deleted with
 ``x``. Both work in memory; nothing is written until save is pressed and
-confirmed, and the previous file is kept as ``.presegment``.
+confirmed, and the first save keeps the original file as ``.presegment``.
 
 Steps beyond segmentation (trace extraction, STA) are deliberately not run
 here yet: which of them apply, and with what trigger mode, is a property of the
@@ -102,12 +102,22 @@ def saved_path(source) -> pathlib.Path:
     return source.with_name(source.stem + ".recording.h5")
 
 
+def backup_path(source) -> pathlib.Path:
+    return saved_path(source).with_name(saved_path(source).name + ".presegment")
+
+
 def save_recording(recording, source) -> None:
-    """Write ``recording`` to :func:`saved_path`, keeping what was there as
-    ``.presegment``."""
+    """Write ``recording`` to :func:`saved_path`.
+
+    The first save keeps the file it replaces as ``.presegment``, and no later
+    save touches that backup: it stays the recording as it was before anyone
+    edited it here, however many saves follow. One backup rather than one per
+    save, so a directory of recordings does not fill with versions.
+    """
     target = saved_path(source)
-    if target.exists():
-        shutil.copy2(target, target.with_suffix(target.suffix + ".presegment"))
+    backup = backup_path(source)
+    if target.exists() and not backup.exists():
+        shutil.copy2(target, backup)
     recording.save_object(target.with_name(target.name.removesuffix(".recording.h5")),
                           overwrite=True)
 
@@ -118,27 +128,94 @@ def _present(value) -> bool:
     return isinstance(value, np.ndarray) and value.size > 0
 
 
-def apply_mask(recording, mask) -> None:
-    """Put a hand-edited mask on ``recording`` and bring its traces along.
+def _padded(array, n_rows):
+    """``array`` with ``n_rows`` rows of NaN appended, or as it was if it is
+    not a per-ROI array."""
+    import numpy as np
 
-    ``segment_rois`` swaps the mask and leaves traces for the reader to
-    re-extract; a hand edit cannot, because the inspector reads per-ROI rows
-    by position and a deleted ROI would shift every later cell onto its
-    neighbour's trace. So traces are re-extracted here, and snippets and
-    averages recomputed if the recording had them. STRFs are not: they need
-    the noise stimulus and minutes of compute, and the save confirmation says
-    they are stale.
+    if not _present(array) or n_rows == 0:
+        return array
+    pad = np.full((n_rows, *array.shape[1:]), np.nan,
+                  dtype=np.result_type(array.dtype, np.float32))
+    return np.concatenate([array.astype(pad.dtype, copy=False), pad])
+
+
+def apply_mask(recording, mask) -> None:
+    """Put a hand-edited mask on ``recording`` and keep every per-ROI array aligned.
+
+    Deleted ROIs are dropped through the recording's own ``keep_rois``, which
+    on an STRF recording also drops their STRFs and keys and clears the STRF
+    caches. ROIs that survived untouched keep everything they had. New ROIs
+    are appended after them with NaN STRFs, quality indices and IPL depths:
+    not computed, rather than a neighbour's. Traces are re-extracted for all,
+    and snippets and averages recomputed if the recording had them.
+
+    Without this, 72 ROIs saved over 444 STRFs reload silently and every STRF
+    after the first deleted cell belongs to the wrong one.
     """
     import numpy as np
 
     from pygor.tui import roi_edit
 
+    old = getattr(recording, "rois", None)
     previous = getattr(recording, "roi_origin", None)
-    dtype = recording.rois.dtype if getattr(recording, "rois", None) is not None else np.int16
-    mask = roi_edit.compact(mask).astype(dtype)
     had_averages = _present(getattr(recording, "averages", None))
-    recording.update_rois(mask)
-    recording.num_rois = roi_edit.count(mask)
+    layout = roi_edit.reconcile(old, mask)
+    n_old = roi_edit.count(old) if old is not None else 0
+    strfs = getattr(recording, "strfs", None)
+    if _present(strfs) and n_old:
+        # Checked before anything is changed: a row count that does not divide
+        # means the file was already out of step, and dropping rows from it by
+        # arithmetic would only move the error somewhere harder to see.
+        if len(strfs) % n_old:
+            raise ValueError(
+                f"{len(strfs)} STRFs do not divide among {n_old} ROIs; this recording's "
+                f"STRFs are already misaligned, so they cannot be carried through an edit")
+        # Saved objects can come back with n_colours unset, and keep_rois
+        # multiplies by it.
+        if not getattr(recording, "n_colours", None):
+            recording.n_colours = len(strfs) // n_old
+
+    if old is not None and len(layout.kept) < n_old:
+        # keep_rois maps row i to id -(i+1), so hand it a mask where that holds.
+        recording.rois = roi_edit.compact(old)
+        # It also reads these unguarded, and an object that never had traces
+        # extracted has no such attributes at all. They are recomputed below.
+        for attribute in ("traces_raw", "traces_znorm", "averages", "snippets",
+                          "quality_indices"):
+            if not hasattr(recording, attribute):
+                setattr(recording, attribute, None)
+        # ipl_depths is per ROI, but keep_rois does not subset it.
+        depths = getattr(recording, "ipl_depths", None)
+        recording.keep_rois(layout.kept)
+        if _present(depths) and len(depths) == n_old:
+            recording.ipl_depths = depths[layout.kept]
+
+    if layout.added:
+        n_colours = getattr(recording, "n_colours", 1) or 1
+        strfs = getattr(recording, "strfs", None)  # keep_rois may have replaced it
+        if _present(strfs):
+            recording.strfs = _padded(strfs, layout.added * n_colours)
+            keys = list(getattr(recording, "strf_keys", []) or [])
+            first = len(layout.kept)
+            keys += [f"STRF{c}_{first + n}" for n in range(layout.added)
+                     for c in range(n_colours)]
+            recording.strf_keys = keys
+            recording.num_strfs = len(recording.strfs)
+            recording._invalidate_strf_caches()
+        for attribute in ("quality_indices", "ipl_depths"):
+            value = getattr(recording, attribute, None)
+            if _present(value) and len(value) == len(layout.kept):
+                setattr(recording, attribute, _padded(value, layout.added))
+        sizes = getattr(recording, "roi_sizes", None)
+        if _present(sizes) and len(sizes) == len(layout.kept):
+            new = [int((layout.rois == -(len(layout.kept) + n + 1)).sum())
+                   for n in range(layout.added)]
+            recording.roi_sizes = np.concatenate([sizes, np.asarray(new, dtype=sizes.dtype)])
+
+    dtype = old.dtype if old is not None else np.int16
+    recording.update_rois(layout.rois.astype(dtype))
+    recording.num_rois = roi_edit.count(layout.rois)
     recording.roi_origin = {
         "method": "manual", "source": recording.name,
         "edited_from": previous.get("method") if isinstance(previous, dict) else None,
@@ -164,13 +241,22 @@ def make_draw_screen(recording, source, caps):
         save_recording(recording, source)
 
     def describe_save(mask):
-        text = (f"Save {roi_edit.count(mask)} ROIs to {target.name}? Ids are renumbered "
-                f"without gaps and traces re-extracted. The old file is kept as "
-                f".presegment.")
-        strfs = getattr(recording, "strfs", None)
-        if _present(strfs):
-            text += (f"\n\n[b]The {len(strfs)} STRFs on this recording were computed "
-                     f"from the old ROIs and are not recomputed here.[/b]")
+        from textual.markup import escape
+
+        layout = roi_edit.reconcile(getattr(recording, "rois", None), mask)
+        n_old = roi_edit.count(recording.rois) if recording.rois is not None else 0
+        deleted = n_old - len(layout.kept)
+        text = (f"Save {roi_edit.count(mask)} ROIs to {escape(target.name)}? "
+                f"({len(layout.kept)} kept, {deleted} deleted, {layout.added} new.) "
+                f"Ids are renumbered without gaps and traces re-extracted.")
+        text += ("\n\nThe file as it is now is kept as .presegment."
+                 if not backup_path(source).exists() else
+                 "\n\nThe .presegment backup of the original is left as it is.")
+        if _present(getattr(recording, "strfs", None)) and (deleted or layout.added):
+            text += "\n\n[b]STRFs:[/b] deleted ROIs' STRFs are dropped, the rest kept."
+            if layout.added:
+                text += (f" The {layout.added} new ROIs get empty (NaN) STRFs until "
+                         f"STRFs are recomputed.")
         return text
 
     return DrawScreen(recording, caps=caps, save=save, describe_save=describe_save)
@@ -183,6 +269,8 @@ def make_reprocess_screen(recording, source, caps):
     with a recording it loaded itself, and the two must agree on where a save
     goes.
     """
+    from textual.markup import escape
+
     from pygor.tui.imaging import PREVIEWS, recording_preview
     from pygor.tui.reprocess_screen import ReprocessScreen, segmentation_gating
 
@@ -205,7 +293,8 @@ def make_reprocess_screen(recording, source, caps):
         title=f"{recording.name}  ({recording.num_rois} ROIs on disk)",
         values=values, sections=SECTIONS, run=run, preview=preview,
         save=save, caps=caps, previews=PREVIEWS, choices=choices, gates=gates,
-        save_text=f"Overwrite {source.name}? The old file is kept as .presegment.",
+        save_text=(f"Overwrite {escape(saved_path(source).name)}? The first save keeps "
+                   f"the original as .presegment; later saves leave that backup alone."),
     )
 
 
