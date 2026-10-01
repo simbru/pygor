@@ -52,12 +52,22 @@ def load_wDataCh0(HDF5_file):
 
 
 def metadata_dict(HDF5_file):
+    from pygor.preproc import wparams
+
     date, time = get_experiment_datetime(HDF5_file["wParamsStr"])
+    wparamsnum_ds = HDF5_file["wParamsNum"]
     metadata_dict = {
         "filename": HDF5_file.filename,
         "exp_date": date,
         "exp_time": time,
-        "objectiveXYZ": get_rel_objective_XYZ(HDF5_file["wParamsNum"]),
+        "objectiveXYZ": get_rel_objective_XYZ(wparamsnum_ds),
+        # Every labelled ScanM parameter, keyed the same way as for raw ScanM
+        # loads (pygor.preproc.scanm.scanm_metadata).
+        "wParamsNum": wparams.wparamsnum_to_dict(
+            wparamsnum_ds[()],
+            wparamsnum_ds.attrs.get("IGORWaveDimensionLabels"),
+        ),
+        "wParamsStr": wparams.wparamsstr_to_dict(HDF5_file["wParamsStr"][()]),
     }
     return metadata_dict
 
