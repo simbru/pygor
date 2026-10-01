@@ -294,9 +294,6 @@ class Core:
         # Compute timing parameters
         timing = scanm_module._compute_timing_params(header, images)
 
-        # Parse datetime
-        exp_date, exp_time = scanm_module._parse_scanm_datetime(header)
-
         # Detect triggers
         if trigger_channel in channel_data:
             trigger_stack = channel_data[trigger_channel][:actual_frames]
@@ -341,29 +338,7 @@ class Core:
         )
 
         # Metadata
-        self.metadata = {
-            "filename": str(self.filename),
-            "exp_date": exp_date,
-            "exp_time": exp_time,
-            "objectiveXYZ": (
-                header.get("XCoord_um"),
-                header.get("YCoord_um"),
-                header.get("ZCoord_um"),
-            ),
-            "PixelDuration_us": header.get("PixelDuration"),
-            "RetracePixels": header.get("RtrcLen"),
-            "LineOffset": header.get("LineOffSet"),
-            "FrameWidth": header.get("FrameWidth"),
-            "FrameHeight": header.get("FrameHeight"),
-            "NumberOfFrames": header.get("NumberOfFrames"),
-            "FrameCounter": header.get("FrameCounter"),
-            "StimBufPerFr": header.get("StimBufPerFr"),
-            "ScanMode": header.get("ScanMode"),
-            "Zoom": header.get("Zoom"),
-            "Angle": header.get("Angle"),
-            "User": header.get("User"),
-            "Comment": header.get("Comment"),
-        }
+        self.metadata = scanm_module.scanm_metadata(self.filename, header)
 
         # ROI-related (initially empty)
         self.rois = None
@@ -520,9 +495,6 @@ class Core:
         # Compute timing parameters
         timing = scanm_module._compute_timing_params(header, images)
 
-        # Parse datetime
-        exp_date, exp_time = scanm_module._parse_scanm_datetime(header)
-
         # Detect triggers
         if trigger_channel in channel_data:
             trigger_stack = channel_data[trigger_channel][:actual_frames]
@@ -575,30 +547,7 @@ class Core:
         )
 
         # Metadata - preserve all relevant header info
-        instance.metadata = {
-            "filename": str(path),
-            "exp_date": exp_date,
-            "exp_time": exp_time,
-            "objectiveXYZ": (
-                header.get("XCoord_um"),
-                header.get("YCoord_um"),
-                header.get("ZCoord_um"),
-            ),
-            # Preserve additional ScanM-specific metadata
-            "PixelDuration_us": header.get("PixelDuration"),
-            "RetracePixels": header.get("RtrcLen"),
-            "LineOffset": header.get("LineOffSet"),
-            "FrameWidth": header.get("FrameWidth"),
-            "FrameHeight": header.get("FrameHeight"),
-            "NumberOfFrames": header.get("NumberOfFrames"),
-            "FrameCounter": header.get("FrameCounter"),
-            "StimBufPerFr": header.get("StimBufPerFr"),
-            "ScanMode": header.get("ScanMode"),
-            "Zoom": header.get("Zoom"),
-            "Angle": header.get("Angle"),
-            "User": header.get("User"),
-            "Comment": header.get("Comment"),
-        }
+        instance.metadata = scanm_module.scanm_metadata(path, header)
 
         # ROI-related (initially empty)
         instance.rois = None
@@ -1443,6 +1392,38 @@ class Core:
     def is_registered(self):
         """Whether registration has been applied to the images."""
         return self.params.registered
+
+    @property
+    def is_zstack(self):
+        """Whether this recording is a ScanM z-stack (one frame per z-step).
+
+        Read from the acquisition's scan type (``User_ScanType == 11``), never
+        from the image shape. ``ZStep_um`` can't be used on its own: ScanM
+        writes a non-zero step into time-lapse recordings too. Recordings
+        without ``wParamsNum`` in their metadata (e.g. ``.recording.h5`` files
+        saved before it was kept) report False; reload from the ``.smh`` to
+        recover it.
+        """
+        wparamsnum = self.metadata.get("wParamsNum") or {}
+        return wparamsnum.get("User_ScanType") == 11
+
+    @property
+    def z_positions_um(self):
+        """Objective z position (µm) of each frame of a z-stack, else None.
+
+        ``ZCoord_um + i * ZStep_um`` for frame ``i``. This assumes the stack
+        starts at the recorded ``ZCoord_um`` and steps by ``ZStep_um`` in
+        acquisition order; the sign convention has not been checked against
+        the rig.
+        """
+        if not self.is_zstack:
+            return None
+        wparamsnum = self.metadata["wParamsNum"]
+        z0 = wparamsnum.get("ZCoord_um")
+        step = wparamsnum.get("ZStep_um")
+        if z0 is None or step is None:
+            return None
+        return z0 + np.arange(self.images.shape[0]) * step
 
     @property
     def frametime_ms(self):

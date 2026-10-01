@@ -158,3 +158,5 @@ cython_debug/
 #.idea/
 src/pygor/examples/strf_demo_data.h5
 CLAUDE.md
+# Agent handover notes (LLM meta files stay out of the repo)
+src/pygor/dev/HANDOVER_*.md

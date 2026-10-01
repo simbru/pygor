@@ -439,6 +439,54 @@ def _parse_scanm_datetime(header: dict) -> tuple[datetime.date, datetime.time]:
     return date, time
 
 
+def scanm_metadata(path: str | Path, header: dict) -> dict:
+    """
+    Build a recording's ``metadata`` dict from its ScanM header.
+
+    The top-level keys are the ones pygor has always provided. On top of those,
+    nothing from the header is dropped:
+
+    - ``wParamsNum`` / ``wParamsStr``: ``{label: value}`` dicts using IGOR's
+      wave labels, the same keys an IGOR-exported H5 gives (see
+      ``pygor.data_helpers.metadata_dict``), so code can read e.g.
+      ``metadata["wParamsNum"]["User_ScanType"]`` regardless of source.
+    - ``scanm_header``: the full parsed header, including entries IGOR does
+      not copy into either wave.
+    """
+    from pygor.preproc import wparams
+
+    exp_date, exp_time = _parse_scanm_datetime(header)
+    return {
+        "filename": str(path),
+        "exp_date": exp_date,
+        "exp_time": exp_time,
+        "objectiveXYZ": (
+            header.get("XCoord_um"),
+            header.get("YCoord_um"),
+            header.get("ZCoord_um"),
+        ),
+        # Older ScanM versions may use the second name of each pair.
+        "PixelDuration_us": header.get(
+            "RealPixelDuration_µs", header.get("PixelDuration")
+        ),
+        "RetracePixels": header.get("PixRetraceLen", header.get("RtrcLen")),
+        "LineOffset": header.get("XPixLineOffs", header.get("LineOffSet")),
+        "FrameWidth": header.get("FrameWidth"),
+        "FrameHeight": header.get("FrameHeight"),
+        "NumberOfFrames": header.get("NumberOfFrames"),
+        "FrameCounter": header.get("FrameCounter"),
+        "StimBufPerFr": header.get("StimBufPerFr"),
+        "ScanMode": header.get("ScanMode"),
+        "Zoom": header.get("Zoom"),
+        "Angle": header.get("Angle_deg", header.get("Angle")),
+        "User": header.get("UserName", header.get("User")),
+        "Comment": header.get("Comment"),
+        "wParamsNum": wparams.wparamsnum_from_header(header),
+        "wParamsStr": wparams.wparamsstr_from_header(header),
+        "scanm_header": dict(header),
+    }
+
+
 def _compute_timing_params(header: dict, images: np.ndarray) -> dict:
     """
     Compute timing parameters from ScanM header.

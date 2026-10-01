@@ -61,10 +61,152 @@ WPARAMSNUM_DEFAULTS: tuple[float, ...] = (
 # Genuine wParamsStr length; IGOR reads index 4 (date), pygor also uses 5 (time).
 WPARAMSSTR_LEN = 18
 
+# wParamsStr row labels, in order (ScM_FileIO.ipf SetDimLabel on wStrParams).
+WPARAMSSTR_LABELS: tuple[str, ...] = (
+    "GUID", "ComputerName", "UserName", "OrigPixDataFileName", "DateStamp_d_m_y",
+    "TimeStamp_h_m_s_ms", "ScanM_PVer_TargetOS", "CallingProcessPath",
+    "CallingProcessVer", "StimBufLenList", "TargetedStimDurList",
+    "InChan_PixBufLenList", "User_ScanPathFunc", "IgorGUIVer", "User_Comment",
+    "User_Objective", "RealStimDurList",
+)
+
+# ScanM header key (as returned by scanm.read_smh_header, type prefix dropped) ->
+# wParamsNum label. Transcribed from the SCMIO_key_* table in ScM_FileIO.ipf, which
+# is how IGOR fills wParamsNum when it loads an .smh. Header keys and labels differ
+# (uFrameWidth -> User_dxPix), so looking labels up in the header directly misses
+# most of them.
+SCANM_HEADER_TO_WPARAMSNUM: dict[str, str] = {
+    "HeaderLengthInValuePairs": "HdrLenInValuePairs",
+    "Header_length_in_bytes": "HdrLenInBytes",
+    "MinVoltsAO": "MinVolts_AO",
+    "MaxVoltsAO": "MaxVolts_AO",
+    "StimulusChannelMask": "StimChanMask",
+    "MaxStimulusBufferMapLength": "MaxStimBufMapLen",
+    "NumberOfStimulusBuffers": "NumberOfStimBufs",
+    "TargetedPixelDuration_µs": "TargetedPixDur_us",
+    "MinVoltsAI": "MinVolts_AI",
+    "MaxVoltsAI": "MaxVolts_AI",
+    "InputChannelMask": "InputChanMask",
+    "PixelSizeInBytes": "PixSizeInBytes",
+    "NumberOfFrames": "NumberOfPixBufsSet",
+    "PixelOffset": "PixelOffs",
+    "FrameCounter": "PixBufCounter",
+    "ScanMode": "User_ScanMode",
+    "FrameWidth": "User_dxPix",
+    "FrameHeight": "User_dyPix",
+    "PixRetraceLen": "User_nPixRetrace",
+    "XPixLineOffs": "User_nXPixLineOffs",
+    "ChunksPerFrame": "User_divFrameBufReq",
+    "ScanType": "User_ScanType",
+    "NSubPixOversamp": "User_nSubPixOversamp",
+    "RealPixelDuration_µs": "RealPixDur",
+    "Oversampling_Factor": "OversampFactor",
+    "XCoord_um": "XCoord_um",
+    "YCoord_um": "YCoord_um",
+    "ZCoord_um": "ZCoord_um",
+    "ZStep_um": "ZStep_um",
+    "Zoom": "Zoom",
+    "Angle_deg": "Angle_deg",
+    "NFrPerStep": "User_NFrPerStep",
+    "XOffset_V": "User_XOffset_V",
+    "YOffset_V": "User_YOffset_V",
+    "dZPixels": "User_dzPix",
+    "ZPixLineOffs": "User_nZPixLineOff",
+    "SetupID": "User_SetupID",
+    "LaserWavelength_nm": "User_LaserWaveLen_nm",
+    "AspectRatioFrame": "User_aspectRatioFr",
+    "StimBufPerFr": "User_stimBufPerFr",
+    "YPixLineOffs": "User_nYPixLineOffs",
+    "iChFastScan": "User_iChFastScan",
+    "dxFrDecoded": "User_dxFrDecoded",
+    "dyFrDecoded": "User_dyFrDecoded",
+    "dzFrDecoded": "User_dzFrDecoded",
+    "trajDefVRange_V": "User_trajDefVRange_V",
+    "nTrajParams": "User_nTrajParams",
+    "zoomFactorZ": "User_zoomZ",
+    "offsetZ_V": "User_offsetZ_V",
+    "zeroZ_V": "User_zeroZ_V",
+    "ETL_polarity_V": "User_ETL_polarity_V",
+    "ETL_min_V": "User_ETL_min_V",
+    "ETL_max_V": "User_ETL_max_V",
+    "ETL_neutral_V": "User_ETL_neutral_V",
+}
+
+# Same for the string header entries that IGOR copies into wParamsStr. The
+# list-valued rows (StimBufLenList etc.) are assembled from repeated per-channel
+# keys and are left out; the full header keeps those.
+SCANM_HEADER_TO_WPARAMSSTR: dict[str, str] = {
+    "ComputerName": "ComputerName",
+    "UserName": "UserName",
+    "OriginalPixelDataFileName": "OrigPixDataFileName",
+    "DateStamp": "DateStamp_d_m_y",
+    "TimeStamp": "TimeStamp_h_m_s_ms",
+    "ScanMproductVersionAndTargetOS": "ScanM_PVer_TargetOS",
+    "CallingProcessPath": "CallingProcessPath",
+    "CallingProcessVersion": "CallingProcessVer",
+    "ScanPathFunc": "User_ScanPathFunc",
+    "IgorGUIVer": "IgorGUIVer",
+    "Comment": "User_Comment",
+    "Objective": "User_Objective",
+}
+
 
 def _labels_index_map() -> dict:
     """{label_name: data_index}. label[i] names data[i-1] (N+1 convention)."""
     return {name: i - 1 for i, name in enumerate(WPARAMSNUM_LABELS) if name}
+
+
+def wparamsnum_from_header(header: dict) -> dict:
+    """``{wParamsNum label: value}`` for every mapped key present in a ScanM header."""
+    out = {}
+    for key, label in SCANM_HEADER_TO_WPARAMSNUM.items():
+        if key in header:
+            try:
+                out[label] = float(header[key])
+            except (TypeError, ValueError):
+                pass
+    return out
+
+
+def wparamsstr_from_header(header: dict) -> dict:
+    """``{wParamsStr label: value}`` for every mapped key present in a ScanM header."""
+    return {
+        label: str(header[key])
+        for key, label in SCANM_HEADER_TO_WPARAMSSTR.items()
+        if key in header
+    }
+
+
+def wparamsnum_to_dict(data, labels=None) -> dict:
+    """``{label: value}`` from a wParamsNum wave and its IGORWaveDimensionLabels.
+
+    ``labels`` follows the N+1 convention (label[i] names data[i-1]). Without
+    labels, the standard 60-point layout is assumed only if the length matches;
+    otherwise an empty dict is returned rather than guessing. Blank labels are
+    reserved gaps and are skipped.
+    """
+    data = np.asarray(data, dtype=np.float64).reshape(-1)
+    if labels is not None:
+        names = [
+            x.decode("utf-8", "replace") if isinstance(x, bytes) else str(x)
+            for x in np.asarray(labels).reshape(-1)
+        ][1:]
+    elif len(data) == len(WPARAMSNUM_LABELS) - 1:
+        names = list(WPARAMSNUM_LABELS[1:])
+    else:
+        return {}
+    return {name: float(val) for name, val in zip(names, data) if name}
+
+
+def wparamsstr_to_dict(arr) -> dict:
+    """``{label: value}`` from a wParamsStr wave. Unlabelled rows keep their index."""
+    out = {}
+    for i, val in enumerate(np.asarray(arr).reshape(-1)):
+        if isinstance(val, bytes):
+            val = val.decode("utf-8", "replace")
+        name = WPARAMSSTR_LABELS[i] if i < len(WPARAMSSTR_LABELS) else str(i)
+        out[name] = str(val)
+    return out
 
 
 def build_wparamsnum(core):
@@ -87,17 +229,21 @@ def build_wparamsnum(core):
     data = np.array(WPARAMSNUM_DEFAULTS, dtype=np.float64)
     name_to_index = _labels_index_map()
 
-    # Core stores the ScanM header as _scanm_header; ScanMData as _header.
+    # Core stores the ScanM header as _scanm_header; ScanMData as _header. The
+    # header is not saved with a .recording.h5, so a reloaded object falls back
+    # to the wParamsNum dict kept in its metadata.
     header = getattr(core, "_scanm_header", None) or getattr(core, "_header", None)
-    if header:
-        for name, idx in name_to_index.items():
-            if name in header:
-                try:
-                    data[idx] = float(header[name])
-                except (TypeError, ValueError):
-                    pass
-
     metadata = getattr(core, "metadata", None)
+    if header:
+        known = wparamsnum_from_header(header)
+    elif metadata:
+        known = metadata.get("wParamsNum") or {}
+    else:
+        known = {}
+    for name, val in known.items():
+        if name in name_to_index:
+            data[name_to_index[name]] = val
+
     if metadata:
         xyz = metadata.get("objectiveXYZ", None)
         if xyz is not None and len(xyz) >= 3:
@@ -151,6 +297,10 @@ def build_wparamsstr(core):
     arr = np.full(WPARAMSSTR_LEN, b"", dtype="S100")
     metadata = getattr(core, "metadata", None)
     if metadata:
+        for i, name in enumerate(WPARAMSSTR_LABELS):
+            val = (metadata.get("wParamsStr") or {}).get(name)
+            if val:
+                arr[i] = str(val).encode("utf-8")[:100]
         exp_date = metadata.get("exp_date", None)
         exp_time = metadata.get("exp_time", None)
         if exp_date is not None:
