@@ -219,6 +219,25 @@ def message_figure(text, width, height, dpi=DEFAULT_DPI, colour="#ff6b6b") -> Fi
 # ---------------------------------------------------------------------------
 
 
+def _best_grid(n, width, height, frame_shape, title_px=14):
+    """Rows and columns that draw ``n`` frames of ``frame_shape`` as large as possible.
+
+    One row when the box is wide, one column when it is tall and narrow, a grid in
+    between. A field of view with its master, two other speeds and an FFF is unreadable
+    as a single row of four.
+    """
+    frame_h, frame_w = (frame_shape[0] or 1), (frame_shape[1] or 1)
+    best, best_scale = (1, max(n, 1)), 0.0
+    for cols in range(1, max(n, 1) + 1):
+        rows = -(-n // cols)
+        tile_w = width / cols
+        tile_h = height / rows - title_px
+        scale = min(tile_w / frame_w, tile_h / frame_h)
+        if scale > best_scale:
+            best, best_scale = (rows, cols), scale
+    return best
+
+
 @panel(name="fov_alignment", level="fov", check="alignment")
 def fov_alignment(bundle, *, width, height, dpi=DEFAULT_DPI, role=None, roi=None,
                   channel=-1, **params):
@@ -231,9 +250,17 @@ def fov_alignment(bundle, *, width, height, dpi=DEFAULT_DPI, role=None, roi=None
     transferred outlines sit on cells in *this* recording, which is what
     ``use_master_mask`` lets you check against when a transfer looks wrong.
     """
-    roles = list(bundle.roles)
+    # The master first: it is what every other recording is judged against.
+    roles = [bundle.master_role] + [r for r in bundle.roles if r != bundle.master_role]
     figure = new_figure(width, height, dpi)
-    axes = figure.subplots(1, len(roles), squeeze=False)[0]
+    try:
+        frame_shape = np.shape(bundle.projection(bundle.master_role))
+    except (KeyError, OSError):
+        frame_shape = (1, 1)
+    rows, cols = _best_grid(len(roles), width, height, frame_shape)
+    axes = figure.subplots(rows, cols, squeeze=False).ravel()
+    for spare in axes[len(roles):]:
+        spare.set_visible(False)
     master_mask = bundle.roi_mask(bundle.master_role) if params.get("use_master_mask") else None
 
     for axis, name in zip(axes, roles):
@@ -349,6 +376,92 @@ def fov_lost_rois(bundle, *, width, height, dpi=DEFAULT_DPI, role=None, roi=None
         f"{partner}: {len(lost)} of {bundle.n_cells} cells lost in transfer",
         color="#ff6b6b" if lost else "white", fontsize=8, pad=3,
     )
+    figure.tight_layout()
+    return figure
+
+
+def _master_ids(ref, mask):
+    """Each ROI id in an inheritor's mask -> the master ROI id it came from.
+
+    transfer_rois_from can renumber the survivors of a lossy transfer from one; its
+    roi_origin lists what was expected and what was lost, which recovers the mapping.
+    Where the counts do not fit that reading the ids are taken as already shared.
+    """
+    ids = sorted({int(i) for i in np.unique(mask) if i < 0}, reverse=True)
+    origin = getattr(ref, "roi_origin", None) or {}
+    expected = [int(i) for i in origin.get("expected_roi_ids", [])]
+    lost = {int(i) for i in origin.get("lost_roi_ids", [])}
+    survivors = [i for i in expected if i not in lost]
+    if lost and len(survivors) == len(ids) and set(ids) != set(survivors):
+        return {own: survivors[abs(own) - 1] for own in ids}
+    return {own: own for own in ids}
+
+
+def _draw_cells(axis, mask, colour_of, id_map=None, linewidth=0.9):
+    from skimage import measure
+
+    for roi_id in np.unique(mask):
+        if roi_id >= 0:
+            continue
+        contours = measure.find_contours((mask == roi_id).astype(float), 0.5)
+        if not contours:
+            continue
+        contour = max(contours, key=len)
+        master_id = id_map.get(int(roi_id), int(roi_id)) if id_map else int(roi_id)
+        axis.plot(contour[:, 1], contour[:, 0], color=colour_of(master_id),
+                  linewidth=linewidth)
+
+
+@panel(name="rec_transfer", level="fov", check="alignment")
+def rec_transfer(bundle, *, width, height, dpi=DEFAULT_DPI, role=None, roi=None,
+                 channel=-1, **params):
+    """The master's cells, and the same cells as moved into one other recording.
+
+    What a transfer verdict needs to see: whether the outlines in the judged recording
+    sit on cells -- the same cells as in the master. The red/green overlay compares the
+    images instead, and those differ legitimately between stimuli (an FFF and a moving
+    bar light up different cells), so a low correlation there is not by itself a failed
+    transfer. Every cell has the same colour in both images, so one can be followed
+    across; cells lost at the frame edge are marked on the master in red.
+    """
+    master_role = bundle.master_role
+    partner = role or next((r for r in bundle.roles if r != master_role), None)
+    if partner is None or partner == master_role:
+        return message_figure(f"{bundle.fov_uid}\nno other recording to compare",
+                              width, height, dpi, colour="#999999")
+
+    master_image = _stretch(bundle.projection(master_role))
+    other_image = _stretch(bundle.projection(partner))
+    master_mask = bundle.roi_mask(master_role)
+    other_mask = bundle.roi_mask(partner)
+    info = bundle.alignment(partner)
+
+    from matplotlib import colormaps
+
+    palette = colormaps["tab20"]
+    colour_of = lambda master_id: palette((abs(master_id) * 7) % 20)  # noqa: E731
+    lost = {int(i) for i in info.lost_roi_ids}
+
+    rows, cols = _best_grid(2, width, height, master_image.shape, title_px=28)
+    figure = new_figure(width, height, dpi)
+    axes = figure.subplots(rows, cols, squeeze=False).ravel()
+    for axis, image in zip(axes, (master_image, other_image)):
+        axis.set_facecolor("black")
+        _bare(axis)
+        axis.imshow(image, cmap="Greys_r", origin="lower")
+
+    _draw_cells(axes[0], master_mask,
+                lambda i: "#ff3333" if i in lost else colour_of(i))
+    _draw_cells(axes[1], other_mask, colour_of,
+                id_map=_master_ids(bundle.peek(partner), other_mask))
+
+    axes[0].set_title(f"MASTER  {bundle.peek(master_role).stem}  ·  "
+                      f"{bundle.n_cells} cells", color="white", fontsize=8, pad=3)
+    shift = ", ".join(f"{s:.1f}" for s in info.shift) if info.shift else "n/a"
+    axes[1].set_title(
+        f"JUDGING  {bundle.peek(partner).stem}  ·  outlines moved from the master\n"
+        f"r={info.correlation:.2f}  shift=({shift}) px  lost={info.n_lost}",
+        color="#ffd166", fontsize=8, pad=3)
     figure.tight_layout()
     return figure
 

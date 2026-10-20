@@ -55,6 +55,7 @@ class ReviewSession:
                 classify=self.binding.classify,
                 fov_uid_of=self.binding.fov_uid_of,
                 pick=getattr(self.binding, "pick", None),
+                extra_role=getattr(self.binding, "extra_role", None),
             )
             for bundle in self._bundles:
                 bundle.cache = self.bundle_cache

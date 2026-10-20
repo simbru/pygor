@@ -112,6 +112,35 @@ class PanelView(Vertical):
         return pixels_for_cells(self.size.width or 80, self.size.height or 20, self.caps)
 
 
+def pending_recordings(session, bundle):
+    """Direction recordings of a field of view that no verdict has covered yet.
+
+    A recording is covered by its own recording verdict, or by a field-of-view 'keep'
+    made while it was already part of the field of view (the verdict's source_digest
+    lists every recording it saw). The other speeds and repeats were added after most
+    fields of view were judged, and a field of view that was not kept says nothing
+    about whether its direction recording is usable on its own -- so those are the
+    ones listed here.
+    """
+    from pygor.review.exclusions import covered_verdict
+
+    fov = session.verdict_for(bundle)
+    digests = {(bundle.fov_uid, bundle.condition, role): f"{ref.mtime}:{ref.size}"
+               for role, ref in bundle.refs.items()}
+    pending = []
+    for role in bundle.roles:
+        if role != "osds" and not role.startswith("osds["):
+            continue
+        check = "segmentation" if role == bundle.master_role else "alignment"
+        own = session.verdict_for(bundle, subject_type="recording", check=check,
+                                  subject_uid=bundle.peek(role).recording_uid, role=role)
+        # The export's rule, so 'nothing left to judge' here means every recording
+        # has a verdict there.
+        if covered_verdict(fov, own, role, digests) == "":
+            pending.append(role)
+    return pending
+
+
 class ReviewScreen(Screen):
     """Shared verdict handling, so the three screens cannot disagree about it.
 
@@ -224,11 +253,13 @@ class IndexScreen(ReviewScreen):
     BINDINGS = [
         Binding("enter", "open", "open"),
         Binding("t", "strf_page", "more RFs"),
+        Binding("h", "toggle_strfs", "RFs on/off"),
+        Binding("u", "toggle_todo", "only todo"),
         Binding("r", "reload", "reload"),
         Binding("q", "quit", "quit"),
     ]
 
-    COLUMNS = ("", "fov_uid", "roles", "cells", "shift", "corr", "lost", "bad")
+    COLUMNS = ("", "todo", "fov_uid", "roles", "cells", "shift", "corr", "lost", "bad")
 
     GLYPHS = {"keep": "OK", "reject": "NO", "flag": "!!", "uncertain": "??", "": ""}
 
@@ -253,21 +284,41 @@ class IndexScreen(ReviewScreen):
             table.add_column(column, key=column)
         self._strf_timer = None
         self.strf_page = 0
+        self.only_todo = False
+        self.query_one("#strfs", PanelView).display = self.app.show_strfs
         self.load_rows()
+
+    def _todo(self, row) -> str:
+        """How many of a field of view's direction recordings still need a verdict."""
+        bundle = self.app.session.find(row.fov_uid, row.condition)
+        pending = pending_recordings(self.app.session, bundle)
+        return str(len(pending)) if pending else ""
 
     def load_rows(self) -> None:
         table = self.query_one("#fovs", DataTable)
         table.clear()
-        self.frame = self.app.session.overview()
+        frame = self.app.session.overview()
+        todo = [self._todo(row) for row in frame.itertuples()]
+        frame = frame.assign(todo=todo)
+        if self.only_todo:
+            frame = frame[frame["todo"] != ""].reset_index(drop=True)
+        self.frame = frame
         for row in self.frame.itertuples():
             corr = "" if row.worst_correlation != row.worst_correlation else f"{row.worst_correlation:.2f}"
             shift = "" if row.max_shift_px != row.max_shift_px else f"{row.max_shift_px:.1f}"
             table.add_row(
-                self.GLYPHS.get(row.verdict, ""), row.fov_uid, row.roles,
+                self.GLYPHS.get(row.verdict, ""), row.todo, row.fov_uid, row.roles,
                 str(row.n_cells), shift, corr, str(row.n_lost),
                 str(row.bad_status + row.unusable),
             )
         self.refresh_status()
+
+    def action_toggle_todo(self) -> None:
+        """Show only the fields of view with direction recordings still to judge."""
+        self.only_todo = not self.only_todo
+        self.load_rows()
+        self.app.notify("only fields of view with recordings to judge" if self.only_todo
+                        else "all fields of view")
 
     def refresh_glyphs(self) -> None:
         """Repaint the verdict column from the store.
@@ -288,6 +339,9 @@ class IndexScreen(ReviewScreen):
             glyph = self.GLYPHS.get(decided.verdict if decided else "", "")
             if table.get_cell_at(Coordinate(index, 0)) != glyph:
                 table.update_cell_at(Coordinate(index, 0), glyph)
+            todo = self._todo(row)
+            if table.get_cell_at(Coordinate(index, 1)) != todo:
+                table.update_cell_at(Coordinate(index, 1), todo)
 
     def on_screen_resume(self) -> None:
         """Coming back from a field of view: show what was decided in there."""
@@ -319,9 +373,22 @@ class IndexScreen(ReviewScreen):
         # key does not queue a load per row.
         if self._strf_timer is not None:
             self._strf_timer.stop()
-        self.query_one("#strfs", PanelView).show_message("receptive fields…")
-        self._strf_timer = self.set_timer(1.2, self.load_strfs)
+        if self.app.show_strfs:
+            self.query_one("#strfs", PanelView).show_message("receptive fields…")
+            self._strf_timer = self.set_timer(1.2, self.load_strfs)
         self.refresh_status()
+
+    def action_toggle_strfs(self) -> None:
+        """Hide the receptive fields and give the recordings the whole column.
+
+        With the RF pane gone the preview is tall and narrow, so fov_alignment stacks
+        the recordings one above the other at full width instead of shrinking them
+        into a row.
+        """
+        self.app.show_strfs = not self.app.show_strfs
+        self.query_one("#strfs", PanelView).display = self.app.show_strfs
+        # Re-render once the layout has settled, at the preview's new size.
+        self.call_after_refresh(self.preview, None)
 
     def load_strfs(self) -> None:
         self.app.render_into(self.query_one("#strfs", PanelView), "fov_strf_sheet",
@@ -375,6 +442,8 @@ class FovScreen(ReviewScreen):
         Binding("escape", "back", "back"),
         Binding("p", "next_panel", "panel"),
         Binding("greater_than_sign", "next_role", "partner"),
+        Binding("g", "next_target", "next recording"),
+        Binding("G", "prev_target", "previous / FOV"),
         Binding("enter", "cells", "cells"),
         Binding("R", "reprocess", "reprocess"),
         Binding("v", "napari", "napari"),
@@ -386,16 +455,32 @@ class FovScreen(ReviewScreen):
         self.panels = list(self.app.binding.PANEL_SETS["fov"])
         self.panel_index = 0
         self.role_index = 0
+        self.target_index = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Static("", id="target")
         yield PanelView(self.app.caps, id="panel")
         yield Static("", id="detail")
         yield Static("", id="status")
         yield Footer()
 
     def on_mount(self) -> None:
+        # Open on the first recording still owed a verdict, so the work is in front of
+        # you rather than one keypress away.
+        pending = pending_recordings(self.app.session, self.bundle)
+        if pending:
+            self.target_index = self.targets.index(pending[0])
         self.redraw()
+
+    def current_panels(self):
+        """What to look at for the thing being judged."""
+        role = self.target
+        if role is None:
+            return self.panels
+        if role == self.bundle.master_role:
+            return ["rec_segmentation", "rec_triggers"]
+        return ["rec_transfer", "fov_overlay", "fov_lost_rois", "rec_triggers"]
 
     def current_bundle(self):
         return self.bundle
@@ -405,13 +490,67 @@ class FovScreen(ReviewScreen):
         roles = [r for r in self.bundle.roles if r != self.bundle.master_role]
         return roles[self.role_index % len(roles)] if roles else None
 
+    @property
+    def targets(self):
+        """What the verdict keys can judge: the field of view, then each direction
+        recording on its own -- the master, then the other speeds and repeats.
+
+        A field-of-view verdict is about pairing the RF with everything else; a
+        recording verdict says whether that one direction recording is usable on its
+        own, which is what lets clean OSDS data count even where the RF failed.
+        """
+        direction = sorted((r for r in self.bundle.roles
+                            if r == "osds" or r.startswith("osds[")),
+                           key=lambda r: (r != self.bundle.master_role, r))
+        return [None] + direction
+
+    @property
+    def target(self):
+        return self.targets[self.target_index]
+
     def verdict_target(self):
-        return "fov", self.bundle.fov_uid, "alignment", "", -1
+        role = self.target
+        if role is None:
+            return "fov", self.bundle.fov_uid, "alignment", "", -1
+        # The master is judged on its own segmentation; a recording that inherited
+        # its ROIs on whether they landed on the same cells.
+        check = "segmentation" if role == self.bundle.master_role else "alignment"
+        return "recording", self.bundle.peek(role).recording_uid, check, role, -1
+
+    def action_next_target(self) -> None:
+        """Forward through the recordings, stopping at the last one.
+
+        It does not wrap: wrapping put the whole field of view under the next keypress
+        straight after the last recording, and a 'keep' meant for a recording landed on
+        the field of view instead. Getting back to it is G, a deliberate step.
+        """
+        if self.target_index >= len(self.targets) - 1:
+            self.app.notify("last recording -- G goes back")
+            return
+        self._go_to_target(self.target_index + 1)
+
+    def action_prev_target(self) -> None:
+        """Back through the recordings, stopping at the whole field of view."""
+        if self.target_index <= 0:
+            self.app.notify("already judging the whole field of view")
+            return
+        self._go_to_target(self.target_index - 1)
+
+    def _go_to_target(self, index) -> None:
+        self.target_index = index
+        role = self.target
+        partners = [r for r in self.bundle.roles if r != self.bundle.master_role]
+        if role in partners:
+            self.role_index = partners.index(role)
+        self.panel_index = 0
+        self.redraw()
 
     def redraw(self) -> None:
-        panel = self.panels[self.panel_index % len(self.panels)]
+        panels = self.current_panels()
+        panel = panels[self.panel_index % len(panels)]
+        role = self.target if self.target is not None else self.role
         self.app.render_into(self.query_one("#panel", PanelView), panel, self.bundle,
-                             role=self.role)
+                             role=role)
         lines = []
         for name, info in self.bundle.alignments().items():
             ref = self.bundle.peek(name)
@@ -423,16 +562,45 @@ class FovScreen(ReviewScreen):
             lines.append(line)
         for name, why in self.bundle.missing().items():
             lines.append(f"{name:5s} MISSING — {why}")
-        self.query_one("#detail", Static).update("\n".join(lines))
+        from rich.text import Text
+
+        self.query_one("#detail", Static).update(Text("\n".join(lines)))
         self.refresh_status()
 
+    def banner(self) -> str:
+        """In words: what the verdict keys will judge, and the question to answer."""
+        subject_type, _uid, check, role, _ = self.verdict_target()
+        current = self.app.session.verdict_for(
+            self.bundle, subject_type=subject_type, check=check,
+            subject_uid=_uid, role=role)
+        decided = f"decided: {current.verdict.upper()}" if current else "not decided yet"
+        pending = pending_recordings(self.app.session, self.bundle)
+        left = f"{len(pending)} recording(s) left in this field of view" if pending \
+            else "no recordings left to judge here"
+        if subject_type == "fov":
+            return (f"JUDGING  the whole field of view  ·  {decided}\n"
+                    "Question: can the RF, the direction tuning and the full-field "
+                    "response be paired cell for cell?\n"
+                    f"{left}  ·  g: judge the recordings one by one")
+        stem = self.bundle.peek(role).stem
+        if check == "segmentation":
+            question = ("Question: are these ROIs real cells, so that this direction "
+                        "recording is usable on its own?")
+        else:
+            question = ("Question: do the outlines on the JUDGING image sit on the same "
+                        "cells as on the MASTER?  (same colour = same cell)")
+        return (f"JUDGING  recording {role}  ·  {stem}  ·  {decided}\n{question}\n"
+                f"a keep  ·  x reject  ·  p other views  ·  g next  ·  G back  ·  {left}")
+
     def refresh_status(self) -> None:
-        current = self.app.session.verdict_for(self.bundle)
-        decided = f"{current.verdict} ({current.reason})" if current else "undecided"
-        self.query_one("#status", Static).update(
-            f"panel {self.panels[self.panel_index % len(self.panels)]}  ·  "
-            f"partner {self.role}  ·  target: FOV alignment  ·  {decided}"
-        )
+        from rich.text import Text
+
+        # Plain Text, not markup: role names like 'osds[OSDS_vel_4x]' would otherwise
+        # be read as style tags and swallowed.
+        panels = self.current_panels()
+        self.query_one("#status", Static).update(Text(
+            f"panel {panels[self.panel_index % len(panels)]}  ·  partner {self.role}"))
+        self.query_one("#target", Static).update(Text(self.banner()))
 
     def action_next_panel(self) -> None:
         self.panel_index += 1
@@ -621,6 +789,7 @@ class ProofreadApp(App):
        a percentage here would fill both dimensions and stretch it. */
     PanelView { height: 1fr; overflow: hidden; align: center middle; }
     #detail { height: auto; padding: 0 1; color: $text-muted; }
+    #target { height: auto; padding: 0 1; background: $warning 25%; text-style: bold; }
     #status { height: 1; padding: 0 1; background: $panel; }
     #reason-box { padding: 1 2; width: 60%; height: auto; background: $panel; }
     #value-box, #confirm-box { padding: 1 2; width: 70%; height: auto; background: $panel; }
@@ -645,6 +814,8 @@ class ProofreadApp(App):
         self.binding = binding
         self.caps = caps
         self.goto = goto
+        # Shown by default only where the dataset has receptive fields to show.
+        self.show_strfs = "fov_strf_sheet" in binding.PANEL_SETS.get("fov", ())
         self.last_verdict = None
         self._napari_procs = []
 

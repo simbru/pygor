@@ -15,9 +15,11 @@ import sys
 DATASETS = {
     "Chromatic SWN": "analyses.review_datasets.chromatic_swn",
     "Achromatic SWN": "analyses.review_datasets.achromatic_swn",
+    "OSDS only": "analyses.review_datasets.osds_only",
     # short forms, for typing on a command line
     "chromatic": "analyses.review_datasets.chromatic_swn",
     "achromatic": "analyses.review_datasets.achromatic_swn",
+    "osds": "analyses.review_datasets.osds_only",
 }
 
 INSTALL_HINT = (

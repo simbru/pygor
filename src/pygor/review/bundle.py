@@ -410,7 +410,8 @@ class FovBundle:
         return None if match.empty else match.iloc[0]
 
 
-def group_refs(refs, *, prefix_of, classify, fov_uid_of, pick=None, expected=None):
+def group_refs(refs, *, prefix_of, classify, fov_uid_of, pick=None, expected=None,
+               extra_role=None):
     """Group scanned recordings into bundles, one per field of view.
 
     The dataset supplies the rules: ``prefix_of(stem)`` pulls out the
@@ -422,6 +423,11 @@ def group_refs(refs, *, prefix_of, classify, fov_uid_of, pick=None, expected=Non
 
     ``pick`` chooses between several candidates for a role, as when a field of
     view has repeat recordings of the same stimulus.
+
+    ``extra_role(role, stem)`` names a candidate ``pick`` passed over as a role of
+    its own -- another speed of the direction stimulus, say, that inherited the
+    master's ROIs -- or returns None to leave it out. The chosen recording of each
+    role is unaffected, so the master and every verdict keyed on it stay the same.
     """
     if pick is None:
         pick = lambda candidates: sorted(candidates, key=lambda r: len(r.stem))[0]
@@ -442,6 +448,12 @@ def group_refs(refs, *, prefix_of, classify, fov_uid_of, pick=None, expected=Non
         chosen = {role: pick(cands) for role, cands in by_role.items() if cands}
         if not chosen:
             continue
+        if extra_role is not None:
+            for role, cands in by_role.items():
+                for ref in cands:
+                    name = None if ref is chosen[role] else extra_role(role, ref.stem)
+                    if name is not None:
+                        chosen[name] = ref
         # ROIs come from the direction recording when there is one, so a cell
         # keeps one identity across stimuli; otherwise the noise recording
         # segmented itself and defines its own.
