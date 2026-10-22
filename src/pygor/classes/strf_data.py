@@ -3549,6 +3549,26 @@ class STRF(Core):
         """
         return self.calc_gaussian_fit_index(roi=roi, idx=idx, **kwargs)["theta"]
 
+    def get_rf_peak_edge_distance(self, roi=None, idx=None):
+        """Pixels from each RF's peak to the nearest edge of its map.
+
+        Measured on ``collapse_times()`` (border removed), the map the Gaussian fit
+        sees; see :func:`pygor.strf.gaussian_fit.peak_edge_distance`. RFs whose
+        peak lies within ~2 px of the edge are mostly called non-Gaussian, so gate
+        on this before reading the Gaussian-fit index as a property of the cell.
+        Same ``roi``/``idx`` selection as :meth:`calc_gaussian_fit_index`.
+        """
+        values = np.array(
+            [
+                pygor.strf.gaussian_fit.peak_edge_distance(m)
+                for m in self.collapse_times()
+            ]
+        )
+        flat, shape = self._flat_strf_indices(roi=roi, idx=idx)
+        if flat is None:
+            return values
+        return values[flat].reshape(shape)
+
     def pca_rf_shape_analysis(
         self, roi, threshold_sd=3.0, plot=True, force_recompute=False
     ):

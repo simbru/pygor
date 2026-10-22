@@ -72,7 +72,8 @@ def build_frame_to_pattern(
 
     frame_to_pattern = np.full(n_f_relevant, -1, dtype=np.int64)
 
-    trigger_counter = 0
+    # trigger tt showed noise frame tt (see pygor.strf.calculate_strf)
+    trigger_counter = skip_first_triggers % n_patterns
     for tt in range(skip_first_triggers, n_triggers - skip_last_triggers - 1):
         current_start_frame = int(ttf[tt]) - trigger_start
         current_end_frame = int(ttf[tt + 1]) - trigger_start

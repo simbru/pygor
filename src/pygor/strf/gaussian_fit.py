@@ -205,6 +205,23 @@ def ellipse_mask(space, fit, n_sigma=1):
     return rad2 <= n_sigma**2, rad2
 
 
+def peak_edge_distance(space):
+    """Pixels from the RF's peak (largest ``|space|``) to the nearest edge of the map.
+
+    0 means the peak sits on the border. Only the peak's position enters, so the RF's
+    shape cannot move it: measures built from the RF's extent (the fitted ellipse,
+    or the above-threshold patch reaching the border) let a lumpy, tailed or
+    two-lobed RF reach the edge because it is non-Gaussian, and so select on what
+    the index measures. Cutting a clean RF off at the border barely changes its
+    index, but RFs whose peak lies within ~2 px of the edge are mostly called
+    non-Gaussian (bc_rf_paper/comparison/control/gaussianity_spread.md).
+    """
+    space = np.ma.filled(np.ma.masked_invalid(space), 0.0)
+    ny, nx = space.shape
+    y, x = np.unravel_index(np.argmax(np.abs(space)), space.shape)
+    return int(min(y, ny - 1 - y, x, nx - 1 - x))
+
+
 def _folded_var(mu, sd):
     """Var(|X|) for X ~ N(mu, sd^2).
 

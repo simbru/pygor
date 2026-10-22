@@ -477,8 +477,12 @@ def calculate_calcium_correlated_average(
         dtype=np.float32,
     )
 
-    # Vectorized trigger-to-noise mapping following IGOR's exact logic
-    trigger_counter = 0
+    # Vectorized trigger-to-noise mapping following IGOR's exact logic.
+    # Trigger tt showed noise frame tt, so a skipped start must also skip the
+    # same number of noise frames; starting the counter at 0 paired the first
+    # kept trigger with noise frame 0 and computed every later part of a
+    # recording against the wrong stimulus.
+    trigger_counter = skip_first_triggers % noise_array.shape[2]
     for tt in range(skip_first_triggers, n_triggers - skip_last_triggers - 1):
         current_start_frame = int(triggertimes_frame[tt]) - trigger_start
         current_end_frame = int(triggertimes_frame[tt + 1]) - trigger_start

@@ -95,10 +95,13 @@ def get_rel_objective_XYZ(wParamsNum_arr):
     Would it make sense to do this based on FishID maybe? Since new fish requires new mount and new location 
     """
 
-    wParamsNum_All_XYZ = wParamsNum_All[26:29]  # 26, 27, and 28 (X, Y, Z)
-    X = wParamsNum_All_XYZ[0]
-    Y = wParamsNum_All_XYZ[2]
-    Z = wParamsNum_All_XYZ[1]
+    # ScanM's wParamsNum rows 26, 27, 28 are XCoord_um, YCoord_um, ZCoord_um
+    # (ScM_FileIO.ipf), and preproc/wparams.py writes them back in that order. Y and
+    # Z used to be swapped here, so a recording read from an Igor H5 disagreed with
+    # the same recording read from its .smp. Checked on the MP-285 rig by moving
+    # one axis at a time: each move changes only its own field, in um, and a
+    # positive move increases it.
+    X, Y, Z = wParamsNum_All[26:29]
     return X, Y, Z
 
 

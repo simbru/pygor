@@ -1413,8 +1413,9 @@ class Core:
 
         ``ZCoord_um + i * ZStep_um`` for frame ``i``. This assumes the stack
         starts at the recorded ``ZCoord_um`` and steps by ``ZStep_um`` in
-        acquisition order; the sign convention has not been checked against
-        the rig.
+        acquisition order. On the MP-285 rig ``ZCoord_um`` is in um and rises
+        with a positive (deeper) stage move; the direction of ``ZStep_um``
+        within a stack has not been checked.
         """
         if not self.is_zstack:
             return None
