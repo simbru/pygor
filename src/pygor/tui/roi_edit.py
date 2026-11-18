@@ -15,6 +15,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# Reconciling an edited mask with the recording is shared with the napari
+# GUI, so it lives in core; re-exported here for the TUI's existing callers.
+from pygor.core.roi_alignment import (  # noqa: F401
+    Reconciled,
+    background_value,
+    compact,
+    count,
+    reconcile,
+)
+
 
 @dataclass(frozen=True)
 class Added:
@@ -24,12 +34,6 @@ class Added:
     roi_id: int | None
     taken: int
     blocked: int
-
-
-def background_value(rois) -> int:
-    """The value the mask already uses for "no ROI"."""
-    free = rois[rois >= 0]
-    return int(free.flat[0]) if free.size else 1
 
 
 def disk(shape, centre, radius: float):
@@ -97,68 +101,3 @@ def remove(rois, roi_id: int):
     out = rois.copy()
     out[out == roi_id] = background_value(rois)
     return out
-
-
-def compact(rois):
-    """Renumber to -1..-n without gaps, keeping the existing order.
-
-    Deleting leaves holes in the ids, and while the inspector copes (see
-    ``probe.roi_ids``), plenty of pygor still maps id to row as ``abs(id)-1``.
-    So a mask is compacted before it leaves the editor, never during: ids
-    stay stable while the reader is working.
-    """
-    import numpy as np
-
-    out = rois.copy()
-    ids = sorted(np.unique(rois[rois < 0]).tolist(), reverse=True)
-    for new, old in enumerate(ids, start=1):
-        out[rois == old] = -new
-    return out
-
-
-@dataclass(frozen=True)
-class Reconciled:
-    """An edited mask laid out against the one it was edited from."""
-
-    rois: object  # np.ndarray, ids -1..-n
-    kept: list  # row indices into the old mask's ROIs, in order
-    added: int  # ROIs after the kept ones that are new
-
-
-def reconcile(old, edited) -> Reconciled:
-    """Lay ``edited`` out so every per-ROI array of ``old`` can follow it.
-
-    An old ROI survives if exactly its pixels are one ROI in ``edited``;
-    anything else -- a deleted cell, a new one, an old one reshaped -- is not a
-    survivor. Survivors take rows 0..k-1 in their old order, so an array
-    indexed like ``old`` follows by keeping rows ``kept``; everything else
-    comes after, and has no row to inherit.
-
-    Rows of ``old`` are positional (see ``probe.roi_ids``), so a mask with
-    gaps in its ids is handled; the result never has gaps.
-    """
-    import numpy as np
-
-    old_ids = sorted(np.unique(old[old < 0]).tolist(), reverse=True) if old is not None else []
-    edited_ids = sorted(np.unique(edited[edited < 0]).tolist(), reverse=True)
-
-    survivor_of = {}  # edited id -> old row
-    for row, old_id in enumerate(old_ids):
-        pixels = old == old_id
-        values = np.unique(edited[pixels])
-        if (values.size == 1 and values[0] < 0
-                and int((edited == values[0]).sum()) == int(pixels.sum())):
-            survivor_of[int(values[0])] = row
-
-    kept_ids = sorted(survivor_of, key=survivor_of.get)
-    order = kept_ids + [i for i in edited_ids if i not in survivor_of]
-    out = np.full(edited.shape, background_value(edited), dtype=edited.dtype)
-    for n, roi_id in enumerate(order):
-        out[edited == roi_id] = -(n + 1)
-    return Reconciled(out, [survivor_of[i] for i in kept_ids], len(order) - len(kept_ids))
-
-
-def count(rois) -> int:
-    import numpy as np
-
-    return int(np.unique(rois[rois < 0]).size)

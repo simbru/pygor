@@ -1,10 +1,10 @@
 """The window's per-ROI plot, and the ROI navigation that drives it.
 
-One matplotlib axis showing whatever the selected ROI looks like. The
-view selector carries a single entry for now and hides itself until there
-is a second, which is where the per-ROI detail views in
-`dev/gui_workflow_map.md` belong: RF maps per channel, temporal kernels,
-tuning functions.
+One matplotlib figure showing whatever the selected ROI looks like. Views
+are offered by what the recording carries, not by its class: the RF view
+appears only when there are STRFs, so a full-field recording never shows
+it. More per-ROI detail views from `dev/gui_workflow_map.md` (temporal
+kernels, tuning functions) belong in the same selector.
 
 Distribution plots live with the metrics table instead, since a
 distribution is read alongside the values it summarises.
@@ -13,6 +13,7 @@ distribution is read alongside the values it summarises.
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtWidgets import (
     QCheckBox,
     QStackedWidget,
@@ -20,11 +21,14 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSlider,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
+from pygor.gui.metrics import has_strfs
+from pygor.gui.rf import RFData, draw_fit, draw_map, fit_legend, symmetric_limit
 from pygor.gui.roi_bridge import label_to_trace_index
 from pygor.gui.timebase import average_axis, frame_to_seconds, trace_axis
 from pygor.gui.triggers import trigger_times, within_loop_times
@@ -61,6 +65,7 @@ class PlotDock(QWidget):
 
     TRACE = "Trace"
     AVERAGE = "Average"
+    RF = "RF"
 
     def __init__(self, recording, viewer, labels_layer=None):
         super().__init__()
@@ -69,9 +74,14 @@ class PlotDock(QWidget):
         self._labels_layer = labels_layer
         self._cursor = None
         self._background = None
+        # Maps, movies and fits, fetched on first use of the RF view
+        self._rf = RFData(recording)
+        # Set by launch: makes a blank ROI layer when there is none, so
+        # New ROI works on a recording that has never been segmented
+        self.create_roi_layer = None
 
         self.mode_box = QComboBox()
-        self.mode_box.addItems([self.TRACE, self.AVERAGE])
+        self.mode_box.addItems(self.available_views())
         self.mode_box.setToolTip("Which view this plot shows")
         self.mode_box.currentIndexChanged.connect(self._on_view_changed)
 
@@ -167,9 +177,62 @@ class PlotDock(QWidget):
         average_row.addStretch(1)
         average_controls.setLayout(average_row)
 
+        # The RF movie: the STRF frame by frame, beside the time-collapsed map
+        self.play_button = QPushButton("Play")
+        self.play_button.setCheckable(True)
+        self.play_button.setToolTip("Play the STRF through time, looping")
+        self.play_button.toggled.connect(self._on_play_toggled)
+        self.frame_slider = QSlider(Qt.Horizontal)
+        self.frame_slider.setToolTip(
+            "STRF frame. Opens on the ROI's strongest frame"
+        )
+        self.frame_slider.valueChanged.connect(self._show_rf_frame)
+        self.frame_label = QLabel()
+        self.rf_timer = QTimer(self)
+        self.rf_timer.timeout.connect(self._advance_rf_frame)
+        # (image artist, its STRF frames) per colour, for the movie column
+        self._rf_movies = []
+        # (marker line, x of each frame) per colour, in the kernel column
+        self._rf_frame_lines = []
+        # STRF ROI index the RF view is showing, for the reject toggle
+        self._rf_index = None
+
+        # Marks the shown RF as not real, in the recording itself; saved with it
+        self.reject_button = QPushButton("Reject RF")
+        self.reject_button.setCheckable(True)
+        self.reject_button.setToolTip(
+            "Mark this ROI's RF as not real (all colour channels). Stored in the "
+            "recording when it is saved; the STRF itself is kept. The paper pipeline "
+            "then treats the cell as having no RF."
+        )
+        self.reject_button.toggled.connect(self._on_reject_toggled)
+        # Set by launch, so the RF panel can mark the tile
+        self.on_rf_rejected = None
+
+        # Off by default: whether an RF is real is judged on the map and the
+        # movie, and the fit is not to sway that
+        self.fits_box = QCheckBox("Fits")
+        self.fits_box.setToolTip(
+            "Draw the Gaussian fit (solid) and the region its fit index is "
+            "scored over (dashed), with the fit's numbers"
+        )
+        self.fits_box.toggled.connect(lambda _: self.refresh())
+
+        rf_controls = QWidget()
+        movie_row = QHBoxLayout()
+        movie_row.setContentsMargins(0, 0, 0, 0)
+        movie_row.addWidget(self.play_button)
+        movie_row.addWidget(self.frame_slider, stretch=1)
+        movie_row.addWidget(self.frame_label)
+        movie_row.addWidget(self.fits_box)
+        movie_row.addWidget(self.reject_button)
+        rf_controls.setLayout(movie_row)
+
+        # Pages in the same order as available_views()
         self.controls_stack = QStackedWidget()
         self.controls_stack.addWidget(trace_controls)
         self.controls_stack.addWidget(average_controls)
+        self.controls_stack.addWidget(rf_controls)
 
         # A one-entry selector is just noise; it appears once a second view
         # is registered.
@@ -236,6 +299,18 @@ class PlotDock(QWidget):
         self.viewer.bind_key(".", lambda _viewer: self.step_roi(1))
         self.viewer.bind_key("n", lambda _viewer: self.new_roi())
 
+    def disconnect_events(self):
+        """Let go of the viewer, so another recording can be attached to it.
+
+        Layer events go with the layers; the frame slider and the key
+        bindings belong to the viewer and would otherwise keep driving
+        this dock, and napari refuses to bind a key twice.
+        """
+        self.viewer.dims.events.current_step.disconnect(self._on_frame_changed)
+        self.play_button.setChecked(False)
+        for key in (",", ".", "n"):
+            self.viewer.bind_key(key, None)
+
     @property
     def n_rois(self):
         """Number of ROIs available in the current trace source, else 0."""
@@ -273,13 +348,15 @@ class PlotDock(QWidget):
 
         napari commits a stroke's staged undo history on mouse release, and
         emits ``paint`` from there, so this fires once per stroke rather
-        than once per mouse move. Erasing is excluded: it removes pixels
-        rather than creating an ROI.
+        than once per mouse move. Only drawing modes count: erasing removes
+        pixels rather than creating an ROI, and edits made from code (the
+        ROI editor's delete and merge) also emit ``paint`` while the layer
+        sits in pan/zoom.
         """
         layer = self.labels_layer
         if layer is None or not self.auto_new_box.isChecked():
             return
-        if str(layer.mode) == "erase":
+        if str(layer.mode) not in _DRAWING_MODES:
             return
         self.new_roi()
 
@@ -299,13 +376,23 @@ class PlotDock(QWidget):
         Without this, painting after selecting ROI 11 keeps adding to ROI
         11 rather than creating ROI 12. napari has no built-in binding for
         this, so it is provided here.
+
+        A recording with no ROIs has no layer to draw on, so one is made.
+        Outside a drawing mode, selecting a label shows nothing, so the
+        layer is made active and switched to painting.
         """
-        if self.labels_layer is None:
+        layer = self.labels_layer
+        if layer is None and self.create_roi_layer is not None:
+            layer = self.create_roi_layer()
+        if layer is None:
             return
         target = self.max_label + 1
         self.roi_spin.setMaximum(max(self.roi_spin.maximum(), target))
         self.set_roi(target)
         self.roi_spin.setMaximum(self._roi_upper_bound())
+        self.viewer.layers.selection.active = layer
+        if layer.mode not in ("paint", "fill", "polygon"):
+            layer.mode = "paint"
 
     def step_roi(self, delta):
         """Move the selection by delta ROIs, wrapping at both ends."""
@@ -507,6 +594,22 @@ class PlotDock(QWidget):
         if index >= 0:
             self.mode_box.setCurrentIndex(index)
 
+    def available_views(self):
+        """Views this recording has data for, in selector order."""
+        views = [self.TRACE, self.AVERAGE]
+        if has_strfs(self.recording):
+            views.append(self.RF)
+        return views
+
+    def _reload_views(self):
+        """Offer a view once its data exists, e.g. STRFs computed after opening."""
+        for name in self.available_views():
+            if self.mode_box.findText(name) < 0:
+                self.mode_box.addItem(name)
+        several = self.mode_box.count() > 1
+        self.view_label.setVisible(several)
+        self.mode_box.setVisible(several)
+
     def _on_view_changed(self, index=None):
         self.controls_stack.setCurrentIndex(self.mode_box.currentIndex())
         self.refresh()
@@ -541,10 +644,20 @@ class PlotDock(QWidget):
         # Labels can outrun the trace array: an ROI drawn by hand exists in
         # the mask before traces are extracted for it.
         self.roi_spin.setMaximum(self._roi_upper_bound())
-        self.ax.clear()
+        self._reload_views()
+        # The RF view lays out one axis per colour, so the figure is rebuilt
+        # rather than its one axis cleared
+        self.figure.clear()
+        self.ax = self.figure.add_subplot(111)
         self._cursor = None
         self._background = None
+        self._rf_movies = []
 
+        if self.view != self.RF:
+            self.play_button.setChecked(False)
+        if self.view == self.RF:
+            self._draw_rf()
+            return
         if self.view == self.AVERAGE:
             self._draw_average()
             return
@@ -664,3 +777,152 @@ class PlotDock(QWidget):
         else:
             self._background = None
             self.canvas.draw_idle()
+
+    def _draw_rf(self):
+        """The selected ROI's RF in each colour, with its Gaussian fit.
+
+        One row per colour: the time-collapsed map the fit is made on, and
+        beside it the STRF itself, one frame at a time, driven by the slider
+        and Play. Solid ellipse: the fitted Gaussian. Dashed: the
+        data-derived footprint the fit index is scored over.
+        """
+        from pygor.strf.rejection import is_rejected
+
+        data = self._rf.refresh()
+        index = label_to_trace_index(self.selected_label, self.recording.rois)
+        if index < 0 or index >= data.n_rois:
+            self._rf_index = None
+            self.reject_button.setEnabled(False)
+            self.status.setText(f"No STRF for label {self.selected_label}")
+            self.ax.set_axis_off()
+            self.canvas.draw_idle()
+            return
+        self._rf_index = index
+        rejected = is_rejected(self.recording, index)
+        self.reject_button.blockSignals(True)
+        self.reject_button.setEnabled(True)
+        self.reject_button.setChecked(rejected)
+        self.reject_button.blockSignals(False)
+
+        self.figure.clear()
+        axes = self.figure.subplots(
+            data.n_colours, 3, squeeze=False, gridspec_kw={"width_ratios": [1, 1, 1.1]}
+        )
+        fits = self.fits_box.isChecked()
+        self._rf_movies = []
+        self._rf_frame_lines = []
+        for colour in range(data.n_colours):
+            i = data.flat(index, colour)
+            static, movie, kernel = axes[colour]
+            draw_map(static, data.maps[i], symmetric_limit(data.maps[i]))
+            frames = data.movies[i]
+            self._rf_movies.append(
+                (draw_map(movie, frames[0], symmetric_limit(frames)), frames)
+            )
+            self._draw_kernel(kernel, data, i, len(frames))
+            static.set_ylabel(f"ch{colour}", fontsize=8)
+            if fits:
+                for ax in (static, movie):
+                    draw_fit(ax, data, i)
+                static.set_title(self._rf_title(data, i), fontsize=8, loc="left")
+        axes[0, 0].set_title(
+            axes[0, 0].get_title(loc="left") or "time-collapsed", fontsize=8, loc="left"
+        )
+        axes[0, 1].set_title("over time", fontsize=8, loc="left")
+        axes[0, 2].set_title("kernel: centre —, surround - -", fontsize=8, loc="left")
+        if fits:
+            self.figure.legend(
+                handles=fit_legend(data.n_sigma), loc="outside lower center",
+                ncols=2, fontsize=7, frameon=False,
+            )
+
+        n_frames = len(self._rf_movies[0][1])
+        self.frame_slider.blockSignals(True)
+        self.frame_slider.setRange(0, n_frames - 1)
+        if not self.play_button.isChecked():
+            # Each ROI opens on its strongest frame, not on the empty first one
+            peak = np.abs(np.stack([f for _, f in self._rf_movies]))
+            peak = np.nan_to_num(peak).max(axis=(0, 2, 3))
+            self.frame_slider.setValue(int(np.argmax(peak)))
+        self.frame_slider.blockSignals(False)
+        self._show_rf_frame(self.frame_slider.value(), draw=False)
+
+        if rejected:
+            self.figure.suptitle("RF rejected", color="tab:red", fontsize=9)
+        self.status.setText(
+            f"ROI {self.selected_label} of {data.n_rois}"
+            + (" — RF rejected (save the recording to keep this)" if rejected else "")
+        )
+        self.canvas.draw_idle()
+
+    def _on_reject_toggled(self, reject):
+        """Reject or restore the shown RF on the recording object."""
+        from pygor.strf.rejection import set_rejected
+
+        if self._rf_index is None:
+            return
+        set_rejected(self.recording, self._rf_index, reject)
+        if self.on_rf_rejected is not None:
+            self.on_rf_rejected()
+        self.refresh()
+
+    def _draw_kernel(self, ax, data, i, n_frames):
+        """Centre (solid) and surround (dashed) time courses, with a marker at
+        the movie's frame so the two can be read together."""
+        pair = data.kernels(i)
+        if pair is None:
+            ax.text(0.5, 0.5, "no kernel", ha="center", va="center",
+                    transform=ax.transAxes, fontsize=8, color="0.5")
+            ax.set_axis_off()
+            return
+        times = data.frame_times_ms(pair.shape[-1])
+        x = times if times is not None else np.arange(pair.shape[-1])
+        for lobe, style in zip(pair, ("-", "--")):
+            ax.plot(x, lobe, color="k", lw=1, ls=style)
+        ax.axhline(0, color="0.7", lw=0.6)
+        if times is not None:
+            ax.axvline(0, color="0.7", lw=0.6, ls=":")
+        ax.set_xlabel("ms" if times is not None else "frame", fontsize=7)
+        ax.tick_params(labelsize=7)
+        ax.spines[["top", "right"]].set_visible(False)
+        # x of each movie frame, for the marker; the kernel may differ in length
+        frame_x = (data.frame_times_ms(n_frames) if times is not None
+                   else np.arange(n_frames))
+        line = ax.axvline(frame_x[0], color="tab:orange", lw=1)
+        self._rf_frame_lines.append((line, frame_x))
+
+    def _show_rf_frame(self, frame, draw=True):
+        """Put one STRF frame in the movie column, without redrawing the rest."""
+        if not self._rf_movies:
+            return
+        for artist, frames in self._rf_movies:
+            artist.set_data(frames[min(frame, len(frames) - 1)])
+        for line, frame_x in getattr(self, "_rf_frame_lines", []):
+            x = frame_x[min(frame, len(frame_x) - 1)]
+            line.set_xdata([x, x])
+        self.frame_label.setText(self._rf.frame_label(frame))
+        if draw:
+            self.canvas.draw_idle()
+
+    def _advance_rf_frame(self):
+        if not self._rf_movies:
+            return
+        self.frame_slider.setValue(
+            (self.frame_slider.value() + 1) % (self.frame_slider.maximum() + 1)
+        )
+
+    def _on_play_toggled(self, playing):
+        self.play_button.setText("Pause" if playing else "Play")
+        if not playing:
+            self.rf_timer.stop()
+            return
+        self.rf_timer.start(self._rf.refresh().frame_interval_ms())
+
+    @staticmethod
+    def _rf_title(data, i):
+        """The fit's own numbers, for judging it; no call is made on them."""
+        index = data.fits["index"][i]
+        if not np.isfinite(index):
+            return "no fit"
+        return (f"fit index {index:.2f}, snr {data.fits['snr'][i]:.1f}, "
+                f"peak {data.edge[i]:.0f} px from edge")

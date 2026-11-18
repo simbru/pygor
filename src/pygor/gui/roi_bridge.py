@@ -111,19 +111,33 @@ def trace_index_to_label(index, roi_mask=None):
     return int(abs(ids[index]))
 
 
-def sync_rois_from_layer(recording, labels_layer):
+def sync_rois_from_layer(recording, labels_layer, refresh_traces=True, origin=None):
     """Write layer edits back to the recording, if there are any.
 
-    Returns True when the recording's mask was updated. Analysis reads
-    ``recording.rois``, not the layer, so anything drawn by hand has to be
-    pushed across before it can be measured.
+    Returns what :func:`pygor.core.roi_alignment.apply_mask` did, or False
+    when the layer already matches. Analysis reads ``recording.rois``, not
+    the layer, so anything drawn by hand has to be pushed across before it
+    can be measured.
+
+    Every per-ROI array -- traces, STRFs, IPL depths and the rest -- is
+    reindexed with the mask, so an ROI's data stays with its pixels. The
+    layer is then redrawn from the result, whose ids are compacted to 1..N:
+    label ``n`` is trace row ``n - 1`` again afterwards.
     """
     if labels_layer is None:
         return False
+    from pygor.core.roi_alignment import apply_mask
+
     current = getattr(recording, "rois", None)
-    igor = True if current is None else is_igor_style(current)
-    mask = labels_to_mask(labels_layer.data, igor_style=igor)
+    if current is not None and not is_igor_style(current):
+        # apply_mask works in the IGOR convention; the same ROIs, relabelled
+        recording.rois = labels_to_mask(mask_to_labels(current), igor_style=True)
+        current = recording.rois
+    mask = labels_to_mask(labels_layer.data, igor_style=True)
     if current is not None and np.array_equal(mask, np.asarray(current)):
         return False
-    recording.update_rois(mask)
-    return True
+    applied = apply_mask(recording, mask, refresh_traces=refresh_traces)
+    if isinstance(origin, dict):
+        recording.roi_origin = dict(origin)
+    labels_layer.data = mask_to_labels(recording.rois)
+    return applied

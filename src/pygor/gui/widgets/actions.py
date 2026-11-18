@@ -28,6 +28,7 @@ class ActionsDock(QWidget):
         default_layers=None,
         on_depths_updated=None,
         bus=None,
+        on_strfs_changed=None,
     ):
         super().__init__()
         self.recording = recording
@@ -36,7 +37,10 @@ class ActionsDock(QWidget):
         self.on_traces_changed = on_traces_changed
         self.on_layer_restored = on_layer_restored
         self.on_depths_updated = on_depths_updated
+        self.on_strfs_changed = on_strfs_changed
         self.bus = bus
+        # (path, array): the stimulus is large and read once per session
+        self._noise = None
         self.default_layers = list(default_layers or [])
         # Guards against reacting to the additions a restore itself makes
         self._restoring = False
@@ -129,6 +133,16 @@ class ActionsDock(QWidget):
             return
         self._set_status(f"Restored locked layer(s): {', '.join(missing)}")
 
+    def disconnect_events(self):
+        """Stop watching the layer list, so the viewer can be cleared.
+
+        Without this, clearing the layers for another recording would
+        trigger the lock and put this recording's layers straight back.
+        """
+        self.lock_box.setChecked(False)
+        self.viewer.layers.events.removing.disconnect(self._on_layer_removing)
+        self.viewer.layers.events.removed.disconnect(self._on_layer_removed)
+
     def _bind_labels_events(self, layer):
         """Keep the ROI number layer in step with strokes on this layer."""
         if layer is None:
@@ -209,8 +223,9 @@ class ActionsDock(QWidget):
     def run_extraction(self, baseline_dur=10.0):
         """Extract traces off the GUI thread, syncing hand-drawn ROIs first."""
         # Extraction reads recording.rois, so ROIs drawn in the layer are
-        # invisible to it until they are written back.
-        pushed = self.sync_rois_from_layer()
+        # invisible to it until they are written back. It extracts next, so
+        # the sync need not.
+        pushed = self.sync_rois_from_layer(refresh_traces=False)
         self._set_status(
             f"Extracting traces ({self.recording.num_rois} ROIs)..."
             if pushed
@@ -225,6 +240,94 @@ class ActionsDock(QWidget):
         if self.on_traces_changed is not None:
             worker.returned.connect(lambda _=None: self.on_traces_changed())
         self._run(worker, "Traces extracted")
+        return worker
+
+    # ------------------------------------------------------------------
+    # Receptive fields
+    # ------------------------------------------------------------------
+
+    @property
+    def can_compute_strfs(self):
+        return callable(getattr(self.recording, "calculate_strf", None))
+
+    def noise_path(self, ask=True):
+        """The noise stimulus file, asking for it the first time.
+
+        Remembered in ``strf.calculate.noise_path`` through the parameter
+        bus, so it shows in the parameter table and is saved with the
+        recording's params.
+        """
+        import pathlib
+
+        path = self.bus.get("strf.calculate.noise_path", "") if self.bus else ""
+        if path and pathlib.Path(path).expanduser().exists():
+            return str(pathlib.Path(path).expanduser())
+        if not ask:
+            return None
+        from qtpy.QtWidgets import QFileDialog
+
+        chosen, _ = QFileDialog.getOpenFileName(
+            self.viewer.window._qt_window,
+            "Noise stimulus for RFs",
+            str(pathlib.Path(path).expanduser().parent) if path else "",
+            "Noise stimulus (*.npy *.h5 *.hdf5);;All files (*)",
+        )
+        if chosen and self.bus is not None:
+            self.bus.set("strf.calculate.noise_path", chosen)
+        return chosen or None
+
+    def run_rfs(self, missing_only=False, noise_path=None):
+        """Compute STRFs off the GUI thread.
+
+        ``missing_only`` computes just the ROIs whose STRFs are NaN -- new,
+        merged or redrawn ones -- and splices them in, leaving every other
+        RF as it was. Their traces are extracted first if they have none.
+        """
+        from pygor.core.roi_alignment import rois_missing_strfs
+
+        if not self.can_compute_strfs:
+            self._set_status("This recording has no STRF analysis")
+            return None
+        self.sync_rois_from_layer()
+        rows = rois_missing_strfs(self.recording) if missing_only else None
+        if missing_only and not rows:
+            self._set_status("No ROI is missing its RF")
+            return None
+        path = noise_path or self.noise_path()
+        if not path:
+            self._set_status("No noise stimulus chosen")
+            return None
+
+        recording = self.recording
+        cached = self._noise
+
+        @thread_worker
+        def job():
+            from pygor.strf.recompute import load_noise, recompute_strfs
+
+            from pygor.core.roi_alignment import fill_missing_traces
+
+            noise = cached[1] if cached and cached[0] == path else load_noise(path)
+            # Only ROIs without a trace get one: the rest keep theirs, which
+            # is what their RFs were computed from
+            fill_missing_traces(recording)
+            done = recompute_strfs(recording, noise, rows)
+            return path, noise, done
+
+        def finished(result):
+            path_, noise, done = result
+            self._noise = (path_, noise)
+            if self.on_strfs_changed is not None:
+                self.on_strfs_changed()
+
+        what = f"{len(rows)} missing RFs" if rows else "all RFs"
+        self._set_status(f"Computing {what}...")
+        worker = job()
+        worker.returned.connect(finished)
+        self._run(
+            worker,
+            lambda: f"Computed {what}" + (f" (ROIs {', '.join(str(r + 1) for r in rows)})" if rows else ""),
+        )
         return worker
 
     def _traces_widget(self):
@@ -350,12 +453,14 @@ class ActionsDock(QWidget):
         else:
             self.viewer.add_image(np.asarray(projection), name=name, colormap="viridis")
 
-    def sync_rois_from_layer(self):
-        """Write layer edits back to the recording, if there are any."""
-        if sync_rois_from_layer(self.recording, self.labels_layer):
+    def sync_rois_from_layer(self, refresh_traces=True):
+        """Write layer edits back to the recording, returning whether it did."""
+        applied = sync_rois_from_layer(
+            self.recording, self.labels_layer, refresh_traces=refresh_traces
+        )
+        if applied:
             self.refresh_numbers()
-            return True
-        return False
+        return bool(applied)
 
     def _restore_layer_widget(self):
         @magicgui(call_button="Restore default layers", layout="vertical")

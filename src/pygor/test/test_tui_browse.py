@@ -74,6 +74,29 @@ class TestLoadDispatch:
         reader.load_recording(tmp_path / "a.h5")
         assert seen["kwargs"] == {}
 
+    def test_raw_file_opens_as_the_class_asked_for(self, tmp_path):
+        from pygor.tui import reader
+
+        seen = {}
+
+        def fake(path, **kwargs):
+            seen["args"] = (path, kwargs)
+
+        reader.load_recording(tmp_path / "a.h5", cls=fake, config=tmp_path / "c.toml")
+        assert seen["args"] == (str(tmp_path / "a.h5"),
+                                {"config": str(tmp_path / "c.toml")})
+
+    def test_analysis_classes_start_with_core(self):
+        from pygor.classes.core_data import Core
+        from pygor.tui import reader
+
+        classes = reader.analysis_classes()
+        assert next(iter(classes)) == "Core"
+        assert "STRF" in classes and "OSDS" in classes
+        assert all(issubclass(cls, Core) for cls in classes.values())
+        assert reader.takes_n_colours(classes["STRF"])
+        assert not reader.takes_n_colours(classes["Core"])
+
 
 class Fake:
     """The shape of a recording, with everything the summary reads."""

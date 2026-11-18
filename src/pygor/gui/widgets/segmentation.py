@@ -28,7 +28,7 @@ from qtpy.QtWidgets import (
 )
 
 from pygor.gui.colors import apply_roi_colormap
-from pygor.gui.roi_bridge import mask_to_labels, sync_rois_from_layer
+from pygor.gui.roi_bridge import labels_to_mask, mask_to_labels, sync_rois_from_layer
 
 # Modes segment_rois accepts. cellpose variants need a model installed, so
 # they are offered but may fail at run time rather than being hidden.
@@ -312,11 +312,21 @@ class SegmentationDock(QWidget):
 
         self.refresh_status(f"Segmenting ({mode})...")
 
+        recording = self.recording
+
         @thread_worker
         def job():
-            return self.recording.segment_rois(
-                mode=mode, overwrite=overwrite, **params
-            )
+            # segment_rois swaps the mask under every per-ROI array. Take its
+            # result and put the old mask back, so apply_mask can carry the
+            # arrays across with ROIs matched by their pixels.
+            old_rois = getattr(recording, "rois", None)
+            old_count = getattr(recording, "num_rois", 0)
+            recording.segment_rois(mode=mode, overwrite=overwrite, **params)
+            new_rois = getattr(recording, "rois", None)
+            origin = getattr(recording, "roi_origin", None)
+            recording.rois = old_rois
+            recording.num_rois = old_count
+            return new_rois, origin
 
         worker = job()
         worker.returned.connect(self._on_segmented)
@@ -326,19 +336,38 @@ class SegmentationDock(QWidget):
         worker.start()
         return worker
 
-    def _on_segmented(self, _result=None):
-        self._roi_data_changed(f"Segmented with {self.mode}")
+    def _on_segmented(self, result=None):
+        new_rois, origin = result if result is not None else (None, None)
+        applied = None
+        if new_rois is not None:
+            from pygor.core.roi_alignment import apply_mask
+
+            applied = apply_mask(
+                self.recording, mask_to_igor(new_rois), refresh_traces=False
+            )
+            if isinstance(origin, dict):
+                self.recording.roi_origin = origin
+        self._roi_data_changed(
+            describe_change(f"Segmented with {self.mode}", applied, self.recording)
+        )
 
     def push_rois(self):
-        """Write ROIs drawn in the layer back to the recording."""
+        """Write ROIs drawn in the layer back to the recording.
+
+        Per-ROI data follows each ROI's pixels; ROIs that are new or were
+        reshaped get NaN rows until traces and RFs are computed for them.
+        """
         if self.labels_layer is None:
             self.refresh_status("No ROI layer to push")
             return False
-        if not sync_rois_from_layer(self.recording, self.labels_layer):
+        applied = sync_rois_from_layer(
+            self.recording, self.labels_layer, refresh_traces=False
+        )
+        if not applied:
             self.refresh_status("ROIs already match the recording")
             return False
-        self._roi_data_changed("Pushed edited ROIs to the recording")
-        return True
+        self._roi_data_changed(describe_change("Pushed", applied, self.recording))
+        return applied
 
     def _roi_data_changed(self, message):
         """Show the new mask everywhere, then report what happened."""
@@ -362,3 +391,22 @@ class SegmentationDock(QWidget):
         if self.on_rois_changed is not None:
             self.on_rois_changed()
         self.refresh_status(message)
+
+
+def mask_to_igor(mask):
+    """A mask in the IGOR convention, whichever one a backend returned."""
+    return labels_to_mask(mask_to_labels(mask), igor_style=True)
+
+
+def describe_change(verb, applied, recording):
+    """What an ROI change kept, dropped and still needs computing."""
+    if applied is None:
+        return verb
+    from pygor.core.roi_alignment import rois_missing_strfs
+
+    text = f"{verb}: {applied.kept} kept, {applied.deleted} removed, {applied.added} new"
+    if applied.added:
+        text += ". Extract traces to fill the new ones"
+        if rois_missing_strfs(recording):
+            text += ", then Recompute missing RFs"
+    return text

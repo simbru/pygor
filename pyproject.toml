@@ -59,6 +59,7 @@ notebook = [
 ]
 
 [project.scripts]
+pygor-gui = "pygor.gui.app:main"
 pygor-proofread = "pygor.tui.__main__:main"
 pygor-tui = "pygor.tui.standalone:main"
 pygor-workbench = "pygor.tui.workbench:main"

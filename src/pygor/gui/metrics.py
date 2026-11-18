@@ -75,6 +75,33 @@ def _from_method(name, **kwargs):
     return lambda rec: np.asarray(getattr(rec, name)(**kwargs), dtype=float)
 
 
+def has_strfs(recording):
+    """Whether the recording carries STRFs to fit, one per ROI and colour."""
+    strfs = getattr(recording, "strfs", None)
+    if strfs is None or not callable(getattr(recording, "calc_gaussian_fit_index", None)):
+        return False
+    strfs = np.asarray(strfs)
+    return strfs.ndim == 4 and strfs.shape[0] > 0
+
+
+def _gaussian_fit(key):
+    """One of the Gaussian fit's outputs per ROI: the median over its colours.
+
+    A single-colour recording gets the value itself.
+    """
+
+    def compute(rec):
+        values = np.asarray(rec.calc_gaussian_fit_index()[key], dtype=float)
+        n_colours = int(getattr(rec, "n_colours", 1) or 1)
+        per_colour = values.reshape(-1, n_colours)
+        out = np.full(len(per_colour), np.nan)
+        has = np.isfinite(per_colour).any(axis=1)
+        out[has] = np.nanmedian(per_colour[has], axis=1)
+        return out
+
+    return compute
+
+
 # Ordered as they should appear in the dropdown. Anything whose `applies`
 # returns False is simply left out for that recording.
 METRICS = (
@@ -157,6 +184,22 @@ METRICS = (
         compute=_from_method("get_contours_count"),
         applies=_method_applies("get_contours_count"),
         description="Number of receptive field contours",
+    ),
+    MetricSpec(
+        key="gaussian_index",
+        label="Gaussian-fit index",
+        compute=_gaussian_fit("index"),
+        applies=has_strfs,
+        description="Departure of the RF from a single Gaussian (0 = Gaussian to "
+        "within noise); median over colour channels",
+    ),
+    MetricSpec(
+        key="gaussian_snr",
+        label="Gaussian-fit SNR",
+        compute=_gaussian_fit("snr"),
+        applies=has_strfs,
+        description="Fitted Gaussian amplitude over the noise; median over colour "
+        "channels",
     ),
 )
 

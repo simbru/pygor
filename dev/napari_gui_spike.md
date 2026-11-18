@@ -26,6 +26,8 @@ rec = pygor.load.Core("recording.h5")
 viewer = launch(rec)        # block=True from a plain script
 ```
 
+Or, without writing any Python, `pygor-gui` (see App shell below).
+
 ## Feasibility findings
 
 Confirmed working, headless, against a stub recording:
@@ -294,6 +296,64 @@ hands ownership to Qt, and the menu entry raises the existing dock.
 part of each dotted path, rather than listing sixty-odd `section.name`
 rows flat. Filtering hides sections left empty and expands those that
 match.
+
+## App shell
+
+`launch(recording)` needs a recording built in Python first, which is the
+step a lab member without a notebook open cannot take. `pygor/gui/app.py`
+starts from an empty viewer instead, the way IGOR's `OS_GUI` panel starts
+from its Load buttons:
+
+```
+pygor-gui
+pygor-gui recording.h5 --as OSDS --config my_settings.toml
+```
+
+A **Recording** menu, first on the bar, holds Open (Ctrl+R), Open recent,
+Save as (Ctrl+Shift+S) and Close; napari keeps Ctrl+O and Ctrl+S for its own
+Open Files and Save Selected Layers. napari's own File menu stays as it is. Open
+asks for the file, the class to open a raw file as, a config TOML, and a
+colour count for classes that take one. A saved `.recording.h5` already
+knows its class and parameters, so for one of those the class and config
+fields are disabled rather than silently ignored. The last class and config
+are remembered, as are recent files, in `QSettings("pygor", "gui")`.
+
+`launch` is split in two so recordings can be swapped in one window:
+`attach(viewer, recording)` builds layers, docks and the Pygor menu and
+returns a `Session`; `detach(viewer, session)` takes them off again. Three
+things on the viewer outlive the layers and have to be let go of
+explicitly: the Analysis dock's layer-list handlers (or clearing the layers
+trips the lock and puts them back), the plot's frame-slider handler, and
+the `,` `.` `n` key bindings, which napari refuses to bind twice. Detach
+pushes unpushed ROI edits to the recording first, then clears every layer,
+user-added ones included, since they were drawn over that recording.
+
+Loading runs on a worker thread. The current recording stays attached until
+the new one has loaded, so a failed open leaves it as it was. Nothing
+tracks whether a recording has changed, so switching or closing always
+offers to save.
+
+Loading goes through `pygor.tui.reader.load_recording`, now taking `cls`
+and `config`, so the TUI and GUI open files the same way. The TUI still
+defaults raw files to STRF; the GUI defaults to Core and lets the user
+choose.
+
+### Against OS_GUI
+
+| OS_GUI step | pygor GUI |
+| --- | --- |
+| 1 Load (ScanM / Tiff) | Recording > Open (ScanM, IGOR H5, saved object; no Tiff) |
+| 2 Linescan / registration | Preprocessing tab (registration; no linescan) |
+| 3 Parameter table | Pygor > Parameter table, shared through `ParamBus` |
+| 4 Detrend | Preprocessing tab |
+| 5 ROI placement | Segmentation tab, hand drawing on the ROIs layer |
+| 6 Traces and triggers | Analysis tab: Extract traces |
+| 7 Average, Events, Kernels, STRFs, Bars, ... | Averages only — **the gap** |
+| 8 HDF5 export / import | Recording > Save as / Open |
+
+Step 7 is next: an analysis tab whose sections are registered per class,
+the way `MetricSpec` registers metrics, with the results drawn as extra
+Plot views.
 
 ## napari Labels controls, for reference
 

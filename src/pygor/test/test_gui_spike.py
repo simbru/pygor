@@ -939,15 +939,16 @@ def test_trace_dock_reads_correct_row_after_erasing_an_roi(recording):
         data = np.asarray(labels_layer.data)
         data[data == 2] = 0
         labels_layer.data = data
+        # The sync drops the erased ROI's row itself and compacts the ids,
+        # so the old ROI 3 is label 2 now -- and still carries its own trace
         actions.sync_rois_from_layer()
-        recording.traces_znorm = np.delete(recording.traces_znorm, 1, axis=0)
-
-        labels_layer.selected_label = 3
-        trace, _ = dock.current_trace()
-        # Label 3 is now the second surviving ROI, so row 1
-        np.testing.assert_allclose(trace, recording.traces_znorm[1])
+        assert recording.traces_znorm.shape[0] == n - 1
 
         labels_layer.selected_label = 2
+        trace, _ = dock.current_trace()
+        np.testing.assert_allclose(trace, 3.0)
+
+        labels_layer.selected_label = 3
         assert dock.current_trace()[0] is None
     finally:
         viewer.close()
@@ -1248,10 +1249,13 @@ def test_a_closed_panel_can_be_restored(recording):
 
 def test_panels_menu_lists_every_panel(recording):
     """The way back has to be somewhere a person would look."""
-    from pygor.gui.launch import PANEL_NAMES, launch
+    from pygor.gui.launch import PANEL_NAMES, launch, panel_docks
 
     viewer = launch(recording, show=False, block=False)
     try:
+        # Some panels exist only for some recordings (RFs needs STRFs)
+        built = panel_docks(viewer)
+        assert built
         menu = next(
             action.menu()
             for action in viewer.window.main_menu.actions()
@@ -1264,7 +1268,7 @@ def test_panels_menu_lists_every_panel(recording):
         )
         entries = [action.text() for action in panels.actions()]
         for name in PANEL_NAMES:
-            assert name in entries
+            assert (name in entries) == (name in built)
         assert "Restore all panels" in entries
     finally:
         viewer.close()

@@ -14,6 +14,7 @@ Usage
 """
 
 import warnings
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -30,8 +31,14 @@ PLOT_PANEL = "Plot"
 #: The tabbed docks on the right, in the order the work is done
 RIGHT_PANELS = ("Preprocessing", "Segmentation", "Analysis", "Metrics")
 
-#: Every panel the GUI creates
-PANEL_NAMES = (PLOT_PANEL, *RIGHT_PANELS)
+#: Every ROI's RF as a mosaic; a right-hand tab, only for recordings with STRFs
+RF_PANEL = "RFs"
+
+#: Click-to-select ROI editing; opened from the ROIs menu, not on launch
+ROI_EDITOR_PANEL = "ROI editor"
+
+#: Every panel the GUI can create
+PANEL_NAMES = (PLOT_PANEL, *RIGHT_PANELS, RF_PANEL)
 
 
 def _import_napari():
@@ -91,20 +98,24 @@ def ensure_image_layers(viewer, recording):
     return names
 
 
-def ensure_roi_layer(viewer, recording):
+def ensure_roi_layer(viewer, recording, empty=False):
     """Return the ROI Labels layer, rebuilding it from the recording if gone.
 
     napari lets any layer be deleted from the layer list, and a deleted
     Labels layer takes ROI editing with it while ``recording.rois`` stays
     intact. Rebuilding from the recording is therefore always possible.
 
-    Returns None only when the recording has no ROI mask at all.
+    Returns None when the recording has no ROI mask at all, unless
+    ``empty`` asks for a blank layer the size of the image to draw into.
     """
     if ROI_LAYER_NAME in viewer.layers:
         return viewer.layers[ROI_LAYER_NAME]
-    if getattr(recording, "rois", None) is None:
+    if getattr(recording, "rois", None) is not None:
+        labels = mask_to_labels(recording.rois)
+    elif empty and getattr(recording, "images", None) is not None:
+        labels = np.zeros(np.shape(recording.images)[-2:], dtype=np.int32)
+    else:
         return None
-    labels = mask_to_labels(recording.rois)
     layer = viewer.add_labels(labels, name=ROI_LAYER_NAME, opacity=0.4)
     # napari's default label colours include greys, which disappear against
     # the greyscale stack.
@@ -113,9 +124,32 @@ def ensure_roi_layer(viewer, recording):
     # stay within the region under the cursor.
     layer.preserve_labels = True
     layer.contiguous = True
+    layer.mouse_wheel_callbacks.append(scale_brush_on_shift_wheel)
     if labels.max() > 0:
         layer.selected_label = 1
     return layer
+
+
+def scale_brush_on_shift_wheel(layer, event):
+    """Shift + scroll grows or shrinks the brush while painting or erasing.
+
+    napari has ``[`` and ``]`` for this but nothing on the wheel. Shift is
+    free there: vispy's camera ignores wheel events with a modifier held,
+    so this does not fight the zoom, and napari keeps Ctrl for the frame
+    slider. Steps are a fifth of the current size, so large brushes do not
+    take dozens of notches to resize.
+    """
+    if "Shift" not in event.modifiers or layer.mode not in ("paint", "erase"):
+        return
+    # Qt reports a Shift-scroll as horizontal on some platforms
+    delta = event.delta[1] or event.delta[0]
+    if not delta:
+        return
+    size = layer.brush_size
+    step = max(1, round(size / 5))
+    upper = max(layer.data.shape[-2:])
+    layer.brush_size = int(np.clip(size + step if delta > 0 else size - step, 1, upper))
+    event.handled = True
 
 
 def refresh_image_layers(viewer, recording):
@@ -132,15 +166,16 @@ def refresh_image_layers(viewer, recording):
     ensure_image_layers(viewer, recording)
 
 
-def ensure_default_layers(viewer, recording):
+def ensure_default_layers(viewer, recording, empty_rois=False):
     """Rebuild any of launch's own layers that are missing.
 
     Returns ``(layer_names, roi_layer)``. Layers the user added themselves
     are left alone, and existing default layers keep their current
-    settings rather than being replaced.
+    settings rather than being replaced. ``empty_rois`` creates a blank
+    ROI layer for a recording that has no ROIs yet.
     """
     names = ensure_image_layers(viewer, recording)
-    roi_layer = ensure_roi_layer(viewer, recording)
+    roi_layer = ensure_roi_layer(viewer, recording, empty=empty_rois)
     if roi_layer is not None:
         names.append(ROI_LAYER_NAME)
         if ensure_number_layer(viewer, roi_layer) is not None:
@@ -187,11 +222,43 @@ def launch(recording, show=True, block=False, title=None):
     napari = _import_napari()
 
     if title is None:
-        title = getattr(recording, "filename", None)
-        title = str(getattr(title, "name", title) or "pygor")
+        title = recording_title(recording)
 
     viewer = napari.Viewer(title=title, show=show)
+    attach(viewer, recording)
 
+    if block:
+        napari.run()
+
+    return viewer
+
+
+def recording_title(recording):
+    """The recording's file name, for a window title."""
+    title = getattr(recording, "filename", None)
+    return str(getattr(title, "name", title) or "pygor")
+
+
+@dataclass
+class Session:
+    """What :func:`attach` put on a viewer, so :func:`detach` can take it off."""
+
+    recording: object
+    bus: object
+    docks: dict
+    menu: object
+
+    @property
+    def actions(self):
+        return self.docks[RIGHT_PANELS[2]]
+
+
+def attach(viewer, recording):
+    """Build pygor's layers, docks and menu for a recording on a viewer.
+
+    Returns a :class:`Session` for :func:`detach`. The viewer is assumed
+    to hold nothing of another recording's; detach that one first.
+    """
     default_layers, labels_layer = ensure_default_layers(viewer, recording)
 
     from pygor.gui.param_bus import ParamBus
@@ -205,16 +272,39 @@ def launch(recording, show=True, block=False, title=None):
     from pygor.gui.widgets.metrics import MetricsDock
     from pygor.gui.widgets.plot import PlotDock
 
+    from pygor.gui.metrics import has_strfs
+
     plot_dock = PlotDock(recording, viewer, labels_layer=labels_layer)
     metrics_dock = MetricsDock(recording, viewer, labels_layer=labels_layer)
+    # Panels are offered by what the recording carries, not by its class
+    rf_dock = None
+    if has_strfs(recording):
+        from pygor.gui.widgets.rf_grid import RFGridDock
+
+        rf_dock = RFGridDock(recording, viewer, labels_layer=labels_layer)
+        # Rejecting an RF in the plot dock crosses out its tile
+        plot_dock.on_rf_rejected = rf_dock.mark_rejected
 
     def rebind_all(layer):
         """Point every dock at an ROI layer that was rebuilt or created."""
         plot_dock.rebind(layer)
         metrics_dock.rebind(layer)
+        if rf_dock is not None:
+            rf_dock.rebind(layer)
         segmentation_dock.rebind(layer)
+        roi_editor.rebind(layer)
         actions_dock._labels_layer = layer
         actions_dock._bind_labels_events(layer)
+
+    def create_roi_layer():
+        """A blank ROI layer to draw into, for a recording with no ROIs."""
+        names, layer = ensure_default_layers(viewer, recording, empty_rois=True)
+        if layer is not None:
+            actions_dock.default_layers = names
+            rebind_all(layer)
+        return layer
+
+    plot_dock.create_roi_layer = create_roi_layer
 
     actions_dock = ActionsDock(
         recording,
@@ -226,6 +316,9 @@ def launch(recording, show=True, block=False, title=None):
         default_layers=default_layers,
         on_depths_updated=lambda: _show_metric(metrics_dock, "IPL depth"),
         bus=bus,
+        on_strfs_changed=lambda: _strfs_changed(
+            plot_dock, metrics_dock, rf_dock, actions_dock
+        ),
     )
 
     # napari owns the left dock area with its layer controls and layer
@@ -252,6 +345,16 @@ def launch(recording, show=True, block=False, title=None):
         on_images_changed=lambda: refresh_image_layers(viewer, recording),
     )
 
+    from pygor.gui.widgets.roi_editor import RoiEditorDock
+
+    roi_editor = RoiEditorDock(
+        recording,
+        viewer,
+        labels_layer=labels_layer,
+        auto_new_box=plot_dock.auto_new_box,
+        on_push=segmentation_dock.push_rois,
+    )
+
     viewer.window.add_dock_widget(plot_dock, name=PLOT_PANEL, area="bottom")
     # Tabs read left to right in the order they are added, so they are
     # added in the order the work is done: clean the images, find the
@@ -268,13 +371,27 @@ def launch(recording, show=True, block=False, title=None):
             dock, name=name, area="right", tabify=first is not None
         )
         first = first or area
+    if rf_dock is not None:
+        viewer.window.add_dock_widget(rf_dock, name=RF_PANEL, area="right", tabify=True)
+        panels[RF_PANEL] = rf_dock
+    # The editor is opened on request from the ROIs menu, so it starts
+    # closed; closing a dock only hides it, so showing it puts the tab back
+    editor_dock = viewer.window.add_dock_widget(
+        roi_editor, name=ROI_EDITOR_PANEL, area="right", tabify=True
+    )
+    editor_dock.hide()
     # tabify raises whatever was added last; the first step of the
     # workflow should be the one on show when the window opens
     first.raise_()
 
+    def open_roi_editor():
+        editor_dock.show()
+        editor_dock.raise_()
+        roi_editor.set_active(True)
+
     from pygor.gui.menus import build_pygor_menu
 
-    build_pygor_menu(
+    menu = build_pygor_menu(
         viewer,
         actions_dock,
         plot_dock,
@@ -282,15 +399,60 @@ def launch(recording, show=True, block=False, title=None):
         preprocessing_dock,
         segmentation_dock,
         recording,
+        open_roi_editor=open_roi_editor,
     )
 
     _size_docks(viewer)
     viewer.reset_view()
 
-    if block:
-        napari.run()
+    return Session(
+        recording=recording,
+        bus=bus,
+        docks={PLOT_PANEL: plot_dock, **panels, ROI_EDITOR_PANEL: roi_editor},
+        menu=menu,
+    )
 
-    return viewer
+
+def detach(viewer, session):
+    """Take a recording's docks, layers and menu off the viewer.
+
+    ROI edits not yet pushed are written to the recording first, so a
+    save offered afterwards still has them. Every layer goes, including
+    any the user added: they were drawn over this recording's images.
+    """
+    actions = session.actions
+    actions.sync_rois_from_layer()
+    actions.disconnect_events()
+    session.docks[PLOT_PANEL].disconnect_events()
+    if RF_PANEL in session.docks:
+        session.docks[RF_PANEL].disconnect_events()
+    if ROI_EDITOR_PANEL in session.docks:
+        session.docks[ROI_EDITOR_PANEL].disconnect_events()
+
+    window = viewer.window
+    for dock in session.docks.values():
+        window.remove_dock_widget(dock)
+    if actions._param_dock is not None:
+        window.remove_dock_widget(actions._param_dock)
+    window.main_menu.removeAction(session.menu.menuAction())
+    viewer.layers.clear()
+
+
+def _strfs_changed(plot_dock, metrics_dock, rf_dock, actions_dock):
+    """Redraw everything that shows an RF, after STRFs were computed.
+
+    The views re-fetch when ``strfs`` is a new array, which both a full
+    and a spliced recompute assign.
+    """
+    plot_dock.refresh()
+    metrics_dock.reload_metrics()
+    metrics_dock.refresh()
+    if rf_dock is not None:
+        rf_dock.redraw()
+    else:
+        actions_dock._set_status(
+            "RFs computed. Reopen the recording to get the RF panel."
+        )
 
 
 def _show_metric(metrics_dock, label):

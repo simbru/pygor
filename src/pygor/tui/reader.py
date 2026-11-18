@@ -44,22 +44,50 @@ def is_recording(path) -> bool:
     return kind(path) is not None
 
 
-def load_recording(path, n_colours=None):
+def load_recording(path, n_colours=None, cls=None, config=None):
     """Open any of :data:`KINDS` as a pygor object.
 
-    A saved object comes back as whatever class saved it. A raw file is loaded
-    as :class:`~pygor.classes.strf_data.STRF`, which is a Core with the STRF
+    A saved object comes back as whatever class saved it, and ``cls`` and
+    ``config`` are ignored. A raw file is loaded as ``cls``, by default
+    :class:`~pygor.classes.strf_data.STRF`, which is a Core with the STRF
     machinery on top: harmless on a recording that has no noise stimulus, and
     the alternative is asking the user to name a class for a file the class
-    can be read off in a second.
+    can be read off in a second. The GUI does ask, since it then offers that
+    class's analyses.
     """
     import pygor.load
 
     path = pathlib.Path(path)
     if path.name.endswith(SAVED_SUFFIX):
         return pygor.load.Core.load_object(path)
+    if cls is None:
+        cls = pygor.load.STRF
     kwargs = {"n_colours": n_colours} if n_colours else {}
-    return pygor.load.STRF(str(path), **kwargs)
+    if config:
+        kwargs["config"] = str(config)
+    return cls(str(path), **kwargs)
+
+
+def analysis_classes() -> dict:
+    """Every class a raw recording can be opened as, by name, Core first."""
+    import pygor.load
+    from pygor.classes.core_data import Core
+
+    found = {
+        name: obj
+        for name, obj in vars(pygor.load).items()
+        if isinstance(obj, type) and issubclass(obj, Core)
+    }
+    return {"Core": Core, **dict(sorted(found.items()))}
+
+
+def takes_n_colours(cls) -> bool:
+    """Whether ``cls`` accepts an ``n_colours`` argument."""
+    import dataclasses
+
+    return dataclasses.is_dataclass(cls) and any(
+        field.name == "n_colours" for field in dataclasses.fields(cls)
+    )
 
 
 def _shape(array) -> str:

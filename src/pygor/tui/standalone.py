@@ -128,105 +128,16 @@ def _present(value) -> bool:
     return isinstance(value, np.ndarray) and value.size > 0
 
 
-def _padded(array, n_rows):
-    """``array`` with ``n_rows`` rows of NaN appended, or as it was if it is
-    not a per-ROI array."""
-    import numpy as np
-
-    if not _present(array) or n_rows == 0:
-        return array
-    pad = np.full((n_rows, *array.shape[1:]), np.nan,
-                  dtype=np.result_type(array.dtype, np.float32))
-    return np.concatenate([array.astype(pad.dtype, copy=False), pad])
-
-
-def apply_mask(recording, mask) -> None:
+def apply_mask(recording, mask):
     """Put a hand-edited mask on ``recording`` and keep every per-ROI array aligned.
 
-    Deleted ROIs are dropped through the recording's own ``keep_rois``, which
-    on an STRF recording also drops their STRFs and keys and clears the STRF
-    caches. ROIs that survived untouched keep everything they had. New ROIs
-    are appended after them with NaN STRFs, quality indices and IPL depths:
-    not computed, rather than a neighbour's. Traces are re-extracted for all,
-    and snippets and averages recomputed if the recording had them.
-
-    Without this, 72 ROIs saved over 444 STRFs reload silently and every STRF
+    Shared with the napari GUI; see :func:`pygor.core.roi_alignment.apply_mask`.
+    Without it, 72 ROIs saved over 444 STRFs reload silently and every STRF
     after the first deleted cell belongs to the wrong one.
     """
-    import numpy as np
+    from pygor.core.roi_alignment import apply_mask as _apply_mask
 
-    from pygor.tui import roi_edit
-
-    old = getattr(recording, "rois", None)
-    previous = getattr(recording, "roi_origin", None)
-    had_averages = _present(getattr(recording, "averages", None))
-    layout = roi_edit.reconcile(old, mask)
-    n_old = roi_edit.count(old) if old is not None else 0
-    strfs = getattr(recording, "strfs", None)
-    if _present(strfs) and n_old:
-        # Checked before anything is changed: a row count that does not divide
-        # means the file was already out of step, and dropping rows from it by
-        # arithmetic would only move the error somewhere harder to see.
-        if len(strfs) % n_old:
-            raise ValueError(
-                f"{len(strfs)} STRFs do not divide among {n_old} ROIs; this recording's "
-                f"STRFs are already misaligned, so they cannot be carried through an edit")
-        # Saved objects can come back with n_colours unset, and keep_rois
-        # multiplies by it.
-        if not getattr(recording, "n_colours", None):
-            recording.n_colours = len(strfs) // n_old
-
-    if old is not None and len(layout.kept) < n_old:
-        # keep_rois maps row i to id -(i+1), so hand it a mask where that holds.
-        recording.rois = roi_edit.compact(old)
-        # It also reads these unguarded, and an object that never had traces
-        # extracted has no such attributes at all. They are recomputed below.
-        for attribute in ("traces_raw", "traces_znorm", "averages", "snippets",
-                          "quality_indices"):
-            if not hasattr(recording, attribute):
-                setattr(recording, attribute, None)
-        # ipl_depths is per ROI, but keep_rois does not subset it.
-        depths = getattr(recording, "ipl_depths", None)
-        recording.keep_rois(layout.kept)
-        if _present(depths) and len(depths) == n_old:
-            recording.ipl_depths = depths[layout.kept]
-
-    if layout.added:
-        n_colours = getattr(recording, "n_colours", 1) or 1
-        strfs = getattr(recording, "strfs", None)  # keep_rois may have replaced it
-        if _present(strfs):
-            recording.strfs = _padded(strfs, layout.added * n_colours)
-            keys = list(getattr(recording, "strf_keys", []) or [])
-            first = len(layout.kept)
-            keys += [f"STRF{c}_{first + n}" for n in range(layout.added)
-                     for c in range(n_colours)]
-            recording.strf_keys = keys
-            recording.num_strfs = len(recording.strfs)
-            recording._invalidate_strf_caches()
-        for attribute in ("quality_indices", "ipl_depths"):
-            value = getattr(recording, attribute, None)
-            if _present(value) and len(value) == len(layout.kept):
-                setattr(recording, attribute, _padded(value, layout.added))
-        sizes = getattr(recording, "roi_sizes", None)
-        if _present(sizes) and len(sizes) == len(layout.kept):
-            new = [int((layout.rois == -(len(layout.kept) + n + 1)).sum())
-                   for n in range(layout.added)]
-            recording.roi_sizes = np.concatenate([sizes, np.asarray(new, dtype=sizes.dtype)])
-
-    dtype = old.dtype if old is not None else np.int16
-    recording.update_rois(layout.rois.astype(dtype))
-    recording.num_rois = roi_edit.count(layout.rois)
-    recording.roi_origin = {
-        "method": "manual", "source": recording.name,
-        "edited_from": previous.get("method") if isinstance(previous, dict) else None,
-    }
-    if recording.num_rois == 0:
-        for attribute in ("traces_raw", "traces_znorm", "snippets", "averages"):
-            setattr(recording, attribute, np.nan)
-        return
-    recording.extract_traces_from_rois()
-    if had_averages:
-        recording.compute_snippets_and_averages()
+    return _apply_mask(recording, mask)
 
 
 def make_draw_screen(recording, source, caps):
