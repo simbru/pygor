@@ -18,7 +18,8 @@ by construction: what is left in the residual is the polarity structure itself, 
 spatial nonlinearity, rather than a lobe some polarity-picking rule decided to ignore.
 
 Array functions here take a single 2D map and know nothing about pygor;
-:func:`gaussian_fit_index_wrapper` is the only thing that touches an STRF object.
+:func:`gaussian_fit_index_wrapper` fits an STRF object, and :func:`classify` and
+:func:`per_roi` apply the ``[strf.gaussian_fit.gate]`` rule to one.
 """
 
 import numpy as np
@@ -405,3 +406,86 @@ def gaussian_fit_index_wrapper(
         key: np.array([record[key] for record in records], dtype=float)
         for key in FIELDS
     }
+
+
+def gate_settings(strf_obj=None, **overrides):
+    """``[strf.gaussian_fit.gate]``: which RFs the index is read on.
+
+    Taken from the object's own config when it has one, else the package defaults, so
+    a script working on aggregated columns and the GUI working on a recording read the
+    same numbers. ``overrides`` replace single keys, e.g. for a threshold sweep.
+    """
+    settings = None
+    params = getattr(strf_obj, "params", None)
+    if params is not None:
+        try:
+            settings = params.get_defaults("strf").get("gaussian_fit", {}).get("gate")
+        except (ValueError, AttributeError):
+            settings = None
+    if settings is None:
+        from pygor.config import get_defaults
+
+        settings = get_defaults("strf.gaussian_fit.gate")
+    return {**settings, **overrides}
+
+
+def passes_gate(index, snr, segmented, edge_dist, settings):
+    """One bool per RF: whether its index counts.
+
+    Takes arrays (or DataFrame columns) in any matching shape, so it serves both an
+    STRF object and an aggregated table. NaN fails every comparison and so the gate.
+    A falsy ``min_peak_edge_dist`` turns the edge gate off.
+    """
+    index = np.asarray(index, dtype=float)
+    keep = np.isfinite(index) & (np.asarray(snr, dtype=float) >= settings["min_snr"])
+    if settings["require_segmented"]:
+        keep &= np.asarray(segmented, dtype=bool)
+    if settings["min_peak_edge_dist"]:
+        keep &= np.asarray(edge_dist, dtype=float) >= settings["min_peak_edge_dist"]
+    return keep
+
+
+def classify(strf_obj, settings=None):
+    """The gate and the non-Gaussian call for every STRF on an object, flat order.
+
+    Returns a dict of 1D arrays, each ``len(strf_obj.strfs)`` long: ``index``,
+    ``snr``, ``chi2``, ``segmented``, ``edge_dist``, ``gated`` and ``non_gaussian``
+    (gated and index above ``non_gaussian_index``).
+    """
+    settings = settings or gate_settings(strf_obj)
+    fit = strf_obj.calc_gaussian_fit_index()
+    segmented = np.asarray(strf_obj.check_cs_pass(), dtype=bool)
+    edge = np.asarray(strf_obj.get_rf_peak_edge_distance(), dtype=float)
+    gated = passes_gate(fit["index"], fit["snr"], segmented, edge, settings)
+    return {
+        "index": fit["index"],
+        "snr": fit["snr"],
+        "chi2": fit["chi2"],
+        "segmented": segmented,
+        "edge_dist": edge,
+        "gated": gated,
+        "non_gaussian": gated & (fit["index"] > settings["non_gaussian_index"]),
+    }
+
+
+def per_roi(strf_obj, settings=None, channels=None):
+    """One value per ROI: the median index over its gated colour channels.
+
+    The cell-level number: a multicolour cell counts once, not once per channel.
+    ``channels`` restricts which colours are pooled (e.g. ``range(4)`` to leave out
+    an all-LED channel); None pools all. Returns ``index`` (NaN with no gated
+    channel), ``n_gated`` and ``non_gaussian`` (1.0, 0.0, or NaN with no gated
+    channel).
+    """
+    settings = settings or gate_settings(strf_obj)
+    result = classify(strf_obj, settings)
+    n_colours = int(getattr(strf_obj, "n_colours", 1) or 1)
+    index = np.where(result["gated"], result["index"], np.nan).reshape(-1, n_colours)
+    if channels is not None:
+        index = index[:, list(channels)]
+    n_gated = np.isfinite(index).sum(axis=1)
+    median = np.full(len(index), np.nan)
+    has = n_gated > 0
+    median[has] = np.nanmedian(index[has], axis=1)
+    non_gaussian = np.where(has, median > settings["non_gaussian_index"], np.nan)
+    return {"index": median, "n_gated": n_gated, "non_gaussian": non_gaussian}

@@ -138,6 +138,9 @@ pre_smooth = 0
 n_jobs = 1  # sequential is the fast path post-upgrade; n_jobs=-1 parallel is opt-in (was the OOM default)
 normalize_strfs = true
 verbose = false
+# Noise stimulus the GUI's Compute RFs uses: a .npy, or an .h5 with a
+# "noise_jitter" dataset. Empty = ask on first use, then remember it here.
+noise_path = ""
 
 [strf.centsurr]
 n_clusters = 3
@@ -162,3 +165,17 @@ noise_sigma = 3.0
 # estimate noise from, which underestimates sd and inflates chi2 and snr together,
 # so an SNR filter cannot catch it.
 min_far_frac = 0.25
+
+[strf.gaussian_fit.gate]
+# Which RFs the index is read on, and where "non-Gaussian" is cut. One rule for the GUI
+# and for scripts working on aggregated columns: pygor.strf.gaussian_fit.passes_gate.
+# Fitted amplitude over noise. Below ~8 the index tail is mostly marginal data.
+min_snr = 8.0
+# Also require pygor's own RF segmentation to find an RF (check_cs_pass). The snr gate
+# alone admits speckled noise maps whose collapsed noise annulus inflates snr.
+require_segmented = true
+# Fewest px from the RF peak to the map edge; 0 disables. RFs at the stimulus border
+# are mostly called non-Gaussian for reasons the index cannot separate.
+min_peak_edge_dist = 3
+# An RF that passes the gate is non-Gaussian if its index is above this.
+non_gaussian_index = 0.1

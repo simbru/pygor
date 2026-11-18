@@ -74,16 +74,19 @@ def vetted(store: VerdictStore, cells: pd.DataFrame, *, include=KEPT) -> pd.Data
     return out.assign(qc_cell_verdict=cell_verdict_column(store, out))
 
 
-def current(verdict, digests):
+def current(verdict, digests, roles=None):
     """``verdict`` if none of the recordings it was made from has changed since, else None.
 
     ``digests`` maps (fov_uid, condition, role) to the recording's current "mtime:size",
     as ReviewSession.source_digests gives. A reprocess rewrites the recordings, so a
     verdict on the old cells stops counting rather than silently vouching for new ones.
+    ``roles`` limits the check to the recordings the question is about.
     """
     if verdict is None or digests is None:
         return verdict
     for role, digest in (verdict.source_digest or {}).items():
+        if roles is not None and role not in roles:
+            continue
         now = digests.get((verdict.fov_uid, verdict.condition, role))
         if now is not None and now != digest:
             return None
@@ -98,9 +101,12 @@ def covered_verdict(fov, own, role, digests=None) -> str:
     made (``source_digest`` lists every recording it saw). A field of view that was not
     kept says nothing about whether its direction recording is usable on its own, and
     one judged before a recording was added never saw it. With ``digests``, a verdict
-    made before the recordings were reprocessed does not count.
+    made before this direction recording was reprocessed does not count. Only its own
+    file is compared: re-saving the noise recording (say, to reject single RFs) says
+    nothing about whether the direction tuning is usable, and a reprocess rewrites
+    every recording, this one included.
     """
-    fov, own = current(fov, digests), current(own, digests)
+    fov, own = current(fov, digests, (role,)), current(own, digests, (role,))
     if own is not None:
         return own.verdict
     if fov is not None and fov.verdict == "keep" and role in (fov.source_digest or {}):

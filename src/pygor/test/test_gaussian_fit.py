@@ -298,6 +298,53 @@ class TestSelectors:
         assert calls["n"] == 0
 
 
+GATE = {
+    "min_snr": 8.0,
+    "require_segmented": True,
+    "min_peak_edge_dist": 3,
+    "non_gaussian_index": 0.1,
+}
+
+
+class TestGate:
+    def test_settings_come_from_the_defaults_and_take_overrides(self):
+        assert set(gaussian_fit.gate_settings()) == set(GATE)
+        assert gaussian_fit.gate_settings(min_snr=5)["min_snr"] == 5
+
+    def test_each_rule_drops_its_own_rf(self):
+        # passes, low snr, not segmented, at the edge, no fit
+        keep = gaussian_fit.passes_gate(
+            index=[0.2, 0.2, 0.2, 0.2, np.nan],
+            snr=[9, 7, 9, 9, 9],
+            segmented=[True, True, False, True, True],
+            edge_dist=[5, 5, 5, 2, 5],
+            settings=GATE,
+        )
+        assert keep.tolist() == [True, False, False, False, False]
+
+    @pytest.mark.parametrize("off", [0, None])
+    def test_a_falsy_edge_distance_turns_the_edge_gate_off(self, off):
+        keep = gaussian_fit.passes_gate(
+            [0.2], [9], [True], [0], {**GATE, "min_peak_edge_dist": off}
+        )
+        assert keep.tolist() == [True]
+
+    def test_per_roi_is_the_median_over_gated_channels(self, monkeypatch):
+        # Two ROIs x three colours. ROI 0: two gated channels, median 0.15 -> non-
+        # Gaussian. ROI 1: nothing gated -> NaN, not a Gaussian call.
+        calls = {
+            "index": np.array([0.1, 0.2, 0.9, 0.05, 0.05, 0.05]),
+            "gated": np.array([True, True, False, False, False, False]),
+        }
+        monkeypatch.setattr(gaussian_fit, "classify", lambda obj, settings: calls)
+        obj = FakeSTRF(n_rois=2, n_colours=3)
+        result = gaussian_fit.per_roi(obj, settings=GATE)
+        assert result["index"][0] == pytest.approx(0.15)
+        assert result["n_gated"].tolist() == [2, 0]
+        assert result["non_gaussian"][0] == 1.0
+        assert np.isnan(result["non_gaussian"][1])
+
+
 @pytest.mark.demo_data
 class TestOnARecording:
     def test_returns_one_value_per_strf(self, strf):
